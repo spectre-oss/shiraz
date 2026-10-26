@@ -14,9 +14,13 @@
           default = pkgs.mkShellNoCC {
             packages = with pkgs; [
               autoconf automake bison cmake curl file flex gettext git
-              go gnumake gzip jdk17_headless libtool meson ninja nodejs_22
+              go gnumake gzip jdk17_headless libtool libunwind meson ninja nodejs_22
               patchelf python3 ripgrep unzip xz zip zstd
             ];
+            shellHook = ''
+              export PKG_CONFIG_PATH="${pkgs.libunwind.dev}/lib/pkgconfig''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+              export LD_LIBRARY_PATH="${pkgs.libunwind}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            '';
           };
         });
     };
