@@ -24,6 +24,8 @@ jobs:
           fetch-depth: 2
       - name: Commit Conventional Commit version bump
         id: bump
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/ci_version.py --apply
 
   build:

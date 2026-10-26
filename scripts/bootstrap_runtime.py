@@ -91,6 +91,9 @@ PATCHES = {
         ('art-resource-private-attribute-io.patch', {
             'libandroidfw/AssetManager2.cpp': 'e860b7656deb7cc7b9ee98587e15d8b363e405e58d03f1e66532bef5e5212402',
         }),
+        ('art-liblog-c-compat.patch', {
+            'system/core/liblog/fake_log_device.c': '244a9b7c548aa032dae9834308e58cd3c74288c00d1dd939e33cc7e18234bb7f',
+        }),
     ],
 }
 BSD_VERSION = '0.12.2'

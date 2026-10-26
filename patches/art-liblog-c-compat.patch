@@ -1,0 +1,13 @@
+diff --git a/system/core/liblog/fake_log_device.c b/system/core/liblog/fake_log_device.c
+index 14ba5a2d..48977eac 100644
+--- a/system/core/liblog/fake_log_device.c
++++ b/system/core/liblog/fake_log_device.c
+@@ -24,2 +24,3 @@
+ #include <stdlib.h>
++#include <stdbool.h>
+ #include <string.h>
+@@ -358,2 +359,3 @@ static bool should_colorize() {
+-    if (char *liblog_color = getenv("LIBLOG_COLOR")) {
++    char *liblog_color = getenv("LIBLOG_COLOR");
++    if (liblog_color) {
+         if (!strcmp(liblog_color, "always")) {
