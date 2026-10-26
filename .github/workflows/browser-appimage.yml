@@ -39,6 +39,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.sha }}
+      - name: Prepare temporary directory
+        run: mkdir -p "$TMPDIR"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go-wasm/go.mod
