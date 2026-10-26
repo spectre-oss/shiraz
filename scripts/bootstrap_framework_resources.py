@@ -18,7 +18,7 @@ from build_apk_fixture import DOWNLOADS
 ROOT = Path(__file__).resolve().parents[1]
 COMMIT = '7e7ea0991020d15cdb69c5da933c282c92f884ef'
 URL = 'https://android.googlesource.com/platform/frameworks/base/+archive/' + COMMIT + '/core/res.tar.gz'
-SHA256 = '5534200a50de4851ce3ba71888e69fab5eb5d0f704b767b84ae6f3dc95039cbb'
+CONTENT_SHA256 = '4160c9accff68d789228c201dbc4fc9c2ea2e437b7600413eb4aeab9bb3941ae'
 LICENSE_SHA256 = 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30'
 
 
@@ -33,7 +33,7 @@ def download(path, url, checksum, limit):
                     raise ValueError('source download exceeds limit')
                 target.write(chunk)
         temporary.replace(path)
-    if path.stat().st_size > limit or hashlib.sha256(path.read_bytes()).hexdigest() != checksum:
+    if path.stat().st_size > limit or (checksum is not None and hashlib.sha256(path.read_bytes()).hexdigest() != checksum):
         raise ValueError('framework dependency checksum mismatch')
 
 
@@ -55,6 +55,14 @@ def source_files(archive):
     return files
 
 
+def source_content_sha256(files):
+    # Gitiles can emit different gzip/tar bytes for the same pinned Git tree.
+    # Hash the bounded, validated file names and contents instead.
+    entries = (f'{name}\0{len(data)}\0{hashlib.sha256(data).hexdigest()}\n'
+               for name, data in sorted(files.items()))
+    return hashlib.sha256(''.join(entries).encode()).hexdigest()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--seed', action='append', help='type/name; repeated seeds replace defaults')
@@ -67,10 +75,12 @@ def main():
     try: fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError: raise SystemExit('A framework resource build is already running')
     archive = cache / 'android-8.1.0_r81-core-res.tar.gz'
-    download(archive, URL, SHA256, 64 * 1024 * 1024)
+    download(archive, URL, None, 64 * 1024 * 1024)
     license = cache / 'Apache-2.0.txt'
     download(license, 'https://www.apache.org/licenses/LICENSE-2.0.txt', LICENSE_SHA256, 32768)
     files = source_files(archive)
+    if source_content_sha256(files) != CONTENT_SHA256:
+        raise ValueError('framework source content checksum mismatch')
     index = ResourceIndex(files); source_count = len(index.nodes); selected, generated = index.closure(seeds)
     outputs, provenance = index.emit(selected, generated)
     build = ROOT / 'build/framework-res'; build.mkdir(parents=True, exist_ok=True)
@@ -94,7 +104,8 @@ def main():
     dump = subprocess.run([str(compiler), 'dump', 'resources', str(apk)], check=True, capture_output=True, text=True, timeout=30).stdout
     actual = {name: int(ident, 16) for ident, name in re.findall(r'^\s*resource (0x[0-9a-fA-F]+) (\S+)', dump, re.MULTILINE)}
     index.validate_ids(actual, selected)
-    report = {'source': URL, 'commit': COMMIT, 'source_sha256': SHA256, 'aapt2_sha256': tool_hash, 'seeds': seeds,
+    report = {'source': URL, 'commit': COMMIT, 'source_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+              'source_content_sha256': CONTENT_SHA256, 'aapt2_sha256': tool_hash, 'seeds': seeds,
               'selected_resources': len(selected), 'source_resources': source_count, 'source_files': provenance,
               'selection_scope': 'Static XML closure from explicit named seeds; not proof of arbitrary dynamic resource use',
               'public_ids': {'/'.join(key): f'0x{index.public[key]:08x}' for key in sorted(selected) if key in index.public}}

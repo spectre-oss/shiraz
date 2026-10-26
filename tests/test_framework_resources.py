@@ -102,3 +102,8 @@ class FrameworkResourceTests(unittest.TestCase):
                     out.addfile(entry, io.BytesIO(b'\0' * entry.size) if kind == 'large' else None)
                     if kind == 'duplicate': out.addfile(entry)
                 with self.subTest(kind=kind), self.assertRaises(ValueError): module.source_files(archive)
+        first = {'res/values/a.xml': b'<resources/>', 'NOTICE': b'license'}
+        reordered = {'NOTICE': b'license', 'res/values/a.xml': b'<resources/>'}
+        changed = {'NOTICE': b'license', 'res/values/a.xml': b'<resources><x/></resources>'}
+        self.assertEqual(module.source_content_sha256(first), module.source_content_sha256(reordered))
+        self.assertNotEqual(module.source_content_sha256(first), module.source_content_sha256(changed))
