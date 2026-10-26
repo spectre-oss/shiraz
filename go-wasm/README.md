@@ -64,6 +64,12 @@ build artifacts and should not be committed.
 
 ## GitHub Actions release and Pages
 
+The build tools are pinned by `flake.nix`. On a Linux host with Nix, run
+`nix develop -c make deps` and `nix develop -c make build` to use the same
+tool versions as CI. The Ubuntu runner provides system development libraries
+for the native AppImage build; the flake supplies Go, Java, Python, Node,
+Meson, Ninja, and the other build tools.
+
 Every push to `main` runs the `Shiraz prerelease and Pages` workflow. It reads
 the pushed Conventional Commit, increments `VERSION`, and pushes a version
 commit as `github-actions[bot]`. A breaking change bumps major, `feat` bumps

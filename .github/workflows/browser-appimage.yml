@@ -41,10 +41,9 @@ jobs:
           ref: ${{ needs.version.outputs.sha }}
       - name: Prepare temporary directory
         run: mkdir -p "$TMPDIR"
-      - uses: actions/setup-go@v5
+      - uses: cachix/install-nix-action@v31
         with:
-          go-version-file: go-wasm/go.mod
-          cache: false
+          extra_nix_config: experimental-features = nix-command flakes
       - name: Install native build dependencies
         run: |
           sudo apt-get update
@@ -61,23 +60,27 @@ jobs:
           mkdir -p "$TMPDIR"
       - name: Build fixture and runtime
         run: |
-          make deps
-          make build
-          make apk-fixture
-          make appimage APK=build/apk-fixture/fixture.apk NAME=Shiraz-CI-Fixture AOT=0
+          nix develop -c bash -euo pipefail -c '
+            make deps
+            make build
+            make apk-fixture
+            make appimage APK=build/apk-fixture/fixture.apk NAME=Shiraz-CI-Fixture AOT=0
+          '
       - name: Build generic base and WebAssembly assembler
         run: |
-          python3 scripts/make_runtime_template.py \
-            build/appimage/org.shiraz.fixture.AppDir build/runtime-template.tar.gz
-          (cd go-wasm/launcher && go build -o ../../build/shiraz-payload-launcher .)
-          version=$(cat VERSION)
-          python3 scripts/make_browser_base.py \
-            build/runtime-template.tar.gz build/shiraz-payload-launcher \
-            "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
-          (cd go-wasm && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
-          python3 go-wasm/bootstrap_font.py
-          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" go-wasm/wasm_exec.js
-          python3 scripts/package_browser_site.py
+          nix develop -c bash -euo pipefail -c '
+            python3 scripts/make_runtime_template.py \
+              build/appimage/org.shiraz.fixture.AppDir build/runtime-template.tar.gz
+            (cd go-wasm/launcher && go build -o ../../build/shiraz-payload-launcher .)
+            version=$(cat VERSION)
+            python3 scripts/make_browser_base.py \
+              build/runtime-template.tar.gz build/shiraz-payload-launcher \
+              "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
+            (cd go-wasm && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
+            python3 go-wasm/bootstrap_font.py
+            cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" go-wasm/wasm_exec.js
+            python3 scripts/package_browser_site.py
+          '
       - name: Verify browser kit
         run: |
           version=$(cat VERSION)
@@ -86,7 +89,7 @@ jobs:
           test -s "dist/Shiraz-Browser-Builder-${version}.zip"
           test -s go-wasm/shiraz-assemble.wasm
           (cd dist && sha256sum -c "Shiraz-Browser-Base-${version}-x86_64.AppImage.sha256")
-          node --max-old-space-size=4096 go-wasm/verify_kit.cjs
+          nix develop -c node --max-old-space-size=4096 go-wasm/verify_kit.cjs
       - name: Upload run artifact
         uses: actions/upload-artifact@v7
         with:
