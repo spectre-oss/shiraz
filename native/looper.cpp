@@ -60,7 +60,7 @@ extern "C" void ALooper_release(ALooper* looper) {
 extern "C" void ALooper_wake(ALooper* looper) {
     if (!looper || looper->wake_fd < 0) return;
     uint64_t count = 1;
-    (void)write(looper->wake_fd, &count, sizeof(count));
+    [[maybe_unused]] const auto written = write(looper->wake_fd, &count, sizeof(count));
 }
 extern "C" int ALooper_addFd(ALooper* looper, int fd, int ident, int events,
                                ALooper::Callback callback, void* data) {
@@ -100,7 +100,7 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd, int* out_events, vo
     if (ready < 0) return poll_error;
     if (event.data.fd == looper->wake_fd) {
         uint64_t count;
-        (void)read(looper->wake_fd, &count, sizeof(count));
+        [[maybe_unused]] const auto bytes = read(looper->wake_fd, &count, sizeof(count));
         return poll_wake;
     }
     ALooper::Watch watch{};

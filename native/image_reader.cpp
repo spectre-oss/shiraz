@@ -38,7 +38,7 @@ class Retirement {
     bool stopping = false;
     int wake = -1;
     std::thread worker;
-    void signal() { uint64_t value=1; (void)write(wake,&value,sizeof(value)); }
+    void signal() { uint64_t value=1; [[maybe_unused]] const auto written=write(wake,&value,sizeof(value)); }
     void run() {
         std::unique_lock<std::mutex> lock(mutex);
         for (;;) {
@@ -52,7 +52,7 @@ class Retirement {
             int result;
             do {result=poll(descriptors.data(),descriptors.size(),-1);}while(result<0&&errno==EINTR);
             lock.lock();
-            if(descriptors[0].revents){uint64_t value;(void)read(wake,&value,sizeof(value));}
+            if(descriptors[0].revents){uint64_t value;[[maybe_unused]] const auto bytes=read(wake,&value,sizeof(value));}
             for(size_t i=descriptors.size();i>1;--i)if(descriptors[i-1].revents){
                 auto entry=entries[i-2];close(entry.fence);AHardwareBuffer_release(entry.buffer);
                 entries.erase(entries.begin()+i-2);
