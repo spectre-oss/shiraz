@@ -1,0 +1,335 @@
+The Android-specific notice below is retained from frameworks/base/NOTICE at
+AOSP commit 7e7ea0991020d15cdb69c5da933c282c92f884ef. It applies to the imported
+java/android/widget/Scroller.java, OverScroller.java and
+java/android/view/GestureDetector.java, java/android/util/{Pair,Property,ReflectiveProperty,NoSuchPropertyException}.java and the imported android.text interfaces,
+SpannableStringBuilder, Selection and InputFilter, plus XmlPullAttributes and
+XmlAttributeValues (selected XmlUtils conversions), and StateSet public helpers. Their source headers
+retain the file-specific copyright and Apache-2.0 license notices.
+
+Android Code
+Copyright 2005-2008 The Android Open Source Project
+
+This product includes software developed as part of
+The Android Open Source Project (http://source.android.com).
+
+android/view/ViewOutlineProvider.java is copied from AOSP frameworks/base
+core/java/android/view/ViewOutlineProvider.java, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef (Apache-2.0).
+
+CornerPathEffect.java is an original Java implementation. Its line-segment trim
+rule (at most the radius or half a segment) was checked against AOSP Skia
+src/effects/SkCornerPathEffect.cpp, external/skia commit
+51df37794c99ce49b76de7f37e8145e41d76b7fc (android-8.1.0_r81).
+It uses a separate contour/segment algorithm and preserves existing cubic curves;
+Skia source is not included in this implementation.
+
+android/database/Observable.java and DataSetObservable.java are copied from
+AOSP frameworks/base/core/java/android/database, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef (Apache-2.0).
+
+GradientDrawable ring geometry and XML attribute scope were checked against
+AOSP frameworks/base/graphics/java/android/graphics/drawable/GradientDrawable.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+The Shiraz implementation is original Java using bounded cubic arc segments;
+AOSP GradientDrawable source is not included.
+
+Matrix.java is original managed code. Android Matrix API contracts were checked
+against frameworks/base/graphics/java/android/graphics/Matrix.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+Rectangle preservation and perspective vector mapping were checked against
+external/skia/src/core/SkMatrix.cpp, commit
+51df37794c99ce49b76de7f37e8145e41d76b7fc. No Matrix source was copied.
+
+DrawableWrapper.java is original delegation code checked against the public
+constructor, replacement and state-propagation behavior in
+frameworks/base/graphics/java/android/graphics/drawable/DrawableWrapper.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+No AOSP DrawableWrapper source was copied.
+
+android/util/FloatProperty.java is copied unchanged from
+frameworks/base/core/java/android/util/FloatProperty.java, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef, retaining Apache-2.0 notices.
+Region and RegionIterator are original managed geometry implementations.
+
+Paint font-variation return/reset behavior was checked against
+frameworks/base/graphics/java/android/graphics/Paint.java, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef. The bounded parser and
+FreeType/HarfBuzz integration are original Shiraz code; no source was copied.
+
+Letter-spacing edge distribution, optional-ligature threshold and script exclusions
+were checked against frameworks/minikin/libs/minikin/Layout.cpp,
+android-8.1.0_r81, commit c74b893b49ea63e3bf91eb2bc4b950eccae55481.
+Shiraz uses an original bounded HarfBuzz-position adjustment implementation.
+
+Paint shadow alpha/reset behavior was checked against AOSP frameworks/base
+Paint.java (android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef).
+Radius-to-sigma scaling was checked against external/skia/src/effects/SkBlurMask.cpp
+(51df37794c99ce49b76de7f37e8145e41d76b7fc). The bounded three-pass box blur,
+coverage compositing and Java integration are original code, not copied Skia code.
+
+ProgressBar and ClipDrawable are original managed implementations checked against
+frameworks/base/core/java/android/widget/ProgressBar.java and
+frameworks/base/graphics/java/android/graphics/drawable/ClipDrawable.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+No AOSP implementation source was copied for these classes.
+
+ObjectAnimator path binding behavior was checked against frameworks/base/core/java/
+android/animation/PathKeyframes.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). Curve subdivision and property binding
+are original implementations; no AOSP implementation source was copied.
+
+PathInterpolator is an original managed implementation checked against
+frameworks/base/core/java/android/view/animation/PathInterpolator.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+No AOSP implementation source was copied.
+
+AnimatorSet public lifecycle/dependency contracts were checked against
+frameworks/base/core/java/android/animation/AnimatorSet.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). Shiraz's bounded dependency-group
+scheduler is original code; no AOSP implementation source was copied.
+
+Nine-patch XML alpha, tint and mirroring contracts were checked against
+frameworks/base/graphics/java/android/graphics/drawable/NinePatchDrawable.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+The XML loader and bounded software mirroring are original implementations.
+
+StateListAnimator selection and View attachment contracts were checked against
+frameworks/base/core/java/android/animation/StateListAnimator.java and View.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef. The state
+selector, scalar XML loader and View integration are original implementations.
+
+InsetDrawable bounds, padding and intrinsic sizing were checked against
+frameworks/base/graphics/java/android/graphics/drawable/InsetDrawable.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+The bounded wrapper and XML loading code are original implementations.
+
+AnimationScaleListDrawable selection was checked against frameworks/base/core/java/
+com/android/internal/graphics/drawable/AnimationScaleListDrawable.java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+The container, XML loader and host duration scaling are original implementations.
+
+Animated vector target binding and path-trim behavior were checked against
+frameworks/base/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java
+and VectorDrawable.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). Mutable named targets, model copies,
+software trimming and animation integration are original implementations.
+
+ScrollView measurement, scroll clamping and keyboard dispatch were checked against
+frameworks/base/core/java/android/widget/ScrollView.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). The host viewport/input implementation
+is original code and uses the separately attributed OverScroller implementation.
+
+Scrollbar geometry/style flags and the target-SDK rule for legacy fadingEdge were
+checked against frameworks/base/core/java/android/view/View.java and
+core/java/android/widget/ScrollBarDrawable.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). The host ScrollBars helper is original code.
+
+View background setter delegation was checked against the same AOSP View.java:
+setBackground calls the overridable setBackgroundDrawable implementation, allowing
+AppCompat/Material overrides to call super without recursive redispatch.
+
+TextView pixel/em width constraints and measurement precedence were checked against
+frameworks/base/core/java/android/widget/TextView.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). The host implementation is original code.
+
+View background tint application/state handling was checked against the same AOSP
+View.java applyBackgroundTint implementation. Host tint dispatch and ColorDrawable
+rendering changes are original code.
+
+TextView compound drawable padding, measurement and stationary icon positioning
+were checked against frameworks/base/core/java/android/widget/TextView.java
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). The host
+compound drawable implementation is original code.
+
+Adapter, ListAdapter, SpinnerAdapter and BaseAdapter contracts were checked against
+frameworks/base/core/java/android/widget/{Adapter,ListAdapter,SpinnerAdapter,BaseAdapter}.java
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). Implementations
+are original and use the separately attributed DataSetObservable.
+
+AdapterView's selection, item callback, descendant lookup and empty-view contracts
+were checked against frameworks/base/core/java/android/widget/AdapterView.java
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). The host base
+class implementation is original code.
+
+AbsListView/ListView viewport fill direction, adapter row contracts and selection
+positioning were checked against frameworks/base/core/java/android/widget/ListView.java
+and AbsListView.java (android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef).
+The bounded host viewport/recycling and input implementation is original code.
+
+SparseIntArray API behavior, insertion-point lookup and copyKeys semantics were
+checked against frameworks/base/core/java/android/util/SparseIntArray.java
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). The primitive
+sorted-array implementation is original code.
+
+RelativeLayout rule constants, sibling edge offsets and missing-anchor fallbacks were
+checked against frameworks/base/core/java/android/widget/RelativeLayout.java
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). The host dependency
+ordering and measurement/layout solver are original code.
+
+AbsListView selector ordering, callback ownership and highlight bounds were checked
+against frameworks/base/core/java/android/widget/AbsListView.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). The host selector implementation is original.
+
+ListView fixed-row and HeaderViewListAdapter position, ID, view-type and emptiness
+contracts were checked against frameworks/base/core/java/android/widget/ListView.java
+and HeaderViewListAdapter.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). The wrapper implementation is original.
+
+ScaleDrawable level geometry and XML percentage semantics were checked against
+frameworks/base/graphics/java/android/graphics/drawable/ScaleDrawable.java
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). The bounded
+host implementation and XML integration are original code.
+
+AnimatorInflater pathData/propertyXName/propertyYName loading was checked against
+frameworks/base/core/java/android/animation/AnimatorInflater.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). The XML bridge uses Shiraz's existing
+original path-motion ObjectAnimator implementation.
+
+View.setBackgroundResource resource-zero and repeated-resource behavior was checked
+against the same AOSP View.java. The themed resource bridge is original code.
+
+Vector gradient resource integration was checked against VectorDrawable.java's
+GradientColor handling in frameworks/base/graphics/java/android/graphics/drawable
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). The software
+mask rasterizer and gradient sampling code are original implementations.
+
+View long-click listener dispatch, handled-click suppression and confirm-key tracking
+were checked against frameworks/base/core/java/android/view/View.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). Host callback scheduling is original code.
+
+Additional adapted API27 text classes: android/text/SpannableString.java,
+SpannedString.java and SpannableStringInternal.java, from frameworks/base
+android-8.1.0_r81 commit 7e7ea0991020d15cdb69c5da933c282c92f884ef.
+Apache-2.0 notices are retained in the files. Shiraz replaces internal array
+helpers with Java arrays and adds text/span bounds.
+
+MetaKeyKeyListener.java and NumberKeyListener.java are adapted from AOSP
+frameworks/base/core/java/android/text/method, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef (Apache-2.0).
+MetaKeyKeyListener uses host chorded modifiers instead of Android character maps.
+NumberKeyListener retains the accepted-character filter; committed SDL text
+replaces device-character lookup. Locale helper methods are not imported.
+BaseKeyListener is an original host implementation with codepoint deletion;
+Android grapheme/word deletion and device character maps remain unsupported.
+
+HorizontalScrollView is original host code using the existing Shiraz ScrollView
+touch model. Its measurement, RTL start offset and oversized-child gravity
+contracts were checked against AOSP frameworks/base/core/java/android/widget/
+HorizontalScrollView.java (android-8.1.0_r81,
+7e7ea0991020d15cdb69c5da933c282c92f884ef). No AOSP widget source was copied.
+
+EdgeEffect.java is adapted from frameworks/base/core/java/android/widget/
+EdgeEffect.java, android-8.1.0_r81, commit
+7e7ea0991020d15cdb69c5da933c282c92f884ef (Apache-2.0). Changes replace internal
+styleable references with the public colorEdgeEffect attribute, validate sizes
+and finite pulls, bound pull accumulation, handle minimum-int velocity safely,
+and suppress idle/degenerate drawing on the software canvas.
+
+ImageView matrix copying, identity reset and automatic-scale matrix reporting
+were checked against AOSP frameworks/base/core/java/android/widget/ImageView.java
+(android-8.1.0_r81, 7e7ea0991020d15cdb69c5da933c282c92f884ef). The affine
+ImageView/Canvas integration is original code using the existing bitmap shader.
+
+TextDirectionHeuristic.java and TextDirectionHeuristics.java are imported
+unchanged from frameworks/base/core/java/android/text/, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef (Apache-2.0). Original license
+headers are retained. These paragraph-direction heuristics do not implement
+full bidirectional paragraph layout or glyph reordering.
+
+android/util/Patterns.java imports the EMAIL_ADDRESS regular-expression subset
+from frameworks/base/core/java/android/util/Patterns.java, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef (Apache-2.0). The original
+copyright and license header is retained. Other Patterns APIs are not imported.
+
+android/widget/CheckBox.java constructors and accessibility class name are imported
+from AOSP frameworks/base/core/java/android/widget/CheckBox.java, android-8.1.0_r81,
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef (Apache-2.0).
+
+The original shared-glyph text-on-path implementation follows the placement and
+alignment semantics of AOSP SkiaCanvas.cpp drawLayoutOnPath and MinikinUtils.cpp
+hOffsetForTextAlign (frameworks/base/libs/hwui, android-8.1.0_r81). No source was
+imported for this implementation; the empty-contour fallback is retained.
+
+Dialog/Window hierarchy restoration and TextView/EditText text snapshot policy
+were checked against Dialog.java, PhoneWindow.java, TextView.java and EditText.java
+in AOSP frameworks/base/core/java, android-8.1.0_r81. This is original in-process
+state handling; no Android saved-state parcel implementation was imported.
+
+android/os/StatFs.java is imported unchanged from AOSP frameworks/base/core/java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef
+(Apache-2.0). It uses the pinned ART libcore Os.statvfs host implementation.
+
+ActivityManager heap memory-class units were checked against AOSP ActivityManager.java
+(android-8.1.0_r81). Shiraz derives both classes from the actual standalone VM heap
+cap; no separate Android manifest large-heap tier is configured. Original code.
+
+HandlerThread priority application order was checked against AOSP HandlerThread.java
+(android-8.1.0_r81); original code uses existing Linux Process.setThreadPriority
+and preserves explicit host permission/range failures.
+
+ContentResolver file/resource stream dispatch and Settings integer default/error
+semantics were checked against AOSP ContentResolver.java and Settings.java
+(android-8.1.0_r81). Original host implementation; Android settings are absent,
+not synthetic device state. External content providers are unavailable.
+
+android/content/UriMatcher.java is imported from AOSP frameworks/base/core/java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef
+(Apache-2.0). Original copyright and license header retained; trailing whitespace removed.
+
+Canvas.drawLine stroke-only style and zero-length cap semantics were checked
+against AOSP8.1 SkDraw.cpp drawPoints and SkStroke.cpp preJoinTo. Original code
+uses existing path rasterization; no Skia source imported.
+
+Animation, Transformation, AlphaAnimation, TranslateAnimation, ScaleAnimation,
+RotateAnimation and AnimationSet are adapted from AOSP frameworks/base/core/java/
+android/view/animation, android-8.1.0_r81 commit7e7ea0991020d15cdb69c5da933c282c92f884ef.
+Apache-2.0 notices retained. Changes replace internal styleables with public attr IDs,
+remove unavailable source annotations/CloseGuard diagnostics, use numeric API14
+constant, reject unsupported z-order/background/wallpaper effects, and trim whitespace.
+Animation XML loading and software View integration are original Shiraz code.
+
+android/net/NetworkInfo.java is imported from AOSP frameworks/base/core/java,
+android-8.1.0_r81, commit 7e7ea0991020d15cdb69c5da933c282c92f884ef
+(Apache-2.0). Original header retained; removed the unavailable internal
+VisibleForTesting annotation/import and trailing whitespace. Parcel transport methods
+explicitly reject use because Shiraz Parcel is unavailable. ConnectivityManager
+and HostConnectivity are original read-only host implementations, not AOSP services.
+
+TrafficStats per-thread tag storage follows the semantics of AOSP8.1
+TrafficStats.java and NetworkManagementSocketTagger.java. Original code;
+no socket accounting backend or Android traffic counters are claimed.
+
+patches/art-imageless-dex-load.patch modifies the Apache-2.0 ART source
+art/runtime/oat_file_assistant.cc in the pinned ATL art_standalone revision
+recorded by scripts/bootstrap_runtime.py. The dependency retains its original
+AOSP copyright and license header. This host-only change skips automatic oat
+compilation when no boot image is loaded; image-backed AOT remains available.
+
+patches/art-boot-resource-paths.patch modifies the Apache-2.0 ART source
+art/runtime/native/java_lang_VMClassLoader.cc at the pinned ATL revision in
+scripts/bootstrap_runtime.py. Its original AOSP copyright and license header
+remain intact. Boot resource URLs use configured physical archives instead of
+logical DEX locations, allowing relocatable boot images to retain their resources.
+
+The original Shiraz Android bitmap bridge (include/shiraz/android_bitmap.h and
+native/android_bitmap.cpp) implements the NDK getInfo/lockPixels/unlockPixels
+ABI described by AOSP frameworks/native/include/android/bitmap.h (Android 8.1).
+No AOSP implementation is imported. It adapts Shiraz's straight-alpha Java
+pixels to premultiplied RGBA bytes and alpha-only bytes for native callers.
+
+android.util.JsonReader, JsonWriter, JsonScope and MalformedJsonException originate from AOSP frameworks/base
+commit 7e7ea0991020d15cdb69c5da933c282c92f884ef, core/java/android/util/.
+Copyright (C) 2010 The Android Open Source Project. Apache License 2.0.
+android.util.Patterns.IP_ADDRESS is extracted from Patterns.java at that same
+commit, alongside the previously attributed EMAIL_ADDRESS pattern.
+Original notices are retained in the source files; license text: Apache-2.0.txt.
+
+android/view/inputmethod/BaseInputConnection.java and android/text/CapsMode.java:
+adapted from frameworks/base core/java/android/view/inputmethod/BaseInputConnection.java
+and core/java/android/text/TextUtils.java at android-8.1.0_r81 commit
+7e7ea0991020d15cdb69c5da933c282c92f884ef. Original Apache-2.0 notices retained.
+
+URLUtil URL classification and stripAnchor methods in java/android/webkit/URLUtil.java
+are adapted from AOSP frameworks/base/core/java/android/webkit/URLUtil.java
+(Copyright 2006 The Android Open Source Project), Apache License 2.0.
+Other URL guessing/filename helpers are not included.

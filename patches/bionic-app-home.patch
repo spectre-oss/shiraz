@@ -1,0 +1,12 @@
+--- a/libc/libc-misc.c
++++ b/libc/libc-misc.c
+@@ -73,9 +73,6 @@
+ 		printf("!!! NULL passed to %s\n", __func__);
+ 	}
+ 
+-	if(!strcmp(name, "HOME"))
+-		return NULL;
+-
+ 	/* no point returning anything else, apps mix this with using hardcoded paths */
+ 	if(!strcmp(name, "ANDROID_ROOT"))
+ 		return "/system";

@@ -1,0 +1,26 @@
+--- a/libc/libc.c
++++ b/libc/libc.c
+@@ -1,6 +1,7 @@
+ #include "../wrapper/verbose.h"
+ #include <assert.h>
+ #include <dirent.h>
++#include <dlfcn.h>
+ #include <stddef.h>
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -308,7 +309,14 @@
+ 		}
+ 	}
+ 
+-	const int ret = sigaction(sig, (act ? &gact : NULL), (oact ? &goact : NULL));
++	/* Standalone ART names its chain wrapper explicitly instead of interposing
++	 * libc sigaction. Native app crash handlers must not replace ART's handler
++	 * for implicit null checks and stack overflow delivery. */
++	int (*chain_action)(int, const struct sigaction *, struct sigaction *) =
++		(int (*)(int, const struct sigaction *, struct sigaction *))dlsym(RTLD_DEFAULT, "sigchain_sigaction");
++	const int ret = chain_action
++		? chain_action(sig, (act ? &gact : NULL), (oact ? &goact : NULL))
++		: sigaction(sig, (act ? &gact : NULL), (oact ? &goact : NULL));
+ 
+ 	if (oact) {
+ 		*oact = (struct bionic_sigaction){0};

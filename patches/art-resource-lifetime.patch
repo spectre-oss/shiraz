@@ -1,0 +1,86 @@
+diff --git a/libandroidfw/Android.mk b/libandroidfw/Android.mk
+index 837beb7a..14f6439b 100644
+--- a/libandroidfw/Android.mk
++++ b/libandroidfw/Android.mk
+@@ -9,10 +9,10 @@ LOCAL_MODULE_CLASS := SHARED_LIBRARIES
+ LOCAL_IS_HOST_MODULE := true
+ LOCAL_CXXFLAGS = $(libandroidfw_defaults_CXXFLAGS)
+ LOCAL_CFLAGS   = $(libandroidfw_defaults_CFLAGS)
+-LOCAL_LDFLAGS  = $(libandroidfw_defaults_LDFLAGS)
++LOCAL_LDFLAGS  = $(libandroidfw_defaults_LDFLAGS) -Wl,-z,defs
+ LOCAL_LDLIBS   =  \
+         $(libandroidfw_defaults_LDLIBS) \
+-        -lz
++        -lz -lpng
+ LOCAL_SRC_FILES_ =  \
+         $(libandroidfw_defaults_SRCS) \
+         ApkAssets.cpp \
+diff --git a/libandroidfw/androidfw_c_api.cpp b/libandroidfw/androidfw_c_api.cpp
+index 3f3d9c56..7ab7edad 100644
+--- a/libandroidfw/androidfw_c_api.cpp
++++ b/libandroidfw/androidfw_c_api.cpp
+@@ -19,14 +19,33 @@ class GuardedAssetManager2 : public android::AssetManager2 {
+ 
+ extern "C" const struct ApkAssets *ApkAssets_load(const char *path, bool system)
+ {
+-  const android::ApkAssets *apkAssets = android::ApkAssets::Load(path, system).release();
+-  return reinterpret_cast<const struct ApkAssets *>(apkAssets);
++  auto apkAssets = android::ApkAssets::Load(path, system);
++  if (apkAssets) apkAssets->incStrong(apkAssets.get());
++  return reinterpret_cast<const struct ApkAssets *>(apkAssets.get());
+ }
+ 
+ extern "C" const struct ApkAssets *ApkAssets_loadDir(const char *path)
+ {
+-  const android::ApkAssets *apkAssets = android::ApkAssets::Load(android::DirectoryAssetsProvider::Create(path)).release();
+-  return reinterpret_cast<const struct ApkAssets *>(apkAssets);
++  auto apkAssets = android::ApkAssets::Load(android::DirectoryAssetsProvider::Create(path));
++  if (apkAssets) apkAssets->incStrong(apkAssets.get());
++  return reinterpret_cast<const struct ApkAssets *>(apkAssets.get());
++}
++
++extern "C" void ApkAssets_delete(const struct ApkAssets *assets)
++{
++  auto apkAssets = reinterpret_cast<const android::ApkAssets *>(assets);
++  if (apkAssets) apkAssets->decStrong(apkAssets);
++}
++
++extern "C" void AssetManager_delete(struct AssetManager *manager)
++{
++  delete reinterpret_cast<GuardedAssetManager2 *>(manager);
++}
++
++extern "C" void ResTable_config_setLocale(struct ResTable_config *config, const char *locale)
++{
++  static_assert(sizeof(struct ResTable_config) == sizeof(android::ResTable_config));
++  reinterpret_cast<android::ResTable_config *>(config)->setBcp47Locale(locale);
+ }
+ 
+ extern "C" struct AssetManager *AssetManager_new(void)
+@@ -64,9 +83,9 @@ extern "C" bool AssetManager_setApkAssets(struct AssetManager *asset_manager,
+   for (size_t i = 0; i < num_assets; i++) {
+     apkAssets_vec.push_back(((const android::ApkAssets**)apk_assets)[i]);
+   }
+-  const GuardedAssetManager2::ApkAssetsList *apkAssets = new const GuardedAssetManager2::ApkAssetsList(apkAssets_vec.begin(), apkAssets_vec.size());
++  const GuardedAssetManager2::ApkAssetsList apkAssets(apkAssets_vec.data(), apkAssets_vec.size());
+   auto op = assetManager->StartOperation();
+-  return assetManager->SetApkAssets(*apkAssets, invalidate_caches);
++  return assetManager->SetApkAssets(apkAssets, invalidate_caches);
+ }
+ 
+ const struct ResStringPool *AssetManager_getStringPoolForCookie(struct AssetManager *asset_manager, ApkAssetsCookie cookie)
+diff --git a/libandroidfw/include/androidfw/androidfw_c_api.h b/libandroidfw/include/androidfw/androidfw_c_api.h
+index d3720a30..e37b822d 100644
+--- a/libandroidfw/include/androidfw/androidfw_c_api.h
++++ b/libandroidfw/include/androidfw/androidfw_c_api.h
+@@ -486,6 +486,10 @@ enum file_type {
+ const struct ApkAssets *ApkAssets_load(const char *path, bool system);
+ const struct ApkAssets *ApkAssets_loadDir(const char *path);
+ 
++// The manager borrows APK assets: destroy the manager before deleting its assets.
++void ApkAssets_delete(const struct ApkAssets *assets);
++void AssetManager_delete(struct AssetManager *manager);
++void ResTable_config_setLocale(struct ResTable_config *config, const char *locale);
+ struct AssetManager *AssetManager_new(void);
+ void AssetManager_lock(struct AssetManager *asset_manager);
+ void AssetManager_unlock(struct AssetManager *asset_manager);

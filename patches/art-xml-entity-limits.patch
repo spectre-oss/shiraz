@@ -1,0 +1,56 @@
+diff --git a/libcore/xml/src/main/java/org/kxml2/io/KXmlParser.java b/libcore/xml/src/main/java/org/kxml2/io/KXmlParser.java
+index e010f1d0..b331cd2c 100644
+--- a/libcore/xml/src/main/java/org/kxml2/io/KXmlParser.java
++++ b/libcore/xml/src/main/java/org/kxml2/io/KXmlParser.java
+@@ -139,6 +139,9 @@ public class KXmlParser implements XmlPullParser, Closeable {
+     private Reader reader;
+     private String encoding;
+     private ContentSource nextContentSource;
++    // Host apps parse untrusted files without an Android process watchdog.
++    private long entityCharacters;
++    private int entityDepth;
+     private char[] buffer = new char[8192];
+     private int position = 0;
+     private int limit = 0;
+@@ -1603,6 +1606,9 @@ public class KXmlParser implements XmlPullParser, Closeable {
+     //  public part starts here...
+
+     public void setInput(Reader reader) throws XmlPullParserException {
++        while (nextContentSource != null) popContentSource();
++        entityCharacters = 0;
++        entityDepth = 0;
+         this.reader = reader;
+
+         type = START_DOCUMENT;
+@@ -1628,6 +1634,9 @@ public class KXmlParser implements XmlPullParser, Closeable {
+     }
+
+     public void setInput(InputStream is, String charset) throws XmlPullParserException {
++        while (nextContentSource != null) popContentSource();
++        entityCharacters = 0;
++        entityDepth = 0;
+         position = 0;
+         limit = 0;
+         boolean detectCharset = (charset == null);
+@@ -2159,7 +2168,12 @@ public class KXmlParser implements XmlPullParser, Closeable {
+      * Prepends the characters of {@code newBuffer} to be read before the
+      * current buffer.
+      */
+-    private void pushContentSource(char[] newBuffer) {
++    private void pushContentSource(char[] newBuffer) throws XmlPullParserException {
++        if (entityDepth >= 64 || entityCharacters + newBuffer.length > 8 * 1024 * 1024) {
++            throw new XmlPullParserException("Entity expansion exceeds host XML limits", this, null);
++        }
++        entityDepth++;
++        entityCharacters += newBuffer.length;
+         nextContentSource = new ContentSource(nextContentSource, buffer, position, limit);
+         buffer = newBuffer;
+         position = 0;
+@@ -2170,6 +2184,7 @@ public class KXmlParser implements XmlPullParser, Closeable {
+      * Replaces the current exhausted buffer with the next buffer in the chain.
+      */
+     private void popContentSource() {
++        entityDepth--;
+         buffer = nextContentSource.buffer;
+         position = nextContentSource.position;
+         limit = nextContentSource.limit;

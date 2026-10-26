@@ -1,0 +1,1 @@
+<View xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/autofill_metadata_view" android:layout_width="20px" android:layout_height="20px" android:importantForAutofill="noExcludeDescendants" android:autofillHints="username,emailAddress" />

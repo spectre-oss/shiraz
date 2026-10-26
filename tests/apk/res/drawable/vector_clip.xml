@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="8dp" android:height="8dp" android:viewportWidth="8" android:viewportHeight="8" android:autoMirrored="true">
+    <clip-path android:name="mask" android:fillType="evenOdd" android:pathData="M0,0h6v8h-6z M2,2h2v4h-2z"/>
+    <path android:fillColor="#ff000000" android:pathData="M0,0h8v8h-8z"/>
+</vector>

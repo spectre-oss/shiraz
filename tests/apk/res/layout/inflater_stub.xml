@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent">
+ <View android:layout_width="1dp" android:layout_height="1dp"/>
+ <ViewStub android:id="@+id/lazy_stub" android:inflatedId="@+id/lazy_inflated" android:layout="@layout/inflater_probe" android:layout_width="19dp" android:layout_height="11dp" android:layout_marginLeft="3dp"/>
+ <View android:layout_width="1dp" android:layout_height="1dp"/>
+</FrameLayout>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.fixture" android:versionName="@string/fixture_version">
+    <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="35" />
+    <application android:name=".FixtureApplication" android:label="@string/app_name" android:icon="@drawable/png_grid">
+        <service android:name=".ServiceFixture$Sample" android:exported="false" android:permission="org.shiraz.fixture.PERMISSION" android:directBootAware="true" android:stopWithTask="true">
+            <meta-data android:name="boolean" android:value="true" />
+            <meta-data android:name="integer" android:value="-7" />
+            <meta-data android:name="float" android:value="1.25" />
+            <meta-data android:name="color" android:value="#123456" />
+            <meta-data android:name="text" android:value="@string/service_meta_text" />
+            <meta-data android:name="resolved_bool" android:value="@bool/service_meta_bool" />
+            <meta-data android:name="resolved_int" android:value="@integer/service_meta_integer" />
+            <meta-data android:name="resource" android:resource="@string/service_meta_text" />
+        </service>
+        <service android:name=".ServiceFixture$Legacy" android:exported="false" />
+        <service android:name=".ServiceFixture$Persistent" android:exported="false" />
+        <service android:name=".ServiceFixture$Disabled" android:enabled="false" />
+        <service android:name=".ServiceFixture$Separate" android:process=":separate" />
+        <activity android:name=".ActivityInfoFixture$Sample" android:launchMode="singleTask" android:exported="false" android:enabled="false" android:directBootAware="true" android:process=":screen" android:permission="org.shiraz.fixture.PERMISSION" android:parentActivityName=".FixtureActivity" android:configChanges="orientation|screenSize|uiMode" android:screenOrientation="portrait">
+            <meta-data android:name="text" android:value="@string/service_meta_text" />
+            <meta-data android:name="integer" android:value="-7" />
+            <meta-data android:name="resource" android:resource="@string/service_meta_text" />
+        </activity>
+        <activity android:name=".ResizeActivity$Requested" android:exported="false" />
+        <activity android:name=".ResizeActivity" android:exported="false" />
+        <activity android:name=".ResizeActivity$Handled" android:label="Handled resize title" android:exported="false" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout" />
+        <activity android:name=".FixtureActivity" android:exported="true" android:label="@string/welcome">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    <activity android:name=".BucketResizeActivity" android:configChanges="uiMode" android:exported="false" />
+        <activity android:name=".NavigationActivity" android:exported="false" />
+        <activity android:name=".NavigationActivity$Handled" android:exported="false" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout" />
+        <activity android:name=".NavigationActivity$Child" android:exported="false" />
+    </application>
+</manifest>

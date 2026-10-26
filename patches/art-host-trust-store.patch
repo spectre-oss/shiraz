@@ -1,0 +1,23 @@
+diff --git a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLTrustManager.java b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLTrustManager.java
+index 7da48fbf..8d902f55 100644
+--- a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLTrustManager.java
++++ b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLTrustManager.java
+@@ -237,7 +237,7 @@ public class WolfSSLTrustManager extends TrustManagerFactorySpi {
+                             "$JAVA_HOME not set, unable to load system certs");
+                     }
+
+-                    if (androidRoot != null) {
++                    if (!systemCertsFound && androidRoot != null) {
+
+                         /* first try to use AndroidCAStore KeyStore, this is
+                          * pre-loaded with Android system CA certs */
+@@ -270,6 +270,9 @@ public class WolfSSLTrustManager extends TrustManagerFactorySpi {
+                             String[] cafiles = null;
+                             try {
+                                 cafiles = cadir.list();
++                                if (cafiles == null) {
++                                    throw new KeyStoreException("CA certificate directory is unavailable");
++                                }
+                             } catch (Exception e) {
+                                 /* denied access reading cacerts directory */
+                                 WolfSSLDebug.log(getClass(), WolfSSLDebug.ERROR,

@@ -1,0 +1,11 @@
+Private runtime font dependencies (not vendored in the source tree)
+
+scripts/bootstrap_fonts.py downloads unmodified Noto Sans, Noto Sans Arabic,
+Noto Sans Hebrew (Regular/Bold) from https://github.com/notofonts/noto-fonts
+revision ffebf8c1ee449e544955a7e813c54f9b73848eac, and monochrome Noto Emoji
+from https://github.com/google/fonts revision e7db6ca603fd4862010383ff17ffd6cc4ffac1c0.
+Every font and original license file is SHA-256 checked by the bootstrap.
+These fonts are licensed under the SIL Open Font License, Version 1.1.
+The original LICENSE and NotoEmoji-OFL.txt are installed beside the fonts in
+.local/share/shiraz/fonts and must accompany redistribution of those fonts.
+No font binaries are committed and no host font configuration is modified.

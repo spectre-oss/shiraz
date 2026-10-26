@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent">
+ <SurfaceView android:id="@+id/surface_gone" android:visibility="gone" android:layout_width="10dp" android:layout_height="10dp"/>
+ <View android:id="@+id/view_invisible" android:visibility="invisible" android:layout_width="10dp" android:layout_height="10dp"/>
+ <include android:id="@+id/include_invisible" android:visibility="invisible" layout="@layout/inflater_probe"/>
+</FrameLayout>

@@ -1,0 +1,29 @@
+--- a/libandroidfw/androidfw_c_api.cpp
++++ b/libandroidfw/androidfw_c_api.cpp
+@@ -568,3 +568,14 @@
+   *out_count = configurations->size();
+   return true;
+ }
++
++// Unlike the legacy wrapper, distinguish a confirmed miss from incomplete I/O.
++extern "C" bool AssetManager_findResourceId(struct AssetManager *asset_manager,
++                                           const char *name, const char *type,
++                                           const char *package, uint32_t *out_id) {
++  if (!asset_manager || !name || !type || !package || !out_id) return false;
++  auto manager = reinterpret_cast<GuardedAssetManager2 *>(asset_manager);
++  auto result = manager->GetResourceId(name, type, package);
++  *out_id = result.has_value() ? result.value() : 0;
++  return !android::IsIOError(result);
++}
+--- a/libandroidfw/include/androidfw/androidfw_c_api.h
++++ b/libandroidfw/include/androidfw/androidfw_c_api.h
+@@ -504,6 +504,9 @@
+ ApkAssetsCookie AssetManager_resolveReference(struct AssetManager *asset_manager, ApkAssetsCookie cookie,
+                                                          struct Res_value *in_out_value, struct ResTable_config* in_out_selected_config,
+                                                          uint32_t *in_out_flags, uint32_t *out_last_reference);
++// Returns false on I/O failure; true with zero ID denotes a confirmed miss.
++bool AssetManager_findResourceId(struct AssetManager *asset_manager, const char *name,
++                                 const char *type, const char *package, uint32_t *out_id);
+ uint32_t AssetManager_getResourceId(struct AssetManager *asset_manager, const char *name, const char *type, const char *package);
+ uint32_t AssetManager_getResourceName(struct AssetManager *asset_manager, uint32_t resid, struct resource_name* outName);
+ struct Theme *AssetManager_newTheme(struct AssetManager *asset_manager);

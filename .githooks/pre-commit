@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+python3 scripts/commit_guard.py
+python3 scripts/version.py --check

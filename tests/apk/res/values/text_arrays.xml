@@ -1,0 +1,14 @@
+<resources>
+ <string-array name="typed_choices"><item>First</item><item>@string/service_meta_text</item><item>@null</item><item>حافظ</item></string-array>
+ <string-array name="typed_empty_choices" />
+ <item name="typed_choices_alias" type="array">@array/typed_choices</item>
+ <style name="TypedArrayChoices"><item name="android:entries">@array/typed_choices</item></style>
+ <plurals name="typed_tracks">
+  <item quantity="zero">%d zero</item>
+  <item quantity="one">%d track</item>
+  <item quantity="two">%d two</item>
+  <item quantity="few">%d few</item>
+  <item quantity="many">%d many</item>
+  <item quantity="other">%d tracks</item>
+ </plurals>
+</resources>

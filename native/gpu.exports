@@ -1,0 +1,4 @@
+{
+ global: Java_shiraz_runtime_NativeGpu_*; _ZN6shiraz*;
+ local: *;
+};

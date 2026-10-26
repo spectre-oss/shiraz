@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<View xmlns:android="http://schemas.android.com/apk/res/android" style="@style/ConstructorXml" android:id="@+id/constructor_view" android:paddingLeft="9px" android:background="@null" />

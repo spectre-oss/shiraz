@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="FixtureBase" parent="">
+        <item name="themeAccent">#ffabcdef</item>
+        <item name="themeLabel">@string/localized</item>
+        <item name="themeFlag">true</item>
+        <item name="themeAlias">?attr/themeAccent</item>
+    </style>
+</resources>

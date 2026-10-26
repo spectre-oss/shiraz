@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<resources>
+    <string name="service_meta_text">true</string>
+    <bool name="service_meta_bool">true</bool>
+    <integer name="service_meta_integer">-27</integer>
+</resources>

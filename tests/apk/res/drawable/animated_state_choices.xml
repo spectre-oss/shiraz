@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<animated-selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/choice_checked" android:state_checked="true" android:drawable="@color/animated_selector_red" />
+    <transition android:fromId="@+id/choice_unchecked" android:toId="@id/choice_checked" android:reversible="true">
+        <animation-list android:oneshot="true">
+            <item android:duration="20" android:drawable="@color/animated_selector_green" />
+            <item android:duration="20" android:drawable="@color/animated_selector_white" />
+        </animation-list>
+    </transition>
+    <item android:id="@id/choice_unchecked" android:drawable="@color/animated_selector_blue" />
+</animated-selector>

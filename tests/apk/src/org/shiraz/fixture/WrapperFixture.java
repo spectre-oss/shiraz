@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.shiraz.fixture;
+import android.graphics.*;
+import android.graphics.drawable.*;
+import android.content.res.ColorStateList;
+public final class WrapperFixture {
+ private static void check(boolean v,String why){if(!v)throw new AssertionError(why);}
+ private static final class Wrapper extends DrawableWrapper {Wrapper(Drawable d){super(d);}}
+ private static void insets(){
+  GradientDrawable child=new GradientDrawable();child.setColor(Color.RED);child.setSize(10,20);InsetDrawable inset=new InsetDrawable(child,2,3,4,5);inset.setBounds(1,2,21,32);check(child.getBounds().equals(new Rect(3,5,17,27)),"Inset child bounds");check(inset.getIntrinsicWidth()==16&&inset.getIntrinsicHeight()==28,"Inset intrinsic dimensions");Rect padding=new Rect();check(inset.getPadding(padding)&&padding.equals(new Rect(2,3,4,5)),"Inset padding");Bitmap bitmap=Bitmap.createBitmap(24,34,Bitmap.Config.ARGB_8888);try{inset.draw(new Canvas(bitmap));check(bitmap.getPixel(3,5)==Color.RED&&bitmap.getPixel(2,5)==0&&bitmap.getPixel(17,5)==0,"Inset pixels");}finally{bitmap.recycle();}
+  InsetDrawable fraction=new InsetDrawable(child,.25f,0f,.25f,0f);fraction.setBounds(0,0,100,50);check(child.getBounds().equals(new Rect(25,0,75,50))&&fraction.getIntrinsicWidth()==20,"Fractional bounds and intrinsic");fraction.setBounds(10,20,210,120);check(child.getBounds().equals(new Rect(60,20,160,120)),"Fractional resize");GradientDrawable replacement=new GradientDrawable();fraction.setDrawable(replacement);check(replacement.getBounds().equals(new Rect(60,20,160,120))&&child.getCallback()==null,"Replacement receives inset bounds");
+  InsetDrawable negative=new InsetDrawable(new ColorDrawable(Color.BLUE),-2);negative.setBounds(2,2,8,8);check(negative.getDrawable().getBounds().equals(new Rect(0,0,10,10)),"Negative expansion");InsetDrawable collapsed=new InsetDrawable(new ColorDrawable(Color.BLUE),.6f);check(collapsed.getIntrinsicWidth()==-1,"No intrinsic size when fractions consume width");try{new InsetDrawable(child,Float.NaN);throw new AssertionError("NaN inset accepted");}catch(IllegalArgumentException expected){}
+ }
+ public static void check(){insets();
+  GradientDrawable a=new GradientDrawable();a.setColor(new ColorStateList(new int[][]{{android.R.attr.state_pressed},{}},new int[]{Color.RED,Color.BLUE}));a.setSize(12,14);a.setChangingConfigurations(4);Wrapper w=new Wrapper(a);w.setChangingConfigurations(2);w.setBounds(3,4,13,14);w.setState(new int[]{android.R.attr.state_pressed});w.setLevel(500);w.setLayoutDirection(1);
+  final int[] calls={0,0,0};final Runnable task=new Runnable(){public void run(){}};Drawable.Callback owner=new Drawable.Callback(){public void invalidateDrawable(Drawable d){check(d==w,"Invalidation identity");calls[0]++;}public void scheduleDrawable(Drawable d,Runnable r,long when){check(d==w&&r==task&&when==123,"Schedule forwarding");calls[1]++;}public void unscheduleDrawable(Drawable d,Runnable r){check(d==w&&r==task,"Unschedule forwarding");calls[2]++;}};w.setCallback(owner);
+  a.invalidateSelf();a.scheduleSelf(task,123);a.unscheduleSelf(task);check(calls[0]==1&&calls[1]==1&&calls[2]==1,"Child callback relay");check(w.getIntrinsicWidth()==12&&w.getIntrinsicHeight()==14&&w.getChangingConfigurations()==6,"Metadata delegation");
+  Bitmap b=Bitmap.createBitmap(20,20,Bitmap.Config.ARGB_8888);try{w.draw(new Canvas(b));check(b.getPixel(5,5)==Color.RED&&b.getPixel(1,1)==0,"Bounds/state drawing");w.setAlpha(128);b.eraseColor(0);w.draw(new Canvas(b));check(b.getPixel(5,5)==0x80ff0000,"Alpha delegation");}finally{b.recycle();}
+  w.setVisible(false,false);GradientDrawable replacement=new GradientDrawable();replacement.setColor(Color.GREEN);w.setDrawable(replacement);check(a.getCallback()==null&&replacement.getCallback()==w,"Replacement callbacks");check(replacement.getBounds().equals(w.getBounds())&&replacement.getLevel()==500&&replacement.getLayoutDirection()==1&&!replacement.isVisible(),"Replacement receives stored state");check(replacement.getState().length==1&&replacement.getAlpha()==255,"Replacement state but no cached alpha");check(w.getCallback()==owner,"Owner remains attached");int invalidations=calls[0];a.invalidateSelf();check(calls[0]==invalidations,"Detached child cannot invalidate owner");
+  Wrapper outer=new Wrapper(w);try{w.setDrawable(outer);throw new AssertionError("Cycle accepted");}catch(IllegalArgumentException expected){}check(w.getDrawable()==replacement,"Cycle rejection atomic");
+  outer.setDrawable(null);w.setDrawable(null);check(w.getOpacity()==PixelFormat.TRANSPARENT&&w.getIntrinsicWidth()==-1&&w.getAlpha()==255,"Empty wrapper defaults");Rect pad=new Rect(1,2,3,4);check(!w.getPadding(pad)&&pad.equals(new Rect()),"Empty padding reset");check(w.getConstantState()==null,"No fabricated subclass clone state");
+  System.out.println("WRAPPER_STATE_CALLBACK_PIXELS_OK");
+ }
+}

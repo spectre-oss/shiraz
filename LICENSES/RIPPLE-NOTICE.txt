@@ -1,0 +1,20 @@
+Patterned ripple rendering
+
+native/ripple.cpp is a CPU adaptation of RippleShader.java from the Android
+Open Source Project, frameworks/base/graphics/java/android/graphics/drawable.
+Copyright (C) 2021 The Android Open Source Project
+Licensed under the Apache License, Version 2.0; see Apache-2.0.txt.
+
+Source:
+https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android13-release/graphics/java/android/graphics/drawable/RippleShader.java
+
+Shiraz modifications: C++ scalar evaluation, per-frame precomputed constants,
+clipped pixel iteration, conditional turbulence evaluation, validated JNI buffer
+access, and straight-ARGB output for Shiraz's compositor. The Java lifecycle is
+implemented separately using the timings in RippleAnimationSession.java,
+RippleForeground.java and RippleBackground.java. Android 13 paint alpha and
+minimum color alpha behavior are retained for the patterned style.
+
+GPU backend: native/ripple_gpu.inc adapts the same AOSP shader equations to
+Skia runtime effects. Per-wave constants are supplied as uniforms; Ganesh
+compiles the effect once and rasterizes the animated ripple on the GPU.

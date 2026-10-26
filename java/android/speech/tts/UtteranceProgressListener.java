@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package android.speech.tts;
+public abstract class UtteranceProgressListener {
+ public abstract void onStart(String utteranceId);
+ public abstract void onDone(String utteranceId);
+ public abstract void onError(String utteranceId);
+ public void onError(String utteranceId,int errorCode){onError(utteranceId);}
+ public void onStop(String utteranceId,boolean interrupted){}
+ public void onBeginSynthesis(String utteranceId,int sampleRateInHz,int audioFormat,int channelCount){}
+ public void onAudioAvailable(String utteranceId,byte[] audio){}
+ public void onRangeStart(String utteranceId,int start,int end,int frame){}
+}

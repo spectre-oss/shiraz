@@ -1,0 +1,1 @@
+<nine-patch xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/nine_patch_test" android:tint="#ff00ffff" android:tintMode="src_in" />

@@ -1,0 +1,4 @@
+<com.android.internal.graphics.drawable.AnimationScaleListDrawable xmlns:android="http://schemas.android.com/apk/res/android">
+ <item><color android:color="#ffff0000" /></item>
+ <item><color android:color="#ff00ff00" /></item>
+</com.android.internal.graphics.drawable.AnimationScaleListDrawable>

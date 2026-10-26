@@ -1,0 +1,12 @@
+--- a/libandroidfw/AssetManager2.cpp
++++ b/libandroidfw/AssetManager2.cpp
+@@ -1485,6 +1485,9 @@
+         // under the type '^attr-private' in order to leave the ID space of public 'attr'
+         // free for future additions. Check '^attr-private' for the same name.
+         resid = package->FindEntryByName(kAttrPrivate16, entry16);
++        if (UNLIKELY(IsIOError(resid))) {
++          return base::unexpected(resid.error());
++        }
+       }
+
+       if (resid.has_value()) {

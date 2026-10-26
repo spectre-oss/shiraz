@@ -1,0 +1,36 @@
+--- a/libandroidfw/androidfw_c_api.cpp
++++ b/libandroidfw/androidfw_c_api.cpp
+@@ -550,3 +550,21 @@
+
+   return ret.has_value() ? true : false;
+ }
++
++// Host size buckets use app qualifiers only, including mipmaps as Android API 27 does.
++extern "C" bool AssetManager_getSizeConfigurations(struct AssetManager *asset_manager,
++                                                  uint16_t *triples, size_t capacity,
++                                                  size_t *out_count) {
++  if (!asset_manager || !triples || !out_count) return false;
++  auto manager = reinterpret_cast<GuardedAssetManager2 *>(asset_manager);
++  auto configurations = manager->GetResourceConfigurations(true, false);
++  if (!configurations.has_value() || configurations->size() > capacity) return false;
++  size_t index = 0;
++  for (const auto& config : configurations.value()) {
++    triples[index++] = config.screenWidthDp;
++    triples[index++] = config.screenHeightDp;
++    triples[index++] = config.smallestScreenWidthDp;
++  }
++  *out_count = configurations->size();
++  return true;
++}
+--- a/libandroidfw/include/androidfw/androidfw_c_api.h
++++ b/libandroidfw/include/androidfw/androidfw_c_api.h
+@@ -526,6 +526,9 @@
+
+ struct Asset *AssetManager_openNonAsset(struct AssetManager *asset_manager, const char* filename, enum AccessMode mode);
+ struct AssetDir *AssetManager_openDir(struct AssetManager *asset_manager, const char* dirName);
++// Caller capacity is in configurations; output has width/height/smallest-width triples.
++bool AssetManager_getSizeConfigurations(struct AssetManager *asset_manager, uint16_t *triples,
++                                       size_t capacity, size_t *out_count);
+ char **AssetManager_getLocales(struct AssetManager *asset_manager, bool exclude_system, bool merge_equivalent_languages);
+
+ int Asset_openFileDescriptor(struct Asset *asset, off64_t* outStart, off64_t* outLength);

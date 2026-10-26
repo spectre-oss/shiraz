@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+ <item android:id="@+id/layer_back" android:drawable="@color/layer_red"/>
+ <item android:id="@+id/layer_icon"><bitmap android:src="@drawable/png_grid" android:gravity="bottom|center_horizontal" android:filter="false"/></item>
+ <item android:id="@+id/layer_front" android:drawable="@drawable/vector_group" android:width="8dp" android:height="8dp" android:gravity="top|right"/>
+</layer-list>

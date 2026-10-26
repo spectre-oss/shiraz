@@ -1,0 +1,1 @@
+<scale xmlns:android="http://schemas.android.com/apk/res/android" android:scaleWidth="100%" android:scaleGravity="center" android:level="5000"><shape><solid android:color="#ffff0000"/></shape></scale>

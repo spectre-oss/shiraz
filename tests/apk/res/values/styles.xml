@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="themeAccent" format="color" />
+    <attr name="themeLabel" format="string" />
+    <attr name="themeFlag" format="boolean" />
+    <attr name="themeCount" format="integer" />
+    <attr name="themeAlias" format="color" />
+    <style name="FixtureBase" parent="">
+        <item name="themeAccent">#ff112233</item>
+        <item name="themeLabel">@string/localized</item>
+        <item name="themeFlag">true</item>
+        <item name="themeAlias">?attr/themeAccent</item>
+    </style>
+    <style name="FixtureChild" parent="FixtureBase"><item name="themeFlag">false</item></style>
+    <style name="FixtureOverlay" parent=""><item name="themeAccent">#ff445566</item><item name="themeCount">7</item></style>
+    <style name="FixtureMissingParent" parent="android:style/Theme.Material" />
+    <attr name="typedDefault" format="reference" />
+    <attr name="typedCount" format="integer" />
+    <attr name="typedEmpty" format="string" />
+    <attr name="typedText" format="string" />
+    <attr name="typedSize" format="dimension" />
+    <attr name="typedColor" format="color" />
+    <attr name="typedFallback" format="integer" />
+    <style name="TypedBase" parent="FixtureBase"><item name="typedDefault">@style/TypedDefault</item><item name="typedCount">1</item><item name="typedEmpty">base</item></style>
+    <style name="TypedDefault" parent=""><item name="typedCount">2</item><item name="typedFallback">21</item></style>
+    <style name="TypedOther" parent=""><item name="typedCount">3</item><item name="typedFallback">31</item></style>
+    <style name="TypedXml" parent=""><item name="themeAccent">#ff998877</item><item name="typedCount">4</item><item name="themeFlag">false</item></style>
+    <attr name="typedBagAlias" format="reference" />
+    <attr name="typedBagArray" format="reference" />
+    <attr name="typedParentBag" format="reference" />
+    <style name="TypedPlatformParent" parent="android:style/Widget.Material.Button.Colored" />
+    <attr name="typedCycle" format="reference" />
+    <item name="TypedAlias" type="style">@style/TypedDefault</item>
+    <integer-array name="typed_numbers"><item>7</item><item>11</item></integer-array>
+    <style name="TypedBags" parent=""><item name="typedBagAlias">@style/TypedAlias</item><item name="typedBagArray">@array/typed_numbers</item><item name="typedParentBag">@style/TypedPlatformParent</item></style>
+    <style name="TypedCycle" parent=""><item name="typedCycle">@string/typed_cycle_a</item></style>
+    <attr name="constructorDefault" format="reference" />
+    <attr name="constructorAbsent" format="reference" />
+    <style name="ConstructorTheme" parent="">
+        <item name="constructorDefault">@style/ConstructorDefault</item>
+        <item name="android:paddingBottom">2px</item><item name="android:enabled">true</item>
+    </style>
+    <style name="ConstructorDefault" parent="">
+        <item name="android:paddingLeft">4px</item><item name="android:paddingTop">3px</item>
+        <item name="android:background">#ff0000ff</item><item name="android:enabled">false</item>
+        <item name="android:minHeight">17px</item>
+    </style>
+    <style name="ConstructorFallback" parent=""><item name="android:paddingTop">99px</item></style>
+    <style name="ConstructorParent" parent=""><item name="android:paddingLeft">6px</item><item name="android:contentDescription">Inherited description</item></style>
+    <style name="ConstructorXml" parent="ConstructorParent"><item name="android:importantForAccessibility">yes</item><item name="android:paddingRight">7px</item><item name="android:layout_width">20px</item><item name="android:layout_height">30px</item></style>
+    <style name="ConstructorFrame" parent=""><item name="android:measureAllChildren">true</item><item name="android:foreground">#ff112233</item></style>
+    <style name="ConstructorLinear" parent=""><item name="android:orientation">vertical</item><item name="android:weightSum">2</item><item name="android:baselineAligned">false</item></style>
+    <style name="ConstructorImage" parent=""><item name="android:tint">#ff112233</item><item name="android:tintMode">src_in</item><item name="android:src">#ff445566</item><item name="android:scaleType">centerInside</item><item name="android:maxHeight">42px</item></style>
+    <style name="ConstructorText" parent=""><item name="android:text">Styled text</item><item name="android:textSize">18px</item><item name="android:textColor">#ff778899</item></style>
+    <style name="ConstructorUnsupported" parent=""><item name="android:rotation">20</item></style>
+    <style name="TypographyBase" parent=""><item name="android:textSize">18px</item><item name="android:textColor">#ff223344</item><item name="android:textStyle">bold</item><item name="android:fontFamily">monospace</item></style>
+    <style name="TypographyChild" parent="TypographyBase"><item name="android:textColorHint">#ff556677</item><item name="android:textColorLink">#ff778899</item></style>
+    <style name="TypographyColors" parent=""><item name="android:textColor">@color/typography_colors</item></style>
+    <style name="TypographySpacing" parent=""><item name="android:letterSpacing">0.2</item></style>
+    <style name="TypographyCaps" parent="TypographyBase"><item name="android:textAllCaps">true</item></style>
+<style name="FocusHighlightFixture" parent=""><item name="android:selectableItemBackground">@drawable/focus_highlight_fixture</item></style>
+</resources>

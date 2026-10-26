@@ -1,0 +1,9 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+appdir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+case "$(uname -m)" in
+    x86_64) loader=ld-linux-x86-64.so.2 ;;
+    aarch64) loader=ld-linux-aarch64.so.1 ;;
+    *) echo "Unsupported Shiraz CPU architecture" >&2; exit 126 ;;
+esac
+exec "$appdir/usr/lib/$loader" --library-path "$appdir/usr/lib" "$appdir/usr/bin/shiraz-app" "$@"

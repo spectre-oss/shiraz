@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<resources><string name="resize_bucket">base</string><string name="resize_height">short</string><string name="resize_smallest">small</string></resources>

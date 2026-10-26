@@ -1,0 +1,81 @@
+name: Browser AppImage kit
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      SHIRAZ_BUILD_JOBS: '4'
+      TMPDIR: /home/runner/shiraz-tmp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-wasm/go.mod
+          cache: false
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake bison build-essential ca-certificates cmake flex \
+            gettext git libasound2-dev libcairo2-dev libdbus-1-dev libegl1-mesa-dev \
+            libfontconfig1-dev libfreetype-dev libgbm-dev libgles2-mesa-dev \
+            libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+            libharfbuzz-dev libicu-dev libjpeg-dev libopus-dev libpng-dev \
+            libsndfile1-dev libsqlite3-dev libtool libudev-dev libwebp-dev libx11-dev \
+            libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev \
+            libxkbcommon-dev libwayland-dev meson ninja-build openjdk-17-jdk \
+            pkg-config python3 python3-venv xz-utils zlib1g-dev
+          mkdir -p "$TMPDIR"
+      - name: Build fixture and runtime
+        run: |
+          make deps
+          make build
+          make apk-fixture
+          make appimage APK=build/apk-fixture/fixture.apk NAME=Shiraz-CI-Fixture AOT=0
+      - name: Build generic base and WebAssembly assembler
+        run: |
+          python3 scripts/make_runtime_template.py \
+            build/appimage/org.shiraz.fixture.AppDir build/runtime-template.tar.gz
+          (cd go-wasm/launcher && go build -o ../../build/shiraz-payload-launcher .)
+          version=$(cat VERSION)
+          python3 scripts/make_browser_base.py \
+            build/runtime-template.tar.gz build/shiraz-payload-launcher \
+            "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
+          (cd go-wasm && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
+          python3 go-wasm/bootstrap_font.py
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" go-wasm/wasm_exec.js
+      - name: Verify outputs
+        run: |
+          version=$(cat VERSION)
+          test -s "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
+          test -s "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage.sha256"
+          test -s go-wasm/shiraz-assemble.wasm
+          test -s go-wasm/fonts/Manrope-wght.ttf
+          (cd dist && sha256sum -c "Shiraz-Browser-Base-${version}-x86_64.AppImage.sha256")
+          file "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage" go-wasm/shiraz-assemble.wasm
+          node --max-old-space-size=4096 go-wasm/verify_kit.cjs
+      - name: Upload browser kit
+        uses: actions/upload-artifact@v7
+        with:
+          name: shiraz-browser-kit-x86_64
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            dist/Shiraz-Browser-Base-*-x86_64.AppImage
+            dist/Shiraz-Browser-Base-*-x86_64.AppImage.sha256
+            go-wasm/demo.html
+            go-wasm/fonts/Manrope-wght.ttf
+            go-wasm/fonts/OFL.txt
+            go-wasm/fonts/README.md
+            go-wasm/shiraz-assemble.wasm
+            go-wasm/wasm_exec.js

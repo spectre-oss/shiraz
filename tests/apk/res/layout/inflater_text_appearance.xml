@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Map title" android:textAppearance="@style/TypographyChild" android:textSize="22px" android:textColor="#ffcc2200" android:textStyle="italic"/>

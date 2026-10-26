@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>Shiraz — Browser AppImage builder</title>
+<style>
+@font-face {
+  font-family: Manrope;
+  src: url("fonts/Manrope-wght.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+:root { color-scheme: dark; font-family: Manrope, system-ui, sans-serif; background: #000; color: #f2f2f2; }
+* { box-sizing: border-box; }
+body { min-height: 100vh; margin: 0; background: radial-gradient(ellipse 52rem 34rem at 50% 16%, #d8e6ff13, transparent 68%), #000; }
+body::before { content: ""; position: fixed; inset: 0; pointer-events: none; background-image: linear-gradient(#ffffff06 1px, transparent 1px), linear-gradient(90deg, #ffffff06 1px, transparent 1px); background-size: 48px 48px; mask-image: linear-gradient(#0005, transparent 70%); }
+a { color: inherit; }
+main { width: min(100% - 40px, 760px); margin: 0 auto; padding: clamp(48px, 8vw, 96px) 0 80px; position: relative; }
+.eyebrow { margin: 0 0 22px; color: #b9b9b9; font-size: 12px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
+.eyebrow::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 11px; background: #e5e5e5; box-shadow: 0 0 14px #fff9; vertical-align: 1px; }
+h1 { max-width: 680px; margin: 0; font-size: clamp(40px, 7vw, 72px); line-height: 1.06; letter-spacing: -.065em; font-weight: 600; }
+.lead { max-width: 590px; margin: 24px 0 45px; color: #aaa; font-size: clamp(16px, 2.4vw, 19px); line-height: 1.7; }
+.panel { padding: clamp(24px, 4vw, 36px); border: 1px solid #2b2b2b; border-radius: 12px; background: linear-gradient(145deg, #111, #080808 70%); box-shadow: 0 24px 70px #0009; }
+.panel-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+h2 { margin: 0; font-size: 19px; letter-spacing: -.035em; font-weight: 650; }
+.arch { color: #888; font-size: 12px; font-weight: 700; letter-spacing: .07em; }
+.file-field { display: block; margin: 0 0 23px; }
+.file-field > span { display: block; margin-bottom: 10px; color: #cfcfcf; font-size: 13px; font-weight: 650; }
+input[type=file] { width: 100%; padding: 12px; border: 1px solid #343434; border-radius: 8px; color: #bcbcbc; background: #0a0a0a; font: 13px Manrope, system-ui, sans-serif; cursor: pointer; }
+input[type=file]::file-selector-button { margin-right: 16px; padding: 10px 14px; border: 1px solid #4b4b4b; border-radius: 5px; color: #f2f2f2; background: #202020; font: 650 12px Manrope, system-ui, sans-serif; cursor: pointer; }
+input[type=file]:hover { border-color: #777; }
+input[type=file]::file-selector-button:hover { background: #303030; }
+input[type=file]:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.actions { margin-top: 30px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+button { min-height: 48px; padding: 0 22px; border: 1px solid #fff; border-radius: 6px; background: #f1f1f1; color: #090909; font: 750 13px Manrope, system-ui, sans-serif; cursor: pointer; transition: background .2s, transform .2s; }
+button:hover { background: #d7d7d7; transform: translateY(-1px); }
+button:disabled { opacity: .55; cursor: progress; transform: none; }
+.local-note { color: #777; font-size: 12px; }
+.status-label { display: block; margin: 27px 0 9px; color: #858585; font-size: 11px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+pre { min-height: 54px; margin: 0; padding: 15px 17px; border: 1px solid #252525; border-radius: 7px; background: #050505; color: #a9a9a9; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; white-space: pre-wrap; }
+pre[data-state=error] { border-color: #8b4545; color: #ffb3b3; }
+pre[data-state=success] { border-color: #42604b; color: #b5e4c0; }
+footer { margin-top: 27px; display: flex; justify-content: space-between; gap: 18px; color: #6f6f6f; font-size: 12px; }
+footer a { text-decoration-color: #555; text-underline-offset: 3px; }
+@media (max-width: 560px) { .panel-heading, footer { align-items: flex-start; flex-direction: column; } .lead { margin-bottom: 34px; } }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Shiraz · Browser tool</p>
+  <h1>Build an AppImage from an APK.</h1>
+  <p class="lead">Choose a generic Shiraz base and your APK. The assembler creates a standalone Linux AppImage in your browser.</p>
+  <section class="panel" aria-labelledby="panel-title">
+    <div class="panel-heading"><h2 id="panel-title">AppImage assembler</h2><span class="arch">LINUX · x86_64</span></div>
+    <label class="file-field"><span>Shiraz base AppImage</span><input id="base" type="file" accept=".AppImage"></label>
+    <label class="file-field"><span>Android APK</span><input id="apk" type="file" accept=".apk"></label>
+    <div class="actions"><button id="assemble" type="button">Build AppImage ↗</button><span class="local-note">Files stay in your browser.</span></div>
+    <span class="status-label">Build status</span>
+    <pre id="status" role="status" aria-live="polite">Ready. Select both files to begin.</pre>
+  </section>
+  <footer><span>Experimental Android translation layer for Linux.</span><a href="https://spectre-oss.github.io/projects/shiraz/">About Shiraz ↗</a></footer>
+</main>
+<script src="wasm_exec.js"></script>
+<script>
+const status = document.getElementById('status');
+const button = document.getElementById('assemble');
+let ready;
+async function load() {
+  const go = new Go();
+  const response = await fetch('shiraz-assemble.wasm', {cache: 'no-store'});
+  if (!response.ok) throw new Error(`WASM download failed: HTTP ${response.status}`);
+  const {instance} = await WebAssembly.instantiate(await response.arrayBuffer(), go.importObject);
+  go.run(instance);
+}
+ready = load();
+button.onclick = async () => {
+  button.disabled = true;
+  status.dataset.state = '';
+  try {
+    status.textContent = 'Loading files…';
+    await ready;
+    const selected = ['base', 'apk'].map(id => document.getElementById(id).files[0]);
+    if (selected.some(file => !file)) throw new Error('Select the base AppImage and an APK.');
+    const version = selected[0].name.match(/^Shiraz-Browser-Base-([0-9]+\.[0-9]+\.[0-9]+)-x86_64\.AppImage$/)?.[1];
+    if (!version) throw new Error('Select a versioned Shiraz browser base AppImage.');
+    const [base, apk] = await Promise.all(selected.map(file => file.arrayBuffer()));
+    if (apk.byteLength !== selected[1].size) throw new Error(`APK read incomplete: expected ${selected[1].size} bytes, got ${apk.byteLength}.`);
+    if (apk.byteLength < 4 || new Uint8Array(apk, 0, 2).some((byte, index) => byte !== [0x50, 0x4b][index])) {
+      throw new Error(`${selected[1].name} is not an APK/ZIP (${apk.byteLength} bytes). Select a complete APK download.`);
+    }
+    status.textContent = 'Assembling…';
+    const result = shirazBuildFromApk(new Uint8Array(base), new Uint8Array(apk), version);
+    if (result.error) throw new Error(`${selected[1].name}: ${result.error}`);
+    const url = URL.createObjectURL(new Blob([result.bytes], {type:'application/octet-stream'}));
+    const link = document.createElement('a');
+    link.href = url; link.download = `${result.package}-Shiraz-${version}-x86_64.AppImage`; link.click();
+    status.dataset.state = 'success';
+    status.textContent = `AppImage ready. SHA-256: ${result.sha256}. On Linux, make it executable with chmod +x before running.`;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    status.dataset.state = 'error';
+    status.textContent = String(error);
+  } finally { button.disabled = false; }
+};
+</script>
+</body>
+</html>

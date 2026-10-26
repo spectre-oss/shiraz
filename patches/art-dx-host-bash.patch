@@ -1,0 +1,9 @@
+diff --git a/dalvik/dx/etc/dx b/dalvik/dx/etc/dx
+--- a/dalvik/dx/etc/dx
++++ b/dalvik/dx/etc/dx
+@@ -1,4 +1,4 @@
+-#!/bin/bash
++#!/usr/bin/env bash
+ #
+ # Copyright (C) 2007 The Android Open Source Project
+ #

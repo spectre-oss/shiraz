@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shiraz activity fixture – café</string>
+    <string name="welcome">Hello café 🌍</string>
+    <string name="welcome_alias">@string/welcome</string>
+    <string name="formatted">%1$s has %2$d maps</string>
+    <string name="localized">Default language</string>
+    <integer name="not_string">42</integer>
+    <integer name="welcome">7</integer>
+    <bool name="flag">true</bool>
+    <color name="accent">#ff123456</color>
+    <color name="color_alias">@color/accent</color>
+    <color name="theme_color">?attr/themeAccent</color>
+    <color name="short_rgb">#123</color>
+    <dimen name="distance">12.5dp</dimen>
+    <string name="fixture_version">1.0</string>
+    <string name="orientation_probe">portrait-default</string>
+    <string name="night_probe">day-default</string>
+    <string name="decimal_probe">%1$.1f</string>
+</resources>

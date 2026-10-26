@@ -1,0 +1,1 @@
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" android:drawable="@drawable/vector_animated_source"><set android:shareInterpolator="true"><target android:name="turn" android:animation="@animator/vector_turn"/><target android:name="bar" android:animation="@animator/vector_trim_end"/></set></animated-vector>

@@ -1,0 +1,33 @@
+--- a/libc/libc.c
++++ b/libc/libc.c
+@@ -1,6 +1,7 @@
+ #include "../wrapper/verbose.h"
+ #include <assert.h>
+ #include <dirent.h>
++#include <stddef.h>
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <limits.h>
+@@ -218,12 +219,21 @@
+ bionic_readdir(DIR *dirp)
+ {
+ 	assert(dirp);
+-	static struct bionic_dirent bde;
++#ifdef __LP64__
++	/* LP64 layouts match. Preserve libc's per-DIR storage; one global result
++	 * races between directory walkers and corrupts nested enumeration. */
++	_Static_assert(sizeof(struct bionic_dirent) == sizeof(struct dirent), "dirent size");
++	_Static_assert(offsetof(struct bionic_dirent, d_name) == offsetof(struct dirent, d_name), "dirent name");
++	_Static_assert(offsetof(struct bionic_dirent, d_type) == offsetof(struct dirent, d_type), "dirent type");
++	return (struct bionic_dirent*)readdir(dirp);
++#else
++	static _Thread_local struct bionic_dirent bde;
+ 	struct dirent *de;
+ 	if (!(de = readdir(dirp)))
+ 		return NULL;
+ 	glibc_dirent_to_bionic_dirent(de, &bde);
+ 	return &bde;
++#endif
+ }
+ 
+ // readdir_r is deprecated in glibc, but as long as it exists, it makes sense to use it for implementing the bionic variant

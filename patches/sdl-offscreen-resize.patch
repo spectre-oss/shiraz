@@ -1,0 +1,55 @@
+--- a/src/video/offscreen/SDL_offscreenwindow.c
++++ b/src/video/offscreen/SDL_offscreenwindow.c
+@@ -68,6 +68,32 @@
+     return 0;
+ }
+ 
++/* Shiraz: recreate the pbuffer on resize while retaining the GL context. */
++void OFFSCREEN_SetWindowSize(_THIS, SDL_Window *window)
++{
++#ifdef SDL_VIDEO_OPENGL_EGL
++    OFFSCREEN_Window *data = window->driverdata;
++    EGLSurface replacement;
++    SDL_GLContext context;
++    SDL_bool current;
++    if (!data || data->egl_surface == EGL_NO_SURFACE) {
++        return;
++    }
++    replacement = SDL_EGL_CreateOffscreenSurface(_this, window->w, window->h);
++    if (replacement == EGL_NO_SURFACE) {
++        return;
++    }
++    current = SDL_GL_GetCurrentWindow() == window;
++    context = SDL_GL_GetCurrentContext();
++    if (current && SDL_EGL_MakeCurrent(_this, replacement, context) < 0) {
++        SDL_EGL_DestroySurface(_this, replacement);
++        return;
++    }
++    SDL_EGL_DestroySurface(_this, data->egl_surface);
++    data->egl_surface = replacement;
++#endif
++}
++
+ void OFFSCREEN_DestroyWindow(_THIS, SDL_Window *window)
+ {
+     OFFSCREEN_Window *offscreen_window = window->driverdata;
+--- a/src/video/offscreen/SDL_offscreenwindow.h
++++ b/src/video/offscreen/SDL_offscreenwindow.h
+@@ -35,6 +35,7 @@
+ } OFFSCREEN_Window;
+ 
+ extern int OFFSCREEN_CreateWindow(_THIS, SDL_Window *window);
++extern void OFFSCREEN_SetWindowSize(_THIS, SDL_Window *window);
+ extern void OFFSCREEN_DestroyWindow(_THIS, SDL_Window *window);
+ 
+ #endif /* _SDL_offscreenwindow */
+--- a/src/video/offscreen/SDL_offscreenvideo.c
++++ b/src/video/offscreen/SDL_offscreenvideo.c
+@@ -88,6 +88,7 @@
+ 
+     /* "Window" */
+     device->CreateSDLWindow = OFFSCREEN_CreateWindow;
++    device->SetWindowSize = OFFSCREEN_SetWindowSize;
+     device->DestroyWindow = OFFSCREEN_DestroyWindow;
+ 
+     return device;

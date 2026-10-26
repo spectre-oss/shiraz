@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.motionreference">
+ <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="27"/>
+ <application android:label="Shiraz Android motion reference" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false">
+  <activity android:name=".MotionReferenceActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+  <activity android:name=".MotionReferenceActivity$Next" android:exported="false"/>
+ </application>
+</manifest>

@@ -1,0 +1,42 @@
+diff --git a/art/libartbase/base/mem_map.cc b/art/libartbase/base/mem_map.cc
+index 3dbe7b83..2d11d845 100644
+--- a/art/libartbase/base/mem_map.cc
++++ b/art/libartbase/base/mem_map.cc
+@@ -1174,6 +1174,37 @@ void* MemMap::MapInternal(void* addr,
+   }
+ #endif
+   actual = TargetMMap(addr, length, prot, flags, fd, offset);
++#if defined(__linux__) && defined(__x86_64__)
++  if (actual == MAP_FAILED && errno == ENOMEM && low_4gb && addr == nullptr &&
++      (flags & MAP_ANONYMOUS) != 0 && (flags & MAP_FIXED) == 0 && fd == -1 && offset == 0) {
++    // MAP_32BIT exhausts below 2GB; ART references support the full low 4GB.
++    // Nonfixed hints never replace mappings. At most128 bounded attempts.
++    auto map_upper_low4gb = [&]() -> void* {
++      const uintptr_t begin = uintptr_t{1} << 31;
++      const uintptr_t end = (uintptr_t{1} << 32) - kPageSize;
++      const uintptr_t step = 16 * 1024 * 1024;
++      if (length == 0 || length > end - begin) {
++        errno = ENOMEM;
++        return MAP_FAILED;
++      }
++      for (uintptr_t hint = begin; hint <= end - length; hint += step) {
++        void* result = TargetMMap(reinterpret_cast<void*>(hint), length, prot,
++                                  flags & ~MAP_32BIT, fd, offset);
++        if (result == MAP_FAILED) {
++          continue;
++        }
++        const uintptr_t address = reinterpret_cast<uintptr_t>(result);
++        if (address >= begin && address <= end - length) {
++          return result;
++        }
++        TargetMUnmap(result, length);
++      }
++      errno = ENOMEM;
++      return MAP_FAILED;
++    };
++    actual = map_upper_low4gb();
++  }
++#endif
+ #endif
+   return actual;
+ }

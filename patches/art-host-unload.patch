@@ -1,0 +1,24 @@
+--- a/libcore/luni/src/main/native/Register.cpp
++++ b/libcore/luni/src/main/native/Register.cpp
+@@ -56,17 +56,12 @@
+ 
+ // DalvikVM calls this on shutdown, do any global cleanup here.
+ // -- Very important if we restart multiple DalvikVMs in the same process to reset the state.
+-void JNI_OnUnload(JavaVM* vm, void*) {
+-    JNIEnv* env;
+-    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+-        ALOGE("JavaVM::GetEnv() failed");
+-        abort();
+-    }
++void JNI_OnUnload(JavaVM*, void*) {
++    // Host ART may destroy the VM after detaching the shutdown thread.
++    // ICU teardown below only resets native RAII state and does not use JNI.
+     ALOGV("libjavacore JNI_OnUnload");
+ 
+-    ScopedLocalFrame localFrame(env);
+-
+-#define UNREGISTER(FN) extern void FN(JNIEnv*); FN(env)
++#define UNREGISTER(FN) extern void FN(JNIEnv*); FN(nullptr)
+     UNREGISTER(unregister_libcore_icu_ICU);
+ #undef UNREGISTER
+ }

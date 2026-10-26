@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="2dp" android:background="#ff0000ff">
+ <View android:id="@+id/inflated_red" android:layout_width="12dp" android:layout_height="8dp" android:layout_marginLeft="3dp" android:layout_marginTop="4dp" android:background="#ffff0000" android:tag="red"/>
+ <ImageView android:id="@+id/inflated_image" android:layout_width="4dp" android:layout_height="4dp" android:layout_gravity="bottom|right" android:src="@drawable/png_grid" android:scaleType="fitXY"/>
+ <include layout="@layout/inflater_piece" android:id="@+id/inflated_include" android:layout_width="6dp" android:layout_height="4dp" android:layout_gravity="center"/>
+</FrameLayout>

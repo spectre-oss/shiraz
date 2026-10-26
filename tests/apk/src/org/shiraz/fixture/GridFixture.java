@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.shiraz.fixture;
+import android.content.Context;import android.widget.*;import android.view.*;import android.graphics.*;
+public final class GridFixture {
+ private static void check(boolean value,String why){if(!value)throw new AssertionError(why);}
+ private static void size(View v,int w,int h){v.measure(View.MeasureSpec.makeMeasureSpec(w,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(h,View.MeasureSpec.EXACTLY));v.layout(0,0,w,h);}
+ private static void event(View view,int action,float x,float y){MotionEvent e=MotionEvent.obtain(1,2,action,x,y,0);try{view.dispatchTouchEvent(e);}finally{e.recycle();}}
+ public static void check(final Context context){final int[] count={12},reused={0};BaseAdapter adapter=new BaseAdapter(){public int getCount(){return count[0];}public Object getItem(int p){return p;}public long getItemId(int p){return p+100;}public boolean isEnabled(int p){return p!=1;}public boolean areAllItemsEnabled(){return false;}public View getView(int p,View old,ViewGroup parent){View v=old==null?new View(context):old;if(old!=null)reused[0]++;v.setLayoutParams(new AbsListView.LayoutParams(-1,20+p%3*5));v.setBackgroundColor(p%2==0?Color.RED:Color.BLUE);return v;}};
+  GridView grid=new GridView(context);grid.setNumColumns(3);check(grid.getNumColumns()==3,"Requested columns before measurement");grid.setColumnWidth(30);grid.setStretchMode(GridView.NO_STRETCH);grid.setHorizontalSpacing(5);grid.setVerticalSpacing(3);grid.setAdapter(adapter);size(grid,100,55);
+  check(grid.getNumColumns()==3&&grid.getChildCount()==12&&grid.getChildAt(1).getLeft()==35&&grid.getChildAt(3).getTop()==33,"Columns and variable row height");check(!grid.isLayoutRequested()&&grid.getFirstVisiblePosition()==0&&grid.getLastVisiblePosition()==5,"Grid layout settles and reports viewport");
+  Bitmap image=Bitmap.createBitmap(100,55,Bitmap.Config.ARGB_8888);grid.draw(new Canvas(image));check(image.getPixel(4,4)==Color.RED&&image.getPixel(36,4)==Color.BLUE&&image.getPixel(32,4)==0,"Grid cell pixels and spacing");image.recycle();
+  final int[] clicks={0};grid.setOnItemClickListener(new AdapterView.OnItemClickListener(){public void onItemClick(AdapterView<?> parent,View view,int position,long id){check(position==2&&id==102,"Grid item click identity");clicks[0]++;}});event(grid,0,75,10);event(grid,1,75,10);check(clicks[0]==1,"Grid pointer click");event(grid,0,40,10);event(grid,1,40,10);check(clicks[0]==1,"Disabled grid cell not clicked");
+  event(grid,0,10,45);event(grid,2,10,5);event(grid,1,10,5);check(grid.getFirstVisiblePosition()>=3&&grid.canScrollVertically(-1)&&clicks[0]==1,"Grid drag scroll without click");grid.scrollListBy(8192);check(!grid.canScrollVertically(1)&&grid.getLastVisiblePosition()==11,"Grid scroll end clamp");
+  grid.setNumColumns(GridView.AUTO_FIT);grid.setSelection(0);size(grid,70,55);check(grid.getNumColumns()==2&&grid.getChildAt(2).getTop()==28&&grid.getFirstVisiblePosition()==0&&reused[0]>0,"Auto-fit resize, pending selection and recycling");grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);size(grid,100,55);check(grid.getNumColumns()==3&&grid.getColumnWidth()==30,"Column stretch calculation");
+  count[0]=2;adapter.notifyDataSetChanged();size(grid,100,55);check(grid.getChildCount()==2&&!grid.canScrollVertically(1),"Grid dataset shrink");count[0]=257;adapter.notifyDataSetChanged();try{size(grid,100,55);throw new AssertionError("Unbounded grid accepted");}catch(UnsupportedOperationException expected){}count[0]=0;adapter.notifyDataSetChanged();size(grid,100,55);check(grid.getChildCount()==0&&grid.getLastVisiblePosition()==-1,"Empty grid");
+  System.out.println("GRID_GEOMETRY_INPUT_OK");
+ }
+}

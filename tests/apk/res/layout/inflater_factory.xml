@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<factory_probe xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="4dp" android:layout_height="2dp"/>

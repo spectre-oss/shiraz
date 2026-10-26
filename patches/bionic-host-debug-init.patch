@@ -1,0 +1,20 @@
+--- a/linker/linker.c
++++ b/linker/linker.c
+@@ -209,6 +209,17 @@
+ /* apkenv */
+ // this will be filled by the main executable (either to &_r_debug, or to the address taken from DT_DEBUG)
+ struct r_debug *_r_debug_ptr;
++
++#ifdef __GLIBC__
++/* Host ART does not embed main_executable/bionic_compat.c.  glibc exposes
++ * the rendezvous directly, so initialize it before any Bionic dlopen.
++ * Non-glibc hosts still use their executable's DT_DEBUG initialization. */
++__attribute__((constructor)) static void apkenv_init_host_debug(void)
++{
++	if (!_r_debug_ptr)
++		_r_debug_ptr = &_r_debug;
++}
++#endif
+ 
+ #define rtld_db_dlactivity() ((void (*)(void))_r_debug_ptr->r_brk)()
+ 

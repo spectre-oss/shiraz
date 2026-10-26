@@ -1,0 +1,1 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="20px" android:height="10px" android:viewportWidth="20" android:viewportHeight="10"><path android:fillColor="@color/vector_gradient" android:pathData="M0,0 H20 V10 H0 Z"/></vector>

@@ -1,0 +1,86 @@
+--- a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java
++++ b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java
+@@ -90,6 +90,35 @@
+      * entering library */
+     final private Object ioLock = new Object();
+ 
++    /* Stream operations outlive the brief native I/O mutex lock (e.g. select).
++     * Closing must not free their WOLFSSL/session mutex until they return. */
++    private int activeStreamOperations;
++
++    private void retainStreamSession() throws SocketException {
++        synchronized (handshakeLock) {
++            if (connectionClosed || ssl == null) {
++                throw new SocketException("Connection already shutdown");
++            }
++            activeStreamOperations++;
++        }
++    }
++
++    private void releaseStreamSession() throws IOException {
++        synchronized (handshakeLock) {
++            activeStreamOperations--;
++            try { freeClosedSession(); }
++            catch (WolfSSLJNIException error) { throw new IOException(error); }
++        }
++    }
++
++    /* Caller holds handshakeLock. No blocking I/O is performed here. */
++    private void freeClosedSession() throws WolfSSLJNIException {
++        if (connectionClosed && activeStreamOperations == 0 && ssl != null) {
++            ssl.freeSSL();
++            ssl = null;
++        }
++    }
++
+     /**
+      * Create new WolfSSLSocket object
+      *
+@@ -1510,8 +1539,7 @@
+                         /* Connection is closed, free native WOLFSSL session
+                          * to release native memory earlier than garbage
+                          * collector might with finalize(). */
+-                        this.ssl.freeSSL();
+-                        this.ssl = null;
++                        freeClosedSession();
+                     }
+                 }
+             }
+@@ -1776,6 +1804,8 @@
+                              "thread trying to get readLock");
+ 
+             synchronized (readLock) {
++                socket.retainStreamSession();
++                try {
+ 
+                 WolfSSLDebug.log(getClass(), WolfSSLDebug.INFO,
+                                  "thread got readLock");
+@@ -1863,6 +1893,9 @@
+ 
+                 /* return number of bytes read */
+                 return ret;
++                } finally {
++                    socket.releaseStreamSession();
++                }
+             }
+         }
+     } /* end WolfSSLInputStream inner class */
+@@ -1902,6 +1935,8 @@
+                              "thread trying to get writeLock");
+ 
+             synchronized (writeLock) {
++                socket.retainStreamSession();
++                try {
+ 
+                 WolfSSLDebug.log(getClass(), WolfSSLDebug.INFO,
+                                  "thread got writeLock");
+@@ -1978,6 +2013,9 @@
+ 
+                 WolfSSLDebug.log(getClass(), WolfSSLDebug.INFO,
+                                  "thread exiting writeLock");
++                } finally {
++                    socket.releaseStreamSession();
++                }
+             }
+         }
+     } /* end WolfSSLOutputStream inner class */

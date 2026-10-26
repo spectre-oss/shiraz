@@ -1,0 +1,7 @@
+Local MediaPlayer audio decoding dynamically links to the host libsndfile library.
+Project and source: https://libsndfile.github.io/libsndfile/
+License: LGPL-2.1-or-later. No libsndfile source is vendored in Shiraz.
+Building the playback bridge requires the libsndfile development headers and library.
+AppImage dependency scanning bundles the shared library and its dependencies and
+records their installed package versions, license identifiers, and hashes in the
+bundle metadata. The library remains independently licensed and replaceable.

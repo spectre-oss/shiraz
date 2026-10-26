@@ -1,0 +1,2 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<CheckBox xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="100dp" android:layout_height="wrap_content" android:height="28dp" android:checked="true" android:button="@color/ripple_mask_color" />

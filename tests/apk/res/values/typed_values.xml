@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="typed_density_alias" type="drawable">@drawable/typed_density</item>
+    <item name="typed_float" type="dimen" format="float">1.25</item>
+    <dimen name="typed_negative">-12.5dp</dimen>
+    <dimen name="typed_tiny">0.1dp</dimen>
+    <fraction name="typed_fraction">25%</fraction>
+    <fraction name="typed_parent_fraction">-50%p</fraction>
+    <string name="typed_cycle_a">@string/typed_cycle_b</string>
+    <string name="typed_cycle_b">@string/typed_cycle_a</string>
+    <item name="typed_empty" type="string">@empty</item>
+    <string name="typed_depth_0">@string/typed_depth_1</string>
+    <string name="typed_depth_1">@string/typed_depth_2</string>
+    <string name="typed_depth_2">@string/typed_depth_3</string>
+    <string name="typed_depth_3">@string/typed_depth_4</string>
+    <string name="typed_depth_4">@string/typed_depth_5</string>
+    <string name="typed_depth_5">@string/typed_depth_6</string>
+    <string name="typed_depth_6">@string/typed_depth_7</string>
+    <string name="typed_depth_7">@string/typed_depth_8</string>
+    <string name="typed_depth_8">@string/typed_depth_9</string>
+    <string name="typed_depth_9">@string/typed_depth_10</string>
+    <string name="typed_depth_10">@string/typed_depth_11</string>
+    <string name="typed_depth_11">@string/typed_depth_12</string>
+    <string name="typed_depth_12">@string/typed_depth_13</string>
+    <string name="typed_depth_13">@string/typed_depth_14</string>
+    <string name="typed_depth_14">@string/typed_depth_15</string>
+    <string name="typed_depth_15">@string/typed_depth_16</string>
+    <string name="typed_depth_16">@string/typed_depth_17</string>
+    <string name="typed_depth_17">@string/typed_depth_18</string>
+    <string name="typed_depth_18">@string/typed_depth_19</string>
+    <string name="typed_depth_19">@string/typed_depth_20</string>
+    <string name="typed_depth_20">@string/typed_depth_21</string>
+    <string name="typed_depth_21">@string/typed_depth_22</string>
+    <string name="typed_depth_22">@string/typed_depth_23</string>
+    <string name="typed_depth_23">@string/typed_depth_24</string>
+    <string name="typed_depth_24">@string/typed_depth_25</string>
+    <string name="typed_depth_25">@string/typed_depth_26</string>
+    <string name="typed_depth_26">@string/typed_depth_27</string>
+    <string name="typed_depth_27">@string/typed_depth_28</string>
+    <string name="typed_depth_28">@string/typed_depth_29</string>
+    <string name="typed_depth_29">@string/typed_depth_30</string>
+    <string name="typed_depth_30">@string/typed_depth_31</string>
+    <string name="typed_depth_31">@string/typed_depth_32</string>
+    <string name="typed_depth_32">@string/typed_depth_33</string>
+    <string name="typed_depth_33">deep</string>
+</resources>

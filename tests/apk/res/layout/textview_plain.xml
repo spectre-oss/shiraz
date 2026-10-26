@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="#ffffffff" android:backgroundTint="#ff0000ff" android:backgroundTintMode="src_in" android:drawableStart="@drawable/compound_icon" android:drawablePadding="2px" android:text="XML text" android:textSize="18px" android:textColor="#ff00ff00" android:padding="3px" android:maxLines="2" android:maxWidth="70px" android:gravity="center" />

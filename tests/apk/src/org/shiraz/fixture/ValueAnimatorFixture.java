@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package org.shiraz.fixture;
+import android.animation.*;
+public final class ValueAnimatorFixture {
+ public static void check(){ValueAnimator value=ValueAnimator.ofFloat(0,10,30);value.setInterpolator(null);value.setCurrentFraction(.75f);if(Math.abs((Float)value.getAnimatedValue()-20)>0.001f)throw new AssertionError("Segmented float interpolation");ValueAnimator integer=ValueAnimator.ofInt(10,20);integer.setInterpolator(null);integer.setCurrentFraction(.25f);if(!integer.getAnimatedValue().equals(12))throw new AssertionError("Integer truncation");ValueAnimator copy=value.clone();copy.setCurrentFraction(0);if((Float)value.getAnimatedValue()!=20||copy.isStarted())throw new AssertionError("Independent animator clone");}
+ public static ValueAnimator create(final StringBuilder events){ValueAnimator value=ValueAnimator.ofFloat(0,10);value.setInterpolator(null);value.setDuration(100);value.addListener(new AnimatorListenerAdapter(){public void onAnimationStart(Animator a){events.append('S');}public void onAnimationRepeat(Animator a){events.append('R');}public void onAnimationCancel(Animator a){events.append('C');}public void onAnimationEnd(Animator a){events.append('E');}});return value;}
+ public static void install(){check();final ValueAnimator zero=ValueAnimator.ofFloat(0,1);zero.setDuration(0);zero.addListener(new AnimatorListenerAdapter(){public void onAnimationEnd(Animator a){if((Float)zero.getAnimatedValue()!=1||zero.isStarted())throw new AssertionError("Frame-driven animator end");System.out.println("VALUE_ANIMATOR_LIVE_FRAME_OK");}});zero.start();}
+}

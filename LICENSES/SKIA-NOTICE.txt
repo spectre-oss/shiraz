@@ -1,0 +1,10 @@
+GPU Canvas backend
+
+Shiraz links Skia (BSD-3-Clause), from https://skia.googlesource.com/skia
+Pinned revision: 5db0949ba318d248ebc3d33c73ad1251bf95c243 (chrome/m140).
+The unmodified upstream source lives in the ignored .deps/skia directory.
+Its LICENSE is included in AppImage license metadata by build_appimage.py.
+Build recipe: scripts/bootstrap_skia.py. System FreeType, Fontconfig and OpenGL
+are used; their distribution licenses are included by the existing packager.
+The GPU ripple adaptation has separate AOSP Apache-2.0 provenance in
+RIPPLE-NOTICE.txt. Shiraz's original bridge code is GPL-3.0-only.

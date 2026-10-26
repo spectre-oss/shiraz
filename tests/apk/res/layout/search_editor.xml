@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<EditText xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="48px" android:inputType="text" android:imeOptions="actionSearch|flagNoFullscreen" android:imeActionLabel="Find" android:imeActionId="77" android:singleLine="true" android:text="initial" />

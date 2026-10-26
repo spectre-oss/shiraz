@@ -1,0 +1,22 @@
+--- a/art/runtime/native/java_lang_VMClassLoader.cc
++++ b/art/runtime/native/java_lang_VMClassLoader.cc
+@@ -132,6 +132,7 @@
+  */
+ static jobjectArray VMClassLoader_getBootClassPathEntries(JNIEnv* env, jclass) {
+-  const std::vector<const DexFile*>& path =
+-      Runtime::Current()->GetClassLinker()->GetBootClassPath();
++  // Resources live in the configured files, not the logical DEX locations
++  // used to validate a relocatable boot image. Use each physical archive once.
++  const std::vector<std::string>& path = Runtime::Current()->GetBootClassPath();
+   jobjectArray array =
+       env->NewObjectArray(path.size(), WellKnownClasses::java_lang_String, nullptr);
+@@ -141,8 +142,6 @@
+   }
+   for (size_t i = 0; i < path.size(); ++i) {
+-    const DexFile* dex_file = path[i];
+-
+     // For multidex locations, e.g., x.jar!classes2.dex, we want to look into x.jar.
+-    const std::string location(DexFileLoader::GetBaseLocation(dex_file->GetLocation()));
++    const std::string location(DexFileLoader::GetBaseLocation(path[i]));
+ 
+     ScopedLocalRef<jstring> javaPath(env, env->NewStringUTF(location.c_str()));

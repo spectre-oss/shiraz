@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-3.0-only
+import android.content.*;import android.os.*;import android.widget.*;
+public final class AutoCompleteTextSmoke {
+ static void check(boolean value,String why){if(!value)throw new AssertionError(why);}
+ static class Field extends AutoCompleteTextView {int count=-1;Field(Context c){super(c,null,0);}public void onFilterComplete(int n){count=n;}void replace(Object value){replaceText(convertSelectionToString(value));}}
+ public static void main(String[] args)throws Exception {Looper.prepareMainLooper();try{
+  final android.content.res.Resources r=android.content.res.Resources.shirazOpen(args[0],96,160);Context c=new ContextWrapper(null){private final android.content.res.Resources.Theme t=r.newTheme();public android.content.res.Resources getResources(){return r;}public android.content.res.Resources.Theme getTheme(){return t;}};
+  LinearLayout root=new LinearLayout(c),nested=new LinearLayout(c);TextView first=new TextView(c),second=new TextView(c);root.addView(nested);nested.addView(first);root.addView(second);first.setTag("name");second.setTag("name");check(root.findViewWithTag(new String("name"))==first,"depth first equality");check(root.findViewWithTag(null)==null,"null excluded");root.setTag("name");check(root.findViewWithTag("name")==root,"self before children");root.setTag(null);nested.removeView(first);check(root.findViewWithTag("name")==second,"removed child excluded");
+  Field f=new Field(c);ArrayAdapter<String> a=new ArrayAdapter<String>(c,0,new String[]{"Hafez","Shiraz","Hafiz"});f.setAdapter(a);check(f.getAdapter()==a&&f.getThreshold()==2,"adapter/default threshold");f.setText("Ha");long deadline=System.nanoTime()+3000000000L;while(f.count<0&&System.nanoTime()<deadline){Thread.sleep(5);Looper.getMainLooper().shirazDispatchDue(100);}check(f.count==2&&a.getCount()==2,"async filtering publishes matches");
+  f.count=-1;f.setText("Shiraz",false);for(int i=0;i<10;i++){Thread.sleep(5);Looper.getMainLooper().shirazDispatchDue(100);}check(f.count==-1&&a.getCount()==2,"suppressed filtering");f.replace("Hafez");check(f.getText().toString().equals("Hafez")&&f.getSelectionStart()==5&&!f.isPerformingCompletion(),"replacement/cursor/reset");
+  f.setAdapter(null);f.setThreshold(0);check(f.getThreshold()==1,"threshold floor");f.setText("");check(!f.enoughToFilter(),"empty threshold");f.setValidator(new AutoCompleteTextView.Validator(){public boolean isValid(CharSequence t){return t.toString().equals("valid");}public CharSequence fixText(CharSequence t){return "valid";}});f.setText("invalid");f.performValidation();check(f.getText().toString().equals("valid"),"validation");check(!f.isPopupShowing(),"no phantom popup");f.showDropDown();check(!f.isPopupShowing(),"popup not presented");check(f.getDropDownAnchor()==0,"anchor default");
+  System.out.println("AUTOCOMPLETE_MODEL_OK");
+ }finally{Looper.shirazShutdownMain();}}
+}

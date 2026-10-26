@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="png_alias" type="drawable">@drawable/png_grid</item>
+    <attr name="pngIcon" format="reference" />
+    <item name="png_theme_drawable" type="drawable">?attr/pngIcon</item>
+    <style name="FixturePng" parent=""><item name="pngIcon">@drawable/png_grid</item></style>
+</resources>

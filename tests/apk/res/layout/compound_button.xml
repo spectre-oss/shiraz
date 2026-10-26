@@ -1,0 +1,1 @@
+<view xmlns:android="http://schemas.android.com/apk/res/android" class="org.shiraz.fixture.CompoundButtonFixture$Toggle" android:layout_width="100dp" android:layout_height="40dp" android:saveEnabled="false" android:checked="true" android:clickable="true" android:focusable="true" android:text="Enabled" android:button="@color/ripple_mask_color" />

@@ -1,0 +1,4 @@
+Public OpenSL ES ABI headers, copied unchanged from the local AOSP frameworks/wilhelm checkout at d99408039ffddbf2e4a17ac30361a36d652c6ef3.
+Upstream project: https://android.googlesource.com/platform/frameworks/wilhelm
+Original Khronos permissive and Android Apache-2.0 copyright/license notices remain in each header.
+Shiraz implementation is separate in native/opensles.cpp.

@@ -1,0 +1,1 @@
+<HorizontalScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="100dp" android:layout_height="60dp" android:tooltipText="Scroll categories" android:fillViewport="true" android:scrollX="10dp" android:scrollbars="horizontal"><View android:layout_width="300dp" android:layout_height="match_parent" /></HorizontalScrollView>

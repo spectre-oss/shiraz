@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+ <group android:id="@+id/inflate_group" android:checkableBehavior="single">
+  <item android:id="@+id/inflate_first" android:title="First" android:checked="true" android:orderInCategory="2"/>
+  <item android:id="@+id/inflate_second" android:title="Second" android:showAsAction="ifRoom|withText" android:orderInCategory="1" android:onClick="selectInflated"/>
+ </group>
+ <item android:id="@+id/inflate_parent" android:title="Parent"><menu><item android:id="@+id/inflate_nested" android:title="Nested" android:enabled="false"/></menu></item>
+</menu>

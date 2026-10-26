@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-only
+import android.graphics.drawable.*;
+import android.graphics.*;
+public final class AnimatedSelectorSmoke {
+ static void check(boolean v,String m){if(!v)throw new AssertionError(m);}
+ static int color(Drawable d){return ((ColorDrawable)d).getColor();}
+ public static void main(String[] args)throws Exception{
+  AnimatedStateListDrawable d=new AnimatedStateListDrawable();d.addState(new int[]{1},new ColorDrawable(Color.RED),10);d.addState(new int[]{},new ColorDrawable(Color.BLUE),20);
+  AnimationDrawable frames=new AnimationDrawable();frames.addFrame(new ColorDrawable(Color.GREEN),1000);frames.addFrame(new ColorDrawable(Color.WHITE),1000);d.addTransition(20,10,frames,true);
+  check(color(d.getCurrent())==Color.BLUE,"initial wildcard");d.setState(new int[]{1});check(d.getCurrent()==frames&&color(frames.getCurrent())==Color.GREEN,"transition starts");d.setState(new int[]{});check(d.getCurrent()==frames,"reverse does not replace transition");d.jumpToCurrentState();check(color(d.getCurrent())==Color.BLUE,"jump selects reverse destination");
+  d.setState(new int[]{1});d.setVisible(false,false);check(color(d.getCurrent())==Color.RED,"hide settles destination");d.setVisible(true,false);d.setState(new int[]{});check(color(frames.getCurrent())==Color.WHITE,"reverse edge starts at last frame");d.jumpToCurrentState();check(color(d.getCurrent())==Color.BLUE,"reverse jump");
+  d.addState(new int[]{2},new ColorDrawable(Color.BLACK),30);d.setState(new int[]{1});d.jumpToCurrentState();check(color(d.getCurrent())==Color.RED,"transition children do not corrupt state indices");
+  final Runnable[] pending={null};AnimatedStateListDrawable timed=new AnimatedStateListDrawable();timed.addState(new int[]{1},new ColorDrawable(Color.RED),1);timed.addState(new int[]{},new ColorDrawable(Color.BLUE),2);AnimationDrawable shortFrames=new AnimationDrawable();shortFrames.addFrame(new ColorDrawable(Color.GREEN),10);shortFrames.addFrame(new ColorDrawable(Color.WHITE),10);timed.addTransition(2,1,shortFrames,true);timed.setCallback(new Drawable.Callback(){public void invalidateDrawable(Drawable d){}public void scheduleDrawable(Drawable d,Runnable task,long when){pending[0]=task;}public void unscheduleDrawable(Drawable d,Runnable task){if(pending[0]==task)pending[0]=null;}});timed.setState(new int[]{1});check(pending[0]!=null,"frame scheduled");Thread.sleep(35);pending[0].run();check(color(shortFrames.getCurrent())==Color.WHITE&&pending[0]==null,"timed completion stops scheduling");timed.setState(new int[]{});check(pending[0]!=null,"completed transition reverses");timed.setVisible(false,false);check(pending[0]==null&&color(timed.getCurrent())==Color.BLUE,"hidden cancels scheduled transition");
+  android.content.res.Resources resources=android.content.res.Resources.shirazOpen(System.getProperty("shiraz.fixture"),100,100);try{int id=resources.getIdentifier("animated_state_choices","drawable","org.shiraz.fixture");check(id!=0,"fixture resource");AnimatedStateListDrawable xml=(AnimatedStateListDrawable)resources.getDrawable(id);check(color(xml.getCurrent())==Color.BLUE,"XML initial");xml.setState(new int[]{16842912});check(xml.getCurrent() instanceof AnimationDrawable,"XML transition");xml.jumpToCurrentState();check(color(xml.getCurrent())==Color.RED,"XML target");}finally{resources.shirazClose();}
+  System.out.println("ANIMATED_SELECTOR_OK");
+ }
+}
