@@ -1,23 +1,44 @@
-name: Browser AppImage kit
+name: Shiraz prerelease and Pages
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
 
-permissions:
-  contents: read
+concurrency:
+  group: shiraz-release-main
+  cancel-in-progress: false
 
 jobs:
+  version:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      sha: ${{ steps.bump.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+      - name: Commit Conventional Commit version bump
+        id: bump
+        run: python3 scripts/ci_version.py --apply
+
   build:
+    needs: version
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    permissions:
+      contents: write
     env:
       SHIRAZ_BUILD_JOBS: '4'
       TMPDIR: /home/runner/shiraz-tmp
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go-wasm/go.mod
@@ -54,28 +75,59 @@ jobs:
           (cd go-wasm && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
           python3 go-wasm/bootstrap_font.py
           cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" go-wasm/wasm_exec.js
-      - name: Verify outputs
+          python3 scripts/package_browser_site.py
+      - name: Verify browser kit
         run: |
           version=$(cat VERSION)
+          test "$version" = "${{ needs.version.outputs.version }}"
           test -s "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
-          test -s "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage.sha256"
+          test -s "dist/Shiraz-Browser-Builder-${version}.zip"
           test -s go-wasm/shiraz-assemble.wasm
-          test -s go-wasm/fonts/Manrope-wght.ttf
           (cd dist && sha256sum -c "Shiraz-Browser-Base-${version}-x86_64.AppImage.sha256")
-          file "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage" go-wasm/shiraz-assemble.wasm
           node --max-old-space-size=4096 go-wasm/verify_kit.cjs
-      - name: Upload browser kit
+      - name: Upload run artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shiraz-browser-kit-x86_64
+          name: shiraz-browser-kit-${{ needs.version.outputs.version }}-x86_64
           if-no-files-found: error
           compression-level: 0
           path: |
             dist/Shiraz-Browser-Base-*-x86_64.AppImage
             dist/Shiraz-Browser-Base-*-x86_64.AppImage.sha256
-            go-wasm/demo.html
-            go-wasm/fonts/Manrope-wght.ttf
-            go-wasm/fonts/OFL.txt
-            go-wasm/fonts/README.md
-            go-wasm/shiraz-assemble.wasm
-            go-wasm/wasm_exec.js
+            dist/Shiraz-Browser-Builder-*.zip
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          version=$(cat VERSION)
+          tag="v${version}"
+          base="dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
+          checksum="${base}.sha256"
+          builder="dist/Shiraz-Browser-Builder-${version}.zip"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$base" "$checksum" "$builder" --clobber
+          else
+            gh release create "$tag" "$base" "$checksum" "$builder" \
+              --target "$RELEASE_SHA" --title "Shiraz ${version}" --prerelease \
+              --notes "Prebuilt x86_64 Shiraz base AppImage and browser WASM assembler. App compatibility is experimental."
+          fi
+      - name: Upload Pages site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: build/pages-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

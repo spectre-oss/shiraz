@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Version the index from the final Conventional Commit message, relative to HEAD."""
+"""Validate Conventional Commits and calculate their next semantic version."""
 import argparse
 import re
 import subprocess
@@ -16,9 +16,7 @@ def bump(current, message):
         return f'{major + 1}.0.0'
     if match[1] == 'feat':
         return f'{major}.{minor + 1}.0'
-    if match[1] in ('fix', 'perf'):
-        return f'{major}.{minor}.{patch + 1}'
-    return f'{major}.{minor}.{patch}'
+    return f'{major}.{minor}.{patch + 1}'
 
 
 def main():
@@ -26,11 +24,18 @@ def main():
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--message-file', type=Path)
     parser.add_argument('--prepare', action='store_true')
+    parser.add_argument('--validate-message-only', action='store_true')
     args = parser.parse_args()
     current = Path('VERSION').read_text().strip()
     if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', current):
         parser.error('VERSION must contain a semantic version')
     if args.message_file:
+        if args.validate_message_only:
+            try:
+                bump(current, args.message_file.read_text())
+            except ValueError as exc:
+                parser.error(str(exc))
+            return
         result = subprocess.run(['git', 'show', 'HEAD:VERSION'], capture_output=True, text=True)
         base = result.stdout.strip() if result.returncode == 0 else '0.0.0'
         try:

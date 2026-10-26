@@ -79,11 +79,10 @@ Do not present synthetic fixtures as OsmAnd screenshots or claim parity before t
 
 ## Build and commits
 Use the Makefile. Conventional Commits required. make hooks installs repository-local
-hooks. pre-commit checks staged safety; commit-msg validates the final message and
-validates the staged VERSION against the message (unavailable during pre-commit).
-Use make commit MSG="feat(scope): summary" to prepare VERSION before Git creates
-the commit tree. A direct git commit with a version-changing message stages the
-correct VERSION and rejects the first attempt; retry the same message. feat bumps
-minor, fix bumps patch, breaking changes bump major; other types preserve version.
-Version must be exposed by the CLI and native app. Commit source-only milestones
-locally after checks; do not push. Track unfinished runtime work honestly.
+hooks. pre-commit checks staged safety; commit-msg validates the final message.
+Use make commit MSG="feat(scope): summary" for local source commits. GitHub Actions
+updates VERSION from each Conventional Commit pushed to main and commits the bump
+as github-actions[bot]. Breaking changes bump major, feat bumps minor, and other
+types bump patch. Version must be exposed by the CLI and native app. Commit
+source-only milestones locally after checks; do not push unless asked. Track
+unfinished runtime work honestly.

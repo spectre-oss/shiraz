@@ -27,6 +27,15 @@ h1 { max-width: 680px; margin: 0; font-size: clamp(40px, 7vw, 72px); line-height
 .panel-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
 h2 { margin: 0; font-size: 19px; letter-spacing: -.035em; font-weight: 650; }
 .arch { color: #888; font-size: 12px; font-weight: 700; letter-spacing: .07em; }
+.base-info { margin-bottom: 25px; padding: 18px 20px; border: 1px solid #343434; border-radius: 8px; background: #0a0a0a; }
+.base-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.base-title { display: block; color: #888; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.base-version { display: block; margin-top: 7px; font-size: 19px; font-weight: 700; letter-spacing: -.035em; }
+.base-detail { margin: 10px 0 0; color: #949494; font-size: 12px; line-height: 1.6; }
+.base-link { color: #d4d4d4; font-size: 12px; text-decoration-color: #666; text-underline-offset: 3px; white-space: nowrap; }
+details { margin: -3px 0 24px; }
+summary { width: fit-content; color: #a8a8a8; cursor: pointer; font-size: 12px; }
+details .file-field { margin: 15px 0 0; }
 .file-field { display: block; margin: 0 0 23px; }
 .file-field > span { display: block; margin-bottom: 10px; color: #cfcfcf; font-size: 13px; font-weight: 650; }
 input[type=file] { width: 100%; padding: 12px; border: 1px solid #343434; border-radius: 8px; color: #bcbcbc; background: #0a0a0a; font: 13px Manrope, system-ui, sans-serif; cursor: pointer; }
@@ -55,11 +64,15 @@ footer a { text-decoration-color: #555; text-underline-offset: 3px; }
   <p class="lead">Choose a generic Shiraz base and your APK. The assembler creates a standalone Linux AppImage in your browser.</p>
   <section class="panel" aria-labelledby="panel-title">
     <div class="panel-heading"><h2 id="panel-title">AppImage assembler</h2><span class="arch">LINUX · x86_64</span></div>
-    <label class="file-field"><span>Shiraz base AppImage</span><input id="base" type="file" accept=".AppImage"></label>
+    <div class="base-info">
+      <div class="base-top"><div><span class="base-title">Current prerelease</span><strong class="base-version" id="release-version">Checking GitHub Releases…</strong></div><a class="base-link" id="release-link" hidden>View release ↗</a></div>
+      <p class="base-detail" id="release-detail">The matching Shiraz base will load when you build.</p>
+    </div>
+    <details id="manual-base"><summary>Use a local base AppImage</summary><label class="file-field"><span>Shiraz base AppImage</span><input id="base" type="file" accept=".AppImage"></label></details>
     <label class="file-field"><span>Android APK</span><input id="apk" type="file" accept=".apk"></label>
-    <div class="actions"><button id="assemble" type="button">Build AppImage ↗</button><span class="local-note">Files stay in your browser.</span></div>
+    <div class="actions"><button id="assemble" type="button">Build AppImage ↗</button><span class="local-note">Your APK stays in your browser.</span></div>
     <span class="status-label">Build status</span>
-    <pre id="status" role="status" aria-live="polite">Ready. Select both files to begin.</pre>
+    <pre id="status" role="status" aria-live="polite">Ready. Select an APK to begin.</pre>
   </section>
   <footer><span>Experimental Android translation layer for Linux.</span><a href="https://spectre-oss.github.io/projects/shiraz/">About Shiraz ↗</a></footer>
 </main>
@@ -67,7 +80,59 @@ footer a { text-decoration-color: #555; text-underline-offset: 3px; }
 <script>
 const status = document.getElementById('status');
 const button = document.getElementById('assemble');
+const releaseVersion = document.getElementById('release-version');
+const releaseDetail = document.getElementById('release-detail');
+const releaseLink = document.getElementById('release-link');
+const manualBase = document.getElementById('manual-base');
 let ready;
+async function loadRelease() {
+  let manifest;
+  try {
+    const response = await fetch('release.json', {cache: 'no-store'});
+    if (response.ok) manifest = await response.json();
+  } catch (_) { /* Local demo can use a selected base file. */ }
+  let latest;
+  try {
+    const response = await fetch('https://api.github.com/repos/spectre-oss/shiraz/releases?per_page=20', {cache: 'no-store'});
+    if (response.ok) {
+      const releases = await response.json();
+      latest = releases.filter(release => {
+        const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(release.tag_name);
+        return !release.draft && release.prerelease && match &&
+          release.assets.some(asset => asset.name === `Shiraz-Browser-Base-${match[1]}.${match[2]}.${match[3]}-x86_64.AppImage`);
+      }).sort((a, b) => {
+        const left = a.tag_name.slice(1).split('.').map(Number);
+        const right = b.tag_name.slice(1).split('.').map(Number);
+        return (right[0] - left[0]) || (right[1] - left[1]) || (right[2] - left[2]);
+      })[0];
+    }
+  } catch (_) { /* The site bundle remains usable when the API is unavailable. */ }
+  if (latest) {
+    releaseVersion.textContent = latest.tag_name;
+    releaseLink.href = `https://github.com/spectre-oss/shiraz/releases/tag/${latest.tag_name}`;
+    releaseLink.hidden = false;
+  } else if (manifest) {
+    releaseVersion.textContent = `v${manifest.version}`;
+    releaseLink.href = manifest.release_url;
+    releaseLink.hidden = false;
+  }
+  if (!manifest || !/^\d+\.\d+\.\d+$/.test(manifest.version) ||
+      manifest.base_file !== `base/Shiraz-Browser-Base-${manifest.version}-x86_64.AppImage` ||
+      !/^[0-9a-f]{64}$/.test(manifest.base_sha256) || !Number.isSafeInteger(manifest.base_size) || manifest.base_size < 1) {
+    if (!latest) releaseVersion.textContent = 'Local base required';
+    releaseDetail.textContent = 'Select a base AppImage below to build locally.';
+    manualBase.open = true;
+    return null;
+  }
+  if (latest && latest.tag_name !== `v${manifest.version}`) {
+    releaseDetail.textContent = `The site is updating from v${manifest.version}. Select a local base or reload shortly.`;
+    manualBase.open = true;
+    return null;
+  }
+  releaseDetail.textContent = `x86_64 base · ${(manifest.base_size / 1048576).toFixed(0)} MiB · loaded when you build`;
+  return manifest;
+}
+const releaseReady = loadRelease();
 async function load() {
   const go = new Go();
   const response = await fetch('shiraz-assemble.wasm', {cache: 'no-store'});
@@ -80,20 +145,39 @@ button.onclick = async () => {
   button.disabled = true;
   status.dataset.state = '';
   try {
-    status.textContent = 'Loading files…';
+    status.textContent = 'Preparing builder…';
     await ready;
-    const selected = ['base', 'apk'].map(id => document.getElementById(id).files[0]);
-    if (selected.some(file => !file)) throw new Error('Select the base AppImage and an APK.');
-    const version = selected[0].name.match(/^Shiraz-Browser-Base-([0-9]+\.[0-9]+\.[0-9]+)-x86_64\.AppImage$/)?.[1];
-    if (!version) throw new Error('Select a versioned Shiraz browser base AppImage.');
-    const [base, apk] = await Promise.all(selected.map(file => file.arrayBuffer()));
-    if (apk.byteLength !== selected[1].size) throw new Error(`APK read incomplete: expected ${selected[1].size} bytes, got ${apk.byteLength}.`);
+    const apkFile = document.getElementById('apk').files[0];
+    if (!apkFile) throw new Error('Select an APK.');
+    const baseFile = document.getElementById('base').files[0];
+    let version, base;
+    if (baseFile) {
+      version = baseFile.name.match(/^Shiraz-Browser-Base-([0-9]+\.[0-9]+\.[0-9]+)-x86_64\.AppImage$/)?.[1];
+      if (!version) throw new Error('Select a versioned Shiraz browser base AppImage.');
+      status.textContent = 'Reading base AppImage…';
+      base = await baseFile.arrayBuffer();
+    } else {
+      const manifest = await releaseReady;
+      if (!manifest) throw new Error('The current base is unavailable. Select a local base AppImage.');
+      version = manifest.version;
+      status.textContent = `Downloading Shiraz base v${version}…`;
+      const response = await fetch(manifest.base_file);
+      if (!response.ok) throw new Error(`Base download failed: HTTP ${response.status}`);
+      base = await response.arrayBuffer();
+      if (base.byteLength !== manifest.base_size) throw new Error('Base download is incomplete.');
+      const digest = await crypto.subtle.digest('SHA-256', base);
+      const actual = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+      if (actual !== manifest.base_sha256) throw new Error('Base download checksum mismatch.');
+    }
+    status.textContent = 'Reading APK…';
+    const apk = await apkFile.arrayBuffer();
+    if (apk.byteLength !== apkFile.size) throw new Error(`APK read incomplete: expected ${apkFile.size} bytes, got ${apk.byteLength}.`);
     if (apk.byteLength < 4 || new Uint8Array(apk, 0, 2).some((byte, index) => byte !== [0x50, 0x4b][index])) {
-      throw new Error(`${selected[1].name} is not an APK/ZIP (${apk.byteLength} bytes). Select a complete APK download.`);
+      throw new Error(`${apkFile.name} is not an APK/ZIP (${apk.byteLength} bytes). Select a complete APK download.`);
     }
     status.textContent = 'Assembling…';
     const result = shirazBuildFromApk(new Uint8Array(base), new Uint8Array(apk), version);
-    if (result.error) throw new Error(`${selected[1].name}: ${result.error}`);
+    if (result.error) throw new Error(`${apkFile.name}: ${result.error}`);
     const url = URL.createObjectURL(new Blob([result.bytes], {type:'application/octet-stream'}));
     const link = document.createElement('a');
     link.href = url; link.download = `${result.package}-Shiraz-${version}-x86_64.AppImage`; link.click();

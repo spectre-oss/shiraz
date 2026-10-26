@@ -33,8 +33,11 @@ cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" .
 python3 -m http.server 8000
 ```
 
-Open `http://localhost:8000/demo.html`, select the versioned base AppImage and
-an APK, then download the result. The browser does not upload the APK. On Linux:
+Open `http://localhost:8000/demo.html`, select the versioned base AppImage under
+"Use a local base AppImage" and an APK, then download the result. On the deployed
+GitHub Pages site, the matching base loads automatically from the site when you
+build. The browser checks the latest prerelease version through the GitHub
+Releases API. Your APK is never uploaded. On Linux:
 
 ```sh
 chmod +x APK-Shiraz-VERSION-x86_64.AppImage
@@ -59,14 +62,18 @@ Linux packager.
 Generated templates, WASM binaries, `wasm_exec.js`, and AppImages are local
 build artifacts and should not be committed.
 
-## GitHub Actions artifact
+## GitHub Actions release and Pages
 
-Run **Browser AppImage kit** from the Actions tab, or push a `v*` tag. The
-workflow builds the runtime from source with a generated fixture APK, then
-uploads `shiraz-browser-kit-x86_64` as a run artifact. Download and unzip it,
-serve the `go-wasm/` directory with an HTTP server, and select the included
-versioned base AppImage in `demo.html`. The artifact contains the demo, WASM
-assembler, Go browser support script, generic base AppImage, and SHA-256 file.
-It does not contain an APK or an app-specific AppImage. This workflow currently
-produces x86_64 only; ARM browser packaging needs a separate ARM base and ABI
-support in the assembler.
+Every push to `main` runs the `Shiraz prerelease and Pages` workflow. It reads
+the pushed Conventional Commit, increments `VERSION`, and pushes a version
+commit as `github-actions[bot]`. A breaking change bumps major, `feat` bumps
+minor, and every other accepted type bumps patch. If the source commit already
+contains the expected version, the workflow uses it without a second bump.
+The workflow builds the runtime from source using a generated fixture APK,
+publishes the x86_64 base AppImage and browser builder ZIP in a versioned
+GitHub prerelease, uploads them as run artifacts, and deploys the matching
+browser site to GitHub Pages. The site bundle also contains the versioned base
+AppImage so browser fetching stays on the same origin. The builder ZIP does not
+contain a base; select one locally when serving that ZIP outside Pages. No APK
+is included in a release. ARM browser packaging still needs a separate ARM base
+and ABI support in the assembler.

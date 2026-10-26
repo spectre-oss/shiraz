@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
-python3 scripts/version.py --message-file "$1"
+python3 scripts/version.py --message-file "$1" --validate-message-only
 python3 scripts/commit_guard.py

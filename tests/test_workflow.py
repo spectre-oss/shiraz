@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 
 
@@ -13,16 +14,26 @@ def load(name):
 
 version = load('version')
 guard = load('commit_guard')
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+ci_version = load('ci_version')
 
 
 class WorkflowTests(unittest.TestCase):
     def test_conventional_versions(self):
         for message, expected in [('feat(ui): add surfaces', '1.3.0'), ('fix: repair input', '1.2.4'),
-                                  ('docs: clarify setup', '1.2.3'), ('feat!: break ABI', '2.0.0'),
+                                  ('docs: clarify setup', '1.2.4'), ('feat!: break ABI', '2.0.0'),
                                   ('refactor: change ABI\n\nBREAKING CHANGE: new ABI', '2.0.0')]:
             self.assertEqual(version.bump('1.2.3', message), expected)
         with self.assertRaises(ValueError):
             version.bump('1.2.3', 'random commit')
+
+    def test_ci_version_plan(self):
+        self.assertEqual(ci_version.planned_version('1.2.3', '1.2.3', 'feat(web): update builder'), ('1.3.0', True))
+        self.assertEqual(ci_version.planned_version('1.2.3', '1.2.4', 'docs: clarify setup'), ('1.2.4', False))
+        self.assertEqual(ci_version.planned_version('1.2.3', '1.2.3', 'docs: clarify setup'), ('1.2.4', True))
+        self.assertEqual(ci_version.planned_version(None, '1.2.3', 'chore: initial import'), ('1.2.3', False))
+        with self.assertRaises(ValueError):
+            ci_version.planned_version('1.2.3', '1.2.9', 'fix: mismatch')
 
     def test_guards(self):
         for path in ['context/osmand/file.cpp', 'build/a', 'app.apk', 'key.pem', 'secrets/value', '.env.local', 'docs/private.md']:
@@ -52,26 +63,22 @@ class GitHookTests(unittest.TestCase):
             git('config', 'user.email', 'test@localhost')
             git('config', 'core.hooksPath', '.githooks')
             git('add', 'scripts', '.githooks', 'VERSION')
-            first = git('commit', '-m', 'feat: add runtime foundation', check=False)
-            self.assertNotEqual(first.returncode, 0)
             git('commit', '-m', 'feat: add runtime foundation')
-            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '0.1.0')
+            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '0.0.0')
             (repo / 'source.cpp').write_text('int main() { return 0; }\n')
             git('add', 'source.cpp')
             result = git('commit', '-m', 'invalid message', check=False)
             self.assertNotEqual(result.returncode, 0)
-            self.assertEqual((repo / 'VERSION').read_text().strip(), '0.1.0')
-            self.assertNotEqual(git('commit', '-m', 'fix: repair input', check=False).returncode, 0)
+            self.assertEqual((repo / 'VERSION').read_text().strip(), '0.0.0')
             git('commit', '-m', 'fix: repair input')
-            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '0.1.1')
+            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '0.0.0')
             (repo / 'source.cpp').write_text('int main() { return 1; }\n')
             git('add', 'source.cpp')
-            self.assertNotEqual(git('commit', '-m', 'refactor!: change ABI', check=False).returncode, 0)
             git('commit', '-m', 'refactor!: change ABI')
-            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '1.0.0')
+            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '0.0.0')
             (repo / 'bad.apk').write_text('do not commit')
             git('add', 'bad.apk')
             result = git('commit', '-m', 'chore: add forbidden artifact', check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Blocked: bad.apk', result.stdout + result.stderr)
-            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '1.0.0')
+            self.assertEqual(git('show', 'HEAD:VERSION').stdout.strip(), '0.0.0')

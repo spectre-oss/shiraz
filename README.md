@@ -1,5 +1,11 @@
 # Shiraz
 
+Pushes to `main` with Conventional Commit messages trigger the GitHub Actions
+version bump, x86_64 browser AppImage prerelease, and
+[browser builder](https://spectre-oss.github.io/shiraz/) deployment. The APK
+stays in the browser; the base AppImage and WebAssembly assembler are built
+from source in CI. Release support and Android app compatibility are experimental.
+
 Shiraz runs selected Android APKs on Linux using a translated Android framework,
 ART, SDL, and EGL/GLES. App compatibility is incremental.
 
