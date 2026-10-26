@@ -10,8 +10,8 @@ export MSG
 export PYTHONPATH := $(CURDIR)/src
 export PKG_CONFIG_PATH := $(CURDIR)/.local/lib/pkgconfig:$(CURDIR)/.local/lib64/pkgconfig:$(PKG_CONFIG_PATH)
 SDL_LOCAL_LIBRARY := $(wildcard .local/lib/libSDL2.a) build/libshiraz-gpu.so
-SDL_CFLAGS = $(shell pkg-config --cflags sdl2 2>/dev/null)
-SDL_LIBS = $(shell pkg-config --static --libs sdl2 2>/dev/null) -Lbuild -lshiraz-gpu -Wl,-rpath,'$$ORIGIN'
+SDL_CFLAGS = $(shell .local/bin/sdl2-config --cflags 2>/dev/null || pkg-config --cflags sdl2 2>/dev/null)
+SDL_LIBS = $(shell .local/bin/sdl2-config --libs 2>/dev/null || pkg-config --static --libs sdl2 2>/dev/null) -Lbuild -lshiraz-gpu -Wl,-rpath,'$$ORIGIN'
 
 .PHONY: framework apk-fixture apk-smoke runtime-aot-smoke runtime-jni-smoke jni-smoke runtime-smoke runtime-sources runtime-bridges runtime-art commit all build test check hooks version inspect plan run preview smoke clean deps context
 commit:
