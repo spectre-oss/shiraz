@@ -64,6 +64,7 @@ jobs:
         run: |
           nix develop -c bash -euo pipefail -c '
             make deps
+            make runtime-art
             make build
             make apk-fixture
             make appimage APK=build/apk-fixture/fixture.apk NAME=Shiraz-CI-Fixture AOT=0
