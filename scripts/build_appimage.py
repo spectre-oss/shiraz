@@ -323,6 +323,7 @@ def build(args):
     copy_file(ROOT/'packaging/AppRun', appdir/'AppRun')
     (appdir/'AppRun').chmod(0o755)
     libraries = Libraries(appdir)
+    multiarch = 'aarch64-linux-gnu' if architecture == 'aarch64' else 'x86_64-linux-gnu'
     # The bridge is compiled with the flake's libunwind headers. Select the
     # matching shared library before transitive scanning can pick Ubuntu's
     # older libunwind with the same SONAME.
@@ -331,7 +332,6 @@ def build(args):
         # The Nix libunwind RUNPATH points at Nix glibc. Use Ubuntu only while
         # scanning this library; other bundled Nix tools need their own ABI.
         library_path = libraries.env['LD_LIBRARY_PATH']
-        multiarch = 'aarch64-linux-gnu' if architecture == 'aarch64' else 'x86_64-linux-gnu'
         try:
             libraries.env['LD_LIBRARY_PATH'] = library_path + ':/usr/lib/' + multiarch
             libraries.add(Path(unwind_override), 'libunwind.so.8')
@@ -351,6 +351,20 @@ def build(args):
                 libraries.add(path)
     for name in DISPLAY_LIBS:
         libraries.system(name)
+    # GLVND loads its EGL vendor and Mesa loads its DRI driver with dlopen(),
+    # so ldd on libEGL.so.1 cannot discover either dependency. Without these,
+    # a Wayland window can be created but SDL cannot create a renderer.
+    if (appdir/'usr/lib/libEGL.so.1').is_file():
+        libraries.system('libEGL_mesa.so.0')
+        dri_roots = (Path('/usr/lib')/multiarch/'dri', Path('/lib')/multiarch/'dri',
+                     Path('/usr/lib/dri'), Path('/lib/dri'))
+        swrast = next((root/'swrast_dri.so' for root in dri_roots if (root/'swrast_dri.so').is_file()), None)
+        if swrast is None:
+            raise RuntimeError('Missing Mesa swrast_dri.so for portable Wayland rendering')
+        libraries.add(swrast, 'swrast_dri.so')
+        vendor = appdir/'usr/share/glvnd/egl_vendor.d/50_mesa.json'
+        vendor.parent.mkdir(parents=True, exist_ok=True)
+        vendor.write_text('{"file_format_version":"1.0.0","ICD":{"library_path":"libEGL_mesa.so.0"}}\n')
     validate_unwind_abi(libraries.directory)
     for name in ('libnss_dns.so.2', 'libnss_files.so.2'):
         if (Path('/usr/lib')/name).is_file():

@@ -175,6 +175,12 @@ int main(int argc,char** argv) {
         {"XKB_CONFIG_ROOT",usr/"share/X11/xkb"}}) {
         if(fs::is_directory(setting.second))env(setting.first,setting.second.string());
     }
+    const fs::path mesaVendor=usr/"share/glvnd/egl_vendor.d/50_mesa.json";
+    if(fs::is_regular_file(mesaVendor)){
+        if(!std::getenv("__EGL_VENDOR_LIBRARY_FILENAMES"))env("__EGL_VENDOR_LIBRARY_FILENAMES",mesaVendor.string());
+        if(!std::getenv("LIBGL_DRIVERS_PATH"))env("LIBGL_DRIVERS_PATH",lib.string());
+        if(!std::getenv("LIBGL_ALWAYS_SOFTWARE"))env("LIBGL_ALWAYS_SOFTWARE","1");
+    }
     env("SHIRAZ_APPDIR",root.string());
     for(const auto& item:std::vector<std::pair<std::string,std::string>>{{"XDG_DATA_HOME",".local/share"},{"XDG_CACHE_HOME",".cache"},{"XDG_STATE_HOME",".local/state"}})
         env(("SHIRAZ_HOST_"+item.first).c_str(),xdg(item.first.c_str(),item.second.c_str()).string());
