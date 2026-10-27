@@ -1,5 +1,31 @@
 # Shiraz Go web server
 
+## Debian package
+
+The experimental `shiraz-web` amd64 package has been installed and exercised in
+clean Debian 12 (Bookworm) and Debian 13 (Trixie) containers. It bundles the
+Shiraz native runtime, ART, Python, fonts, and media libraries. Install it with:
+
+```sh
+sudo apt install ./shiraz-web_0.332.14-1_amd64.deb
+```
+
+The package creates and starts `shiraz-web.service`. Open
+<http://127.0.0.1:8080/> on the server. Use `systemctl status shiraz-web` to
+check the service. The service uses a dedicated `shiraz` user and listens only
+on localhost. APK uploads and saved app data are not included in the package;
+app data persists under `/opt/shiraz/data` after removal.
+
+The upload endpoint has no authentication. Remote browser access needs an
+authenticated HTTPS entry point and WebRTC network configuration appropriate
+for the server; this package currently provides only the localhost service.
+
+`packaging/build_deb.py` assembles the package from a prepared Shiraz runtime
+tree and a private Python/library bundle. This is not yet a Debian-native
+source build. Its input arguments are `--source-root`, `--runtime-root`,
+`--private-python`, and `--output`; the runtime root must have the built ART,
+Shiraz libraries, fonts, codecs, and Bionic translation configuration.
+
 This package serves a phone-shaped APK runner. It runs the APK with Shiraz's
 headless SDL display, reads the actual app-surface capture, and shows it in the
 browser over WebRTC VP8 video. Touch, drag, Back, Stop, and keyboard input

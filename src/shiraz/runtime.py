@@ -423,6 +423,8 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         env['LD_PRELOAD'] = str(compat) + (':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
                    '-Xcompiler:' + str(HOST / 'bin/dex2oat'), '-Dlog.tag=' + log_level,
+                   *(['-Djavax.net.ssl.trustStore=' + os.environ['SHIRAZ_JAVA_TRUST_STORE']]
+                     if os.environ.get('SHIRAZ_JAVA_TRUST_STORE') else []),
                    '-Djava.library.path=' + ':'.join((str(HOST / 'lib64'), str(ROOT / 'build'), str(app_lib))),
                    '-Dshiraz.frameworkResources=' + str(framework_resources),
                    *(['-Dshiraz.deviceProfile=' + str(device_profile)] if device_profile else []),
@@ -431,6 +433,8 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                    '-cp', str(framework) + ':' + str(apk), 'shiraz.runtime.ActivityRunner',
                    package, app, activity, str(width), str(height), str(frames if frames is not None else -1),
                    str(data), str(snapshot) if snapshot else '-', str(metadata)]
+        if loader := os.environ.get('SHIRAZ_RUNTIME_LOADER'):
+            command = [loader, '--library-path', env['LD_LIBRARY_PATH'], *command]
         print(f'Launching experimental activity {activity}; logs: {work.relative_to(ROOT)}', flush=True)
         with (work / 'stdout.log').open('w') as stdout, (work / 'stderr.log').open('w') as stderr:
             try:
