@@ -7,7 +7,7 @@ clean Debian 12 (Bookworm) and Debian 13 (Trixie) containers. It bundles the
 Shiraz native runtime, ART, Python, fonts, and media libraries. Install it with:
 
 ```sh
-sudo apt install ./shiraz-web_0.332.14-3_amd64.deb
+sudo apt install ./shiraz-web_*_amd64.deb
 ```
 
 The package creates and starts `shiraz-web.service`. Open
@@ -26,7 +26,11 @@ for the server; this package currently provides only the localhost service.
 tree and a private Python/library bundle. This is not yet a Debian-native
 source build. Its input arguments are `--source-root`, `--runtime-root`,
 `--private-python`, and `--output`; the runtime root must have the built ART,
-Shiraz libraries, fonts, codecs, and Bionic translation configuration.
+Shiraz libraries, fonts, and Bionic translation configuration. The GitHub
+prerelease workflow builds this package and checks installation and portal
+startup on Debian 12 and 13. That package declares Debian's `ffmpeg` package
+as a dependency; `apt` installs it automatically. The package bundles the
+remaining private runtime libraries and includes no sample app APK.
 
 This package serves a phone-shaped APK runner. It runs the APK with Shiraz's
 headless SDL display, reads the actual app-surface capture, and shows it in the

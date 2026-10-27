@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--private-python", type=Path, required=True)
     parser.add_argument("--revision", type=int, default=1)
+    parser.add_argument("--system-ffmpeg", action="store_true",
+                        help="depend on Debian's ffmpeg package instead of a private codec bundle")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     source = args.source_root.resolve()
@@ -54,8 +56,9 @@ def main():
     for name in ("shiraz", "espeak-ng-data", "bionic_translation"):
         copy(runtime / ".local/share" / name, app / ".local/share" / name)
     copy(runtime / ".local/lib", app / ".local/lib")
-    copy(runtime / ".local/system-codecs/usr/lib", app / ".local/system-codecs/usr/lib")
-    copy(runtime / ".local/system-codecs/usr/bin/ffmpeg", app / ".local/system-codecs/usr/bin/ffmpeg")
+    if not args.system_ffmpeg:
+        copy(runtime / ".local/system-codecs/usr/lib", app / ".local/system-codecs/usr/lib")
+        copy(runtime / ".local/system-codecs/usr/bin/ffmpeg", app / ".local/system-codecs/usr/bin/ffmpeg")
     copy(python / "bin/python3", app / "python/bin/python3")
     copy(python / "lib", app / "python/lib")
     copy(python / "cacerts", app / "python/cacerts")
@@ -68,9 +71,11 @@ def main():
     copy(source / "build/framework-res/framework-res.apk", build / "framework-res/framework-res.apk")
     copy(source / "build/shiraz-web", build / "shiraz-web")
     write(app / "bin/python3", '#!/bin/sh\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/python/lib /opt/shiraz/python/bin/python3 "$@"\n', 0o755)
-    write(app / "bin/ffmpeg", '#!/bin/sh\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/.local/system-codecs/usr/lib:/opt/shiraz/.local/lib:/opt/shiraz/python/lib /opt/shiraz/.local/system-codecs/usr/bin/ffmpeg "$@"\n', 0o755)
+    if not args.system_ffmpeg:
+        write(app / "bin/ffmpeg", '#!/bin/sh\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/.local/system-codecs/usr/lib:/opt/shiraz/.local/lib:/opt/shiraz/python/lib /opt/shiraz/.local/system-codecs/usr/bin/ffmpeg "$@"\n', 0o755)
     write(app / "config/fonts.conf", '<?xml version="1.0"?>\n<fontconfig>\n  <dir>/opt/shiraz/.local/share/shiraz/fonts</dir>\n  <cachedir>/opt/shiraz/build/fontconfig-cache</cachedir>\n</fontconfig>\n')
-    write(stage / "usr/bin/shiraz-web", '#!/bin/sh\nexport PATH=/opt/shiraz/bin:/usr/bin:/bin\nexport SHIRAZ_RUNTIME_LOADER=/opt/shiraz/python/lib/ld-linux-x86-64.so.2\nexport SHIRAZ_JAVA_TRUST_STORE=/opt/shiraz/python/cacerts\nexport SHIRAZ_FFMPEG=/opt/shiraz/bin/ffmpeg\nexport FONTCONFIG_FILE=/opt/shiraz/config/fonts.conf\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/python/lib /opt/shiraz/build/shiraz-web -root /opt/shiraz "$@"\n', 0o755)
+    ffmpeg_path = "/usr/bin/ffmpeg" if args.system_ffmpeg else "/opt/shiraz/bin/ffmpeg"
+    write(stage / "usr/bin/shiraz-web", f'#!/bin/sh\nexport PATH=/opt/shiraz/bin:/usr/bin:/bin\nexport SHIRAZ_RUNTIME_LOADER=/opt/shiraz/python/lib/ld-linux-x86-64.so.2\nexport SHIRAZ_JAVA_TRUST_STORE=/opt/shiraz/python/cacerts\nexport SHIRAZ_FFMPEG={ffmpeg_path}\nexport FONTCONFIG_FILE=/opt/shiraz/config/fonts.conf\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/python/lib /opt/shiraz/build/shiraz-web -root /opt/shiraz "$@"\n', 0o755)
     write(stage / "lib/systemd/system/shiraz-web.service", """[Unit]
 Description=Shiraz APK web portal
 After=network.target
@@ -88,13 +93,14 @@ NoNewPrivileges=true
 [Install]
 WantedBy=multi-user.target
 """)
+    depends = "adduser, libc6, systemd" + (", ffmpeg" if args.system_ffmpeg else "")
     write(stage / "DEBIAN/control", f"""Package: shiraz-web
 Version: {version}-{args.revision}
 Section: misc
 Priority: optional
 Architecture: amd64
 Maintainer: SpectreOSS <https://github.com/spectre-oss/shiraz>
-Depends: adduser, libc6, systemd
+Depends: {depends}
 Description: Experimental Shiraz Android APK web portal
  Bundled Shiraz ART, Python, media runtime, and native libraries.
  The service listens on localhost:8080. Android app support is experimental.
@@ -132,8 +138,12 @@ This is an experimental build for x86-64 Debian 12 and 13.
     copy(source / "LICENSES", notices / "Shiraz-notices")
     copy(source / "packaging/licenses/LGPL-2.1-only.txt", notices / "LGPL-2.1-only.txt")
     copy(source / "packaging/licenses/GPL-2.0-only.txt", notices / "GPL-2.0-only.txt")
-    copy(runtime / ".local/system-codecs/usr/share/licenses", notices / "media-libraries")
-    copy(python / "lib/python3.14/LICENSE.txt", notices / "Python-LICENSE.txt")
+    if not args.system_ffmpeg:
+        copy(runtime / ".local/system-codecs/usr/share/licenses", notices / "media-libraries")
+    python_licenses = sorted((python / "lib").glob("python3.*/LICENSE.txt"))
+    if len(python_licenses) != 1:
+        raise SystemExit("private Python must contain exactly one LICENSE.txt")
+    copy(python_licenses[0], notices / "Python-LICENSE.txt")
     art_root = source / "context/art_standalone"
     for directory, subdirs, files in os.walk(art_root):
         subdirs[:] = [name for name in subdirs if name not in ("out", ".git")]
