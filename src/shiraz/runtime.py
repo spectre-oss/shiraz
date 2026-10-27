@@ -473,6 +473,9 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                    package, app, activity, str(width), str(height), str(frames if frames is not None else -1),
                    str(data), str(snapshot) if snapshot else '-', str(metadata)]
         if loader := os.environ.get('SHIRAZ_RUNTIME_LOADER'):
+            # The private loader must also find its matching C++ runtime. Debian
+            # 12's system libstdc++ lacks symbols required by the bundled ART.
+            env['LD_LIBRARY_PATH'] += ':' + str(Path(loader).parent)
             command = [loader, '--library-path', env['LD_LIBRARY_PATH'], *command]
         print(f'Launching experimental activity {activity}; logs: {work.relative_to(ROOT)}', flush=True)
         try:

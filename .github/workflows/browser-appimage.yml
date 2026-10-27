@@ -148,6 +148,11 @@ jobs:
               apt-get update -qq
               apt-get install -y -qq --no-install-recommends curl /packages/'"$(basename "$deb")"' >/dev/null
               dpkg -s shiraz-web | grep -q "^Status: install ok installed$"
+              loader=/opt/shiraz/python/lib/ld-linux-x86-64.so.2
+              art=/opt/shiraz/context/art_standalone/out/host/linux-x86
+              runtime_libs="$art/lib64:/opt/shiraz/.local/lib:/opt/shiraz/build:/opt/shiraz/python/lib"
+              "$loader" --library-path "$runtime_libs" --list "$art/bin/dalvikvm" > /tmp/art-libraries.txt
+              grep -F "libstdc++.so.6 => /opt/shiraz/python/lib/libstdc++.so.6" /tmp/art-libraries.txt
               /usr/bin/shiraz-web -listen 127.0.0.1:18080 >/tmp/shiraz-web.log 2>&1 &
               server_pid=$!
               trap "kill $server_pid 2>/dev/null || true" EXIT
