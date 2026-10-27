@@ -208,10 +208,15 @@ func (s *server) webrtcAnswer(w http.ResponseWriter, r *http.Request) {
 			s.mu.Lock()
 			s.clients[ch] = struct{}{}
 			running := s.running
+			appName := s.appName
 			s.mu.Unlock()
 			message := "Ready"
 			if running {
-				message = "An APK is running"
+				message = "Running"
+				if appName != "" {
+					data, _ := json.Marshal(event{"app", appName})
+					ch.SendText(string(data))
+				}
 			}
 			data, _ := json.Marshal(event{"status", message})
 			ch.SendText(string(data))

@@ -38,6 +38,7 @@ type server struct {
 	mu       sync.Mutex
 	running  bool
 	stopping bool
+	appName  string
 	frame    string
 	input    string
 	commands int
@@ -240,9 +241,11 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
 		return
 	}
+	s.appName = filepath.Base(file.FileName())
 	s.runs.Add(1)
 	s.mu.Unlock()
 	accepted = true
+	s.broadcast(event{"app", filepath.Base(file.FileName())})
 	go s.run(dir, path)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -253,6 +256,7 @@ func (s *server) run(dir, path string) {
 	defer func() {
 		s.mu.Lock()
 		s.running = false
+		s.appName = ""
 		s.input = ""
 		s.frame = ""
 		s.mu.Unlock()
@@ -296,6 +300,7 @@ func (s *server) run(dir, path string) {
 		s.broadcast(event{"error", err.Error()})
 		return
 	}
+	s.broadcast(event{"status", "Running"})
 	var wg sync.WaitGroup
 	wg.Add(2)
 	stream := func(rd io.Reader) {

@@ -93,7 +93,7 @@ func TestWebRTCInput(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s := &server{running: true, input: path, clients: make(map[*webrtc.DataChannel]struct{})}
+	s := &server{running: true, appName: "messenger.apk", input: path, clients: make(map[*webrtc.DataChannel]struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webrtc", s.webrtcAnswer)
 	httpServer := httptest.NewServer(mux)
@@ -111,7 +111,14 @@ func TestWebRTCInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready := make(chan struct{})
+	events := make(chan event, 2)
 	channel.OnOpen(func() { close(ready) })
+	channel.OnMessage(func(message webrtc.DataChannelMessage) {
+		var item event
+		if json.Unmarshal(message.Data, &item) == nil && (item.Type == "app" || item.Type == "status") {
+			events <- item
+		}
+	})
 	offer, err := peer.CreateOffer(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +160,16 @@ func TestWebRTCInput(t *testing.T) {
 	case <-ready:
 	case <-time.After(10 * time.Second):
 		t.Fatal("data channel did not open")
+	}
+	for _, expected := range []event{{"app", "messenger.apk"}, {"status", "Running"}} {
+		select {
+		case got := <-events:
+			if got != expected {
+				t.Fatalf("session event: got %+v, want %+v", got, expected)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("session state was not sent on reconnect")
+		}
 	}
 	data, err := json.Marshal(command{Action: "fingerdown", X: .5, Y: .5})
 	if err != nil {
