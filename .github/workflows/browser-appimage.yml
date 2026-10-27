@@ -63,6 +63,8 @@ jobs:
       - name: Build fixture and runtime
         run: |
           nix develop -c bash -euo pipefail -c '
+            # ART links against Ubuntu libraries; use Ubuntu Java for JNI.
+            export PATH="/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH"
             make deps
             make runtime-art
             make build
