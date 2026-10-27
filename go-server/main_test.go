@@ -111,11 +111,11 @@ func TestWebRTCInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready := make(chan struct{})
-	events := make(chan event, 2)
+	events := make(chan event, 3)
 	channel.OnOpen(func() { close(ready) })
 	channel.OnMessage(func(message webrtc.DataChannelMessage) {
 		var item event
-		if json.Unmarshal(message.Data, &item) == nil && (item.Type == "app" || item.Type == "status") {
+		if json.Unmarshal(message.Data, &item) == nil && (item.Type == "app" || item.Type == "status" || item.Type == "log") {
 			events <- item
 		}
 	})
@@ -170,6 +170,15 @@ func TestWebRTCInput(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("session state was not sent on reconnect")
 		}
+	}
+	s.broadcast(event{"log", "streamed runtime line"})
+	select {
+	case got := <-events:
+		if got != (event{"log", "streamed runtime line"}) {
+			t.Fatalf("streamed log: got %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("log was not sent over the data channel")
 	}
 	data, err := json.Marshal(command{Action: "fingerdown", X: .5, Y: .5})
 	if err != nil {
