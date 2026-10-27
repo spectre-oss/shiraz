@@ -138,10 +138,6 @@ class Libraries:
         self.by_digest = {}
         roots = [str(ROOT/'build'), str(HOST/'lib64'), str(ROOT/'.local/lib')]
         roots += [p for p in os.environ.get('SHIRAZ_SYSTEM_LIBRARY_PATH', '').split(':') if p]
-        # Keep the Ubuntu runtime ahead of Nix RUNPATHs while resolving the
-        # explicitly selected Nix libunwind and its ordinary dependencies.
-        multiarch = 'aarch64-linux-gnu' if platform.machine() == 'aarch64' else 'x86_64-linux-gnu'
-        roots.append('/usr/lib/' + multiarch)
         self.env = dict(os.environ, LD_LIBRARY_PATH=':'.join(roots))
 
     def add(self, source, name=None):
@@ -332,7 +328,15 @@ def build(args):
     # older libunwind with the same SONAME.
     unwind_override = os.environ.get('SHIRAZ_LIBUNWIND_SO8')
     if unwind_override:
-        libraries.add(Path(unwind_override), 'libunwind.so.8')
+        # The Nix libunwind RUNPATH points at Nix glibc. Use Ubuntu only while
+        # scanning this library; other bundled Nix tools need their own ABI.
+        library_path = libraries.env['LD_LIBRARY_PATH']
+        multiarch = 'aarch64-linux-gnu' if architecture == 'aarch64' else 'x86_64-linux-gnu'
+        try:
+            libraries.env['LD_LIBRARY_PATH'] = library_path + ':/usr/lib/' + multiarch
+            libraries.add(Path(unwind_override), 'libunwind.so.8')
+        finally:
+            libraries.env['LD_LIBRARY_PATH'] = library_path
     libraries.scan(binaries/'shiraz-app')
     for name in RUNTIME_LIBS:
         libraries.add(ROOT/'build'/('lib'+name+'.so'))
