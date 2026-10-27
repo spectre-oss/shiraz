@@ -3,6 +3,8 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v4"
 )
 
 func TestValidAPK(t *testing.T) {
@@ -71,39 +73,95 @@ func TestInputAndFrame(t *testing.T) {
 		t.Fatalf("unexpected input: %q", data)
 	}
 	frame := filepath.Join(dir, "frame.ppm")
-	if err := os.WriteFile(frame, []byte("P6\n1 1\n255\n\xff\x00\x00"), 0600); err != nil {
+	pixels := make([]byte, videoWidth*videoHeight*3)
+	pixels[0] = 255
+	ppm := append([]byte("P6\n360 640\n255\n"), pixels...)
+	if err := os.WriteFile(frame, ppm, 0600); err != nil {
 		t.Fatal(err)
 	}
-	image, err := readPPM(frame)
+	image, err := readPPMPixels(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, g, b, _ := image.At(0, 0).RGBA()
-	if r != 65535 || g != 0 || b != 0 {
+	if image[0] != 255 || image[1] != 0 || image[2] != 0 {
 		t.Fatal("wrong frame pixel")
 	}
 }
 
-func TestWebSocketInput(t *testing.T) {
+func TestWebRTCInput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "input.txt")
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s := &server{running: true, input: path, clients: make(map[*websocket.Conn]chan event)}
+	s := &server{running: true, input: path, clients: make(map[*webrtc.DataChannel]struct{})}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", s.ws)
+	mux.HandleFunc("/webrtc", s.webrtcAnswer)
 	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
-	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
-	c, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Origin": []string{httpServer.URL}})
+	peer, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
-	if err := c.WriteJSON(command{Action: "fingerdown", X: .5, Y: .5}); err != nil {
+	defer peer.Close()
+	channel, err := peer.CreateDataChannel("control", nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
+	if _, err := peer.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan struct{})
+	channel.OnOpen(func() { close(ready) })
+	offer, err := peer.CreateOffer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gather := webrtc.GatheringCompletePromise(peer)
+	if err := peer.SetLocalDescription(offer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gather:
+	case <-time.After(10 * time.Second):
+		t.Fatal("client ICE gathering timed out")
+	}
+	body, err := json.Marshal(peer.LocalDescription())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, httpServer.URL+"/webrtc", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", httpServer.URL)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		t.Fatalf("signaling status: %d", response.StatusCode)
+	}
+	var answer webrtc.SessionDescription
+	if err := json.NewDecoder(response.Body).Decode(&answer); err != nil {
+		t.Fatal(err)
+	}
+	if err := peer.SetRemoteDescription(answer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("data channel did not open")
+	}
+	data, err := json.Marshal(command{Action: "fingerdown", X: .5, Y: .5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := channel.Send(data); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -114,5 +172,5 @@ func TestWebSocketInput(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("WebSocket input did not reach live-input file")
+	t.Fatal("WebRTC input did not reach live-input file")
 }

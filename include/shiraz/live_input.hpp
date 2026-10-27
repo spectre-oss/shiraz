@@ -34,13 +34,13 @@ public:
     std::vector<std::string> poll(){
         if(fd_<0)return {};
         struct stat info{};
-        if(fstat(fd_,&info)||info.st_size<off_t(offset_)||info.st_size>65536)throw std::runtime_error("Live input truncated or exceeds 64KiB");
+        if(fstat(fd_,&info)||info.st_size<off_t(offset_)||info.st_size>8*1024*1024)throw std::runtime_error("Live input truncated or exceeds 8MiB");
         char bytes[4096];ssize_t count=pread(fd_,bytes,sizeof(bytes),off_t(offset_));
         if(count<0){if(errno==EINTR)return {};throw std::runtime_error("Cannot read live input");}
         offset_+=size_t(count);pending_.append(bytes,size_t(count));
         std::vector<std::string> lines;
         while(lines.size()<32){auto end=pending_.find('\n');if(end==std::string::npos)break;
-            if(end>1024||++commands_>1024)throw std::invalid_argument("Live input command bound");
+            if(end>1024||++commands_>100000)throw std::invalid_argument("Live input command bound");
             lines.push_back(pending_.substr(0,end));pending_.erase(0,end+1);
         }
         if(pending_.find('\n')==std::string::npos&&pending_.size()>1024)throw std::invalid_argument("Live input line exceeds 1KiB");

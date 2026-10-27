@@ -9,9 +9,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -23,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v4"
 )
 
 const maxAPK = 256 << 20
@@ -39,7 +36,7 @@ type server struct {
 	frame    string
 	input    string
 	commands int
-	clients  map[*websocket.Conn]chan event
+	clients  map[*webrtc.DataChannel]struct{}
 }
 
 type command struct {
@@ -47,67 +44,40 @@ type command struct {
 	X      float64 `json:"x"`
 	Y      float64 `json:"y"`
 	Text   string  `json:"text"`
+	Key    string  `json:"key"`
+}
+
+func sdlKey(code string) (string, bool) {
+	if len(code) == 4 && strings.HasPrefix(code, "Key") && code[3] >= 'A' && code[3] <= 'Z' {
+		return code[3:], true
+	}
+	if len(code) == 6 && strings.HasPrefix(code, "Digit") && code[5] >= '0' && code[5] <= '9' {
+		return code[5:], true
+	}
+	keys := map[string]string{
+		"Escape": "Escape", "Enter": "Return", "NumpadEnter": "Keypad Enter", "Backspace": "Backspace", "Delete": "Delete", "Space": "Space", "Tab": "Tab",
+		"ArrowLeft": "Left", "ArrowRight": "Right", "ArrowUp": "Up", "ArrowDown": "Down", "Home": "Home", "End": "End", "PageUp": "PageUp", "PageDown": "PageDown",
+		"ShiftLeft": "Left Shift", "ShiftRight": "Right Shift", "ControlLeft": "Left Ctrl", "ControlRight": "Right Ctrl", "AltLeft": "Left Alt", "AltRight": "Right Alt",
+		"Minus": "-", "Equal": "=", "BracketLeft": "[", "BracketRight": "]", "Backslash": "\\", "Semicolon": ";", "Quote": "'", "Comma": ",", "Period": ".", "Slash": "/", "Backquote": "`",
+	}
+	name, ok := keys[code]
+	return name, ok
 }
 
 func (s *server) broadcast(e event) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, ch := range s.clients {
-		select {
-		case ch <- e:
-		default:
-		}
-	}
-}
-
-func (s *server) ws(w http.ResponseWriter, r *http.Request) {
-	// The page and socket must have the same browser origin.
-	if r.Header.Get("Origin") != "http://"+r.Host && r.Header.Get("Origin") != "https://"+r.Host {
-		http.Error(w, "invalid origin", http.StatusForbidden)
-		return
-	}
-	upgrader := websocket.Upgrader{}
-	c, err := upgrader.Upgrade(w, r, nil)
+	data, err := json.Marshal(e)
 	if err != nil {
 		return
 	}
-	ch := make(chan event, 128)
 	s.mu.Lock()
-	s.clients[c] = ch
-	busy := s.running
-	s.mu.Unlock()
-	if busy {
-		ch <- event{"status", "An APK is running"}
-	} else {
-		ch <- event{"status", "Ready"}
+	clients := make([]*webrtc.DataChannel, 0, len(s.clients))
+	for ch := range s.clients {
+		clients = append(clients, ch)
 	}
-	defer func() { s.mu.Lock(); delete(s.clients, c); s.mu.Unlock(); c.Close() }()
-	go func() {
-		defer c.Close()
-		c.SetReadLimit(1024)
-		for {
-			var cmd command
-			if c.ReadJSON(&cmd) != nil {
-				return
-			}
-			if err := s.sendInput(cmd); err != nil {
-				log.Printf("input rejected: %v", err)
-			}
-		}
-	}()
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for {
-		c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		select {
-		case e := <-ch:
-			if c.WriteJSON(e) != nil {
-				return
-			}
-		case <-ticker.C:
-			if c.WriteMessage(websocket.PingMessage, nil) != nil {
-				return
-			}
+	s.mu.Unlock()
+	for _, ch := range clients {
+		if err := ch.SendText(string(data)); err != nil {
+			log.Printf("data channel send: %v", err)
 		}
 	}
 }
@@ -129,6 +99,12 @@ func (s *server) sendInput(cmd command) error {
 		line = "text " + strconv.Quote(cmd.Text) + "\n"
 	case "enter":
 		line = "keydown \"Return\"\nkeyup \"Return\"\n"
+	case "keydown", "keyup":
+		key, ok := sdlKey(cmd.Key)
+		if !ok {
+			return errors.New("unsupported key")
+		}
+		line = cmd.Action + " " + strconv.Quote(key) + "\n"
 	case "portrait":
 		line = "resize 360 640\n"
 	case "landscape":
@@ -143,7 +119,7 @@ func (s *server) sendInput(cmd command) error {
 	if !s.running || s.input == "" {
 		return errors.New("no running app")
 	}
-	if s.commands >= 900 {
+	if s.commands >= 90000 {
 		return errors.New("input command limit reached")
 	}
 	file, err := os.OpenFile(s.input, os.O_APPEND|os.O_WRONLY, 0600)
@@ -155,7 +131,7 @@ func (s *server) sendInput(cmd command) error {
 	if err != nil {
 		return err
 	}
-	if info.Size()+int64(len(line)) > 60000 {
+	if info.Size()+int64(len(line)) > 7*1024*1024 {
 		return errors.New("input file limit reached")
 	}
 	if _, err := io.WriteString(file, line); err != nil {
@@ -163,56 +139,6 @@ func (s *server) sendInput(cmd command) error {
 	}
 	s.commands += strings.Count(line, "\n")
 	return nil
-}
-
-func readPPM(path string) (image.Image, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	reader := bufio.NewReader(file)
-	var magic string
-	var width, height, max int
-	if _, err := fmt.Fscan(reader, &magic, &width, &height, &max); err != nil {
-		return nil, err
-	}
-	if magic != "P6" || width < 1 || height < 1 || width > 8192 || height > 8192 || width*height > 16*1024*1024 || max != 255 {
-		return nil, errors.New("invalid frame")
-	}
-	separator, err := reader.ReadByte()
-	if err != nil || separator != '\n' {
-		return nil, errors.New("invalid frame header")
-	}
-	pixels := make([]byte, width*height*3)
-	if _, err := io.ReadFull(reader, pixels); err != nil {
-		return nil, err
-	}
-	result := image.NewRGBA(image.Rect(0, 0, width, height))
-	for i := 0; i < width*height; i++ {
-		result.Set(i%width, i/width, color.RGBA{pixels[i*3], pixels[i*3+1], pixels[i*3+2], 255})
-	}
-	return result, nil
-}
-
-func (s *server) snapshot(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	path := s.frame
-	s.mu.Unlock()
-	if path == "" {
-		http.Error(w, "no frame yet", http.StatusServiceUnavailable)
-		return
-	}
-	frame, err := readPPM(path)
-	if err != nil {
-		http.Error(w, "no frame yet", http.StatusServiceUnavailable)
-		return
-	}
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "no-store")
-	if err := png.Encode(w, frame); err != nil {
-		log.Printf("frame encoding: %v", err)
-	}
 }
 
 func validAPK(path string) error {
@@ -389,7 +315,7 @@ func main() {
 	if err := os.MkdirAll(filepath.Join(abs, "build"), 0700); err != nil {
 		log.Fatal(err)
 	}
-	s := &server{root: abs, clients: make(map[*websocket.Conn]chan event)}
+	s := &server{root: abs, clients: make(map[*webrtc.DataChannel]struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -400,8 +326,7 @@ func main() {
 		w.Header().Set("Cache-Control", "no-store")
 		io.WriteString(w, page)
 	})
-	mux.HandleFunc("GET /ws", s.ws)
-	mux.HandleFunc("GET /frame.png", s.snapshot)
+	mux.HandleFunc("POST /webrtc", s.webrtcAnswer)
 	mux.HandleFunc("POST /upload", s.upload)
 	log.Printf("Shiraz web server listening at http://%s", *listen)
 	log.Fatal(http.ListenAndServe(*listen, mux))
