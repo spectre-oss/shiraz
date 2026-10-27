@@ -414,6 +414,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                'XDG_CACHE_HOME': str(work / 'cache'), 'BOOTCLASSPATH': boot,
                'LD_LIBRARY_PATH': str(HOST / 'lib64') + ':' + str(ROOT / '.local/lib') + ':' + str(ROOT / 'build') + ':' + str(app_lib),
                'BIONIC_LD_LIBRARY_PATH': str(app_lib),
+               'SHIRAZ_FONT_DIR': str(ROOT / '.local/share/shiraz/fonts'),
                'XDG_DATA_DIRS': str(ROOT / '.local/share') + ':/usr/share'}
         profile_values = validate_device_profile(device_profile) if device_profile else {}
         env['SHIRAZ_ANDROID_DISPLAY_ID'] = profile_values.get('build.display', 'Shiraz ' + (ROOT / 'VERSION').read_text(encoding='ascii').strip())
