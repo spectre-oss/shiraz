@@ -75,7 +75,7 @@ def main():
         write(app / "bin/ffmpeg", '#!/bin/sh\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/.local/system-codecs/usr/lib:/opt/shiraz/.local/lib:/opt/shiraz/python/lib /opt/shiraz/.local/system-codecs/usr/bin/ffmpeg "$@"\n', 0o755)
     write(app / "config/fonts.conf", '<?xml version="1.0"?>\n<fontconfig>\n  <dir>/opt/shiraz/.local/share/shiraz/fonts</dir>\n  <cachedir>/opt/shiraz/build/fontconfig-cache</cachedir>\n</fontconfig>\n')
     ffmpeg_path = "/usr/bin/ffmpeg" if args.system_ffmpeg else "/opt/shiraz/bin/ffmpeg"
-    write(stage / "usr/bin/shiraz-web", f'#!/bin/sh\nexport PATH=/opt/shiraz/bin:/usr/bin:/bin\nexport SHIRAZ_RUNTIME_LOADER=/opt/shiraz/python/lib/ld-linux-x86-64.so.2\nexport SHIRAZ_JAVA_TRUST_STORE=/opt/shiraz/python/cacerts\nexport SHIRAZ_FFMPEG={ffmpeg_path}\nexport FONTCONFIG_FILE=/opt/shiraz/config/fonts.conf\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/python/lib /opt/shiraz/build/shiraz-web -root /opt/shiraz "$@"\n', 0o755)
+    write(stage / "usr/bin/shiraz-web", f'#!/bin/sh\nexport PATH=/opt/shiraz/bin:/usr/bin:/bin\nexport SHIRAZ_RUNTIME_LOADER=/opt/shiraz/python/lib/ld-linux-x86-64.so.2\nexport SHIRAZ_JAVA_TRUST_STORE=/opt/shiraz/python/cacerts\nexport SHIRAZ_FFMPEG={ffmpeg_path}\nexport FONTCONFIG_FILE=/opt/shiraz/config/fonts.conf\nexport XDG_STATE_HOME=${{XDG_STATE_HOME:-/opt/shiraz/data/state}}\nexec /opt/shiraz/python/lib/ld-linux-x86-64.so.2 --library-path /opt/shiraz/python/lib /opt/shiraz/build/shiraz-web -root /opt/shiraz "$@"\n', 0o755)
     write(stage / "lib/systemd/system/shiraz-web.service", """[Unit]
 Description=Shiraz APK web portal
 After=network.target
@@ -85,6 +85,7 @@ Type=simple
 User=shiraz
 Group=shiraz
 WorkingDirectory=/opt/shiraz
+Environment=XDG_STATE_HOME=/opt/shiraz/data/state
 ExecStart=/usr/bin/shiraz-web -listen 127.0.0.1:8080
 Restart=on-failure
 RestartSec=3
@@ -111,7 +112,7 @@ if ! getent passwd shiraz >/dev/null; then
   adduser --system --group --home /opt/shiraz --no-create-home shiraz
 fi
 chown shiraz:shiraz /opt/shiraz /opt/shiraz/build
-install -d -o shiraz -g shiraz -m 0700 /opt/shiraz/data /opt/shiraz/build/runs
+install -d -o shiraz -g shiraz -m 0700 /opt/shiraz/data /opt/shiraz/data/state /opt/shiraz/build/runs
 if [ -d /run/systemd/system ]; then
   systemctl daemon-reload
   systemctl enable --now shiraz-web.service

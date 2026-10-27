@@ -14,7 +14,8 @@ The package creates and starts `shiraz-web.service`. Open
 <http://127.0.0.1:8080/> on the server. Use `systemctl status shiraz-web` to
 check the service. The service uses a dedicated `shiraz` user and listens only
 on localhost. APK uploads and saved app data are not included in the package;
-app data persists under `/opt/shiraz/data` after removal.
+app data persists under `/opt/shiraz/data` after removal. Runtime audit state
+is stored in the service-owned `/opt/shiraz/data/state`.
 The Live logs tab streams ART output over WebRTC and loads the complete saved
 stdout/stderr files after a run ends or the page reconnects.
 

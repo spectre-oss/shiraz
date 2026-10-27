@@ -148,6 +148,9 @@ jobs:
               apt-get update -qq
               apt-get install -y -qq --no-install-recommends curl /packages/'"$(basename "$deb")"' >/dev/null
               dpkg -s shiraz-web | grep -q "^Status: install ok installed$"
+              test "$(stat -c %U:%G:%a /opt/shiraz/data/state)" = "shiraz:shiraz:700"
+              grep -Fq "Environment=XDG_STATE_HOME=/opt/shiraz/data/state" /lib/systemd/system/shiraz-web.service
+              su -s /bin/sh shiraz -c "test -w /opt/shiraz/data/state && touch /opt/shiraz/data/state/.ci-write-test"
               loader=/opt/shiraz/python/lib/ld-linux-x86-64.so.2
               art=/opt/shiraz/context/art_standalone/out/host/linux-x86
               runtime_libs="$art/lib64:/opt/shiraz/.local/lib:/opt/shiraz/build:/opt/shiraz/python/lib"
