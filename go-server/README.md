@@ -7,7 +7,7 @@ clean Debian 12 (Bookworm) and Debian 13 (Trixie) containers. It bundles the
 Shiraz native runtime, ART, Python, fonts, and media libraries. Install it with:
 
 ```sh
-sudo apt install ./shiraz-web_0.332.14-1_amd64.deb
+sudo apt install ./shiraz-web_0.332.14-3_amd64.deb
 ```
 
 The package creates and starts `shiraz-web.service`. Open
@@ -15,6 +15,8 @@ The package creates and starts `shiraz-web.service`. Open
 check the service. The service uses a dedicated `shiraz` user and listens only
 on localhost. APK uploads and saved app data are not included in the package;
 app data persists under `/opt/shiraz/data` after removal.
+The Live logs tab streams ART output over WebRTC and loads the complete saved
+stdout/stderr files after a run ends or the page reconnects.
 
 The upload endpoint has no authentication. Remote browser access needs an
 authenticated HTTPS entry point and WebRTC network configuration appropriate

@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -32,17 +33,19 @@ type event struct {
 	Message string `json:"message"`
 }
 type server struct {
-	root     string
-	ctx      context.Context
-	runs     sync.WaitGroup
-	mu       sync.Mutex
-	running  bool
-	stopping bool
-	appName  string
-	frame    string
-	input    string
-	commands int
-	clients  map[*webrtc.DataChannel]struct{}
+	root             string
+	ctx              context.Context
+	runs             sync.WaitGroup
+	mu               sync.Mutex
+	running          bool
+	stopping         bool
+	appName          string
+	frame            string
+	input            string
+	commands         int
+	clients          map[*webrtc.DataChannel]struct{}
+	latestLogDir     string
+	latestRunStarted time.Time
 }
 
 type command struct {
@@ -217,7 +220,8 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	n, copyErr := io.Copy(out, io.LimitReader(file, maxAPK+1))
+	hash := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(out, hash), io.LimitReader(file, maxAPK+1))
 	closeErr := out.Close()
 	if copyErr != nil || closeErr != nil || n > maxAPK || n == 0 {
 		os.RemoveAll(dir)
@@ -242,6 +246,8 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.appName = filepath.Base(file.FileName())
+	s.latestLogDir = filepath.Join(s.root, "build", "runs", fmt.Sprintf("%x", hash.Sum(nil)))
+	s.latestRunStarted = time.Now()
 	s.runs.Add(1)
 	s.mu.Unlock()
 	accepted = true
@@ -250,6 +256,33 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(event{"status", "APK accepted"})
+}
+
+func (s *server) savedLogs(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	dir, started := s.latestLogDir, s.latestRunStarted
+	s.mu.Unlock()
+	if dir == "" {
+		http.Error(w, "no run logs yet", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	for _, name := range []string{"stdout.log", "stderr.log"} {
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err != nil || info.ModTime().Before(started) {
+			continue
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(w, "[%s]\n", name)
+		_, _ = io.Copy(w, file)
+		file.Close()
+		fmt.Fprint(w, "\n")
+	}
 }
 
 func (s *server) run(dir, path string) {
@@ -356,6 +389,7 @@ func main() {
 	})
 	mux.HandleFunc("POST /webrtc", s.webrtcAnswer)
 	mux.HandleFunc("POST /upload", s.upload)
+	mux.HandleFunc("GET /logs", s.savedLogs)
 	httpServer := &http.Server{Addr: *listen, Handler: mux}
 	done := make(chan struct{})
 	go func() {

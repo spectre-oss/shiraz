@@ -34,12 +34,15 @@ def main():
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--private-python", type=Path, required=True)
+    parser.add_argument("--revision", type=int, default=1)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     source = args.source_root.resolve()
     runtime = args.runtime_root.resolve()
     python = args.private_python.resolve()
     version = (source / "VERSION").read_text(encoding="ascii").strip()
+    if args.revision < 1:
+        parser.error("revision must be positive")
     stage = args.output.parent.resolve() / "shiraz-deb-stage"
     shutil.rmtree(stage, ignore_errors=True)
     app = stage / "opt/shiraz"
@@ -86,7 +89,7 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 """)
     write(stage / "DEBIAN/control", f"""Package: shiraz-web
-Version: {version}-1
+Version: {version}-{args.revision}
 Section: misc
 Priority: optional
 Architecture: amd64

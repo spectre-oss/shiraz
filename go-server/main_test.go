@@ -16,6 +16,23 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+func TestSavedLogsReturnsCompleteRuntimeFiles(t *testing.T) {
+	dir := t.TempDir()
+	stdout := strings.Repeat("runtime line\n", 2000)
+	stderr := "warning from ART\n"
+	for name, content := range map[string]string{"stdout.log": stdout, "stderr.log": stderr} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &server{latestLogDir: dir, latestRunStarted: time.Now().Add(-time.Minute)}
+	w := httptest.NewRecorder()
+	s.savedLogs(w, httptest.NewRequest(http.MethodGet, "/logs", nil))
+	if w.Code != http.StatusOK || w.Body.String() != "[stdout.log]\n"+stdout+"\n[stderr.log]\n"+stderr+"\n" {
+		t.Fatalf("saved logs were incomplete: status=%d length=%d", w.Code, w.Body.Len())
+	}
+}
+
 func TestValidAPK(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.apk")
 	file, err := os.Create(path)

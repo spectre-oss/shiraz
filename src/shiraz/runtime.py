@@ -9,12 +9,51 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
+import threading
 import time
 import tempfile
 import zipfile
 from .architecture import native_abi, supports_native_abis
 from .apk import FormatError
 from .native_payload import extract_native
+
+
+def run_with_live_logs(command, cwd, env, work, timeout):
+    """Keep the diagnostic files and forward ART output to the parent process."""
+    with (work / 'stdout.log').open('wb') as stdout_log, (work / 'stderr.log').open('wb') as stderr_log:
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def pump(pipe, log_file, destination):
+            for chunk in iter(lambda: pipe.read1(8192), b''):
+                log_file.write(chunk)
+                log_file.flush()
+                try:
+                    if hasattr(destination, 'buffer'):
+                        destination.buffer.write(chunk)
+                        destination.buffer.flush()
+                    else:
+                        destination.write(chunk.decode('utf-8', errors='replace'))
+                        destination.flush()
+                except (BrokenPipeError, OSError):
+                    pass
+            pipe.close()
+
+        threads = [threading.Thread(target=pump, args=(process.stdout, stdout_log, sys.stdout), daemon=True),
+                   threading.Thread(target=pump, args=(process.stderr, stderr_log, sys.stderr), daemon=True)]
+        for thread in threads:
+            thread.start()
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            for thread in threads:
+                thread.join()
+        return subprocess.CompletedProcess(command, returncode)
 
 ROOT = Path(__file__).resolve().parents[2]
 HOST = ROOT / 'context/art_standalone/out/host/linux-x86'
@@ -436,12 +475,10 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         if loader := os.environ.get('SHIRAZ_RUNTIME_LOADER'):
             command = [loader, '--library-path', env['LD_LIBRARY_PATH'], *command]
         print(f'Launching experimental activity {activity}; logs: {work.relative_to(ROOT)}', flush=True)
-        with (work / 'stdout.log').open('w') as stdout, (work / 'stderr.log').open('w') as stderr:
-            try:
-                result = subprocess.run(command, cwd=data, env=env, stdout=stdout, stderr=stderr,
-                                        stdin=subprocess.DEVNULL, timeout=timeout)
-            except subprocess.TimeoutExpired:
-                raise FormatError(f'Activity timed out; inspect {work.relative_to(ROOT)}/stderr.log') from None
+        try:
+            result = run_with_live_logs(command, data, env, work, timeout)
+        except subprocess.TimeoutExpired:
+            raise FormatError(f'Activity timed out; inspect {work.relative_to(ROOT)}/stderr.log') from None
         current = hashlib.sha256()
         with apk.open('rb') as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b''):

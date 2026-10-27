@@ -1,14 +1,47 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from copy import deepcopy
+import io
+import os
 from pathlib import Path
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 from shiraz.apk import FormatError
-from shiraz.runtime import art_execution_options, ROOT, local_path, run_activity, missing_framework_class, missing_framework_method, properties_text, application_metadata, package_timestamps
+from shiraz.runtime import art_execution_options, ROOT, local_path, run_activity, run_with_live_logs, missing_framework_class, missing_framework_method, properties_text, application_metadata, package_timestamps
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_art_logs_stream_live_and_remain_in_files(self):
+        class Sink:
+            def __init__(self):
+                self.buffer = io.BytesIO()
+
+        stdout, stderr = Sink(), Sink()
+        script = ('import sys,time; print("out one",flush=True); '
+                  'print("err one",file=sys.stderr,flush=True); time.sleep(.3); '
+                  'print("out two",flush=True); print("err two",file=sys.stderr,flush=True)')
+        with tempfile.TemporaryDirectory() as folder:
+            work = Path(folder)
+            result = []
+            with patch('shiraz.runtime.sys.stdout', stdout), patch('shiraz.runtime.sys.stderr', stderr):
+                thread = threading.Thread(target=lambda: result.append(run_with_live_logs(
+                    [sys.executable, '-u', '-c', script], work, os.environ.copy(), work, 5)))
+                thread.start()
+                deadline = time.monotonic() + 3
+                while b'out one\n' not in stdout.buffer.getvalue() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertIn(b'out one\n', stdout.buffer.getvalue())
+                self.assertTrue(thread.is_alive())
+                thread.join(5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result[0].returncode, 0)
+            self.assertEqual(stdout.buffer.getvalue(), (work / 'stdout.log').read_bytes())
+            self.assertEqual(stderr.buffer.getvalue(), (work / 'stderr.log').read_bytes())
+            self.assertIn(b'err two\n', stderr.buffer.getvalue())
+
     def test_receiver_and_provider_intent_metadata(self):
         from shiraz.manifest import inspect_manifest
         manifest = inspect_manifest(b'''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="sample.app"><application><meta-data android:name="app.flag" android:value="true"/>
