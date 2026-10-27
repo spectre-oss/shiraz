@@ -38,3 +38,4 @@ __pycache__/
 /secrets/
 /credentials/
 /go-wasm/fonts/Manrope-wght.ttf
+/go-server/build/
