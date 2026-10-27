@@ -14,10 +14,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -31,8 +33,11 @@ type event struct {
 }
 type server struct {
 	root     string
+	ctx      context.Context
+	runs     sync.WaitGroup
 	mu       sync.Mutex
 	running  bool
+	stopping bool
 	frame    string
 	input    string
 	commands int
@@ -168,7 +173,7 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	if s.running {
+	if s.running || s.stopping {
 		s.mu.Unlock()
 		http.Error(w, "an APK is already running", http.StatusConflict)
 		return
@@ -228,6 +233,15 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid APK: "+err.Error(), 400)
 		return
 	}
+	s.mu.Lock()
+	if s.stopping {
+		s.mu.Unlock()
+		os.RemoveAll(dir)
+		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	s.runs.Add(1)
+	s.mu.Unlock()
 	accepted = true
 	go s.run(dir, path)
 	w.Header().Set("Content-Type", "application/json")
@@ -243,9 +257,14 @@ func (s *server) run(dir, path string) {
 		s.frame = ""
 		s.mu.Unlock()
 		os.RemoveAll(dir)
+		s.runs.Done()
 	}()
 	s.broadcast(event{"status", "Starting Shiraz"})
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	base := s.ctx
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(base, 30*time.Minute)
 	defer cancel()
 	input := filepath.Join(dir, "input.txt")
 	if err := os.WriteFile(input, nil, 0600); err != nil {
@@ -259,6 +278,8 @@ func (s *server) run(dir, path string) {
 	s.commands = 0
 	s.mu.Unlock()
 	cmd := exec.CommandContext(ctx, "python3", "-m", "shiraz", "run", path)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.Dir = s.root
 	cmd.Env = append(os.Environ(), "PYTHONPATH="+filepath.Join(s.root, "src"), "PYTHONUNBUFFERED=1", "SDL_VIDEODRIVER=dummy", "SDL_RENDER_DRIVER=software", "SHIRAZ_PRESENT_SNAPSHOT="+frame, "SHIRAZ_LIVE_INPUT="+input)
 	stdout, err := cmd.StdoutPipe()
@@ -315,7 +336,9 @@ func main() {
 	if err := os.MkdirAll(filepath.Join(abs, "build"), 0700); err != nil {
 		log.Fatal(err)
 	}
-	s := &server{root: abs, clients: make(map[*webrtc.DataChannel]struct{})}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	s := &server{root: abs, ctx: ctx, clients: make(map[*webrtc.DataChannel]struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -328,6 +351,25 @@ func main() {
 	})
 	mux.HandleFunc("POST /webrtc", s.webrtcAnswer)
 	mux.HandleFunc("POST /upload", s.upload)
+	httpServer := &http.Server{Addr: *listen, Handler: mux}
+	done := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		s.mu.Lock()
+		s.stopping = true
+		s.mu.Unlock()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(shutdownCtx)
+		s.runs.Wait()
+		close(done)
+	}()
 	log.Printf("Shiraz web server listening at http://%s", *listen)
-	log.Fatal(http.ListenAndServe(*listen, mux))
+	err = httpServer.ListenAndServe()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		stop()
+		<-done
+		log.Fatal(err)
+	}
+	<-done
 }
