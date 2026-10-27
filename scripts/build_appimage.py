@@ -138,6 +138,10 @@ class Libraries:
         self.by_digest = {}
         roots = [str(ROOT/'build'), str(HOST/'lib64'), str(ROOT/'.local/lib')]
         roots += [p for p in os.environ.get('SHIRAZ_SYSTEM_LIBRARY_PATH', '').split(':') if p]
+        # Keep the Ubuntu runtime ahead of Nix RUNPATHs while resolving the
+        # explicitly selected Nix libunwind and its ordinary dependencies.
+        multiarch = 'aarch64-linux-gnu' if platform.machine() == 'aarch64' else 'x86_64-linux-gnu'
+        roots.append('/usr/lib/' + multiarch)
         self.env = dict(os.environ, LD_LIBRARY_PATH=':'.join(roots))
 
     def add(self, source, name=None):
@@ -223,6 +227,29 @@ def copy_file(source, dest):
     shutil.copy2(source, dest)
 
 
+def validate_unwind_abi(directory):
+    """Catch an older bundled libunwind before shipping an AppImage."""
+    bridge = directory / 'libdl_bio.so.0'
+    unwind = directory / 'libunwind.so.8'
+    if not bridge.is_file() or not unwind.is_file():
+        raise RuntimeError('Packaged bionic bridge or libunwind is missing')
+
+    def symbols(path):
+        output = subprocess.check_output(['readelf', '-W', '--dyn-syms', str(path)], text=True)
+        found = {}
+        for line in output.splitlines():
+            parts = line.split()
+            if len(parts) >= 8 and parts[7].startswith('_UL'):
+                found[parts[7].split('@', 1)[0]] = parts[6]
+        return found
+
+    needed = {name for name, section in symbols(bridge).items() if section == 'UND'}
+    exported = {name for name, section in symbols(unwind).items() if section != 'UND'}
+    missing = needed - exported
+    if missing:
+        raise RuntimeError('Packaged libunwind lacks bionic bridge symbols: ' + ', '.join(sorted(missing)))
+
+
 def notices(share, libraries):
     dest = share/'licenses'
     shutil.copytree(ROOT/'LICENSES', dest)
@@ -300,6 +327,12 @@ def build(args):
     copy_file(ROOT/'packaging/AppRun', appdir/'AppRun')
     (appdir/'AppRun').chmod(0o755)
     libraries = Libraries(appdir)
+    # The bridge is compiled with the flake's libunwind headers. Select the
+    # matching shared library before transitive scanning can pick Ubuntu's
+    # older libunwind with the same SONAME.
+    unwind_override = os.environ.get('SHIRAZ_LIBUNWIND_SO8')
+    if unwind_override:
+        libraries.add(Path(unwind_override), 'libunwind.so.8')
     libraries.scan(binaries/'shiraz-app')
     for name in RUNTIME_LIBS:
         libraries.add(ROOT/'build'/('lib'+name+'.so'))
@@ -314,6 +347,7 @@ def build(args):
                 libraries.add(path)
     for name in DISPLAY_LIBS:
         libraries.system(name)
+    validate_unwind_abi(libraries.directory)
     for name in ('libnss_dns.so.2', 'libnss_files.so.2'):
         if (Path('/usr/lib')/name).is_file():
             libraries.add(Path('/usr/lib')/name)

@@ -4,6 +4,7 @@ import android.content.ContentValues;
 import android.database.*;
 import dalvik.system.BlockGuard;
 import dalvik.system.CloseGuard;
+import android.util.Pair;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -142,6 +143,14 @@ public final class SQLiteDatabase extends SQLiteClosable {
     public boolean isOpen() { return handle.get() != 0; }
     public boolean isReadOnly() { live(); return readOnly; }
     public String getPath() { return path; }
+    public List<Pair<String, String>> getAttachedDbs() {
+        if (!isOpen()) return null;
+        List<Pair<String, String>> result = new ArrayList<Pair<String, String>>();
+        try (Cursor cursor = rawQuery("PRAGMA database_list", null)) {
+            while (cursor.moveToNext()) result.add(Pair.create(cursor.getString(1), cursor.getString(2)));
+        }
+        return result;
+    }
     public void setForeignKeyConstraintsEnabled(boolean value) { if (inTransaction()) throw new IllegalStateException("Foreign keys cannot change in a transaction"); execSQL("PRAGMA foreign_keys=" + (value ? "ON" : "OFF")); }
     public boolean enableWriteAheadLogging() { if (isReadOnly() || path.equals(":memory:")) return false; if (inTransaction()) throw new IllegalStateException("WAL cannot change in a transaction"); try (SQLiteStatement statement = compileStatement("PRAGMA journal_mode=WAL")) { return "wal".equalsIgnoreCase(statement.simpleQueryForString()); } }
     public void disableWriteAheadLogging() { if (inTransaction()) throw new IllegalStateException("WAL cannot change in a transaction"); try (SQLiteStatement statement = compileStatement("PRAGMA journal_mode=DELETE")) { if (!"delete".equalsIgnoreCase(statement.simpleQueryForString()) && !path.equals(":memory:")) throw new SQLiteException("Cannot disable WAL"); } }
