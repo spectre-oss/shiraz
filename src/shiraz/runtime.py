@@ -7,11 +7,14 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import subprocess
 import time
 import tempfile
+import zipfile
 from .architecture import native_abi, supports_native_abis
 from .apk import FormatError
+from .native_payload import extract_native
 
 ROOT = Path(__file__).resolve().parents[2]
 HOST = ROOT / 'context/art_standalone/out/host/linux-x86'
@@ -393,6 +396,15 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         (work / 'result.json').unlink(missing_ok=True)
         for child in ('cache', 'tmp', 'home', 'android-data/dalvik-cache'):
             (work / child).mkdir(parents=True, exist_ok=True)
+        app_lib = work / 'app_lib'
+        if app_lib.exists():
+            shutil.rmtree(app_lib)
+        if report['native_abis']:
+            try:
+                libraries = extract_native(apk, app_lib, 'x86_64' if native_abi() == 'x86_64' else 'aarch64')
+            except (ValueError, OSError, zipfile.BadZipFile) as exc:
+                raise FormatError('Cannot prepare APK native libraries: ' + str(exc)) from exc
+            print(f'SHIRAZ_NATIVE_LIBRARIES installed={len(libraries)}', flush=True)
         metadata = work / 'application.properties'
         facts = application_metadata(manifest, apk, data)
         facts.update(package_timestamps(data, report['apk_sha256']))
@@ -400,7 +412,8 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         boot = ':'.join(str(HOST / 'framework' / name) for name in JARS)
         env = {**os.environ, 'ANDROID_ROOT': str(HOST), 'ANDROID_DATA': str(work / 'android-data'),
                'XDG_CACHE_HOME': str(work / 'cache'), 'BOOTCLASSPATH': boot,
-               'LD_LIBRARY_PATH': str(HOST / 'lib64') + ':' + str(ROOT / '.local/lib') + ':' + str(ROOT / 'build'),
+               'LD_LIBRARY_PATH': str(HOST / 'lib64') + ':' + str(ROOT / '.local/lib') + ':' + str(ROOT / 'build') + ':' + str(app_lib),
+               'BIONIC_LD_LIBRARY_PATH': str(app_lib),
                'XDG_DATA_DIRS': str(ROOT / '.local/share') + ':/usr/share'}
         profile_values = validate_device_profile(device_profile) if device_profile else {}
         env['SHIRAZ_ANDROID_DISPLAY_ID'] = profile_values.get('build.display', 'Shiraz ' + (ROOT / 'VERSION').read_text(encoding='ascii').strip())
@@ -409,7 +422,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         env['LD_PRELOAD'] = str(compat) + (':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
                    '-Xcompiler:' + str(HOST / 'bin/dex2oat'), '-Dlog.tag=' + log_level,
-                   '-Djava.library.path=' + ':'.join((str(HOST / 'lib64'), str(ROOT / 'build'), str(data / 'app_lib'))),
+                   '-Djava.library.path=' + ':'.join((str(HOST / 'lib64'), str(ROOT / 'build'), str(app_lib))),
                    '-Dshiraz.frameworkResources=' + str(framework_resources),
                    *(['-Dshiraz.deviceProfile=' + str(device_profile)] if device_profile else []),
                    '-Dshiraz.speechData=' + str(ROOT / '.local/share'),
