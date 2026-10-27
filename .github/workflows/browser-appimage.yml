@@ -60,6 +60,12 @@ jobs:
             libxkbcommon-dev libwayland-dev meson ninja-build openjdk-17-jdk \
             pkg-config python3 python3-venv ripgrep weston xz-utils zlib1g-dev
           mkdir -p "$TMPDIR"
+      - uses: actions/cache@v4
+        with:
+          path: .local/share/shiraz/fonts
+          key: shiraz-fonts-${{ hashFiles('scripts/bootstrap_fonts.py') }}
+      - name: Prepare verified fonts
+        run: python3 scripts/bootstrap_fonts.py
       - name: Build fixture and runtime
         run: |
           nix develop -c bash -euo pipefail -c '

@@ -6,6 +6,28 @@ import android.view.View;
 
 /** First lifecycle/content subset. Window management and the broader styled-widget framework remain incomplete. */
 public class Activity extends ContextThemeWrapper implements android.view.Window.Callback,android.view.View.OnCreateContextMenuListener,android.content.ComponentCallbacks2,android.view.KeyEvent.Callback,android.view.LayoutInflater.Factory2 {
+    private final java.util.IdentityHashMap<android.content.ServiceConnection,Boolean> serviceBindings=new java.util.IdentityHashMap<android.content.ServiceConnection,Boolean>();
+    private final java.util.IdentityHashMap<android.content.ServiceConnection,Boolean> releasedServiceBindings=new java.util.IdentityHashMap<android.content.ServiceConnection,Boolean>();
+    @Override public boolean bindService(android.content.Intent intent,android.content.ServiceConnection connection,int flags){
+        boolean bound=super.bindService(intent,connection,flags);
+        releasedServiceBindings.remove(connection);
+        serviceBindings.put(connection,Boolean.TRUE);
+        return bound;
+    }
+    @Override public void unbindService(android.content.ServiceConnection connection){
+        if(releasedServiceBindings.remove(connection)!=null)return;
+        super.unbindService(connection);
+        serviceBindings.remove(connection);
+    }
+    /** Android releases connections registered through an Activity when that Activity is destroyed. */
+    public final void shirazReleaseServiceBindings(){
+        android.content.ServiceConnection[] connections=serviceBindings.keySet().toArray(new android.content.ServiceConnection[serviceBindings.size()]);
+        serviceBindings.clear();
+        for(android.content.ServiceConnection connection:connections){
+            releasedServiceBindings.put(connection,Boolean.TRUE);
+            try{super.unbindService(connection);}catch(IllegalArgumentException alreadyUnbound){}
+        }
+    }
     private android.media.session.MediaController mediaController;
     public void setMediaController(android.media.session.MediaController controller){mediaController=controller;}
     public android.media.session.MediaController getMediaController(){return mediaController;}

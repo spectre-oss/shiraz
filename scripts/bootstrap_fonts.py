@@ -6,6 +6,8 @@ import hashlib
 import base64
 import urllib.request
 import urllib.parse
+import urllib.error
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = 'ffebf8c1ee449e544955a7e813c54f9b73848eac'
@@ -35,6 +37,21 @@ FILES = {
     'LICENSE': '0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb',
 }
 
+def download(url, name):
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                return response.read(16 * 1024 * 1024 + 1)
+        except urllib.error.HTTPError as error:
+            if error.code not in (429, 500, 502, 503, 504) or attempt == 4:
+                raise
+        except urllib.error.URLError:
+            if attempt == 4:
+                raise
+        delay = 2 ** attempt
+        print(f'Retrying font download {name} in {delay}s', flush=True)
+        time.sleep(delay)
+
 def main():
     target = ROOT / '.local/share/shiraz/fonts'
     target.mkdir(parents=True, exist_ok=True)
@@ -61,8 +78,7 @@ def main():
             elif android:
                 file = 'NOTICE' if name.endswith('.txt') else name
                 url = f'https://android.googlesource.com/platform/frameworks/base/+/android-4.4_r1/data/fonts/{file}?format=TEXT'
-            with urllib.request.urlopen(url, timeout=60) as response:
-                data = response.read(16 * 1024 * 1024 + 1)
+            data = download(url, name)
             if android:
                 data = base64.b64decode(data, validate=True)
         if hashlib.sha256(data).hexdigest() != digest:

@@ -64,7 +64,7 @@ public final class ActivityLifecycle implements AutoCloseable {
  private void stop(){if(started){started=false;try{activity.shirazMoveFragments(2);}finally{call("onStop");dispatch(4,null);}}}
  private void destroy(){
   Activity old=activity;if(old==null)return;
-  try{try{old.shirazDestroyFragments();}finally{if(created){created=false;old.shirazSetDestroyed();call("onDestroy");dispatch(6,null);}}}finally{old.shirazSetDestroyed();old.shirazReleaseWindow();activity=null;cleanup.detached(old);}
+  try{try{old.shirazDestroyFragments();}finally{if(created){created=false;old.shirazSetDestroyed();call("onDestroy");dispatch(6,null);}}}finally{old.shirazSetDestroyed();try{old.shirazReleaseServiceBindings();}finally{try{old.shirazReleaseWindow();}finally{activity=null;cleanup.detached(old);}}}
  }
  public boolean reconfigure(Configuration configuration,int changes,Runnable apply){return reconfigure(configuration,changes,changes,apply);}
  public boolean reconfigure(Configuration before,Configuration configuration,int changes,Runnable apply){return reconfigure(configuration,changes,policy.significantChanges(before,configuration,changes),apply);}

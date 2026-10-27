@@ -4,9 +4,29 @@ import android.content.*;
 import android.content.pm.ApplicationInfo;
 import android.os.*;
 import shiraz.runtime.HostServices;
+import shiraz.runtime.ActivityLifecycle;
+import shiraz.runtime.ActivityConfigurationPolicy;
 import org.shiraz.fixture.ServiceFixture;
 import java.util.Properties;
 public final class ServiceSmoke {
+ private static final class BoundActivity extends Activity {
+  static ServiceConnection connection;
+  BoundActivity(Context base){attachBaseContext(base);}
+  @Override protected void onCreate(Bundle state){
+   super.onCreate(state);
+   connection=new ServiceConnection(){public void onServiceConnected(ComponentName name,IBinder binder){}public void onServiceDisconnected(ComponentName name){}};
+   check(bindService(new Intent(this,ServiceFixture.Sample.class),connection,Context.BIND_AUTO_CREATE),"Activity service binding");
+  }
+ }
+ private static void activityBindingCleanup(final Context context){
+  Properties facts=new Properties();facts.setProperty("activity.count","1");facts.setProperty("activity.0.name",BoundActivity.class.getName());
+  ActivityLifecycle lifecycle=new ActivityLifecycle(new ActivityLifecycle.Factory(){public Activity create(){return new BoundActivity(context);}},new ActivityLifecycle.Cleanup(){public void detached(Activity activity){}},new ActivityConfigurationPolicy(facts,BoundActivity.class.getName(),27),27);
+  lifecycle.start();due();BoundActivity activity=(BoundActivity)lifecycle.current();ServiceConnection connection=BoundActivity.connection;
+  lifecycle.close();due();
+  try{context.unbindService(connection);throw new AssertionError("Destroyed Activity retained its service binding");}catch(IllegalArgumentException expected){}
+  activity.unbindService(connection);
+  try{activity.unbindService(connection);throw new AssertionError("Late unbind accepted twice");}catch(IllegalArgumentException expected){}
+ }
  public static class NeverForeground extends Service {public IBinder onBind(Intent intent){return null;}public int onStartCommand(Intent intent,int flags,int id){return START_NOT_STICKY;}}
  public static class Foreground extends Service {
   static int starts,destroys;static Foreground instance;
@@ -43,7 +63,7 @@ public final class ServiceSmoke {
  }
  public static void main(String[] args)throws Exception{serviceMetadata();Looper.prepareMainLooper();final HostServices[] host={null};final Application app=new Application();final java.io.File policy=java.io.File.createTempFile("shiraz-service-", ".db");policy.delete();final NotificationManager notifications=NotificationManager.shirazForProcess("Service test",policy);Context context=new ContextWrapper(null){public String getPackageName(){return "org.shiraz.fixture";}public Context getApplicationContext(){return app;}public ApplicationInfo getApplicationInfo(){ApplicationInfo i=new ApplicationInfo();i.targetSdkVersion=35;return i;}protected HostServices shirazServices(){return host[0];}public Object getSystemService(String name){if(NOTIFICATION_SERVICE.equals(name))return notifications;throw new UnsupportedOperationException(name);}};
   Properties metadata=new Properties();String[] names={"Sample","Legacy","Persistent","Disabled","Separate"};metadata.setProperty("service.count","5");for(int i=0;i<names.length;i++)metadata.setProperty("service."+i+".name","org.shiraz.fixture.ServiceFixture$"+names[i]);metadata.setProperty("service.3.enabled","false");metadata.setProperty("service.4.process",":separate");host[0]=new HostServices(context,app,metadata);
-  try{absent(context);ServiceFixture.start(context);due();ServiceFixture.verify(context);app.onLowMemory();check(ServiceFixture.memory==0,"destroyed service callback unregistered");host[0].close();check(ServiceFixture.persistentDestroys==1,"session destroys running service");host[0].close();check(ServiceFixture.persistentDestroys==1,"idempotent close");try{context.startService(new Intent(context,ServiceFixture.Sample.class));throw new AssertionError("closed session restarted");}catch(IllegalStateException expected){}
+  try{absent(context);activityBindingCleanup(context);ServiceFixture.start(context);due();ServiceFixture.verify(context);app.onLowMemory();check(ServiceFixture.memory==0,"destroyed service callback unregistered");host[0].close();check(ServiceFixture.persistentDestroys==1,"session destroys running service");host[0].close();check(ServiceFixture.persistentDestroys==1,"idempotent close");try{context.startService(new Intent(context,ServiceFixture.Sample.class));throw new AssertionError("closed session restarted");}catch(IllegalStateException expected){}
    host[0]=new HostServices(context,app,metadata);Thread worker=new Thread(new Runnable(){public void run(){context.startService(new Intent(context,ServiceFixture.Persistent.class));}});worker.start();try{worker.join();}catch(InterruptedException error){throw new AssertionError(error);}check(ServiceFixture.persistentStarts==1,"worker start queued");due();check(ServiceFixture.persistentStarts==2&&context.stopService(new Intent(context,ServiceFixture.Persistent.class)),"worker delivery/explicit stop");check(ServiceFixture.persistentDestroys==1,"stopService queues destruction");due();check(ServiceFixture.persistentDestroys==2,"explicit stop delivered");host[0].close();
    host[0]=new HostServices(context,app,metadata);for(int i=0;i<64;i++){context.startService(new Intent(context,ServiceFixture.Persistent.class));check(context.stopService(new Intent(context,ServiceFixture.Persistent.class)),"pending stop");}try{context.startService(new Intent(context,ServiceFixture.Persistent.class));throw new AssertionError("instance budget bypassed");}catch(IllegalStateException expected){}host[0].close();due();check(ServiceFixture.persistentStarts==2&&ServiceFixture.persistentDestroys==2,"canceled pending services never created");
    host[0]=new HostServices(context,app,metadata);for(int i=0;i<1024;i++)context.startService(new Intent(context,ServiceFixture.Sample.class));try{context.startService(new Intent(context,ServiceFixture.Sample.class));throw new AssertionError("queue budget bypassed");}catch(IllegalStateException expected){}host[0].close();due();check(ServiceFixture.creates==1&&ServiceFixture.starts==2&&ServiceFixture.destroys==1,"queue cancellation drains without callbacks");
