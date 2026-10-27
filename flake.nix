@@ -19,7 +19,9 @@
             ];
             shellHook = ''
               export PKG_CONFIG_PATH="${pkgs.libunwind.dev}/lib/pkgconfig''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-              export LD_LIBRARY_PATH="${pkgs.libunwind}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+              # Ubuntu provides the AppImage's native libraries. Nix's Java
+              # runtime needs the distro multiarch path to load JNI libraries.
+              export LD_LIBRARY_PATH="${pkgs.libunwind}/lib:/usr/lib/${if system == "aarch64-linux" then "aarch64-linux-gnu" else "x86_64-linux-gnu"}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             '';
           };
         });
