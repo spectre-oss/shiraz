@@ -13,6 +13,8 @@ FRAMEWORK = ('Landroid/', 'Lcom/android/', 'Ldalvik/', 'Llibcore/')
 MAX_ENTRY = 128 * 1024 * 1024
 # Large browser engines fit while total archive and per-library work stay bounded.
 MAX_NATIVE_ENTRY = 256 * 1024 * 1024
+# Game data packs are inventoried without reading/decompressing their contents.
+MAX_ASSET_ENTRY = 384 * 1024 * 1024
 MAX_TOTAL = 768 * 1024 * 1024
 
 
@@ -121,6 +123,8 @@ def inspect_apk(path):
                 raise FormatError('duplicate or unsafe archive entry')
             names.add(name)
             limit = MAX_NATIVE_ENTRY if re.fullmatch(r'lib/[^/]+/[^/]+\.so', name) else MAX_ENTRY
+            if name.startswith('assets/'):
+                limit = MAX_ASSET_ENTRY
             if entry.flag_bits & 1 or entry.file_size > limit:
                 raise FormatError('encrypted or oversized archive entry')
         if 'AndroidManifest.xml' not in names:

@@ -75,9 +75,20 @@ class ApkTests(unittest.TestCase):
         with patch('shiraz.apk.MAX_ENTRY', 1024), patch('shiraz.apk.MAX_NATIVE_ENTRY', 4096):
             inspect_apk(self.apk({'lib/x86_64/libengine.so': payload}))
             with self.assertRaisesRegex(FormatError, 'oversized'):
-                inspect_apk(self.apk({'assets/large.bin': payload}))
+                inspect_apk(self.apk({'res/raw/large.bin': payload}))
             with self.assertRaisesRegex(FormatError, 'oversized'):
                 inspect_apk(self.apk({'lib/x86_64/libengine.so': payload + bytes(4096)}))
+
+    def test_asset_budget_preserves_entry_and_archive_limits(self):
+        with patch('shiraz.apk.MAX_ENTRY', 1024), patch('shiraz.apk.MAX_ASSET_ENTRY', 4096):
+            inspect_apk(self.apk({'assets/data.zip': bytes(4096)}))
+            with self.assertRaisesRegex(FormatError, 'oversized'):
+                inspect_apk(self.apk({'assets/data.zip': bytes(4097)}))
+            with self.assertRaisesRegex(FormatError, 'oversized'):
+                inspect_apk(self.apk({'assets-other/data.zip': bytes(2048)}))
+            with patch('shiraz.apk.MAX_TOTAL', 5000):
+                with self.assertRaisesRegex(FormatError, 'processing limits'):
+                    inspect_apk(self.apk({'assets/one': bytes(3000), 'assets/two': bytes(3000)}))
 
     def test_traversal_rejected(self):
         with self.assertRaisesRegex(FormatError, 'unsafe'):

@@ -11,7 +11,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--kind', choices=['nativewindow', 'egl', 'gles1', 'gles3', 'libc', 'opensles', 'android_runtime', 'android'], default='nativewindow')
+    parser.add_argument('--kind', choices=['nativewindow', 'egl', 'gles1', 'gles2', 'gles3', 'libc', 'opensles', 'android_runtime', 'android'], default='nativewindow')
     parser.add_argument('--library-dir', type=Path, default=ROOT/'build/digitalis-host')
     parser.add_argument('--android-library-dir', type=Path, default=ROOT/'build')
     parser.add_argument('--java-home', type=Path, default=Path(os.environ.get('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')))
@@ -26,11 +26,11 @@ def main():
     if args.kind in ('android_runtime', 'android'):
         command += ['-I'+str(ROOT/'context/art_standalone/libnativehelper/include/nativehelper')]
     command += ['-I'+str(p) for p in includes]
-    names = {'nativewindow': 'nativewindow', 'egl': 'EGL', 'gles1': 'GLESv1_CM', 'gles3': 'GLESv3', 'libc': 'c', 'opensles': 'OpenSLES', 'android_runtime': 'android_runtime', 'android': 'android'}
+    names = {'nativewindow': 'nativewindow', 'egl': 'EGL', 'gles1': 'GLESv1_CM', 'gles2': 'GLESv2', 'gles3': 'GLESv3', 'libc': 'c', 'opensles': 'OpenSLES', 'android_runtime': 'android_runtime', 'android': 'android'}
     source = ROOT/('native/digitalis_'+args.kind+'_proxy.cpp')
-    if args.kind == 'gles3':
-        upstream = ROOT/'context/digitalis-native-bridge-support/android_api/libGLESv3/proxy'
-        text = (upstream/'gles3_trampolines.cc').read_text()
+    if args.kind in ('gles2', 'gles3'):
+        upstream = ROOT/('context/digitalis-native-bridge-support/android_api/lib'+names[args.kind]+'/proxy')
+        text = (upstream/(args.kind+'_trampolines.cc')).read_text()
         text = text.replace('#define GL_GLEXT_PROTOTYPES', '#include <EGL/egl.h>\n#include <dlfcn.h>\n#include <vector>\n#define GL_GLEXT_PROTOTYPES')
         text = text.replace('HostCode /* callee */', 'HostCode callee')
         table = (upstream/'trampolines_arm64_to_x86_64-inl.h').read_text()
@@ -41,7 +41,7 @@ def main():
                 raise SystemExit('Unexpected GLES callback: '+name)
             table = table.replace('{"'+name+'", DoCustomTrampoline_'+name+', reinterpret_cast<void*>(DoBadThunk)}',
                                   '{"'+name+'", DoCustomTrampoline_'+name+', nullptr}')
-        text = text.replace('DEFINE_INIT_PROXY_LIBRARY("libGLESv3.so")', '''extern "C" void InitProxyLibrary(ProxyLibraryBuilder* builder) {
+        text = text.replace('DEFINE_INIT_PROXY_LIBRARY("lib'+names[args.kind]+'.so")', '''extern "C" void InitProxyLibrary(ProxyLibraryBuilder* builder) {
   static std::vector<KnownTrampoline> functions(std::begin(kKnownTrampolines), std::end(kKnownTrampolines));
   void* library = dlopen("libEGL_shiraz.so.1", RTLD_NOW | RTLD_GLOBAL);
   for (auto& entry : functions) if (!entry.thunk) {
@@ -50,9 +50,9 @@ def main():
   }
   builder->Build("libEGL_shiraz.so.1", functions.size(), functions.data(), sizeof(kKnownVariables)/sizeof(KnownVariable), kKnownVariables);
 }''')
-        overlay = work/'gles3-proxy'
+        overlay = work/(args.kind+'-proxy')
         overlay.mkdir(exist_ok=True)
-        source = overlay/'gles3_trampolines.cc'
+        source = overlay/(args.kind+'_trampolines.cc')
         source.write_text(text)
         (overlay/'trampolines_arm64_to_x86_64-inl.h').write_text(table)
     if args.kind == 'android':
@@ -137,7 +137,7 @@ bool isSLID(SLInterfaceID id, SLInterfaceID id2) {
         command += ['-I'+str(ROOT/'context/art_standalone/libnativehelper/include'), '-lnativehelper', '-llog', '-Wl,-z,defs']
     if args.kind == 'android':
         command += ['-landroid', '-llog', '-Wl,-z,defs']
-    if args.kind == 'gles3':
+    if args.kind in ('gles2', 'gles3'):
         command += ['-l:libEGL_shiraz.so.1', '-llog', '-Wl,-z,defs']
     command += ['-o', str(work/('libberberis_proxy_lib'+names[args.kind]+'.so'))]
     subprocess.run(command, check=True)

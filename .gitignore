@@ -20,6 +20,7 @@
 !/docs/experiments/unity/
 !/docs/experiments/libgdx/
 !/docs/experiments/godot/
+!/docs/experiments/sdl/
 /docs/experiments/*/*
 !/docs/experiments/flutter/README.md
 !/docs/experiments/flutter/OBTAINIUM.md
@@ -32,6 +33,8 @@
 !/docs/experiments/libgdx/UNCIV.md
 !/docs/experiments/godot/README.md
 !/docs/experiments/godot/ABRA_CA_BUBBLE.md
+!/docs/experiments/sdl/README.md
+!/docs/experiments/sdl/SUPERTUX.md
 /doc/
 *.apk
 *.apks

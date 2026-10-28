@@ -23,7 +23,7 @@ AOSP native_bridge_support (Apache License 2.0):
 https://android.googlesource.com/platform/frameworks/libs/native_bridge_support
 Revision: b41bf84a958aad713dd7f1e3e0b9f39a03701b4d
 
-The optional Android, OpenSL ES and GLES3 proxies reuse this checkout's
+The optional Android, OpenSL ES and GLES2/3 proxies reuse this checkout's
 interface and callback wrappers. Generated overlays preserve its Apache-2.0
 copyright and license notices.
 
