@@ -10,8 +10,8 @@
 - Manifest identifies Godot 4.3.0.stable. Native libraries are
   `libgodot_android.so` and `libc++_shared.so`, ARM64 only.
 - Tested on 2026-10-28 in the separate x86-64 Linux VM, using the optional
-  Digitalis/Berberis native bridge in interpreter mode. Source baseline
-  `4ac6452` plus the compatibility changes described below.
+   Digitalis/Berberis native bridge in interpreter mode. Initial source baseline
+   `4ac6452`; storage milestone `4ad4f13`, followed by the changes below.
 
 ## Reproduce, fix, retest
 
@@ -30,12 +30,18 @@
    existing app-scoped primary volume, backed by actual filesystem state. The
    unchanged APK passes this step. Storage regression tests pass on both the
    host JVM and ART, including unavailable storage and symlink escape cases.
-5. Native engine loading cannot locate the APK's bundled `libc++_shared.so`.
-   A temporary VM-only linker search-path diagnostic passes that dependency and
-   reaches OpenSL ES initialization. The translator cannot load its OpenSL ES
-   proxy; adding the host library alias alone does not fix that failure.
-   A per-process guest environment fix and audio proxy support remain under
-   investigation. The diagnostic does not establish a working native engine.
+5. Native engine loading initially could not locate the APK's bundled
+   `libc++_shared.so`. Digitalis deliberately filters host loader variables and
+   expects `BERBERIS_GUEST_LD_LIBRARY_PATH`. Shiraz now supplies that variable
+   from the extracted app-library directory. The unchanged APK passes dependency
+   lookup with the original global linker configuration and original translator.
+6. Further loading requires host ABI proxies for OpenSL ES and Android runtime
+   functions. VM-built experimental proxies pass those library-initialization
+   failures, then expose a missing `libandroid.so` proxy. This proves progress
+   through dependency initialization, not actual audio playback or game rendering.
+7. A separate translator rebuild exposed a C++ standard-library compatibility
+   issue and an executable-stack link flag. Both have build fixes; application
+   acceptance of that rebuilt translator remains separate from the launcher fix.
 
 **Startup blocked; no game scene or gameplay verified.** Further acceptance
 requires engine loading, rendering, and an actual puzzle interaction. No APK

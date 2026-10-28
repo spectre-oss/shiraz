@@ -70,7 +70,7 @@ def generate(n):
    path=tp/tm.get('main',tm.get('srcs',[''])[0]);cmd=cmd.replace('$(location '+tool+')','python3 '+shlex.quote(str(path)))
  for f in ins:cmd=cmd.replace('$(location '+os.path.relpath(f,mods[n][2])+')',shlex.quote(f))
  if '$(' in cmd:raise RuntimeError(cmd)
- print('GENERATE',n,flush=True);subprocess.run(cmd,shell=True,check=True,cwd=S,env={**os.environ,"PYTHONPATH":os.pathsep.join(sorted({str(p.parent) for p in S.rglob("*.py")}))})
+ print('GENERATE',n,flush=True);subprocess.run(cmd,shell=True,executable='/bin/sh',check=True,cwd=S,env={**os.environ,"PYTHONPATH":os.pathsep.join(sorted({str(p.parent) for p in S.rglob("*.py")}))})
 def visit(n):
  if n in seen:return
  seen.add(n)

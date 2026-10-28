@@ -24,4 +24,4 @@ remain explicit. No unrelated private experiments are included in this list.
 | [2048](experiments/unity/2048.md) | Unity | Release has only 32-bit native code; rejected by this 64-bit runtime. |
 | [Lucas Doggiehood](experiments/unity/LUCAS_DOGGIEHOOD.md) | Unity | Animated scene, house/Settings input, camera drag, and multitouch zoom verified. Rebuilt ART renders with normal library loading; surface lifecycle fix removes the detach timeout. Native resize, gameplay persistence, and app-requested termination reporting remain open. |
 | [Unciv](experiments/libgdx/UNCIV.md) | libGDX | Offline map, unit exploration, city founding, save/reload across restart, and portrait relayout verified; rendering stability and longer gameplay remain under test. |
-| [Abra-Ca Bubble](experiments/godot/ABRA_CA_BUBBLE.md) | Godot | ARM64 APK passes splash/theme and storage setup; native library loading is under investigation. No game scene verified. |
+| [Abra-Ca Bubble](experiments/godot/ABRA_CA_BUBBLE.md) | Godot | ARM64 APK passes splash/theme, storage setup, and bundled C++ dependency lookup. Native API proxy work continues; no game scene verified. |

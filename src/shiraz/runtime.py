@@ -473,6 +473,9 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                'XDG_DATA_DIRS': str(ROOT / '.local/share') + ':/usr/share'}
         if digitalis:
             env['LD_LIBRARY_PATH'] = str(digitalis.parent) + ':' + env['LD_LIBRARY_PATH']
+            # Digitalis strips host loader variables and unmangles this prefix
+            # when constructing the guest's initial environment.
+            env['BERBERIS_GUEST_LD_LIBRARY_PATH'] = str(app_lib)
         profile_values = validate_device_profile(device_profile) if device_profile else {}
         env['SHIRAZ_ANDROID_DISPLAY_ID'] = profile_values.get('build.display', 'Shiraz ' + (ROOT / 'VERSION').read_text(encoding='ascii').strip())
         env['SHIRAZ_ANDROID_RELEASE'] = profile_values.get('build.release', '8.1')

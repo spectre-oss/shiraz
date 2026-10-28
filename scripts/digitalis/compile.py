@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import os
-import pathlib,json,subprocess,concurrent.futures
+import pathlib,json,subprocess,concurrent.futures,re
 R=pathlib.Path(__file__).resolve().parents[2];S=R/'context/digitalis';W=R/'build/digitalis-host';A=R/'context/art_standalone';B=R/'context/digitalis-native-bridge-support'
 os.environ['TMPDIR']=str(W/'tmp')
 m=json.loads((W/'manifest.json').read_text());m['sources'] += [str(R/'native/digitalis_bridge.cpp'),str(R/'native/digitalis_guest_tls.cpp'),str(R/'native/digitalis_file_profile.cpp')];inc=m['includes']+[str(A/'system/core/libnativebridge/include')]+[str(A/'libbase/include'),str(A/'system/core/include'),str(R/'context/digitalis-bionic/libc'),str(R/'context/digitalis-bionic/libc/platform'),str(S/'jni'),str(S/'lite_translator'),str(S/'kernel_api'),str(A/'libnativehelper/include/nativehelper')]+[str(p) for p in B.rglob('include')]
@@ -17,6 +17,14 @@ def build(s):
   patched=W/'syscall_emulation.cc';patched.write_text(text);s=str(patched)
   localflags_extra=['-I'+str(p.parent)]
  else:localflags_extra=[]
+ if p.name=='frontend.cc' and p.parent.name=='arm64':
+  # libstdc++ 12 lacks C++23 tuple assignment from std::array. Preserve both
+  # generated registers through an ordinary tuple without changing the IR.
+  text,count=re.subn(r'(std::tie\([^;]+?\)\s*=\s*)(Gen<x86_64::LockCmpXchg[^;]+);',
+      r'\1[](auto values) { return std::make_tuple(std::get<0>(values), std::get<1>(values)); }(\2);',p.read_text())
+  if count!=12:raise RuntimeError('Unexpected ARM64 compare-exchange frontend source')
+  patched=W/'frontend.cc';patched.write_text(text);s=str(patched)
+  localflags_extra += ['-I'+str(p.parent)]
  if p.name=='interpreter-main.cc':
   text=p.read_text().replace('#include "interpreter.h"', '#include "interpreter.h"\n#include <cstdlib>')
   text=text.replace('namespace berberis {', 'namespace berberis {\nvoid ShirazTraceGuestPc(unsigned long, const uint64_t*);',1)
@@ -78,7 +86,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
 print('FAILED',len(failed),flush=True)
 if failed:raise SystemExit(1)
 lib=A/'out/host/linux-x86/lib64'
-subprocess.run([flags[0],'-shared','-Wl,-z,defs','-o',str(W/'libberberis_arm64.so'),*[str(p) for p in (W/'obj').glob('*.o')],'-L'+str(lib),'-Wl,-rpath,'+str(lib),'-lbase','-llog','-ldl','-pthread','-latomic'],check=True)
+subprocess.run([flags[0],'-shared','-Wl,-z,defs','-Wl,-z,noexecstack','-o',str(W/'libberberis_arm64.so'),*[str(p) for p in (W/'obj').glob('*.o')],'-L'+str(lib),'-Wl,-rpath,'+str(lib),'-lbase','-llog','-ldl','-pthread','-latomic'],check=True)
 
 for source, name in [('digitalis_libc_proxy.cpp', 'libberberis_proxy_libc.so'), ('digitalis_libm_proxy.cpp', 'libberberis_proxy_libm.so')]:
  subprocess.run(flags+['-shared',str(R/'native'/source),'-L'+str(W),'-lberberis_arm64','-o',str(W/name)],check=True)
