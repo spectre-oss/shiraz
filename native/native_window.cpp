@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstring>
 #include <mutex>
+#include <memory>
 #include <new>
 #include <unordered_set>
 #include <vector>
@@ -69,10 +70,10 @@ static int publish_shared(ANativeWindow* w,bool allowResize=true) {
 extern "C" ANativeWindow* shiraz_window_create(int32_t w, int32_t h) {
     if (!valid_size(w, h)) return nullptr;
     try {
-        auto* window = new ANativeWindow(w, h);
+        auto window = std::make_unique<ANativeWindow>(w, h);
         std::lock_guard<std::mutex> guard(knownMutex);
-        knownWindows.insert(window);
-        return window;
+        knownWindows.insert(window.get());
+        return window.release();
     } catch (const std::bad_alloc&) { return nullptr; }
 }
 extern "C" void ANativeWindow_acquire(ANativeWindow* w) { if (w) ++w->references; }

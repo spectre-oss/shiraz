@@ -44,6 +44,10 @@ build/libandroid.so: native/native_window.cpp native/shared_frame.cpp native/fro
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp -o $@ -pthread -ldl -lgbm -lGLESv2 $(shell pkg-config --cflags --libs fontconfig)
 
+build/test-surface-lifetime: tests/native/surface_lifetime.cpp native/from_surface.cpp native/native_window.cpp native/shared_frame.cpp include/shiraz/native_window.h include/shiraz/shared_frame.hpp include/shiraz/window_frames.hpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/native/surface_lifetime.cpp native/from_surface.cpp native/native_window.cpp native/shared_frame.cpp -o $@ -pthread -ldl -Wl,--wrap=dlopen,--wrap=dlsym,--wrap=dlclose
+
 build/test-native-window: tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp include/shiraz/shared_frame.hpp include/shiraz/window_frames.hpp include/shiraz/native_window.h include/shiraz/window_snapshot.hpp include/shiraz/compositor.hpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp -o $@ -pthread
@@ -52,7 +56,8 @@ build/test-archive-path: tests/native/archive_path.cpp include/shiraz/archive_pa
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/native/archive_path.cpp -o $@
 
-test: build/test-archive-path build/test-shared-memory build/test-compositor build/test-native-window build/test-pointer build/test-audio build/test-egl-window build/shiraz-app build/libshiraz-android-process.so build/libshiraz-android-fonts.so gles-smoke
+test: build/test-surface-lifetime build/test-archive-path build/test-shared-memory build/test-compositor build/test-native-window build/test-pointer build/test-audio build/test-egl-window build/shiraz-app build/libshiraz-android-process.so build/libshiraz-android-fonts.so gles-smoke
+	./build/test-surface-lifetime
 	./build/test-archive-path
 	./build/test-shared-memory
 	./build/test-compositor

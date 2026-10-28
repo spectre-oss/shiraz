@@ -28,6 +28,7 @@ extern "C" ANativeWindow* ANativeWindow_fromSurface(JNIEnv* env, jobject surface
     if (!env || !surface) return nullptr;
     jclass type = env->GetObjectClass(surface);
     jmethodID method = type ? env->GetMethodID(type, "shirazNativeWindow", "()J") : nullptr;
+    if (type) env->DeleteLocalRef(type);
     if (!method || env->ExceptionCheck()) return nullptr;
     jlong window = env->CallLongMethod(surface, method);
     if (!window || env->ExceptionCheck()) return nullptr;
@@ -50,6 +51,16 @@ extern "C" jobject ANativeWindow_toSurface(JNIEnv* env, ANativeWindow* window) {
 }
 namespace {
 struct Egl {
+    void* library = nullptr;
+    EGLBoolean (*terminate)(EGLDisplay) = nullptr;
+    bool initialized = false;
+    // Failed attempts own all partial state. The successful backend stays loaded
+    // for process lifetime because native callers may retain its entry points.
+    ~Egl() {
+        if (ready) return;
+        if (initialized && terminate) terminate(display);
+        if (library) dlclose(library);
+    }
     void* (*proc)(const char*) = nullptr;
     EGLBoolean (*initialize)(EGLDisplay, EGLint*, EGLint*) = nullptr;
     EGLBoolean (*bind)(EGLenum) = nullptr;
@@ -66,18 +77,21 @@ struct Egl {
 std::mutex eglMutex;
 std::unordered_map<ANativeWindow*, EGLSurface> surfaces;
 Egl* egl() {
-    static Egl state;
+    static Egl backend;
     std::lock_guard<std::mutex> guard(eglMutex);
-    if (state.ready) return &state;
+    if (backend.ready) return &backend;
+    Egl state;
     void* library = dlopen("libEGL_shiraz.so.1", RTLD_NOW | RTLD_LOCAL);
     if (!library) library = dlopen("libEGL.so.1", RTLD_NOW | RTLD_LOCAL);
     if (!library) return nullptr;
+    state.library = library;
+    state.terminate = reinterpret_cast<EGLBoolean (*)(EGLDisplay)>(dlsym(library, "eglTerminate"));
     state.proc = reinterpret_cast<void* (*)(const char*)>(dlsym(library, "eglGetProcAddress"));
     state.initialize = reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLint*, EGLint*)>(dlsym(library, "eglInitialize"));
     state.bind = reinterpret_cast<EGLBoolean (*)(EGLenum)>(dlsym(library, "eglBindAPI"));
     state.createContext = reinterpret_cast<EGLContext (*)(EGLDisplay, EGLConfig, EGLContext, const EGLint*)>(dlsym(library, "eglCreateContext"));
     state.destroyContext = reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLContext)>(dlsym(library, "eglDestroyContext"));
-    if (!state.proc || !state.initialize || !state.bind || !state.createContext || !state.destroyContext) return nullptr;
+    if (!state.terminate || !state.proc || !state.initialize || !state.bind || !state.createContext || !state.destroyContext) return nullptr;
     state.createWindow = reinterpret_cast<EGLSurface (*)(EGLDisplay, EGLConfig, EGLNativeWindowType, const EGLint*)>(state.proc("eglCreateWindowSurface"));
     state.destroySurface = reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLSurface)>(state.proc("eglDestroySurface"));
     state.make = reinterpret_cast<EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface, EGLContext)>(state.proc("eglMakeCurrent"));
@@ -88,12 +102,15 @@ Egl* egl() {
     EGLDeviceEXT devices[8]; EGLint count = 0;
     if (!query(8, devices, &count) || count < 1) return nullptr;
     state.display = platform(EGL_PLATFORM_DEVICE_EXT, devices[count - 1], nullptr);
-    if (!state.initialize(state.display, nullptr, nullptr) || !state.bind(EGL_OPENGL_ES_API)) return nullptr;
+    if (!state.initialize(state.display, nullptr, nullptr)) return nullptr;
+    state.initialized = true;
+    if (!state.bind(EGL_OPENGL_ES_API)) return nullptr;
     const EGLint attribs[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE};
     state.root = state.createContext(state.display, nullptr, EGL_NO_CONTEXT, attribs);
     if (state.root == EGL_NO_CONTEXT) return nullptr;
     state.ready = true;
-    return &state;
+    backend = state;
+    return &backend;
 }
 EGLSurface windowSurface(Egl* e, ANativeWindow* window) {
     std::lock_guard<std::mutex> guard(eglMutex);
