@@ -26,6 +26,7 @@
 #include "berberis/guest_os_primitives/guest_thread_manager.h"
 #include "berberis/guest_os_primitives/scoped_pending_signals.h"
 #include "guest_pthread_attributes.h"
+#include "guest_resolver.h"
 #include "setjmp_thunks.h"
 #include <string>
 #include <vector>
@@ -174,9 +175,9 @@ static const KnownTrampoline functions[] = {
 {"android_set_abort_message", Unsupported, const_cast<char*>("android_set_abort_message")},
 {"clock_getres", GetTrampolineFunc<auto(int32_t, void*) -> int32_t>(), reinterpret_cast<void*>(NULL)},
 {"clock_gettime", GetTrampolineFunc<auto(int32_t, void*) -> int32_t>(), reinterpret_cast<void*>(NULL)},
-{"freeaddrinfo", Unsupported, const_cast<char*>("freeaddrinfo")},
-{"gai_strerror", Unsupported, const_cast<char*>("gai_strerror")},
-{"getaddrinfo", Unsupported, const_cast<char*>("getaddrinfo")},
+{"freeaddrinfo", GetTrampolineFunc<decltype(ShirazGuestFreeAddrInfo)>(), reinterpret_cast<void*>(ShirazGuestFreeAddrInfo)},
+{"gai_strerror", GetTrampolineFunc<decltype(ShirazGuestGaiStrerror)>(), reinterpret_cast<void*>(ShirazGuestGaiStrerror)},
+{"getaddrinfo", GetTrampolineFunc<decltype(ShirazGuestGetAddrInfo)>(), reinterpret_cast<void*>(ShirazGuestGetAddrInfo)},
 {"gethostbyaddr", Unsupported, const_cast<char*>("gethostbyaddr")},
 {"gethostbyname", Unsupported, const_cast<char*>("gethostbyname")},
 {"getnameinfo", Unsupported, const_cast<char*>("getnameinfo")},

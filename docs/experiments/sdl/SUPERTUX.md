@@ -115,6 +115,30 @@
     confirmation and precise touch hit-testing must be distinguished. This
     remains an input/performance investigation, not a gameplay pass.
 
-**Animated startup, menus, world-map navigation, level rendering and resize verified.**
-Reliable in-level movement/jumping, audio, and save/restart remain unverified. Startup uses software graphics and ARM64 translation; it is not
-yet evidence of acceptable game performance.
+14. Input tracing confirms that normalized touch coordinates and keyboard
+    codes arrive at SDL's ARM64 JNI entry points. The host runner nevertheless
+    consumed mouse hover after choosing a cursor icon. It now also dispatches
+    generic motion through the dialog/popup/content path. A nested-view test
+    verifies hover coordinates and hidden-child exclusion. In the real APK,
+    moving the mouse over Audio previously left Locale highlighted; after the
+    fix, Audio highlights without clicking. Main-menu hover also tracks the
+    selected item.
+15. Choosing Quit through the menu exits successfully and writes preferences.
+    Restart skips the first-run prompts, but the saved release-check setting
+    exposed unsupported native `getaddrinfo`. The resolver bridge now converts
+    Bionic's flags, error numbers and address-list layout, with matching
+    `freeaddrinfo` and `gai_strerror`. Numeric IPv4/IPv6 and failure-path host
+    tests pass; the host test also passes AddressSanitizer/leak detection, and an
+    ARM64 fixture verifies the returned layout and errors through ART/Digitalis.
+    The unchanged APK passes the former release-check abort and reaches the
+    interactive menu. This does not establish every network feature.
+    Saved settings also confirmed that earlier touchscreen prompt interactions
+    had accepted the selected options; they had not reliably chosen the item
+    visually under the finger.
+
+**Animated startup, menus, mouse hover, world-map navigation, level rendering
+and resize verified.** Preference writing/reloading and a menu-driven clean exit
+are verified. Reliable in-level movement/jumping, audio, campaign progress
+persistence and general network compatibility remain unverified. Startup uses
+software graphics and ARM64 translation; it is not yet evidence of acceptable
+game performance.

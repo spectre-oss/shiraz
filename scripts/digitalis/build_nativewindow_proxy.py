@@ -22,7 +22,7 @@ def main():
     includes = [ROOT/Path(p).relative_to(original) for p in manifest['includes']]
     includes += [ROOT/'include', ROOT/'context/art_standalone/libbase/include', ROOT/'context/art_standalone/system/core/include', ROOT/'context/art_standalone/system/core/liblog/include', args.java_home/'include', args.java_home/'include/linux']
     includes += list((ROOT/'context/digitalis-native-bridge-support').rglob('include'))
-    command = [os.environ.get('DIGITALIS_CXX', 'clang++'), '-std=gnu++23', '-shared', '-fPIC', '-O1', '-include', 'string', '-DANDROID', '-DBERBERIS_GUEST_LP64=1', '-DNATIVE_BRIDGE_GUEST_ARCH_ARM64']
+    command = [os.environ.get('DIGITALIS_CXX', 'clang++'), '-std=gnu++23', '-shared', '-fPIC', '-O1', '-include', 'string', '-DANDROID', '-DHAVE_SYS_UIO_H', '-DBERBERIS_GUEST_LP64=1', '-DNATIVE_BRIDGE_GUEST_ARCH_ARM64']
     if args.kind in ('android_runtime', 'android'):
         command += ['-I'+str(ROOT/'context/art_standalone/libnativehelper/include/nativehelper')]
     command += ['-I'+str(p) for p in includes]

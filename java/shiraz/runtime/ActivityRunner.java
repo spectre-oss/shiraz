@@ -413,7 +413,17 @@ public final class ActivityRunner {
                             private void routePointer(android.view.MotionEvent event) {
                                 int action=event.getActionMasked(),source=event.getSource();float x=event.getX(),y=event.getY();long eventTime=event.getEventTime();
                                 if (activity.isFinishing()) return;
-                                if(action==android.view.MotionEvent.ACTION_HOVER_MOVE){View root=activity.shirazContentView();android.view.PointerIcon icon=DialogOverlay.hasVisible()?DialogOverlay.pointerIcon(x,y):root==null?null:root.shirazPointerIcon(x,y);surface.requestPointerIcon(icon);return;}
+                                if(action==android.view.MotionEvent.ACTION_HOVER_MOVE){
+                                    View root=activity.shirazContentView();
+                                    android.view.PointerIcon icon=DialogOverlay.hasVisible()?DialogOverlay.pointerIcon(x,y):root==null?null:root.shirazPointerIcon(x,y);
+                                    surface.requestPointerIcon(icon);
+                                    // Cursor resolution must not consume the app's mouse motion.
+                                    if(!DialogOverlay.genericMotion(event)&&!android.widget.PopupWindow.shirazGenericMotion(event)){
+                                        View decor=activity.getWindow().getDecorView();
+                                        if(decor!=null)decor.dispatchGenericMotionEvent(event);
+                                    }
+                                    return;
+                                }
                                 if(action==android.view.MotionEvent.ACTION_DOWN)finishNavigation();
                                 if(context.capture.pointer(action,x,y,width,activity)){cancelApplicationPointer(eventTime);return;}
                                 if(action==android.view.MotionEvent.ACTION_DOWN)touchMode((source&0x1002)==0x1002);

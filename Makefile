@@ -1412,3 +1412,12 @@ build/test-color-cursor: tests/color_cursor.cpp native/presentation.cpp include/
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SDL_CFLAGS) tests/color_cursor.cpp native/presentation.cpp -o $@ $(SDL_LIBS)
 color-cursor-smoke: build/test-color-cursor
 	SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software timeout 10 ./build/test-color-cursor
+
+
+.PHONY: guest-resolver-smoke
+build/test-guest-resolver: tests/native/guest_resolver.cpp native/guest_resolver.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -Inative $< -o $@
+guest-resolver-smoke: build/test-guest-resolver
+	./build/test-guest-resolver
+check: guest-resolver-smoke
