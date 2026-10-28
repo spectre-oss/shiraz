@@ -22,6 +22,34 @@ static_assert(sizeof(ShirazGuestPthreadAttributes) == 56);
 static_assert(offsetof(ShirazGuestPthreadAttributes, stack_base) == 8);
 static_assert(offsetof(ShirazGuestPthreadAttributes, sched_policy) == 32);
 
+// Android LP64 attribute API values are not glibc enum values (notably
+// explicit/inherited scheduling). Operate only on guest storage here.
+// Stack alignment/guard defaults match Shiraz's current 4 KiB guest profile.
+namespace shiraz_guest_attr {
+using Attr = ShirazGuestPthreadAttributes;
+inline int init(Attr* a) { *a={}; a->stack_size=1024*1024-32*1024; a->guard_size=4096; return 0; }
+inline int destroy(Attr* a) { *a={}; return 0; }
+inline int getdetachstate(const Attr* a,int* v) { *v=a->flags&1u; return 0; }
+inline int setdetachstate(Attr* a,int v) { if(v!=0&&v!=1)return EINVAL; a->flags=(a->flags&~1u)|v; return 0; }
+inline int getguardsize(const Attr* a,size_t* v) { *v=a->guard_size; return 0; }
+inline int setguardsize(Attr* a,size_t v) { a->guard_size=v; return 0; }
+inline int getinheritsched(const Attr* a,int* v) { *v=(a->flags&4u)?1:((a->flags&8u)?0:(a->sched_policy==0?1:0)); return 0; }
+inline int setinheritsched(Attr* a,int v) { if(v!=0&&v!=1)return EINVAL; a->flags=(a->flags&~12u)|(v?4u:8u); return 0; }
+inline int getschedpolicy(const Attr* a,int* v) { *v=a->sched_policy; return 0; }
+inline int setschedpolicy(Attr* a,int v) { a->sched_policy=v; return 0; }
+inline int getschedparam(const Attr* a,int* priority) { *priority=a->sched_priority; return 0; }
+inline int setschedparam(Attr* a,const int* priority) { a->sched_priority=*priority; return 0; }
+inline int getscope(const Attr*,int* v) { *v=0; return 0; }
+inline int setscope(Attr*,int v) { return v==0?0:(v==1?ENOTSUP:EINVAL); }
+inline int getstack(const Attr* a,void** base,size_t* size) { *base=a->stack_base; *size=a->stack_size; return 0; }
+inline int getstacksize(const Attr* a,size_t* v) { *v=a->stack_size; return 0; }
+inline int setstacksize(Attr* a,size_t v) { if(v<16384)return EINVAL; a->stack_size=v; return 0; }
+inline int setstack(Attr* a,void* base,size_t size) {
+  if(size<16384 || size%4096 || reinterpret_cast<uintptr_t>(base)%4096)return EINVAL;
+  a->stack_base=base; a->stack_size=size; return 0;
+}
+}  // namespace shiraz_guest_attr
+
 class ShirazHostPthreadAttributes {
  public:
   explicit ShirazHostPthreadAttributes(const ShirazGuestPthreadAttributes* guest) {

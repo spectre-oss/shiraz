@@ -29,6 +29,13 @@
    The rebuilt proxy passes that failure. The app creates a landscape surface
    and reaches its native SDL thread, then aborts on unsupported
    `pthread_attr_init`. This is the next runtime blocker, not a gameplay result.
+4. Added guest-layout attribute initialization, setters/getters, and destruction,
+   including Bionic's scheduling enum values and stack validation. Host tests and
+   the real ARM64 thread fixture pass attribute-driven thread creation, joined
+   results, TLS/destructors, and both explicit detach and detached creation.
+   The unchanged APK passes `pthread_attr_init` and creates another native
+   thread; it then aborts on unsupported `pthread_setname_np`. Thread naming and
+   guest/host thread-handle translation are the next investigation.
 
 **Startup investigation; no rendered game or gameplay verified.** Movement,
 menus, resize/back, audio, and save/restart remain unverified.

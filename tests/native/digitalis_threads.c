@@ -13,6 +13,15 @@ extern int pipe(int*);
 extern long read(int,void*,unsigned long);
 extern long write(int,const void*,unsigned long);
 extern int close(int);
+typedef struct { unsigned flags; void* base; unsigned long size,guard; int policy,priority; char reserved[16]; } GuestAttr;
+extern int pthread_attr_init(GuestAttr*);
+extern int pthread_attr_destroy(GuestAttr*);
+extern int pthread_attr_setstacksize(GuestAttr*,unsigned long);
+extern int pthread_attr_getstacksize(const GuestAttr*,unsigned long*);
+extern int pthread_attr_setdetachstate(GuestAttr*,int);
+extern int pthread_attr_getdetachstate(const GuestAttr*,int*);
+extern int pthread_attr_setinheritsched(GuestAttr*,int);
+extern int pthread_attr_getinheritsched(const GuestAttr*,int*);
 static int key;
 static _Thread_local int local;
 struct Work { int parent; int result; int destroyed; int notify; };
@@ -35,11 +44,17 @@ int Java_shiraz_ThreadSmoke_run(void* env,void* klass) {
   (void)env;(void)klass;
   struct Work work[4]={0}; pthread_t threads[4];
   if(pthread_key_create(&key,destroy)) return -1;
+  GuestAttr attr;
+  unsigned long stack=0; int flag=-1;
+  if(pthread_attr_init(&attr) || pthread_attr_getstacksize(&attr,&stack) || stack<16384) return -3;
+  if(pthread_attr_setstacksize(&attr,1)!=22 || pthread_attr_setstacksize(&attr,2*1024*1024)) return -4;
+  if(pthread_attr_setinheritsched(&attr,0) || pthread_attr_getinheritsched(&attr,&flag) || flag!=0) return -5;
+  if(pthread_attr_setinheritsched(&attr,1) || pthread_attr_getinheritsched(&attr,&flag) || flag!=1) return -6;
   int created=0;
   for(int i=0;i<4;++i) {
     work[i].parent=gettid();
     work[i].notify=-1;
-    if(pthread_create(&threads[i],0,worker,&work[i])) break;
+    if(pthread_create(&threads[i],&attr,worker,&work[i])) break;
     ++created;
   }
   int ok=created==4;
@@ -47,17 +62,21 @@ int Java_shiraz_ThreadSmoke_run(void* env,void* klass) {
     void* result=0;
     if(pthread_join(threads[i],&result) || result!=&work[i] || work[i].result!=42 || !work[i].destroyed) ok=0;
   }
+  for(int mode=0;mode<2 && ok;++mode) {
   int fds[2];
   if(ok && pipe(fds)==0) {
     struct Work detached={gettid(),0,0,fds[1]}; pthread_t thread;
-    if(pthread_create(&thread,0,worker,&detached)) ok=0;
+    if(pthread_attr_setdetachstate(&attr,mode) || pthread_attr_getdetachstate(&attr,&flag) || flag!=mode) ok=0;
+    if(!ok || pthread_create(&thread,&attr,worker,&detached)) ok=0;
     else {
-      if(pthread_detach(thread)) { pthread_join(thread,0); ok=0; }
+      if(!mode && pthread_detach(thread)) { pthread_join(thread,0); ok=0; }
       char done=0;
       if(read(fds[0],&done,1)!=1 || done!=42) ok=0;
     }
     close(fds[0]);close(fds[1]);
   } else ok=0;
+  }
+  pthread_attr_destroy(&attr);
   pthread_key_delete(key);
   return ok&&!local?42:-2;
 }

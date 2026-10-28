@@ -4,6 +4,22 @@
 #include <cstring>
 #include <limits>
 int main() {
+  using namespace shiraz_guest_attr;
+  Attr attr{}; assert(init(&attr)==0);
+  int value=-1; assert(getinheritsched(&attr,&value)==0 && value==1);
+  assert(setinheritsched(&attr,0)==0); assert(getinheritsched(&attr,&value)==0 && value==0);
+  assert(setinheritsched(&attr,9)==EINVAL); assert(getinheritsched(&attr,&value)==0 && value==0);
+  assert(setdetachstate(&attr,1)==0); assert(getdetachstate(&attr,&value)==0 && value==1);
+  assert(setscope(&attr,1)==ENOTSUP && setscope(&attr,9)==EINVAL);
+  assert(setstacksize(&attr,1)==EINVAL && setstacksize(&attr,16384)==0);
+  assert(setstack(&attr,reinterpret_cast<void*>(1),16384)==EINVAL);
+  assert(setstack(&attr,reinterpret_cast<void*>(4096),16385)==EINVAL);
+  assert(setguardsize(&attr,8192)==0); size_t size=0;
+  assert(getguardsize(&attr,&size)==0 && size==8192);
+  assert(setschedpolicy(&attr,SCHED_FIFO)==0);
+  int priority=3; assert(setschedparam(&attr,&priority)==0);
+  priority=0; assert(getschedparam(&attr,&priority)==0 && priority==3);
+  assert(destroy(&attr)==0);
   ShirazHostPthreadAttributes defaults(nullptr);
   assert(defaults.error==0 && !defaults.stack && defaults.stack_size>=16384);
   size_t host_size=0; assert(pthread_attr_getstacksize(&defaults.host,&host_size)==0);
