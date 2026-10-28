@@ -35,13 +35,20 @@
    expects `BERBERIS_GUEST_LD_LIBRARY_PATH`. Shiraz now supplies that variable
    from the extracted app-library directory. The unchanged APK passes dependency
    lookup with the original global linker configuration and original translator.
-6. Further loading requires host ABI proxies for OpenSL ES and Android runtime
-   functions. VM-built experimental proxies pass those library-initialization
-   failures, then expose a missing `libandroid.so` proxy. This proves progress
-   through dependency initialization, not actual audio playback or game rendering.
+6. Further loading requires host ABI proxies for OpenSL ES, Android runtime,
+   Android NDK, and GLES3 functions. Built the pinned upstream interface/callback
+   wrappers on the VM, with Shiraz adapters for resource-library symbol lookup,
+   graphics dispatch, and ART file descriptors. The unchanged APK passes those
+   library-initialization failures. A subsequent unresolved JNI-to-Android call
+   is resolved by explicitly routing asset functions to Shiraz's resource library.
+   This does not verify audio playback or game rendering.
 7. A separate translator rebuild exposed a C++ standard-library compatibility
    issue and an executable-stack link flag. Both have build fixes; application
    acceptance of that rebuilt translator remains separate from the launcher fix.
+8. The rebuilt translator with these proxies now reaches native thread creation.
+   Shiraz's libc proxy explicitly aborts on `pthread_create`. Guest-thread creation,
+   callback execution, and lifecycle coverage are the next work; no successful
+   thread or engine initialization is claimed yet.
 
 **Startup blocked; no game scene or gameplay verified.** Further acceptance
 requires engine loading, rendering, and an actual puzzle interaction. No APK

@@ -341,6 +341,8 @@ def build(args):
     for name in RUNTIME_LIBS:
         libraries.add(ROOT/'build'/('lib'+name+'.so'))
     libraries.add(ROOT/"build/libOpenSLES.so.1")
+    # The ARM64 Android proxy resolves the unversioned host library name.
+    libraries.add(ROOT/"build/libOpenSLES.so.1", "libOpenSLES.so")
     # Keep the optional GStreamer bridge separate; decoder plugins are supplied
     # by the host, never extracted from arbitrary APKs or bundled here.
     if (ROOT/'build/libshiraz-video.so').is_file():

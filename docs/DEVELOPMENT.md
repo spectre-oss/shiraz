@@ -77,6 +77,13 @@ For the other interfaces:
 - **ARM64 translation:** `make runtime-digitalis` builds the optional Digitalis
   integration. It requires the pinned sources, prepared ART, compiler headers,
   and matching guest libraries. See [attribution and provenance](../LICENSES/DIGITALIS-NOTICE.txt).
+  Individual experimental proxies can be built with
+  `make digitalis-nativewindow-proxy DIGITALIS_PROXY_OPTIONS="--kind android"`.
+  Other kinds include `opensles`, `android_runtime`, and `gles3`. The Android
+  proxy fetches checksum-pinned AOSP headers into the ignored build tree.
+  Use `--library-dir` and `--android-library-dir` for an existing host runtime;
+  GLES3 requires Shiraz's EGL adapter. Building a proxy does not establish full
+  API support: consult the per-app experiment results and test real callbacks.
 
 ## Make and verify a change
 
