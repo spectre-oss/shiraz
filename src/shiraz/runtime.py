@@ -471,6 +471,10 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                'BIONIC_LD_LIBRARY_PATH': str(app_lib),
                'SHIRAZ_FONT_DIR': str(ROOT / '.local/share/shiraz/fonts'),
                'XDG_DATA_DIRS': str(ROOT / '.local/share') + ':/usr/share'}
+        # Host headless/window choices must not select an Android SDL backend.
+        for key in ('SDL_VIDEODRIVER', 'SDL_RENDER_DRIVER'):
+            if key in env:
+                env.setdefault('SHIRAZ_HOST_' + key, env.pop(key))
         if digitalis:
             env['LD_LIBRARY_PATH'] = str(digitalis.parent) + ':' + env['LD_LIBRARY_PATH']
             # Digitalis strips host loader variables and unmangles this prefix

@@ -19,6 +19,8 @@ Uint32 close_window(Uint32, void*) {
 }
 }
 int main() {
+    const bool hostOnly=std::getenv("SHIRAZ_HOST_SDL_VIDEODRIVER")!=nullptr;
+    if(hostOnly)assert(!std::getenv("SDL_VIDEODRIVER")&&!std::getenv("SDL_RENDER_DRIVER"));
     auto hdpi=shiraz::DisplayGeometry::from(540,1076,1080,2152);
     assert(hdpi.densityDpi==320);
     auto fractional=shiraz::DisplayGeometry::from(800,600,1000,750);
@@ -34,6 +36,7 @@ int main() {
     bool invalidScale=false;try{shiraz::DisplayGeometry::from(1,1,8192,8192);}catch(const std::invalid_argument&){invalidScale=true;}assert(invalidScale);
     auto startup=shiraz::prepare_presentation(32,48);
     assert(startup.pixelWidth==32&&startup.pixelHeight==48&&startup.densityDpi==160);
+    if(hostOnly)assert(!std::getenv("SDL_VIDEODRIVER")&&!std::getenv("SDL_RENDER_DRIVER"));
     bool nested=false;try{shiraz::prepare_presentation(32,48);}catch(const std::runtime_error&){nested=true;}assert(nested);
     shiraz::discard_prepared_presentation();
     startup=shiraz::prepare_presentation(32,48);

@@ -49,7 +49,15 @@ struct ActivePresentation {
     ~ActivePresentation() { active_window=nullptr;presenting = false; }
 };
 struct Video {
-    Video() { if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) throw std::runtime_error(SDL_GetError()); SDL_EnableScreenSaver(); }
+    Video() {
+        // Configure only the host SDL instance, not an Android app's SDL copy.
+        if (const char* driver=std::getenv("SHIRAZ_HOST_SDL_VIDEODRIVER"))
+            SDL_SetHintWithPriority("SDL_VIDEODRIVER",driver,SDL_HINT_OVERRIDE);
+        if (const char* driver=std::getenv("SHIRAZ_HOST_SDL_RENDER_DRIVER"))
+            SDL_SetHintWithPriority(SDL_HINT_RENDER_DRIVER,driver,SDL_HINT_OVERRIDE);
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) throw std::runtime_error(SDL_GetError());
+        SDL_EnableScreenSaver();
+    }
     ~Video() { SDL_EnableScreenSaver(); SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS); }
 };
 std::unique_lock<std::mutex> acquirePresentation() {

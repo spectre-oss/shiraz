@@ -137,6 +137,7 @@ build/test-presentation: tests/presentation.cpp native/presentation.cpp include/
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SDL_CFLAGS) tests/presentation.cpp native/presentation.cpp -o $@ $(SDL_LIBS)
 presentation-smoke: build/test-presentation
 	SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software timeout 10 ./build/test-presentation
+	env -u SDL_VIDEODRIVER -u SDL_RENDER_DRIVER SHIRAZ_HOST_SDL_VIDEODRIVER=dummy SHIRAZ_HOST_SDL_RENDER_DRIVER=software timeout 10 ./build/test-presentation
 
 build/libshiraz-host.so: native/host_process.cpp native/fds.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp include/shiraz/ipc_channel.hpp
 	@mkdir -p build

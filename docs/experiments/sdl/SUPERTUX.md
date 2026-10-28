@@ -7,8 +7,8 @@
   min SDK 21, target SDK 35.
 - SHA-256: `7dd41db4c38862a22625ca0cb66f382d2c30653254a7a2807887cedde4b8f0f9`,
   matching the upstream release asset digest.
-- Tested on 2026-10-28 in the separate x86-64 Linux VM with the optional
-  Digitalis/Berberis ARM64 interpreter. Source baseline `b3f1ff8` plus the changes
+- Tested on 2026-10-28–29 in the separate x86-64 Linux VM with the optional
+  Digitalis/Berberis ARM64 interpreter and two-gear translation mode. Source baseline `b3f1ff8` plus the changes
   described below. No APK or game code executes on the development machine.
 
 ## Reproduce, fix, retest
@@ -65,6 +65,21 @@
    that reports no hardware. The next run passes that call and remains on a
    black surface during the observed startup interval; rendering and gameplay
    are not established. The VM also reports unavailable audio hardware.
+
+9. A longer run exposed a test-environment leak: the host's
+   `SDL_VIDEODRIVER=dummy` and `SDL_RENDER_DRIVER=software` also selected
+   the Android app's SDL backend. A debugger capture showed a partially drawn
+   mountain background in an offscreen SDL buffer, not a presented game frame.
+   The launcher now moves these settings to host-only variables, and host SDL
+   consumes them as instance hints without changing the process environment.
+   The headless presentation regression passes with the original variables absent.
+10. With that isolation, SDL enters Android window setup and aborts because
+    `setRequestedOrientation` is called from its worker thread. Orientation
+    preferences now use a synchronized queue; only the activity thread can
+    consume the pending resize. The regression verifies worker publication,
+    owner-only consumption, and one-shot delivery. The unchanged APK passes
+    the previous abort and reaches Android pixel-format negotiation. The
+    observed presentation remains black; this is still not verified gameplay.
 
 **Startup investigation; no rendered game or gameplay verified.** Movement,
 menus, resize/back, audio, and save/restart remain unverified.

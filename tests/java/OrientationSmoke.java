@@ -17,7 +17,14 @@ public final class OrientationSmoke {
   request.request(13,96,160);
   for(int bad:new int[]{3,4,8,9,10}){try{request.request(bad,96,160);throw new AssertionError("unsupported orientation accepted");}catch(UnsupportedOperationException expected){}if(request.get()!=13)throw new AssertionError("rejection mutated request");}
   try{request.request(15,96,160);throw new AssertionError("invalid mode accepted");}catch(IllegalArgumentException expected){}
-  final Throwable[] error={null};Thread t=new Thread(new Runnable(){public void run(){try{request.request(0,96,160);}catch(Throwable e){error[0]=e;}}});t.start();t.join();if(!(error[0] instanceof IllegalStateException))throw new AssertionError("off-thread request");
+  final Throwable[] error={null};
+  Thread t=new Thread(new Runnable(){public void run(){try{
+   request.request(0,96,160);
+   if(request.get()!=0)throw new AssertionError("worker preference visibility");
+   try{request.take(96,160);throw new AssertionError("worker consumed host resize");}catch(IllegalStateException expected){}
+  }catch(Throwable e){error[0]=e;}}});
+  t.start();t.join();if(error[0]!=null)throw new AssertionError("worker orientation request",error[0]);
+  size=request.take(96,160);if(size==null||size[0]!=160||size[1]!=96||request.take(96,160)!=null)throw new AssertionError("worker request consumption");
   System.out.println("ORIENTATION_OK");
  }
 }
