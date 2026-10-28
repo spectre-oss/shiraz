@@ -26,8 +26,16 @@
    and its dependency closure while preserving public resource IDs. The VM
    resource build passes. Retesting passes splash setup and theme application.
 4. Godot's filesystem directory access requires the storage-manager service.
-   Shiraz currently returns null, causing a Kotlin null-cast failure while
-   constructing the engine wrapper. Storage-volume support is the next issue.
+   Returning null caused a Kotlin null-cast failure. Added enumeration of Shiraz's
+   existing app-scoped primary volume, backed by actual filesystem state. The
+   unchanged APK passes this step. Storage regression tests pass on both the
+   host JVM and ART, including unavailable storage and symlink escape cases.
+5. Native engine loading cannot locate the APK's bundled `libc++_shared.so`.
+   A temporary VM-only linker search-path diagnostic passes that dependency and
+   reaches OpenSL ES initialization. The translator cannot load its OpenSL ES
+   proxy; adding the host library alias alone does not fix that failure.
+   A per-process guest environment fix and audio proxy support remain under
+   investigation. The diagnostic does not establish a working native engine.
 
 **Startup blocked; no game scene or gameplay verified.** Further acceptance
 requires engine loading, rendering, and an actual puzzle interaction. No APK

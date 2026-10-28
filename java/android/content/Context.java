@@ -11,6 +11,7 @@ public abstract class Context {
     public static final String VIBRATOR_SERVICE="vibrator";
     public static final String UI_MODE_SERVICE="uimode";
     public static final String AUDIO_SERVICE="audio";
+    public static final String STORAGE_SERVICE="storage";
     private ContentResolver contentResolver;
     public synchronized ContentResolver getContentResolver(){if(contentResolver==null)contentResolver=new ContentResolver(this);return contentResolver;}
     public static final int MODE_PRIVATE = 0, MODE_ENABLE_WRITE_AHEAD_LOGGING = 8, MODE_NO_LOCALIZED_COLLATORS = 16;
@@ -64,6 +65,7 @@ public abstract class Context {
         return serviceClass.cast(getSystemService(name));
     }
     public String getSystemServiceName(Class<?> serviceClass) {
+        if (serviceClass == android.os.storage.StorageManager.class) return STORAGE_SERVICE;
         if (serviceClass == android.nfc.NfcManager.class) return NFC_SERVICE;
         if (serviceClass == android.accounts.AccountManager.class) return ACCOUNT_SERVICE;
         if (serviceClass == android.hardware.input.InputManager.class) return INPUT_SERVICE;

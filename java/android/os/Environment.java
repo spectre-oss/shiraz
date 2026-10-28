@@ -42,6 +42,10 @@ public class Environment {
         if (!root.isDirectory()) return MEDIA_UNMOUNTED;
         return nativeIsReadOnly(root.getPath().getBytes(StandardCharsets.UTF_8)) ? MEDIA_MOUNTED_READ_ONLY : MEDIA_MOUNTED;
     }
+    public static String shirazStorageState(HostStorage value) {
+        if(value==null)throw new NullPointerException("storage");
+        return state(value);
+    }
     private static native boolean nativeIsReadOnly(byte[] path);
     public static boolean isExternalStorageEmulated() { storage(); return true; }
     public static boolean isExternalStorageRemovable() { storage(); return false; }

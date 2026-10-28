@@ -203,6 +203,7 @@ storage-smoke: framework build/libshiraz-host.so
 	mkdir -p build/storage-smoke
 	javac --release 8 -cp build/framework/classes -d build/storage-smoke tests/java/StorageSmoke.java
 	java -Xcheck:jni -Djava.library.path=build -cp build/storage-smoke:build/framework/classes StorageSmoke
+check: storage-smoke
 
 .PHONY: framework-resources
 framework-resources: build/framework-res/framework-res.apk

@@ -38,6 +38,7 @@ public final class ActivityRunner {
         private android.app.job.JobScheduler jobs;
         private android.app.AlarmManager alarms;
         private android.app.DownloadManager downloads;
+        private android.os.storage.StorageManager storageManager;
         private static final java.util.Set<String> ABSENT_SERVICES = new java.util.HashSet<String>(java.util.Arrays.asList("phone", "wifip2p", "bluetooth", "vibrator", "vibrator_manager", "usb", "nfc", "camera", "keyguard", "power", "batterymanager", "storage", "uimode", "media_session", "media_router", "mediaprojection", "device_policy", "launcherapps", "restrictions", "servicediscovery", "wallpaper", "search", "textservices", "textclassification", "captioning", "input", "usagestats", "role", "print", "dropbox", "consumer_ir", "tv_input", "locale"));
         private android.view.accessibility.AccessibilityManager accessibility;
         private android.app.NotificationManager notifications;
@@ -88,6 +89,7 @@ public final class ActivityRunner {
         private android.os.PowerManager power;
         private android.app.KeyguardManager keyguard;
         @Override public synchronized Object getSystemService(String service) {
+            if(STORAGE_SERVICE.equals(service)){if(storageManager==null)storageManager=android.os.storage.StorageManager.shirazForStorage(storage);return storageManager;}
             if(DOWNLOAD_SERVICE.equals(service)){if(downloads==null)downloads=android.app.DownloadManager.shirazForHost(this);return downloads;}
             if(VIBRATOR_SERVICE.equals(service))return new android.os.Vibrator();
             if("uimode".equals(service))return new android.app.UiModeManager(this);

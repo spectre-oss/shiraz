@@ -22,13 +22,23 @@ public final class StorageSmoke {
             Files.createSymbolicLink(storage.files().toPath().resolve("outside-link"),root.resolve("outside-file"));
             try{storage.filePath("outside-link");throw new AssertionError("Internal file symlink escape accepted");}catch(SecurityException expected){}
             Environment.shirazInitialize(storage);
+            android.os.storage.StorageManager manager=android.os.storage.StorageManager.shirazForStorage(storage);
+            android.os.storage.StorageVolume volume=manager.getPrimaryStorageVolume();
+            require(manager.getStorageVolumes().size()==1&&manager.getStorageVolumes().get(0).equals(volume),"Primary volume enumeration");
+            manager.getStorageVolumes().clear();require(manager.getStorageVolumes().size()==1,"Caller changed volume registry");
+            require(volume.isPrimary()&&volume.isEmulated()&&!volume.isRemovable()&&volume.getUuid()==null,"App volume identity");
+            require(volume.getDirectory().equals(storage.primaryPath(null))&&Environment.MEDIA_MOUNTED.equals(volume.getState()),"Mounted primary volume path/state");
+            require(manager.getStorageVolume(storage.externalFiles(null)).equals(volume)&&manager.getStorageVolume(storage.files())==null,"Volume path lookup");
+            require(manager.getStorageVolume(root.resolve("app/external-other").toFile())==null,"Sibling prefix matched primary volume");
+            try{manager.getStorageVolume(null);throw new AssertionError("Null volume path accepted");}catch(NullPointerException expected){}
             require(Environment.getDownloadCacheDirectory().equals(storage.cache()), "Download cache is app scoped");
             require(Environment.getExternalStorageDirectory().equals(storage.primaryPath(null)), "Environment primary path");
             require(Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState()), "Real filesystem mount state");
             java.lang.reflect.Method readOnly = Environment.class.getDeclaredMethod("nativeIsReadOnly", byte[].class);
             readOnly.setAccessible(true);
             Path sys = Paths.get("/sys");
-            if (Files.isDirectory(sys)) require(((Boolean)readOnly.invoke(null, (Object)sys.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+            // Android libcore forbids FileStore queries; keep this independent host-JDK comparison.
+            if (Files.isDirectory(sys)&&!"Dalvik".equals(System.getProperty("java.vm.name"))) require(((Boolean)readOnly.invoke(null, (Object)sys.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)))
                 == Files.getFileStore(sys).isReadOnly(), "JNI mount flags agree with host filesystem");
             try { Environment.shirazInitialize(storage); throw new AssertionError("Duplicate primary initialization"); }
             catch (IllegalStateException expected) { }
@@ -48,6 +58,8 @@ public final class StorageSmoke {
             Environment.shirazShutdown();
             Environment.shirazInitialize(blocked);
             require(Environment.MEDIA_UNMOUNTED.equals(Environment.getExternalStorageState()), "Unavailable primary state");
+            android.os.storage.StorageVolume unavailableVolume=android.os.storage.StorageManager.shirazForStorage(blocked).getPrimaryStorageVolume();
+            require(unavailableVolume.getDirectory()==null&&Environment.MEDIA_UNMOUNTED.equals(unavailableVolume.getState()),"Unavailable storage volume reported mounted");
             require(Environment.getExternalStorageDirectory().equals(unavailable.resolve("external").toFile()), "Unavailable root path still available");
             Environment.shirazShutdown(); Environment.shirazInitialize(storage);
             Files.write(unavailable.resolve("files"), new byte[]{1});
@@ -59,6 +71,7 @@ public final class StorageSmoke {
             catch (SecurityException expected) { }
             require(!Files.exists(outside.resolve("new")), "Escaping directory created outside storage");
             Files.createSymbolicLink(storage.primaryPath(null).toPath().resolve("public-escape"), outside);
+            require(manager.getStorageVolume(storage.primaryPath(null).toPath().resolve("public-escape/new").toFile())==null,"Symlink escape matched app volume");
             try { Environment.getExternalStoragePublicDirectory("public-escape/new"); throw new AssertionError("Public symlink escape"); }
             catch (SecurityException expected) { }
             require(Environment.MEDIA_UNKNOWN.equals(Environment.getExternalStorageState(outside.toFile())), "Unknown volume state");
@@ -74,7 +87,8 @@ public final class StorageSmoke {
             try { Environment.getExternalStorageState(); throw new AssertionError("Closed storage accepted"); }
             catch (IllegalStateException expected) { }
             try (Stream<Path> paths = Files.walk(root)) {
-                for (Path path : (Iterable<Path>)paths.sorted(Comparator.reverseOrder())::iterator) Files.delete(path);
+                java.util.Iterator<Path> remaining=paths.sorted(Comparator.reverseOrder()).iterator();
+                while(remaining.hasNext())Files.delete(remaining.next());
             }
         }
     }
