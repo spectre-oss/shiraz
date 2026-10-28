@@ -22,5 +22,5 @@ remain explicit. No unrelated private experiments are included in this list.
 | [Obtainium](experiments/flutter/OBTAINIUM.md) | Flutter | Settings, text entry, resizing, back navigation, and theme persistence verified. Background package-query failure remains. |
 | [Joplin](experiments/react-native/JOPLIN.md) | React Native | Notes list, Add menu, note screen, title input, and title persistence across restart verified after line-height fixes. Body editing remains unverified. |
 | [2048](experiments/unity/2048.md) | Unity | Release has only 32-bit native code; rejected by this 64-bit runtime. |
-| [Lucas Doggiehood](experiments/unity/LUCAS_DOGGIEHOOD.md) | Unity | Animated neighborhood renders; house and Settings panels respond to input after correcting the shared EGL/GLES adapter mapping. Native resize, gameplay persistence, and clean shutdown remain open. |
+| [Lucas Doggiehood](experiments/unity/LUCAS_DOGGIEHOOD.md) | Unity | Deployed runtime renders an animated neighborhood, responds to house/Settings input, and pans the camera. Rebuilt ART has a black-frame regression; native resize, gameplay persistence, and clean shutdown remain open. |
 | [Unciv](experiments/libgdx/UNCIV.md) | libGDX | Offline map, unit exploration, city founding, save/reload across restart, and portrait relayout verified; rendering stability and longer gameplay remain under test. |

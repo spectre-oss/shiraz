@@ -74,6 +74,19 @@
     this is not a successful clean-shutdown result. The reproducible regression
     is available through `make art-alt-stack-smoke` after rebuilding ART.
 
+15. Fresh repeated runs with the rebuilt ART remain black, with UnityMain waiting
+    on a condition variable. The deployed runtime still renders the scene with
+    the same framework and graphics adapter. The ownership fixture passes, but
+    the rebuilt runtime is **not yet a verified game-compatible replacement**.
+    A syscall trace attributes signal 9 to the game calling kill on itself after
+    lifecycle timeouts, rather than to the runner's time limit.
+
+16. On the deployed runtime, a drag delivered over separate frames moves the
+    neighborhood camera. The game's onboarding advances from dragging to its
+    zoom instruction. A two-finger spread then zooms into the scene and advances
+    onboarding to the speech-bubble task. This supersedes the earlier
+    inconclusive drag replay and verifies multitouch zoom as well.
+
 **Interactive game scene verified; clean shutdown remains blocked.** Collider
-warnings still appear. Remaining checks include sustained camera dragging,
-progress/save persistence, native resize behavior, and window-detach shutdown.
+warnings still appear. Remaining checks include progress/save persistence,
+native resize behavior, window-detach shutdown, and rebuilt-runtime rendering.
