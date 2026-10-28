@@ -205,6 +205,13 @@ storage-smoke: framework build/libshiraz-host.so
 	java -Xcheck:jni -Djava.library.path=build -cp build/storage-smoke:build/framework/classes StorageSmoke
 check: storage-smoke
 
+.PHONY: alert-dialog-builder-smoke
+alert-dialog-builder-smoke: framework build/libshiraz-host.so build/libshiraz-image.so
+	mkdir -p build/alert-dialog-builder-smoke
+	javac --release 8 -cp build/framework/classes -d build/alert-dialog-builder-smoke tests/java/AlertDialogBuilderSmoke.java
+	$(JAVA) -Djava.library.path=build -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -cp build/alert-dialog-builder-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar AlertDialogBuilderSmoke
+check: alert-dialog-builder-smoke
+
 .PHONY: guest-pthread-attributes-smoke
 build/test-guest-pthread-attributes: tests/native/guest_pthread_attributes.cpp native/guest_pthread_attributes.h
 	@mkdir -p build

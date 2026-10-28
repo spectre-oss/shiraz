@@ -53,7 +53,16 @@
 9. Godot now rejects the device's missing Vulkan capability before creating its
    render view. Its error-reporting path then fails because
    `android.app.AlertDialog.Builder` is missing. Vulkan support is not advertised
-   falsely; graphics compatibility and the missing dialog API remain open.
+   falsely.
+10. Added the platform dialog builder and themed title/message colors. The
+   unchanged APK now displays a readable Vulkan requirements warning. Tapping
+   its visible OK button through normal touch input dismisses the dialog to a
+   blank surface; it does not start gameplay. The missing dialog API is fixed,
+   while the requested Vulkan rendering path remains unsupported.
+
+`make alert-dialog-builder-smoke` covers independent builder-created dialogs,
+button callback ordering, cancellation, dismissal, and dark-theme readability.
+The real APK retest verifies the visible warning and touch dismissal separately.
 
 ## Thread regression coverage
 
