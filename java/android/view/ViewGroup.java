@@ -266,7 +266,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
     public boolean getClipToPadding() { return clipPadding; }
     @Override public boolean shirazRequestsKeepScreenOn(){if(getVisibility()!=VISIBLE)return false;if(super.shirazRequestsKeepScreenOn())return true;for(View child:children)if(child.shirazRequestsKeepScreenOn())return true;return false;}
     @Override public PointerIcon shirazPointerIcon(float x,float y){
-        ArrayList<View> order=orderedChildren();for(int i=order.size()-1;i>=0;i--){View child=order.get(i);float cx=child.shirazLocalX(x+getScrollX()-child.getX()),cy=child.shirazLocalY(y+getScrollY()-child.getY());if(child.getParent()==this&&child.getVisibility()==VISIBLE&&cx>=0&&cy>=0&&cx<child.getWidth()&&cy<child.getHeight()){PointerIcon icon=child.shirazPointerIcon(cx,cy);if(icon!=null)return icon;}}
+        ArrayList<View> order=orderedChildren();for(int i=order.size()-1;i>=0;i--){View child=order.get(i);float cx=child.shirazLocalX(x+getScrollX()-child.getX(),y+getScrollY()-child.getY()),cy=child.shirazLocalY(x+getScrollX()-child.getX(),y+getScrollY()-child.getY());if(child.getParent()==this&&child.getVisibility()==VISIBLE&&cx>=0&&cy>=0&&cx<child.getWidth()&&cy<child.getHeight()){PointerIcon icon=child.shirazPointerIcon(cx,cy);if(icon!=null)return icon;}}
         return super.shirazPointerIcon(x,y);
     }
     private boolean childrenDrawingOrderEnabled,transitionGroup;
@@ -363,7 +363,7 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
     @Override public boolean dispatchGenericMotionEvent(MotionEvent event){
         ArrayList<View> order=orderedChildren();
         for(int i=order.size()-1;i>=0;i--){View child=order.get(i);
-            float x=child.shirazLocalX(event.getX()+getScrollX()-child.getX()),y=child.shirazLocalY(event.getY()+getScrollY()-child.getY());
+            float x=child.shirazLocalX(event.getX()+getScrollX()-child.getX(),event.getY()+getScrollY()-child.getY()),y=child.shirazLocalY(event.getX()+getScrollX()-child.getX(),event.getY()+getScrollY()-child.getY());
             if(child.getParent()!=this||child.getVisibility()!=VISIBLE||child.shirazCollapsed()||!Float.isFinite(x)||!Float.isFinite(y)||x<0||y<0||x>=child.getWidth()||y>=child.getHeight())continue;
             MotionEvent local=MotionEvent.obtain(event);
             try{local.offsetLocation(getScrollX()-child.getX(),getScrollY()-child.getY());if(local.shirazInverseViewScale(child)&&child.dispatchGenericMotionEvent(local))return true;}finally{local.recycle();}
@@ -385,7 +385,7 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
                 int pointer=event.getActionIndex(),bits=gestureSplit?1<<event.getPointerId(pointer):-1;
                 ArrayList<View> order=orderedChildren();
                 for(int i=order.size()-1;i>=0;i--){View child=order.get(i);
-                    float localX=child.shirazLocalX(event.getX(pointer)+getScrollX()-child.getX()),localY=child.shirazLocalY(event.getY(pointer)+getScrollY()-child.getY());
+                    float localX=child.shirazLocalX(event.getX(pointer)+getScrollX()-child.getX(),event.getY(pointer)+getScrollY()-child.getY()),localY=child.shirazLocalY(event.getX(pointer)+getScrollX()-child.getX(),event.getY(pointer)+getScrollY()-child.getY());
                     if(child.getParent()!=this||child.getVisibility()!=VISIBLE||child.shirazCollapsed()||localX<0||localX>=child.getWidth()||localY<0||localY>=child.getHeight())continue;
                     TouchTarget existing=null;for(TouchTarget target:touchTargets)if(target.child==child){existing=target;break;}
                     if(existing!=null){existing.bits|=bits;delivered=existing;break;}

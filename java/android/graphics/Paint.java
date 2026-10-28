@@ -80,7 +80,7 @@ public class Paint {
     public void setAntiAlias(boolean value) { antialias = value; }
     public boolean isAntiAlias() { return antialias; }
     public void setTextSize(float value) {
-        if (!Float.isFinite(value) || value < 0 || value > 512) throw new IllegalArgumentException("Text size must be in [0,512]");
+        if (!Float.isFinite(value) || value < 0 || value > 16384) throw new IllegalArgumentException("Text size must be in [0,16384]");
         textSize = value;
     }
     public void setTextSkewX(float value){if(!Float.isFinite(value)||Math.abs(value)>16)throw new IllegalArgumentException("Text skew must be in [-16,16]");textSkewX=value;}

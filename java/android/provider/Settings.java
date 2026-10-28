@@ -38,6 +38,7 @@ public final class Settings {
   public static int getInt(ContentResolver resolver,String name)throws SettingNotFoundException{return integer(getString(resolver,name),name);}
  }
  public static final class System {
+  public static final String SOUND_EFFECTS_ENABLED="sound_effects_enabled";
   public static final String AIRPLANE_MODE_ON=Global.AIRPLANE_MODE_ON;
   public static final String RINGTONE="ringtone",NOTIFICATION_SOUND="notification_sound",ALARM_ALERT="alarm_alert";
   public static final android.net.Uri CONTENT_URI=android.net.Uri.parse("content://settings/system");
@@ -45,7 +46,7 @@ public final class Settings {
   public static final android.net.Uri DEFAULT_NOTIFICATION_URI=getUriFor(NOTIFICATION_SOUND);
   public static final android.net.Uri DEFAULT_ALARM_ALERT_URI=getUriFor(ALARM_ALERT);
   public static android.net.Uri getUriFor(String name){return android.net.Uri.withAppendedPath(CONTENT_URI,name);}
-  public static String getString(ContentResolver resolver,String name){return AIRPLANE_MODE_ON.equals(name)?Global.getString(resolver,name):read(resolver,"system",name);}
+  public static String getString(ContentResolver resolver,String name){if(resolver==null)throw new NullPointerException("resolver");if(SOUND_EFFECTS_ENABLED.equals(name))return "0";return AIRPLANE_MODE_ON.equals(name)?Global.getString(resolver,name):read(resolver,"system",name);}
   public static int getInt(ContentResolver resolver,String name,int fallback){return integer(getString(resolver,name),fallback);}
   public static int getInt(ContentResolver resolver,String name)throws SettingNotFoundException{return integer(getString(resolver,name),name);}
   public static float getFloat(ContentResolver resolver,String name,float fallback){return floating(getString(resolver,name),fallback);}

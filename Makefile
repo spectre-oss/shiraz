@@ -1316,3 +1316,24 @@ color-value-smoke: framework
 	javac --release 8 -cp build/framework/classes -d build/color-value-smoke tests/java/ColorValueSmoke.java
 	java -Djava.library.path=build -cp build/color-value-smoke:build/framework/classes ColorValueSmoke
 check: color-value-smoke
+
+.PHONY: pixel-copy-smoke
+pixel-copy-smoke: framework build/libshiraz-gles2.so build/libshiraz-gles1.so build/libEGL.so.1 build/libshiraz-bitmap.so build/libshiraz-path.so
+	mkdir -p build/pixel-copy-smoke
+	javac --release 8 -cp build/framework/classes -d build/pixel-copy-smoke tests/java/PixelCopySmoke.java
+	LD_LIBRARY_PATH="$(CURDIR)/build:$${LD_LIBRARY_PATH}" java -Xcheck:jni -Djava.library.path=build -cp build/pixel-copy-smoke:build/framework/classes PixelCopySmoke
+check: pixel-copy-smoke
+
+.PHONY: view-rotation-smoke
+view-rotation-smoke: framework build/libshiraz-bitmap.so build/libshiraz-path.so
+	mkdir -p build/view-rotation-smoke
+	javac --release 8 -cp build/framework/classes -d build/view-rotation-smoke tests/java/ViewRotationSmoke.java
+	java -Djava.library.path=build -cp build/view-rotation-smoke:build/framework/classes ViewRotationSmoke
+check: view-rotation-smoke
+
+.PHONY: qwerty-key-smoke
+qwerty-key-smoke: framework
+	mkdir -p build/qwerty-key-smoke
+	javac --release 8 -cp build/framework/classes -d build/qwerty-key-smoke tests/java/QwertyKeySmoke.java
+	java -cp build/qwerty-key-smoke:build/framework/classes QwertyKeySmoke
+check: qwerty-key-smoke

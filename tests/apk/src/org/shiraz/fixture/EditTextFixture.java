@@ -61,6 +61,7 @@ public final class EditTextFixture {
  }
  public static void check(Context context){
   editorTypes(context);
+  EditText selectable=new EditText(context);selectable.setText("select");selectable.setSelection(1,4);android.text.method.KeyListener listener=selectable.getKeyListener();selectable.setTextIsSelectable(true);check(selectable.isTextSelectable()&&selectable.isFocusable()&&selectable.getKeyListener()==listener&&selectable.getSelectionStart()==1&&selectable.getSelectionEnd()==4,"editable selection policy preserves editing");selectable.setTextIsSelectable(false);check(!selectable.isTextSelectable()&&selectable.getKeyListener()==listener,"clearing selection policy retains editor");
   EditText edit=new EditText(context);FrameLayout root=new FrameLayout(context);root.addView(edit,new FrameLayout.LayoutParams(140,80));layout(root,160,100);check(edit.requestFocus()&&edit.onCheckIsTextEditor(),"Editable focus");
   final StringBuilder trace=new StringBuilder();edit.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){trace.append('B');}public void onTextChanged(CharSequence s,int a,int b,int c){trace.append('O');}public void afterTextChanged(Editable s){trace.append('A');}});
   edit.setText("ab");check(trace.toString().equals("BOA"),"Set text callback order");trace.setLength(0);edit.setSelection(1);check(root.dispatchKeyEvent(new KeyEvent(1,"é😀",0,0)),"Focused committed text dispatch");check(edit.getText().toString().equals("aé😀b")&&edit.getSelectionEnd()==4&&trace.toString().equals("BOA"),"Unicode insertion and cursor");
@@ -77,6 +78,9 @@ public final class EditTextFixture {
   edit.setFilters(new InputFilter[0]);edit.setText("abcd");edit.setSelection(2);edit.setCursorVisible(false);TextView expected=new TextView(context);expected.setText("abcd");check(java.util.Arrays.equals(pixels(edit,140,80),pixels(expected,140,80)),"Editable text pixels match plain text");
   edit.setCursorVisible(true);check(!java.util.Arrays.equals(pixels(edit,140,80),pixels(expected,140,80)),"Focused cursor is rendered");
   edit.selectAll();check(!java.util.Arrays.equals(pixels(edit,140,80),pixels(expected,140,80)),"Selection is rendered");
+  int flags=edit.getPaintFlags();edit.setPaintFlags(flags|Paint.UNDERLINE_TEXT_FLAG);check((edit.getPaint().getFlags()&Paint.UNDERLINE_TEXT_FLAG)!=0,"widget paint flags reach renderer");edit.setPaintFlags(flags);
+  edit.setHighlightColor(0xffff0000);int[] selectedPixels=pixels(edit,140,80);boolean red=false;for(int color:selectedPixels)red|=color==0xffff0000;check(red&&edit.getHighlightColor()==0xffff0000,"custom selection color rendered");
+  edit.setHighlightColor(0);check(java.util.Arrays.equals(pixels(edit,140,80),pixels(expected,140,80)),"transparent selection preserves text pixels");
   layout(edit,140,80);float x=edit.getPaint().measureText("ab");MotionEvent down=MotionEvent.obtain(0,0,MotionEvent.ACTION_DOWN,x,edit.getBaseline(),0);edit.dispatchTouchEvent(down);down.recycle();check(edit.getSelectionEnd()==2,"Pointer hit test");MotionEvent up=MotionEvent.obtain(0,1,MotionEvent.ACTION_UP,x,edit.getBaseline(),0);edit.dispatchTouchEvent(up);up.recycle();
   edit.setText("one two three four five six");pixels(edit,140,80);int wide=edit.getLineCount();pixels(edit,40,140);check(edit.getLineCount()>wide,"Editable portrait reflow");
   edit.setText("a");edit.setSelection(1);edit.setEnabled(false);check(!edit.dispatchKeyEvent(new KeyEvent(4,"bad",0,0))&&edit.getText().toString().equals("a"),"Disabled input rejected");

@@ -10,6 +10,11 @@ public final class LayoutSmoke {
   android.text.StaticLayout layout=new android.text.StaticLayout(text,paint,300,android.text.Layout.Alignment.ALIGN_NORMAL,1,0,false);
   if(layout.getParagraphAlignment(0)!=android.text.Layout.Alignment.ALIGN_CENTER||layout.getParagraphAlignment(1)!=android.text.Layout.Alignment.ALIGN_NORMAL)throw new AssertionError("paragraph alignment span boundaries");
   if(layout.getLineLeft(0)<=0||layout.getLineLeft(1)!=0)throw new AssertionError("paragraph horizontal alignment");
+  android.graphics.Rect bounds=new android.graphics.Rect();
+  for(int line=0;line<layout.getLineCount();line++){
+   int baseline=layout.getLineBounds(line,bounds);
+   if(bounds.left!=0||bounds.right!=300||bounds.top!=layout.getLineTop(line)||bounds.bottom!=layout.getLineTop(line+1)||baseline!=layout.getLineBaseline(line)||layout.getLineBounds(line,null)!=baseline)throw new AssertionError("full-width line bounds and optional output");
+  }
   System.out.println("LAYOUT_GEOMETRY_REPLACEMENT_OK");
  }
 }

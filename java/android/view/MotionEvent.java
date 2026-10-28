@@ -166,8 +166,8 @@ public final class MotionEvent extends InputEvent {
     /** Host window-animation mapping; raw screen coordinates remain unchanged. */
     public void shirazScaleLocation(float scale,float pivotX,float pivotY){live();if(!Float.isFinite(scale)||scale<=0||!Float.isFinite(pivotX)||!Float.isFinite(pivotY))throw new IllegalArgumentException("Pointer scale");for(PointerCoords point:coords)if(!Float.isFinite(pivotX+(point.x-pivotX)*scale)||!Float.isFinite(pivotY+(point.y-pivotY)*scale))throw new IllegalArgumentException("Pointer overflow");for(PointerCoords point:coords){point.x=pivotX+(point.x-pivotX)*scale;point.y=pivotY+(point.y-pivotY)*scale;}}
     final boolean shirazInverseViewScale(View view){live();
-        for(PointerCoords point:coords)if(!Float.isFinite(view.shirazLocalX(point.x))||!Float.isFinite(view.shirazLocalY(point.y)))return false;
-        for(PointerCoords point:coords){point.x=view.shirazLocalX(point.x);point.y=view.shirazLocalY(point.y);if(view.shirazMirroredY()^(view.getScaleX()<0)^(view.getScaleY()<0))point.orientation=-point.orientation;}return true;}
+        for(PointerCoords point:coords)if(!Float.isFinite(view.shirazLocalX(point.x,point.y))||!Float.isFinite(view.shirazLocalY(point.x,point.y)))return false;
+        for(PointerCoords point:coords){float x=view.shirazLocalX(point.x,point.y),y=view.shirazLocalY(point.x,point.y);point.x=x;point.y=y;point.orientation=view.shirazLocalOrientation(point.orientation);}return true;}
     final void shirazMirrorX(float width){live();for(PointerCoords point:coords){point.x=width-point.x;point.orientation=-point.orientation;}}
     public void setLocation(float x,float y){live();double dx=(double)x-coords[0].x,dy=(double)y-coords[0].y;if(!Float.isFinite(x)||!Float.isFinite(y))throw new IllegalArgumentException("Pointer location");for(PointerCoords point:coords)if(!Float.isFinite((float)(point.x+dx))||!Float.isFinite((float)(point.y+dy)))throw new IllegalArgumentException("Pointer location overflow");for(PointerCoords point:coords){point.x=(float)(point.x+dx);point.y=(float)(point.y+dy);}coords[0].x=x;coords[0].y=y;}
     public int describeContents() { return 0; }

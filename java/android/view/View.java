@@ -548,7 +548,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public View(Context context, android.util.AttributeSet attrs, int style, int resource) {
         this(context);
         if(attrs!=null||style!=0||resource!=0){shiraz.runtime.XmlAttributes a=new shiraz.runtime.XmlAttributes(context,attrs,style,resource);a.prefetch(CONSTRUCTOR_ATTRIBUTES);
-            a.reject("rotation rotationX rotationY foregroundTint foregroundTintMode");
+            a.reject("rotationX rotationY foregroundTint foregroundTintMode");if(a.has("rotation"))setRotation(a.number("rotation",0));
             if(a.has("onClick")){
              String click=a.text("onClick");
              if(click!=null){
@@ -936,7 +936,17 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void setScrollContainer(boolean value){scrollContainer=value;}
     public boolean isScrollContainer(){return scrollContainer&&isAttachedToWindow();}
     public static final int SCROLL_AXIS_NONE=0,SCROLL_AXIS_HORIZONTAL=1,SCROLL_AXIS_VERTICAL=2;
-    private float translationX,translationY,rotationY,scaleX=1,scaleY=1,pivotX,pivotY;
+    private float translationX,translationY,rotation,rotationY,scaleX=1,scaleY=1,pivotX,pivotY;
+    private float cameraDistance=8;
+    public float getCameraDistance(){return cameraDistance*getResources().getDisplayMetrics().densityDpi;}
+    /** Camera depth has no effect on the supported planar transforms. Perspective rotations still fail explicitly. */
+    public void setCameraDistance(float distance){
+        if(!Float.isFinite(distance))throw new IllegalArgumentException("View camera distance");
+        int density=getResources().getDisplayMetrics().densityDpi;
+        if(density<=0)throw new IllegalStateException("Invalid display density");
+        float value=Math.abs(distance)/density;
+        if(cameraDistance!=value){cameraDistance=value;invalidate();}
+    }
     private boolean pivotXSet,pivotYSet;
     public float getScaleX(){return scaleX;}public float getScaleY(){return scaleY;}
     public void setScaleX(float value){if(!Float.isFinite(value)||Math.abs(value)>8192)throw new IllegalArgumentException("View scale");if(scaleX!=value){scaleX=value;invalidate();}}
@@ -946,12 +956,14 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void setPivotX(float value){if(!Float.isFinite(value)||Math.abs(value)>10000000)throw new IllegalArgumentException("View pivot");pivotXSet=true;if(pivotX!=value){pivotX=value;invalidate();}}
     public void setPivotY(float value){if(!Float.isFinite(value)||Math.abs(value)>10000000)throw new IllegalArgumentException("View pivot");pivotYSet=true;if(pivotY!=value){pivotY=value;invalidate();}}
     public boolean isPivotXSet(){return pivotXSet;}public boolean isPivotYSet(){return pivotYSet;}
-    final float shirazLocalX(float x){float px=getPivotX();return (x-px)/(shirazMirroredY()?-scaleX:scaleX)+px;}
-    final float shirazLocalY(float y){float py=getPivotY();return (y-py)/scaleY+py;}
+    private double rotationSin,rotationCos=1;
+    final float shirazLocalX(float x,float y){return (float)(((x-getPivotX())*rotationCos+(y-getPivotY())*rotationSin)/(shirazMirroredY()?-scaleX:scaleX)+getPivotX());}
+    final float shirazLocalY(float x,float y){return (float)((-(x-getPivotX())*rotationSin+(y-getPivotY())*rotationCos)/scaleY+getPivotY());}
+    final float shirazLocalOrientation(float orientation){double x=Math.sin(orientation),y=-Math.cos(orientation);double localX=(x*rotationCos+y*rotationSin)/(shirazMirroredY()?-scaleX:scaleX),localY=(-x*rotationSin+y*rotationCos)/scaleY;double angle=Math.atan2(localX,-localY);if(angle>Math.PI/2)angle-=Math.PI;if(angle<-Math.PI/2)angle+=Math.PI;return (float)angle;}
     final boolean shirazCollapsed(){return scaleX==0||scaleY==0;}
-    public float getRotation(){return 0;}
+    public float getRotation(){return rotation;}
     public float getRotationX(){return 0;}
-    public void setRotation(float value){if(!Float.isFinite(value))throw new IllegalArgumentException("View rotation");if(value!=0)throw new UnsupportedOperationException("Planar View rotation is not implemented");}
+    public void setRotation(float value){if(!Float.isFinite(value)||Math.abs(value)>10000000)throw new IllegalArgumentException("View rotation");if(rotation!=value){rotation=value;double angle=Math.toRadians(value%360);rotationSin=Math.sin(angle);rotationCos=Math.cos(angle);if(Math.abs(rotationSin)<1e-7)rotationSin=0;if(Math.abs(rotationCos)<1e-7)rotationCos=0;invalidate();}}
     public void setRotationX(float value){if(!Float.isFinite(value))throw new IllegalArgumentException("View rotationX");if(value!=0)throw new UnsupportedOperationException("Perspective View rotationX is not implemented");}
     public float getRotationY(){return rotationY;}
     /** Exact planar half-turns; perspective rotations require a 3D renderer. */
@@ -961,7 +973,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     /** Local property transform; layout position and ancestor scroll are applied separately. */
     public android.graphics.Matrix getMatrix(){
         if(transformMatrix==null)transformMatrix=new android.graphics.Matrix();
-        transformMatrix.setTranslate(translationX,translationY);transformMatrix.preScale(shirazMirroredY()?-scaleX:scaleX,scaleY,getPivotX(),getPivotY());return transformMatrix;
+        transformMatrix.setTranslate(translationX,translationY);transformMatrix.preRotate(rotation,getPivotX(),getPivotY());transformMatrix.preScale(shirazMirroredY()?-scaleX:scaleX,scaleY,getPivotX(),getPivotY());return transformMatrix;
     }
     public static final android.util.Property<View,Float> PIVOT_X=new android.util.FloatProperty<View>("pivotX"){public Float get(View view){return view.getPivotX();}public void setValue(View view,float value){view.setPivotX(value);}};
     public static final android.util.Property<View,Float> PIVOT_Y=new android.util.FloatProperty<View>("pivotY"){public Float get(View view){return view.getPivotY();}public void setValue(View view,float value){view.setPivotY(value);}};

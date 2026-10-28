@@ -137,7 +137,7 @@ struct Font {
         if(selected!=current){invalidateShapingFont();currentSize=-1;if(FT_Set_Var_Design_Coordinates(face,raw->num_axis,selected.data()))throw std::runtime_error("Cannot apply font variations");current=std::move(selected);}
     }
     bool size(float pixels) {
-        if (!std::isfinite(pixels) || pixels < 0 || pixels > 512) throw std::invalid_argument("Text size must be in [0,512]");
+        if (!std::isfinite(pixels) || pixels < 0 || pixels > 16384) throw std::invalid_argument("Text size must be in [0,16384]");
         if (pixels == 0) return false; // FreeType interprets zero as a default size; Android requires zero coverage.
         const auto requested=FT_F26Dot6(std::lround(pixels * 64));
         if(requested!=currentSize){
@@ -570,6 +570,13 @@ static void drawText(JNIEnv* env, jclass, jintArray pixels, jint width, jint hei
                 auto glyph=reinterpret_cast<FT_BitmapGlyph>(owned.value);raster=&glyph->bitmap;bitmapLeft=glyph->left;bitmapTop=glyph->top;
             }else{
                 if(subpixel&&glyphFace.face->glyph->format==FT_GLYPH_FORMAT_OUTLINE)FT_Outline_Translate(&glyphFace.face->glyph->outline,fraction.x,fraction.y);
+                // Measurement may use amplified fonts; bound coverage before FreeType allocates a raster.
+                if(glyphFace.face->glyph->format==FT_GLYPH_FORMAT_OUTLINE){
+                    FT_BBox bounds;FT_Outline_Get_CBox(&glyphFace.face->glyph->outline,&bounds);
+                    const int64_t bw=int64_t(std::ceil(bounds.xMax/64.0)-std::floor(bounds.xMin/64.0));
+                    const int64_t bh=int64_t(std::ceil(bounds.yMax/64.0)-std::floor(bounds.yMin/64.0));
+                    if(bw<0||bh<0||bw>4096||bh>4096||work+uint64_t(bw)*bh>64*1024*1024)throw std::invalid_argument("Glyph raster bounds");
+                }
                 if(FT_Render_Glyph(glyphFace.face->glyph,aa?FT_RENDER_MODE_NORMAL:FT_RENDER_MODE_MONO))throw std::runtime_error("Cannot rasterize text glyph");
                 raster=&glyphFace.face->glyph->bitmap;bitmapLeft=glyphFace.face->glyph->bitmap_left;bitmapTop=glyphFace.face->glyph->bitmap_top;
             }

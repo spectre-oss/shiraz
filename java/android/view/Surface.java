@@ -6,7 +6,7 @@ public class Surface implements android.os.Parcelable {
  public static class OutOfResourcesException extends RuntimeException {public OutOfResourcesException(){}public OutOfResourcesException(String message){super(message);}}
  private Bitmap front,back,spare;private Canvas locked;private Thread producer;private boolean valid,accepting;private int width,height,format,generation,lockedGeneration;private long nativeWindow;
  static { System.loadLibrary("android"); }
- private Surface delegate;private boolean proxy;private long posts,lastNativeRevision;
+ private Surface delegate;private boolean proxy;private long posts,lastNativeRevision,initialNativeRevision;private boolean hasPostedFrame;
  public Surface(){}
  private Surface(long window,int w,int h){shirazConfigure(w,h,PixelFormat.RGBA_8888);nativeWindow=window;}
  public Surface(SurfaceTexture texture){if(texture==null)throw new NullPointerException("texture");delegate=texture.shirazSurface();proxy=true;}
@@ -15,7 +15,7 @@ public class Surface implements android.os.Parcelable {
  private static native long nativeWindowRevision(long window);
  public synchronized long shirazFrameNumber(){return proxy?target().shirazFrameNumber():posts+(nativeWindow==0?0:nativeWindowRevision(nativeWindow));}
 
- public synchronized long shirazNativeWindow() { if(proxy)return delegate==null?0:delegate.shirazNativeWindow(); if (!valid || width < 1 || height < 1) return 0; if (nativeWindow == 0) {nativeWindow = nativeCreateWindow(width, height);if(nativeWindow!=0&&front!=null){int[] pixels=new int[width*height];front.getPixels(pixels,0,width,0,0,width,height);if(!nativePostArgb(nativeWindow,pixels)){nativeReleaseWindow(nativeWindow);nativeWindow=0;}}} return nativeWindow; }
+ public synchronized long shirazNativeWindow() { if(proxy)return delegate==null?0:delegate.shirazNativeWindow(); if (!valid || width < 1 || height < 1) return 0; if (nativeWindow == 0) {nativeWindow = nativeCreateWindow(width, height);if(nativeWindow!=0&&front!=null){int[] pixels=new int[width*height];front.getPixels(pixels,0,width,0,0,width,height);if(!nativePostArgb(nativeWindow,pixels)){nativeReleaseWindow(nativeWindow);nativeWindow=0;}else initialNativeRevision=nativeWindowRevision(nativeWindow);}} return nativeWindow; }
  public int shirazWidth() { return width; }
  public int shirazHeight() { return height; }
  private static native long nativeCreateWindow(int width, int height);
@@ -49,7 +49,7 @@ public class Surface implements android.os.Parcelable {
   if (nativeCopyArgb(nativeWindow, published)&&revision==nativeWindowRevision(nativeWindow)){front.setPixels(published, 0, front.getWidth(), 0, 0, front.getWidth(), front.getHeight());lastNativeRevision=revision;}
  }
  private static void dimensions(int w,int h){if(w<1||h<1||w>8192||h>8192||(long)w*h>16*1024*1024)throw new IllegalArgumentException("Surface dimensions");}
- public synchronized void shirazConfigure(int w,int h,int pixelFormat){dimensions(w,h);if(nativeWindow!=0&&(width!=w||height!=h)){if(!nativeResizeWindow(nativeWindow,w,h))throw new OutOfResourcesException("Native surface resize failed");nativeEglForgetWindow(nativeWindow);}Bitmap replacement=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);replacement.setDensity(Bitmap.DENSITY_NONE);if(pixelFormat!=PixelFormat.RGBA_8888&&pixelFormat!=PixelFormat.TRANSLUCENT&&pixelFormat!=PixelFormat.TRANSPARENT)replacement.eraseColor(0xff000000);if(front!=null)front.recycle();if(spare!=null){spare.recycle();spare=null;}front=replacement;width=w;height=h;format=pixelFormat;generation++;valid=accepting=true;notifyAll();}
+ public synchronized void shirazConfigure(int w,int h,int pixelFormat){dimensions(w,h);if(nativeWindow!=0&&(width!=w||height!=h)){if(!nativeResizeWindow(nativeWindow,w,h))throw new OutOfResourcesException("Native surface resize failed");nativeEglForgetWindow(nativeWindow);}Bitmap replacement=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);replacement.setDensity(Bitmap.DENSITY_NONE);if(pixelFormat!=PixelFormat.RGBA_8888&&pixelFormat!=PixelFormat.TRANSLUCENT&&pixelFormat!=PixelFormat.TRANSPARENT)replacement.eraseColor(0xff000000);if(front!=null)front.recycle();if(spare!=null){spare.recycle();spare=null;}front=replacement;width=w;height=h;format=pixelFormat;hasPostedFrame=false;initialNativeRevision=nativeWindow==0?0:nativeWindowRevision(nativeWindow);generation++;valid=accepting=true;notifyAll();}
  public synchronized boolean isValid(){return proxy?delegate!=null&&delegate.isValid():valid;}
  synchronized void shirazStopProducer(){accepting=false;generation++;notifyAll();}
  public synchronized void release(){if(proxy){delegate=null;return;}lastNativeRevision=0;valid=accepting=false;generation++;if(nativeWindow!=0){nativeEglForgetWindow(nativeWindow);nativeReleaseWindow(nativeWindow);nativeWindow=0;}if(front!=null){front.recycle();front=null;}if(spare!=null){spare.recycle();spare=null;}published=null;notifyAll();}
@@ -67,9 +67,22 @@ public class Surface implements android.os.Parcelable {
    canvas.setBitmap(null);
    try{if(valid&&lockedGeneration==generation){
      if(format==PixelFormat.RGB_565||format==PixelFormat.RGBX_8888||format==PixelFormat.OPAQUE){int w=back.getWidth(),h=back.getHeight();int[] row=new int[w];for(int y=0;y<h;y++){back.getPixels(row,0,w,0,y,w,1);for(int x=0;x<w;x++){int c=row[x];if(format==PixelFormat.RGB_565){int r=(c>>>19)&31,g=(c>>>10)&63,b=(c>>>3)&31;c=((r<<3|r>>>2)<<16)|((g<<2|g>>>4)<<8)|(b<<3|b>>>2);}row[x]=0xff000000|c;}back.setPixels(row,0,w,0,y,w,1);}}
-     spare=front;front=back;back=null;posts++;if(nativeWindow!=0){int count=width*height;if(published==null||published.length!=count)published=new int[count];front.getPixels(published,0,width,0,0,width,height);if(!nativePostArgb(nativeWindow,published))throw new IllegalStateException("Native surface post failed");lastNativeRevision=nativeWindowRevision(nativeWindow);}
+     spare=front;front=back;back=null;posts++;hasPostedFrame=true;if(nativeWindow!=0){int count=width*height;if(published==null||published.length!=count)published=new int[count];front.getPixels(published,0,width,0,0,width,height);if(!nativePostArgb(nativeWindow,published))throw new IllegalStateException("Native surface post failed");lastNativeRevision=nativeWindowRevision(nativeWindow);}
    }}finally{if(back!=null)back.recycle();back=null;locked=null;producer=null;notifyAll();}
   }
+ }
+ synchronized int shirazCopyPixels(Rect source,Bitmap destination){
+  if(proxy)return delegate==null?PixelCopy.ERROR_SOURCE_INVALID:delegate.shirazCopyPixels(source,destination);
+  if(!valid||front==null)return PixelCopy.ERROR_SOURCE_INVALID;
+  if(!hasPostedFrame&&(nativeWindow==0||nativeWindowRevision(nativeWindow)<=initialNativeRevision))return PixelCopy.ERROR_SOURCE_NO_DATA;
+  publishWindow();
+  if(nativeWindow!=0&&lastNativeRevision!=nativeWindowRevision(nativeWindow))return PixelCopy.ERROR_TIMEOUT;
+  Rect crop=source==null?new Rect(0,0,width,height):new Rect(source);
+  if(!crop.intersect(0,0,width,height))return PixelCopy.ERROR_SOURCE_INVALID;
+  Canvas canvas=new Canvas(destination);
+  try{Paint paint=new Paint(Paint.FILTER_BITMAP_FLAG);paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));canvas.drawBitmap(front,crop,new Rect(0,0,destination.getWidth(),destination.getHeight()),paint);}
+  finally{canvas.setBitmap(null);}
+  return PixelCopy.SUCCESS;
  }
  public Canvas lockHardwareCanvas(){throw new UnsupportedOperationException("Hardware surface canvas requires EGL/native window support");}
  public synchronized void shirazDraw(Canvas canvas,int width,int height){if(proxy){target().shirazDraw(canvas,width,height);return;}if(valid&&front!=null&&width>0&&height>0){publishWindow();canvas.drawBitmap(front,null,new Rect(0,0,width,height),null);}}

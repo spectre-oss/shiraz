@@ -10,6 +10,7 @@ public abstract class Layout {
  public abstract int getLineCount();public abstract int getLineTop(int line);public abstract int getLineDescent(int line);public abstract int getLineStart(int line);public abstract float getLineWidth(int line);
  public final int getLineAscent(int line){return getLineTop(line)-getLineBaseline(line);}
  public int getHeight(){return getLineTop(getLineCount());}public final int getLineBottom(int line){return getLineTop(line+1);}public final int getLineBaseline(int line){return getLineBottom(line)-getLineDescent(line);}public final int getLineEnd(int line){return getLineStart(line+1);}
+ public int getLineBounds(int line,android.graphics.Rect bounds){int baseline=getLineBaseline(line);if(bounds!=null)bounds.set(0,getLineTop(line),width,getLineBottom(line));return baseline;}
  public int getLineForVertical(int vertical){
   int count=getLineCount();if(count<=0)return 0;
   int low=0,high=count-1;

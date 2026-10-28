@@ -30,7 +30,7 @@
 7. Retesting reaches Hermes/JavaScript and installs Expo JSI modules. Startup
    then fails because `android.content.UriPermission` is missing. Error handling
    subsequently aborts with an invalid native stdio handle; that separate native
-   interoperability failure remains open. No Joplin UI or note editing is verified.
+   interoperability failure remains open. At that stage no Joplin UI or note editing was verified.
 8. Added URI-permission value types and empty persisted-grant queries. Taking a
    grant still fails explicitly because no host document picker issues one;
    existing URI parcel transport remains unsupported. Retesting passes module
@@ -55,11 +55,38 @@
     font-feature settings. Added immutable sRGB color values and default-feature
     queries; custom OpenType feature requests still fail explicitly. Regression
     checks pass, and the real app advances beyond those failures.
-15. The current startup failure is missing View.setCameraDistance(float) during
-    React Native transform setup. No usable note list or note editing is verified.
+15. Added density-scaled camera-distance state for planar transforms. Perspective
+    rotations remain unsupported. ART regression covers density changes and
+    invalid input.
+16. React Native attaches metadata spans to text. TextView now retains those
+    markers while continuing to reject unsupported paragraph styles. The actual
+    app renders its Welcome notebook and notes list.
+17. Tapping Add required optional UI sound requests and planar View rotation.
+    UI cues are muted; rotation now affects both rendering and inverse input
+    coordinates. ART regressions cover transformed pixels, touches, and existing
+    multitouch behavior. The real Add menu opens and its icon rotates.
+18. New note uses amplified font sizes for cap-height measurement. Raised the
+    bounded measurement range and added pre-allocation glyph coverage checks.
+    ART regression verifies scaled bounds and rejection of oversized raster work.
+    Retesting passes this measurement and reaches Layout.getLineBounds.
+19. Added full-width line bounds and baseline reporting. ART layout regressions
+    pass. Opening a note then required QwertyKeyListener. Added the desktop committed-text
+    bridge; ART tests verify Unicode deletion, navigation, and no duplicate
+    insertion from physical key-down events.
+20. Added selection/insertion action-mode callback registration, configurable
+    selection highlight color, and access to the actual text Paint flags.
+    Floating Android selection toolbars remain unsupported. ART editor regression
+    covers custom highlight pixels and transparent selection alongside existing
+    input and reflow behavior. Retesting then needed widget font-feature queries
+    and selectable-text setup on attachment. Added default font-feature access
+    and selection policy for editable widgets, retaining the explicit failure
+    for read-only selection. ART editing tests pass. Retesting now reaches a
+    React Native CustomLineHeightSpan rejected by TextView's paragraph-style
+    validation. Per-line height rendering is the next runtime issue; note editing
+    and persistence are still not verified.
 
 ## Acceptance still required
 
 Open the app, create and edit an offline note, navigate away and back, and verify
 persistence after restart. Synchronization and account workflows are out of this
-initial offline experiment. Current outcome: **startup blocked; investigation active**.
+initial offline experiment. Current outcome: **notes list and Add menu render; note creation blocked**.

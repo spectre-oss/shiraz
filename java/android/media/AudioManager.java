@@ -12,6 +12,9 @@ public final class AudioManager {
  public interface OnAudioFocusChangeListener {void onAudioFocusChange(int focusChange);}
  private final ArrayList<AudioFocusRequest> owners=new ArrayList<AudioFocusRequest>();
  private AudioManager(){}public static AudioManager shirazForProcess(){return new AudioManager();}
+ /** Optional system UI cues are muted: Shiraz has no configured desktop sound-effect theme. */
+ public void playSoundEffect(int effectType){}
+ public void playSoundEffect(int effectType,float volume){}
  private void notifyChange(final AudioFocusRequest request,final int change){if(request.listener==null)return;Handler handler=request.handler;if(handler==null){Looper main=Looper.getMainLooper();if(main==null)throw new IllegalStateException("Audio focus needs a main Looper");handler=new Handler(main);}if(!handler.post(new Runnable(){public void run(){request.listener.onAudioFocusChange(change);}}))throw new IllegalStateException("Audio focus callback looper stopped");}
  public synchronized int requestAudioFocus(AudioFocusRequest request){
   if(request==null)throw new NullPointerException("request");

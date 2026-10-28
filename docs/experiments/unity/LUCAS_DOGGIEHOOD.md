@@ -44,6 +44,27 @@
     Native thread/rendering investigation remains open. These observations do
     not establish whether the remaining problem is wholly in Shiraz or the APK.
 
-**Splash rendered; gameplay unverified.** No Unity game scene or input-driven gameplay has been
-observed. The next acceptance step is loading a real scene and interacting with
-it, then repeating launch and shutdown without a crash.
+11. Closing the activity exposed missing PixelCopy callback types. Added real
+    Surface/SurfaceView copying with Handler-delivered results, crop/scaling,
+    and no-frame/source/destination validation. ART and JNI-check regressions
+    cover software frames and EGL frame swaps. The next observed shutdown crash
+    is in ART alternate-signal-stack teardown; a native ownership fix is being
+    built and has not yet been verified.
+
+12. Compared the test deployment with AppImage packaging: GLES was mapped
+    directly to the host library and two independent copies of the Shiraz EGL
+    adapter were loaded. Routed EGL/GLES through one shared adapter instance.
+    The unchanged APK now renders the neighborhood, buildings, moving characters,
+    currency/settings HUD, and onboarding prompt. This is a real Unity scene,
+    not the splash. The packaged builder already maps these APIs through its
+    adapter; the deployment correction is not evidence of a new APK modification.
+
+13. Repeated launch renders the scene again. Pointer input opens a house panel
+    with residents/upgrade controls and opens Settings. A larger window continues
+    rendering, but the capture appears scaled; native responsive game layout is
+    not yet established. A drag replay delivered in one frame acted as a tap,
+    so camera dragging has not passed acceptance.
+
+**Interactive game scene verified; clean shutdown remains blocked.** Collider
+warnings still appear. Remaining checks include sustained camera dragging,
+progress/save persistence, native resize behavior, and shutdown ownership.

@@ -245,7 +245,7 @@ public class TextView extends View {
     private void changed(){measuredLayout=null;layoutWidth=-1;requestLayout();invalidate();}
     private static String plain(CharSequence value){
         if(value==null)return "";
-        if(value instanceof Spanned){for(Object span:((Spanned)value).getSpans(0,value.length(),Object.class))if(!(span instanceof NoCopySpan||span instanceof TextWatcher||span instanceof SpanWatcher||span instanceof android.text.style.CharacterStyle))throw new UnsupportedOperationException("Styled text rendering is not implemented");}
+        if(value instanceof Spanned){for(Object span:((Spanned)value).getSpans(0,value.length(),Object.class))if(span instanceof android.text.style.ParagraphStyle)throw new UnsupportedOperationException("TextView span rendering is not implemented: "+span.getClass().getName());}
         else if(!(value instanceof String||value instanceof StringBuilder||value instanceof StringBuffer))throw new UnsupportedOperationException("Styled text is not implemented");
         if(value.length()>32768)throw new IllegalArgumentException("TextView text limit");
         String result=value.toString();
@@ -306,9 +306,20 @@ public class TextView extends View {
     public void append(CharSequence value,int start,int end){if(!(text instanceof Editable))setText(text,BufferType.EDITABLE);((Editable)text).append(value,start,end);}
     public int getSelectionStart(){return Selection.getSelectionStart(text);}
     public int getSelectionEnd(){return Selection.getSelectionEnd(text);}
+    private int highlightColor=0x663399ff;
+    public void setHighlightColor(int color){if(highlightColor!=color){highlightColor=color;invalidate();}}
+    public int getHighlightColor(){return highlightColor;}
     public boolean hasSelection(){return getSelectionStart()>=0&&getSelectionStart()!=getSelectionEnd();}
-    public boolean isTextSelectable(){return false;}
-    public void setTextIsSelectable(boolean selectable){if(selectable)throw new UnsupportedOperationException("Read-only text selection is not implemented");}
+    private boolean textSelectable;
+    public boolean isTextSelectable(){return textSelectable;}
+    // Retain customization until an action mode is requested; keyboard selection
+    // and clipboard shortcuts do not create a floating Android toolbar.
+    private android.view.ActionMode.Callback selectionActionCallback,insertionActionCallback;
+    public void setCustomSelectionActionModeCallback(android.view.ActionMode.Callback callback){selectionActionCallback=callback;}
+    public android.view.ActionMode.Callback getCustomSelectionActionModeCallback(){return selectionActionCallback;}
+    public void setCustomInsertionActionModeCallback(android.view.ActionMode.Callback callback){insertionActionCallback=callback;}
+    public android.view.ActionMode.Callback getCustomInsertionActionModeCallback(){return insertionActionCallback;}
+    public void setTextIsSelectable(boolean selectable){if(selectable&&!(this instanceof EditText))throw new UnsupportedOperationException("Read-only text selection is not implemented");textSelectable=selectable;if(selectable){setFocusableInTouchMode(true);setFocusable(true);}}
     public int getJustificationMode(){return 0;}
     public void setJustificationMode(int mode){if(mode!=0)throw new UnsupportedOperationException("Text justification is not implemented");}
     protected void onSelectionChanged(int start,int end){}
@@ -330,6 +341,10 @@ public class TextView extends View {
     public final ColorStateList getHintTextColors(){return hintColors;}
     public final int getCurrentHintTextColor(){return hintColors.getColorForState(getDrawableState(),hintColors.getDefaultColor());}
     public TextPaint getPaint(){return paint;}
+    public String getFontFeatureSettings(){return paint.getFontFeatureSettings();}
+    public void setFontFeatureSettings(String settings){paint.setFontFeatureSettings(settings);changed();}
+    public int getPaintFlags(){return paint.getFlags();}
+    public void setPaintFlags(int flags){if(flags!=paint.getFlags()){paint.setFlags(flags);changed();}}
     public float getTextSize(){return paint.getTextSize();}
     public void setShadowLayer(float radius,float dx,float dy,int color){paint.setShadowLayer(radius,dx,dy,color);invalidate();}
     public float getShadowRadius(){return paint.getShadowLayerRadius();}public float getShadowDx(){return paint.getShadowLayerDx();}public float getShadowDy(){return paint.getShadowLayerDy();}public int getShadowColor(){return paint.getShadowLayerColor();}
@@ -560,7 +575,7 @@ public class TextView extends View {
     private void drawEditor(Canvas canvas,int line,float x,float baseline){
         if(!(text instanceof Editable)||!isFocused())return;int a=getSelectionStart(),b=getSelectionEnd();if(a<0||b<0)return;
         String value=lines.get(line);int start=lineStarts.get(line),end=start+value.length();Paint marker=new Paint();Paint.FontMetricsInt metrics=(uniformMetrics()?linePaint(line):paint).getFontMetricsInt();
-        if(a!=b){int left=Math.max(start,Math.min(a,b)),right=Math.min(end,Math.max(a,b));if(left<right){marker.setColor(0x663399ff);if(!hasMetrics()||uniformMetrics()){float[] ranges=new shiraz.runtime.TextGeometry(value,linePaint(line),lineBaseLevels.get(line)).ranges(left-start,right-start);for(int i=0;i<ranges.length;i+=2)canvas.drawRect(x+ranges[i],baseline+metrics.ascent,x+ranges[i+1],baseline+metrics.descent,marker);}else canvas.drawRect(x+advance(value,0,left-start,start),baseline+metrics.ascent,x+advance(value,0,right-start,start),baseline+metrics.descent,marker);}}
+        if(a!=b){int left=Math.max(start,Math.min(a,b)),right=Math.min(end,Math.max(a,b));if(left<right){marker.setColor(highlightColor);if(!hasMetrics()||uniformMetrics()){float[] ranges=new shiraz.runtime.TextGeometry(value,linePaint(line),lineBaseLevels.get(line)).ranges(left-start,right-start);for(int i=0;i<ranges.length;i+=2)canvas.drawRect(x+ranges[i],baseline+metrics.ascent,x+ranges[i+1],baseline+metrics.descent,marker);}else canvas.drawRect(x+advance(value,0,left-start,start),baseline+metrics.ascent,x+advance(value,0,right-start,start),baseline+metrics.descent,marker);}}
         else if(cursorVisible&&a>=start&&a<=end&&(a!=end||line+1==lines.size()||lineStarts.get(line+1)>end)){float at=x+(hasMetrics()&&!uniformMetrics()?advance(value,0,a-start,start):new shiraz.runtime.TextGeometry(value,linePaint(line),lineBaseLevels.get(line)).caret(a-start));marker.setColor(getCurrentTextColor());canvas.drawRect(at,baseline+metrics.ascent,at+1,baseline+metrics.descent,marker);}
     }
     private CharSequence ellipsizedSpans(String original,int origin,String result,int left,int right){
