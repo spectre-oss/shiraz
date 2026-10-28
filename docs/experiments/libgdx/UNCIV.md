@@ -19,10 +19,33 @@
 4. Retesting creates an ES2 context and switches the app surface to landscape.
    Added the missing GL10 `glGetString` bridge; the graphics regression verifies
    the version query and real pixel/texture operations on ART.
-5. Unciv now reports the actual Mesa renderer and framebuffer configuration, then
-   its render thread fails because `android.opengl.GLES20` is missing. A valid
-   graphics context and a live process do not establish a rendered game scene.
+5. The render thread next failed because `android.opengl.GLES20` was missing.
+   Added a JNI bridge for GLES2 shader/program, texture, buffer, uniform, query,
+   and draw operations. Buffer positions and bounds are checked. An ART shader
+   triangle/readback regression and a HotSpot JNI-check run pass on the VM.
+   The library is included in runtime dependencies and AppImage packaging.
+6. Retesting exposed glGetFloatv during texture-filter initialization. Adding the
+   float query advances the unchanged APK to its language selector and main menu.
 
-**Startup blocked; investigation active.** No playable game is claimed. Acceptance
-requires opening the menu, starting an offline game, and observing a response to
-map/game controls. A successful splash screen alone will not establish this.
+## Observed walkthrough
+
+- Selected English, opened Quickstart, and dismissed tutorial/leader dialogs.
+- Used the warrior's Explore action: the unit moved, more tiles appeared, and
+  selection switched to the settler.
+- Used Found city: Onondaga appeared, yields changed, and research/construction
+  prompts became available.
+- Saved through the in-game menu with the default save name.
+- Resized from 640×360 to 360×640. The map and HUD reflowed; a tap on the newly
+  positioned research button opened the technology tree.
+- Restarted the app: English remained selected. Selected the saved game and
+  loaded it; Onondaga, the explored map, and the displayed yields were restored.
+
+**Interactive offline gameplay observed; partial compatibility.** The bounded
+walkthrough does not establish a complete campaign, multiplayer, mods, or audio.
+The VM has no audio output device. A direct tile tap briefly left the map blank;
+the Explore action restored it. This rendering issue remains under investigation.
+Longer turn progression still needs verification.
+
+The GLES20 bridge is a subset: client vertex-array buffers and several less-used
+entry points remain unsupported. These observations apply to this APK and the
+tested software graphics configuration, not all libGDX games.

@@ -22,6 +22,10 @@ public class Paint {
     private float strokeWidth, strokeMiter = 4;
     private Typeface typeface;
     private String variationSettings;private int[] variationTags;private float[] variationValues;
+    public String getFontFeatureSettings(){return null;}
+    public void setFontFeatureSettings(String settings){
+        if(settings!=null&&!settings.isEmpty())throw new UnsupportedOperationException("Explicit OpenType font features are not implemented");
+    }
     private Shader shader;
     public Shader getShader(){return shader;}
     public Shader setShader(Shader value){shader=value;return value;}

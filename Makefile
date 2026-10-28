@@ -1283,3 +1283,36 @@ window-focus-callback-smoke: framework
 	javac --release 8 -cp build/framework/classes -d build/window-focus-callback-smoke tests/java/WindowFocusCallbackSmoke.java
 	java -Djava.library.path=build -cp build/window-focus-callback-smoke:build/framework/classes WindowFocusCallbackSmoke
 check: window-focus-callback-smoke
+
+.PHONY: icon-value-smoke
+icon-value-smoke: framework
+	mkdir -p build/icon-value-smoke
+	javac --release 8 -cp build/framework/classes -d build/icon-value-smoke tests/java/IconValueSmoke.java
+	java -Djava.library.path=build -cp build/icon-value-smoke:build/framework/classes IconValueSmoke
+check: icon-value-smoke
+
+build/libshiraz-gles2.so: native/gles2_jni.cpp build/libEGL_shim.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/gles2_jni.cpp -o $@ -Lbuild -lEGL_shim -lGLESv2 -Wl,-rpath,'$$ORIGIN'
+build: build/libshiraz-gles2.so
+
+.PHONY: descendant-rect-smoke
+descendant-rect-smoke: framework
+	mkdir -p build/descendant-rect-smoke
+	javac --release 8 -cp build/framework/classes -d build/descendant-rect-smoke tests/java/DescendantRectSmoke.java
+	java -Djava.library.path=build -cp build/descendant-rect-smoke:build/framework/classes DescendantRectSmoke
+check: descendant-rect-smoke
+
+.PHONY: gles20-smoke
+gles20-smoke: framework build/libshiraz-gles2.so build/libshiraz-gles1.so build/libEGL.so.1
+	mkdir -p build/gles20-smoke
+	javac --release 8 -cp build/framework/classes -d build/gles20-smoke tests/java/GLES20Smoke.java
+	LD_LIBRARY_PATH="$(CURDIR)/build:$${LD_LIBRARY_PATH}" java -Xcheck:jni -Djava.library.path=build -cp build/gles20-smoke:build/framework/classes GLES20Smoke
+check: gles20-smoke
+
+.PHONY: color-value-smoke
+color-value-smoke: framework
+	mkdir -p build/color-value-smoke
+	javac --release 8 -cp build/framework/classes -d build/color-value-smoke tests/java/ColorValueSmoke.java
+	java -Djava.library.path=build -cp build/color-value-smoke:build/framework/classes ColorValueSmoke
+check: color-value-smoke

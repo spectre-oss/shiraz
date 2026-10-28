@@ -8,6 +8,17 @@ import java.util.ArrayList;
 /** CPU children in insertion order; split pointer input and a single focused branch. */
 public abstract class ViewGroup extends View implements ViewParent, ViewManager {
     public boolean requestChildRectangleOnScreen(View child,android.graphics.Rect rectangle,boolean immediate){return false;}
+    public final void offsetDescendantRectToMyCoords(View descendant,android.graphics.Rect rectangle){offsetDescendantRect(descendant,rectangle,false);}
+    public final void offsetRectIntoDescendantCoords(View descendant,android.graphics.Rect rectangle){offsetDescendantRect(descendant,rectangle,true);}
+    private void offsetDescendantRect(View descendant,android.graphics.Rect rectangle,boolean reverse){
+        if(descendant==null||rectangle==null)throw new NullPointerException();
+        int x=0,y=0,depth=0;View current=descendant;
+        while(current!=this){
+            if(++depth>128||!(current.getParent() instanceof View))throw new IllegalArgumentException("View is not a descendant");
+            x+=current.getLeft()-current.getScrollX();y+=current.getTop()-current.getScrollY();current=(View)current.getParent();
+        }
+        rectangle.offset(reverse?-x:x,reverse?-y:y);
+    }
 
     public void setLayoutAnimation(android.view.animation.LayoutAnimationController controller) {
         if(controller!=null)throw new UnsupportedOperationException("Layout animations are not implemented");

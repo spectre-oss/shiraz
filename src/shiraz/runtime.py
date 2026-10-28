@@ -418,6 +418,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
     required = [ROOT / 'build/libshiraz-capture.so', ROOT / 'build/libshiraz-speech.so', ROOT / '.local/share/espeak-ng-data/phondata', vm, framework, framework_resources, HOST / 'lib64/libwolfssljni.so', ROOT / '.local/lib/libwolfssl.so', ROOT / 'build/libshiraz-bitmap.so', ROOT / 'build/libshiraz-notifications.so', ROOT / 'build/libshiraz-sqlite.so', ROOT / 'build/libshiraz-audio.so', ROOT / 'build/libshiraz-text.so', ROOT / 'build/libshiraz-resources.so', ROOT / 'build/libshiraz-android-process.so', HOST / 'lib64/libandroidfw.so', ROOT / 'build/libshiraz-host.so', ROOT / 'build/libshiraz-jni.so', ROOT / 'build/libandroid.so', ROOT / 'build/libandroid.so.0', ROOT / 'build/libEGL.so.1',
                 *(HOST / 'framework' / jar for jar in JARS)]
     required.append(ROOT / 'build/libshiraz-gles1.so')
+    required.append(ROOT / 'build/libshiraz-gles2.so')
     required.extend(ROOT / '.local/share/shiraz/fonts' / name for name in (
         'NotoSansArabic-Regular.ttf', 'NotoSansArabic-Bold.ttf', 'NotoSansHebrew-Regular.ttf',
         'NotoSansHebrew-Bold.ttf', 'NotoSans-Regular.ttf', 'NotoSans-Bold.ttf',

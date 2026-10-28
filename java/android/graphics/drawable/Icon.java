@@ -18,8 +18,8 @@ public final class Icon implements Parcelable {
  public static Icon createWithBitmap(Bitmap bitmap){if(bitmap==null)throw new IllegalArgumentException("bitmap");Icon icon=new Icon(TYPE_BITMAP);icon.bitmap=bitmap;return icon;}
  public static Icon createWithAdaptiveBitmap(Bitmap bitmap){if(bitmap==null)throw new IllegalArgumentException("bitmap");Icon icon=new Icon(TYPE_ADAPTIVE_BITMAP);icon.bitmap=bitmap;return icon;}
  public static Icon createWithResource(Context context,int id){if(context==null)throw new IllegalArgumentException("context");return createWithResource(context.getPackageName(),id);}
- public static Icon createWithResource(String packageName,int id){if(id==0)throw new IllegalArgumentException("resource");Icon icon=new Icon(TYPE_RESOURCE);icon.resourcePackage=packageName;icon.resourceId=id;return icon;}
- public static Icon createWithResource(Resources resources,String packageName,int id){if(id==0)throw new IllegalArgumentException("resource");Icon icon=new Icon(TYPE_RESOURCE);icon.resourcePackage=packageName;icon.resourceId=id;return icon;}
+ public static Icon createWithResource(String packageName,int id){if(packageName==null)throw new IllegalArgumentException("resource package");Icon icon=new Icon(TYPE_RESOURCE);icon.resourcePackage=packageName;icon.resourceId=id;return icon;}
+ public static Icon createWithResource(Resources resources,String packageName,int id){return createWithResource(packageName,id);}
  public static Icon createWithData(byte[] bytes,int offset,int length){if(bytes==null)throw new IllegalArgumentException("data");if(offset<0||length<0||offset>bytes.length-length||length>16*1024*1024)throw new IllegalArgumentException("icon data bounds");Icon icon=new Icon(TYPE_DATA);icon.data=java.util.Arrays.copyOfRange(bytes,offset,offset+length);return icon;}
  public static Icon createWithContentUri(String uri){if(uri==null||uri.isEmpty()||uri.length()>16384)throw new IllegalArgumentException("uri");Icon icon=new Icon(TYPE_URI);icon.uri=uri;return icon;}
  public static Icon createWithContentUri(Uri uri){if(uri==null)throw new IllegalArgumentException("uri");return createWithContentUri(uri.toString());}

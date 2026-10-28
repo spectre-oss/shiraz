@@ -20,7 +20,7 @@ remain explicit. No unrelated private experiments are included in this list.
 | App | Framework | Current observation |
 | --- | --- | --- |
 | [Obtainium](experiments/flutter/OBTAINIUM.md) | Flutter | Settings, text entry, resizing, back navigation, and theme persistence verified. Background package-query failure remains. |
-| [Joplin](experiments/react-native/JOPLIN.md) | React Native | Native modules, JavaScript, and text measurement advance; shortcut icon resource failure now blocks startup. |
+| [Joplin](experiments/react-native/JOPLIN.md) | React Native | Native modules, JavaScript, text measurement, and view mounting advance; missing camera-distance API now blocks startup. |
 | [2048](experiments/unity/2048.md) | Unity | Release has only 32-bit native code; rejected by this 64-bit runtime. |
 | [Lucas Doggiehood](experiments/unity/LUCAS_DOGGIEHOOD.md) | Unity | Splash renders and focused launch executes game initialization; subsequent scene is black and gameplay remains unverified. |
-| [Unciv](experiments/libgdx/UNCIV.md) | libGDX | ES2 context and renderer queries work; missing GLES20 Java bindings block game rendering. |
+| [Unciv](experiments/libgdx/UNCIV.md) | libGDX | Offline map, unit exploration, city founding, save/reload across restart, and portrait relayout verified; rendering stability and longer gameplay remain under test. |

@@ -45,8 +45,18 @@
 11. ContentResolver rejected local file-URI output. Added local file descriptor
     and output modes with owned stream closure; ART regression covers append,
     truncation, readback, and invalid arguments. Retesting advances to shortcut
-    initialization, where Icon.createWithResource rejects a resource argument.
-    That failure is under investigation; no note-editing pass is established.
+    initialization, where Icon.createWithResource rejected a zero resource ID.
+12. Resource Icon construction now retains the identifier and defers resolution;
+    null package names remain invalid. Retesting passes shortcut initialization.
+13. Safe-area measurement required ViewGroup descendant rectangle conversion.
+    Added forward/inverse mapping through nested layout and scroll offsets, with
+    a regression for unrelated views and unchanged output on failure.
+14. React Native view mounting required Color.valueOf(int) and default Paint
+    font-feature settings. Added immutable sRGB color values and default-feature
+    queries; custom OpenType feature requests still fail explicitly. Regression
+    checks pass, and the real app advances beyond those failures.
+15. The current startup failure is missing View.setCameraDistance(float) during
+    React Native transform setup. No usable note list or note editing is verified.
 
 ## Acceptance still required
 
