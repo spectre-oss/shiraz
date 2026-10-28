@@ -6,6 +6,8 @@ import subprocess
 from pathlib import PurePosixPath
 
 FORBIDDEN_DIRS = {'context', '.deps', '.local', 'build', 'dist', 'data', 'runs', 'docs', 'doc', 'secrets', 'credentials', '__pycache__'}
+PUBLIC_DOCS = {'docs/README.md', 'docs/DEVELOPMENT.md', 'docs/BUILDER.md',
+               'docs/WEB.md', 'docs/AI_CONTRIBUTING.md'}
 FORBIDDEN_SUFFIXES = {'.apk', '.apks', '.aab', '.dex', '.jar', '.class', '.so', '.a', '.o', '.elf', '.appimage', '.exe', '.bin', '.zip', '.gz', '.xz', '.log', '.sqlite', '.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.pyc'}
 SECRET = re.compile(rb'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9_-]{32,}|(?i:(?:api[_-]?key|access[_-]?token|password|client[_-]?secret)\s*[=:]\s*["\x27]?)[A-Za-z0-9_+/=-]{16,}')
 
@@ -14,7 +16,7 @@ def unsafe(path, data, mode='100644'):
     p = PurePosixPath(path)
     if mode not in ('100644', '100755'):
         return 'symlink/submodule or non-regular entry'
-    if any(part.lower() in FORBIDDEN_DIRS for part in p.parts) or p.name.startswith('.env'):
+    if (path not in PUBLIC_DOCS and any(part.lower() in FORBIDDEN_DIRS for part in p.parts)) or p.name.startswith('.env'):
         return 'private/local-only path'
     if p.suffix.lower() in FORBIDDEN_SUFFIXES or '.so.' in p.name:
         return 'binary, credential, or generated artifact extension'

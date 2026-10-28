@@ -19,14 +19,13 @@ body { min-height: 100vh; margin: 0; background: radial-gradient(ellipse 52rem 3
 body::before { content: ""; position: fixed; inset: 0; pointer-events: none; background-image: linear-gradient(#ffffff06 1px, transparent 1px), linear-gradient(90deg, #ffffff06 1px, transparent 1px); background-size: 48px 48px; mask-image: linear-gradient(#0005, transparent 70%); }
 a { color: inherit; }
 main { width: min(100% - 40px, 760px); margin: 0 auto; padding: clamp(48px, 8vw, 96px) 0 80px; position: relative; }
-.eyebrow { margin: 0 0 22px; color: #b9b9b9; font-size: 12px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
-.eyebrow::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 11px; background: #e5e5e5; box-shadow: 0 0 14px #fff9; vertical-align: 1px; }
 h1 { max-width: 680px; margin: 0; font-size: clamp(40px, 7vw, 72px); line-height: 1.06; letter-spacing: -.065em; font-weight: 600; }
 .lead { max-width: 590px; margin: 24px 0 45px; color: #aaa; font-size: clamp(16px, 2.4vw, 19px); line-height: 1.7; }
 .panel { padding: clamp(24px, 4vw, 36px); border: 1px solid #2b2b2b; border-radius: 12px; background: linear-gradient(145deg, #111, #080808 70%); box-shadow: 0 24px 70px #0009; }
 .panel-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
 h2 { margin: 0; font-size: 19px; letter-spacing: -.035em; font-weight: 650; }
-.arch { color: #888; font-size: 12px; font-weight: 700; letter-spacing: .07em; }
+.arch { color: #aaa; font-size: 12px; font-weight: 600; line-height: 1.6; text-align: right; }
+.arch small { display: block; color: #888; font-size: 11px; letter-spacing: .07em; }
 .base-info { margin-bottom: 25px; padding: 18px 20px; border: 1px solid #343434; border-radius: 8px; background: #0a0a0a; }
 .base-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .base-title { display: block; color: #888; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
@@ -47,34 +46,42 @@ input[type=file]:focus-visible, button:focus-visible, a:focus-visible { outline:
 button { min-height: 48px; padding: 0 22px; border: 1px solid #fff; border-radius: 6px; background: #f1f1f1; color: #090909; font: 750 13px Manrope, system-ui, sans-serif; cursor: pointer; transition: background .2s, transform .2s; }
 button:hover { background: #d7d7d7; transform: translateY(-1px); }
 button:disabled { opacity: .55; cursor: progress; transform: none; }
-.local-note { color: #777; font-size: 12px; }
+.local-note { color: #999; font-size: 12px; line-height: 1.7; }
+.local-note span { display: block; }
 .status-label { display: block; margin: 27px 0 9px; color: #858585; font-size: 11px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
 pre { min-height: 54px; margin: 0; padding: 15px 17px; border: 1px solid #252525; border-radius: 7px; background: #050505; color: #a9a9a9; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; white-space: pre-wrap; }
 pre[data-state=error] { border-color: #8b4545; color: #ffb3b3; }
 pre[data-state=success] { border-color: #42604b; color: #b5e4c0; }
-footer { margin-top: 27px; display: flex; justify-content: space-between; gap: 18px; color: #6f6f6f; font-size: 12px; }
+footer { margin-top: 27px; display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; color: #6f6f6f; font-size: 12px; }
+footer nav { display: flex; gap: 16px; flex-wrap: wrap; }
 footer a { text-decoration-color: #555; text-underline-offset: 3px; }
-@media (max-width: 560px) { .panel-heading, footer { align-items: flex-start; flex-direction: column; } .lead { margin-bottom: 34px; } }
+@media (max-width: 560px) { .panel-heading, footer { align-items: flex-start; flex-direction: column; } .arch { text-align: left; } .lead { margin-bottom: 34px; } }
 </style>
 </head>
 <body>
 <main>
-  <p class="eyebrow">Shiraz · Browser tool</p>
   <h1>Build an AppImage from an APK.</h1>
-  <p class="lead">Choose a generic Shiraz base and your APK. The assembler creates a standalone Linux AppImage in your browser.</p>
+  <p class="lead">Select your APK. Your browser packages it with the Shiraz runtime and libraries into one AppImage you can download and run on your Linux desktop. Your APK stays on your device.</p>
   <section class="panel" aria-labelledby="panel-title">
-    <div class="panel-heading"><h2 id="panel-title">AppImage assembler</h2><span class="arch">LINUX · x86_64</span></div>
+    <div class="panel-heading"><h2 id="panel-title">Base AppImage</h2><span class="arch">Runs on Linux desktop<small>x86_64</small></span></div>
     <div class="base-info">
       <div class="base-top"><div><span class="base-title">Current prerelease</span><strong class="base-version" id="release-version">Checking GitHub Releases…</strong></div><a class="base-link" id="release-link" hidden>View release ↗</a></div>
       <p class="base-detail" id="release-detail">The matching Shiraz base will load when you build.</p>
     </div>
     <details id="manual-base"><summary>Use a local base AppImage</summary><label class="file-field"><span>Shiraz base AppImage</span><input id="base" type="file" accept=".AppImage"></label></details>
     <label class="file-field"><span>Android APK</span><input id="apk" type="file" accept=".apk"></label>
-    <div class="actions"><button id="assemble" type="button">Build AppImage ↗</button><span class="local-note">Your APK stays in your browser.</span></div>
+    <div class="actions"><button id="assemble" type="button">Build AppImage ↗</button><span class="local-note">Your APK stays in your browser.<span>No backend—all packaging happens in your browser.</span></span></div>
     <span class="status-label">Build status</span>
     <pre id="status" role="status" aria-live="polite">Ready. Select an APK to begin.</pre>
   </section>
-  <footer><span>Experimental Android translation layer for Linux.</span><a href="https://spectre-oss.github.io/projects/shiraz/">About Shiraz ↗</a></footer>
+  <footer>
+    <span>Experimental Android translation layer for Linux.</span>
+    <nav aria-label="Project links">
+      <a href="https://github.com/spectre-oss/shiraz/blob/main/LICENSE">GPL-3.0-only</a>
+      <a href="https://github.com/spectre-oss/shiraz">GitHub ↗</a>
+      <a href="https://spectre-oss.github.io/projects/shiraz/">About Shiraz ↗</a>
+    </nav>
+  </footer>
 </main>
 <script src="wasm_exec.js"></script>
 <script>

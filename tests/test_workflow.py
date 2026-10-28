@@ -43,6 +43,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(guard.unsafe('link', b'target', '120000'))
         self.assertIsNone(guard.unsafe('native/main.cpp', b'int main() { return 0; }'))
 
+    def test_public_docs_keep_content_protection(self):
+        for path in guard.PUBLIC_DOCS:
+            self.assertIsNone(guard.unsafe(path, b'# Public guide'))
+            self.assertIsNotNone(guard.unsafe(path, b'password=' + b'a' * 32))
+            self.assertIsNotNone(guard.unsafe(path, b'\x00'))
+            self.assertIsNotNone(guard.unsafe(path, b'target', '120000'))
+        for path in ['docs/jobs/1.md', 'docs/others/private.md', 'docs/new-guide.md']:
+            self.assertIsNotNone(guard.unsafe(path, b'private notes'))
+
 class GitHookTests(unittest.TestCase):
     def test_real_commit_versions_and_artifact_rejection(self):
         import os

@@ -5,7 +5,12 @@
 /dist/
 /data/
 /runs/
-/docs/
+/docs/*
+!/docs/README.md
+!/docs/DEVELOPMENT.md
+!/docs/BUILDER.md
+!/docs/WEB.md
+!/docs/AI_CONTRIBUTING.md
 /doc/
 *.apk
 *.apks

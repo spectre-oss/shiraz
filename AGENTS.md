@@ -4,11 +4,17 @@ Scope: this repository only. Main source lives here. Keep operator documentation
 private project notes, credentials, and machine-specific setup outside this repository
 (in the parent workspace docs directory). Do not copy reference project documentation here. The user-authorized exception is
 our comparison and compatibility research in docs/others/ (not copied upstream
-documentation) and the session job log in docs/jobs/; keep both free of secrets,
-APKs, binaries, and private operator notes.
+documentation). Public guides belong in docs/; docs/README.md is their index.
+Only explicitly allowlisted public guides may be committed; private research and
+operator notes stay excluded. Update .gitignore and scripts/commit_guard.py when
+adding a new public guide.
+Session job logs belong outside this Git repository, in the workspace-root
+docs/jobs/ directory; keep logs free of secrets, APKs, and binaries.
 
 ## Session job log
-Each agent session records its own work in docs/jobs/<n>.md. <n> is the next
+Each agent session records its own work in the workspace-root docs/jobs/<n>.md
+(../../docs/jobs/<n>.md when this checkout is at codes/shiraz). Do not recreate
+docs/jobs/ inside the Git repository. <n> is the next
 unused positive integer (1.md, then 2.md). One file belongs to one session.
 The file is append-only: add a new section when the work changes, and do not
 edit or delete earlier sections or earlier files. A later session starts the
