@@ -258,9 +258,22 @@ EGLBoolean querySurface(EGLDisplay display, EGLSurface surface, EGLint attribute
         return real ? real(display, surface, attribute, value) : EGL_FALSE;
     }
     if (!value) return EGL_FALSE;
+    if (attribute == EGL_SWAP_BEHAVIOR) { *value = EGL_BUFFER_DESTROYED; return EGL_TRUE; }
+    if (attribute == EGL_MULTISAMPLE_RESOLVE) { *value = EGL_MULTISAMPLE_RESOLVE_DEFAULT; return EGL_TRUE; }
     if (attribute == EGL_BUFFER_AGE_EXT) { *value = 0; return EGL_TRUE; }
     if (attribute == EGL_WIDTH) { *value = ANativeWindow_getWidth(found->window); return EGL_TRUE; }
     if (attribute == EGL_HEIGHT) { *value = ANativeWindow_getHeight(found->window); return EGL_TRUE; }
+    return EGL_FALSE;
+}
+EGLBoolean surfaceAttrib(EGLDisplay display, EGLSurface surface, EGLint attribute, EGLint value) {
+    if (!findDraw(surface)) {
+        using Fn = EGLBoolean (*)(EGLDisplay, EGLSurface, EGLint, EGLint);
+        auto real = reinterpret_cast<Fn>(symbol("eglSurfaceAttrib"));
+        return real ? real(display, surface, attribute, value) : EGL_FALSE;
+    }
+    if ((attribute == EGL_SWAP_BEHAVIOR && value == EGL_BUFFER_DESTROYED) ||
+        (attribute == EGL_MULTISAMPLE_RESOLVE && value == EGL_MULTISAMPLE_RESOLVE_DEFAULT)) return EGL_TRUE;
+    shimError = (attribute == EGL_SWAP_BEHAVIOR || attribute == EGL_MULTISAMPLE_RESOLVE) ? EGL_BAD_MATCH : EGL_BAD_ATTRIBUTE;
     return EGL_FALSE;
 }
 EGLBoolean destroySurface(EGLDisplay display, EGLSurface surface) {
@@ -314,6 +327,7 @@ extern "C" __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char
     if (std::strcmp(name, "eglCreateWindowSurface") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(createWindow);
     if (std::strcmp(name, "eglMakeCurrent") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(makeCurrent);
     if (std::strcmp(name, "eglSwapBuffers") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(swapBuffers);
+    if (std::strcmp(name, "eglSurfaceAttrib") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(surfaceAttrib);
     if (std::strcmp(name, "eglQuerySurface") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(querySurface);
     if (std::strcmp(name, "eglDestroySurface") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(destroySurface);
     if (std::strcmp(name, "eglGetCurrentSurface") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(currentSurface);
@@ -418,3 +432,5 @@ extern "C" EGLBoolean eglDestroyImageKHR(EGLDisplay display, EGLImageKHR image) 
     return real(display, image);
 }
 extern "C" EGLClientBuffer eglGetNativeClientBufferANDROID(const AHardwareBuffer* b) { return nativeClientBuffer(b); }
+
+extern "C" EGLBoolean eglSurfaceAttrib(EGLDisplay display, EGLSurface surface, EGLint attribute, EGLint value) { return surfaceAttrib(display, surface, attribute, value); }

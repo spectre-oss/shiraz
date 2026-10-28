@@ -347,6 +347,9 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void setOnDragListener(OnDragListener listener){dragListener=listener;}
     public boolean dispatchDragEvent(DragEvent event){if(event==null)throw new NullPointerException("event");return enabled&&dragListener!=null&&dragListener.onDrag(this,event)||onDragEvent(event);}
     public boolean onDragEvent(DragEvent event){return false;}
+    public interface OnGenericMotionListener { boolean onGenericMotion(View view, MotionEvent event); }
+    private OnGenericMotionListener genericMotionListener;
+    public void setOnGenericMotionListener(OnGenericMotionListener listener) { genericMotionListener=listener; }
     public interface OnTouchListener { boolean onTouch(View view, MotionEvent event); }
     public interface OnLongClickListener { boolean onLongClick(View view); }
     public interface OnFocusChangeListener {void onFocusChange(View view,boolean hasFocus);}
@@ -1143,7 +1146,10 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public boolean onHoverEvent(MotionEvent event){return false;}
     public boolean dispatchHoverEvent(MotionEvent event){return onHoverEvent(event);}
     public boolean onGenericMotionEvent(MotionEvent event){return false;}
-    public boolean dispatchGenericMotionEvent(MotionEvent event){return onGenericMotionEvent(event);}
+    public boolean dispatchGenericMotionEvent(MotionEvent event){
+        if(genericMotionListener!=null&&isEnabled()&&genericMotionListener.onGenericMotion(this,event))return true;
+        return onGenericMotionEvent(event);
+    }
     public boolean performHapticFeedback(int feedbackConstant){return false;}
     public boolean performHapticFeedback(int feedbackConstant,int flags){return false;}
     public void playSoundEffect(int soundConstant){}

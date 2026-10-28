@@ -285,7 +285,7 @@ public final class HostPackageManager extends PackageManager {
     }
     private android.content.pm.ProviderInfo providerAt(String prefix,int flags) throws NameNotFoundException {
         android.content.pm.ProviderInfo info=new android.content.pm.ProviderInfo();info.name=required(prefix+"name");info.packageName=name;info.applicationInfo=getApplicationInfo(name,0);
-        info.enabled=bool(prefix+"enabled",true);info.exported=bool(prefix+"exported",false);info.authority=values.getProperty(prefix+"authorities");
+        info.enabled=bool(prefix+"enabled",true);info.exported=bool(prefix+"exported",info.applicationInfo.targetSdkVersion<17);info.authority=values.getProperty(prefix+"authorities");
         info.grantUriPermissions=bool(prefix+"grantUriPermissions",false);info.multiprocess=bool(prefix+"multiprocess",false);
         info.processName=values.getProperty(prefix+"process",name);if(info.processName.startsWith(":"))info.processName=name+info.processName;
         if((flags&GET_META_DATA)!=0)info.metaData=componentMetadata(prefix);

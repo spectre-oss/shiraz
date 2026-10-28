@@ -21,6 +21,10 @@ public final class AssetManager implements AutoCloseable {
     public synchronized String[] list(String path) throws IOException {
         if(closed)throw new IllegalStateException("Asset manager is closed");
         if(path==null)throw new NullPointerException("Asset directory");
+        // Directory callers (including Expo's font discovery) may supply a
+        // trailing separator. Strip one; traversal and empty inner components
+        // still go through the same strict validation as file names.
+        if(path.length()>1&&path.endsWith("/"))path=path.substring(0,path.length()-1);
         if(!path.isEmpty())check(path);
         String prefix="assets/"+(path.isEmpty()?"":path+"/");
         java.util.TreeSet<String> children=new java.util.TreeSet<String>(new java.util.Comparator<String>(){

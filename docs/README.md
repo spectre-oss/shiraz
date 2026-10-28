@@ -1,5 +1,7 @@
 # Shiraz documentation
 
+- [Tested applications](tested.md): observed compatibility and known limits.
+- [Framework experiments](experiments/README.md): per-platform and per-app investigations.
 - [Development](DEVELOPMENT.md): project structure, environment setup, builds, tests, and contributions.
 - [AI-assisted contributions](AI_CONTRIBUTING.md): isolated app testing, evidence collection, bug reports, and fixes.
 - [Builder](BUILDER.md): package an APK into an AppImage locally in a browser.

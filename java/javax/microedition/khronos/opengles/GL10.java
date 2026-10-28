@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package javax.microedition.khronos.opengles;
 public interface GL10 extends GL {
+ String glGetString(int name);
  void glFlush();
  void glFinish();
  void glClear(int mask);

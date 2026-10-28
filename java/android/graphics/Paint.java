@@ -170,6 +170,7 @@ public class Paint {
     public ColorFilter getColorFilter() { return colorFilter; }
     int shirazFilteredColor() { return ColorFilter.shirazApply(colorFilter,color); }
     public void setColor(int color) { this.color = color; }
+    public void setARGB(int alpha,int red,int green,int blue) { setColor(Color.argb(alpha,red,green,blue)); }
     public int getColor() { return color; }
     public void setAlpha(int alpha) {
         if (alpha < 0 || alpha > 255) throw new IllegalArgumentException("alpha");

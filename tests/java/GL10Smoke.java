@@ -13,6 +13,8 @@ public class GL10Smoke {
   EGLSurface surface=egl.eglCreatePbufferSurface(display,configs[0],new int[]{EGL10.EGL_WIDTH,8,EGL10.EGL_HEIGHT,8,EGL10.EGL_NONE});
   if(!egl.eglMakeCurrent(display,surface,surface,context))throw new AssertionError("current "+egl.eglGetError());
   GL10 gl=(GL10)context.getGL();
+  String version=gl.glGetString(0x1f02);
+  if(version==null||!version.contains("OpenGL ES"))throw new AssertionError("GL version query: "+version);
   gl.glViewport(0,0,8,8);gl.glClearColor(1,0,0,1);gl.glClear(0x4000);
   ByteBuffer pixel=ByteBuffer.allocateDirect(8);pixel.position(4);
   gl.glReadPixels(0,0,1,1,0x1908,0x1401,pixel);

@@ -7,7 +7,18 @@ from pathlib import PurePosixPath
 
 FORBIDDEN_DIRS = {'context', '.deps', '.local', 'build', 'dist', 'data', 'runs', 'docs', 'doc', 'secrets', 'credentials', '__pycache__'}
 PUBLIC_DOCS = {'docs/README.md', 'docs/DEVELOPMENT.md', 'docs/BUILDER.md',
-               'docs/WEB.md', 'docs/AI_CONTRIBUTING.md'}
+               'docs/WEB.md', 'docs/AI_CONTRIBUTING.md',
+               'docs/tested.md',
+               'docs/experiments/README.md',
+               'docs/experiments/flutter/README.md',
+               'docs/experiments/flutter/OBTAINIUM.md',
+               'docs/experiments/react-native/README.md',
+               'docs/experiments/react-native/JOPLIN.md',
+               'docs/experiments/unity/README.md',
+               'docs/experiments/unity/2048.md',
+               'docs/experiments/unity/LUCAS_DOGGIEHOOD.md',
+               'docs/experiments/libgdx/README.md',
+               'docs/experiments/libgdx/UNCIV.md'}
 FORBIDDEN_SUFFIXES = {'.apk', '.apks', '.aab', '.dex', '.jar', '.class', '.so', '.a', '.o', '.elf', '.appimage', '.exe', '.bin', '.zip', '.gz', '.xz', '.log', '.sqlite', '.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.pyc'}
 SECRET = re.compile(rb'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9_-]{32,}|(?i:(?:api[_-]?key|access[_-]?token|password|client[_-]?secret)\s*[=:]\s*["\x27]?)[A-Za-z0-9_+/=-]{16,}')
 

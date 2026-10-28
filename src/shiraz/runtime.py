@@ -457,8 +457,10 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
             except (ValueError, OSError, zipfile.BadZipFile) as exc:
                 raise FormatError('Cannot prepare APK native libraries: ' + str(exc)) from exc
             print(f'SHIRAZ_NATIVE_LIBRARIES installed={len(libraries)}', flush=True)
+        app_lib.mkdir(parents=True, exist_ok=True)
         metadata = work / 'application.properties'
         facts = application_metadata(manifest, apk, data)
+        facts['nativeLibraryDir'] = str(app_lib)
         facts.update(package_timestamps(data, report['apk_sha256']))
         metadata.write_text(properties_text(facts), encoding='utf-8')
         boot = ':'.join(str(HOST / 'framework' / name) for name in JARS)
@@ -490,7 +492,11 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                 + '/' + profile_values['build.tags']
             )
         compat = ROOT / 'build/libshiraz-android-process.so'
-        env['LD_PRELOAD'] = str(compat) + (':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
+        # NDK libraries resolve platform symbols through the process-wide scope.
+        # ART's JNI-local load of Resources alone does not expose AAssetManager_*
+        # to native application libraries such as React Native and Flutter.
+        platform_libraries = (compat, ROOT / 'build/libandroid.so', ROOT / 'build/libshiraz-resources.so')
+        env['LD_PRELOAD'] = ':'.join(map(str, platform_libraries)) + (':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
                    *(['-XX:NativeBridge=' + digitalis.name, '-Xforce-nb-testing', '-Dshiraz.guestAbi=arm64-v8a'] if digitalis else []),
                    '-Xcompiler:' + str(HOST / 'bin/dex2oat'), '-Dlog.tag=' + log_level,

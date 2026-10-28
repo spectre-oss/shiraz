@@ -40,9 +40,9 @@ build/libEGL_shim.so: native/egl_shim.cpp include/shiraz/native_window.h include
 build/test-egl-window: tests/egl_window.cpp build/libandroid.so build/libEGL_shim.so include/shiraz/native_window.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/egl_window.cpp -o $@ -Lbuild -landroid -lEGL_shim -lGLESv2 -Wl,-rpath,'$$ORIGIN' -pthread
-build/libandroid.so: native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h
+build/libandroid.so: native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h
 	@mkdir -p build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp -o $@ -pthread -ldl -lgbm -lGLESv2 $(shell pkg-config --cflags --libs fontconfig)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp -o $@ -pthread -ldl -lgbm -lGLESv2 $(shell pkg-config --cflags --libs fontconfig)
 
 build/test-surface-lifetime: tests/native/surface_lifetime.cpp native/from_surface.cpp native/native_window.cpp native/shared_frame.cpp include/shiraz/native_window.h include/shiraz/shared_frame.hpp include/shiraz/window_frames.hpp
 	@mkdir -p build
@@ -1225,3 +1225,32 @@ build: build/libshiraz-gles1.so
 
 digitalis-nativewindow-proxy:
 	python3 scripts/digitalis/build_nativewindow_proxy.py $(DIGITALIS_PROXY_OPTIONS)
+
+.PHONY: provider-metadata-smoke
+provider-metadata-smoke: framework build/libshiraz-host.so
+	mkdir -p build/provider-metadata-smoke
+	javac --release 8 -cp build/framework/classes -d build/provider-metadata-smoke tests/java/ProviderMetadataSmoke.java
+	java -Djava.library.path=build -cp build/provider-metadata-smoke:build/framework/classes shiraz.runtime.ProviderMetadataSmoke
+
+.PHONY: telephony-listener-smoke
+telephony-listener-smoke: framework build/libshiraz-host.so
+	mkdir -p build/telephony-listener-smoke
+	javac --release 8 -cp build/framework/classes -d build/telephony-listener-smoke tests/java/TelephonyListenerSmoke.java
+	java -Djava.library.path=build -cp build/telephony-listener-smoke:build/framework/classes TelephonyListenerSmoke
+
+.PHONY: generic-motion-listener-smoke
+generic-motion-listener-smoke: framework build/libshiraz-host.so
+	mkdir -p build/generic-motion-listener-smoke
+	javac --release 8 -cp build/framework/classes -d build/generic-motion-listener-smoke tests/java/GenericMotionListenerSmoke.java
+	java -Djava.library.path=build -cp build/generic-motion-listener-smoke:build/framework/classes GenericMotionListenerSmoke
+
+build/test-asset-stream: tests/native/asset_stream.cpp build/libshiraz-resources.so
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -isystem context/art_standalone/libandroidfw/include $< -o $@ -Lbuild -lshiraz-resources -L$(ART_HOST)/lib64 -landroidfw -Wl,--allow-shlib-undefined -Wl,-rpath,'$$ORIGIN'
+
+build/test-choreographer: tests/native/choreographer.cpp native/choreographer.cpp native/looper.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@ -pthread
+.PHONY: choreographer-smoke
+choreographer-smoke: build/test-choreographer
+	./build/test-choreographer
+check: choreographer-smoke provider-metadata-smoke telephony-listener-smoke generic-motion-listener-smoke

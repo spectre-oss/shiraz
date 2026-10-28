@@ -2,6 +2,7 @@
 package shiraz.runtime;
 /** Initial GLES1 subset backed by the current native EGL context. */
 public final class HostGL10 implements javax.microedition.khronos.opengles.GL10 {
+ public native String glGetString(int name);
  static { System.loadLibrary("shiraz-gles1"); }
  private java.nio.Buffer vertices,coordinates;
  public native void glFlush();

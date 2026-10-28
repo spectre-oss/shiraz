@@ -77,6 +77,12 @@ int main() {
     EGLSurface surface = makeWindow(display, nullptr, reinterpret_cast<EGLNativeWindowType>(window), nullptr);
     if (surface == EGL_NO_SURFACE || !eglMakeCurrent(display, surface, surface, context)) return 2;
     if (eglGetCurrentSurface(EGL_DRAW) != surface) return 6;
+    auto setAttribute = reinterpret_cast<PFNEGLSURFACEATTRIBPROC>(eglGetProcAddress("eglSurfaceAttrib"));
+    EGLint swapBehavior = 0;
+    if (!setAttribute || !setAttribute(display, surface, EGL_SWAP_BEHAVIOR, EGL_BUFFER_DESTROYED)) return 7;
+    if (!eglQuerySurface(display, surface, EGL_SWAP_BEHAVIOR, &swapBehavior) || swapBehavior != EGL_BUFFER_DESTROYED) return 8;
+    if (eglSurfaceAttrib(display, surface, EGL_SWAP_BEHAVIOR, EGL_BUFFER_PRESERVED) || eglGetError() != EGL_BAD_MATCH) return 9;
+    if (eglSurfaceAttrib(display, surface, EGL_WIDTH, 4) || eglGetError() != EGL_BAD_ATTRIBUTE) return 10;
     GLuint offscreen = 0;
     glGenFramebuffers(1, &offscreen);
     glBindFramebuffer(GL_FRAMEBUFFER, offscreen);

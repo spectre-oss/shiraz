@@ -85,3 +85,8 @@ extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLUtils_uploadNative(JNIEn
  else glTexImage2D(target,level,format,width,height,0,format,type,data.data());
  glPixelStorei(GL_UNPACK_ALIGNMENT,alignment);
 }
+
+extern "C" JNIEXPORT jstring JNICALL Java_shiraz_runtime_HostGL10_glGetString(JNIEnv* env,jobject,jint name) {
+ const GLubyte* value=glGetString(static_cast<GLenum>(name));
+ return value ? env->NewStringUTF(reinterpret_cast<const char*>(value)) : nullptr;
+}

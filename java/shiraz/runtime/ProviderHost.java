@@ -34,11 +34,12 @@ final class ProviderHost {
   for(Entry entry:entries){
    try{
     ContentProvider provider=Class.forName(entry.name).asSubclass(ContentProvider.class).newInstance();
-    ProviderInfo info=new ProviderInfo();
-    info.grantUriPermissions="true".equals(metadata.getProperty(entry.prefix+"grantUriPermissions"));info.multiprocess="true".equals(metadata.getProperty(entry.prefix+"multiprocess"));info.exported=!"false".equals(metadata.getProperty(entry.prefix+"exported"));info.name=entry.name;info.packageName=context.getPackageName();info.authority=entry.authority;
+    ProviderInfo info=context.getPackageManager().getProviderInfo(
+      new android.content.ComponentName(context.getPackageName(),entry.name),
+      android.content.pm.PackageManager.GET_META_DATA);
     provider.attachInfo(context,info);
     providers.add(provider);
-   }catch(ReflectiveOperationException error){
+   }catch(ReflectiveOperationException | android.content.pm.PackageManager.NameNotFoundException error){
     throw new IllegalStateException("Cannot instantiate provider "+entry.name,error);
    }
   }

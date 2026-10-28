@@ -810,3 +810,25 @@ extern "C" int AAsset_isAllocated(Asset* asset) {
 extern "C" void AAsset_close(Asset* asset) {
     if (asset) Asset_delete(asset);
 }
+
+extern "C" int AAsset_read(Asset* asset, void* buffer, size_t count) {
+    if (!asset || (!buffer && count) || count > INT_MAX) return -1;
+    return count ? Asset_read(asset, buffer, count) : 0;
+}
+extern "C" off64_t AAsset_seek64(Asset* asset, off64_t offset, int whence) {
+    if (!asset || (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END)) return -1;
+    if (offset < std::numeric_limits<off_t>::min() || offset > std::numeric_limits<off_t>::max()) return -1;
+    return Asset_seek(asset, static_cast<off_t>(offset), whence);
+}
+extern "C" off_t AAsset_seek(Asset* asset, off_t offset, int whence) {
+    return static_cast<off_t>(AAsset_seek64(asset, offset, whence));
+}
+extern "C" off64_t AAsset_getLength64(Asset* asset) {
+    return asset ? static_cast<off64_t>(Asset_getLength(asset)) : 0;
+}
+extern "C" off64_t AAsset_getRemainingLength64(Asset* asset) {
+    return asset ? static_cast<off64_t>(Asset_getRemainingLength(asset)) : 0;
+}
+extern "C" off_t AAsset_getRemainingLength(Asset* asset) {
+    return static_cast<off_t>(AAsset_getRemainingLength64(asset));
+}
