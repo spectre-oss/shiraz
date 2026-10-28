@@ -87,6 +87,20 @@
     onboarding to the speech-bubble task. This supersedes the earlier
     inconclusive drag replay and verifies multitouch zoom as well.
 
-**Interactive game scene verified; clean shutdown remains blocked.** Collider
+17. Isolated the black frame to the test launcher's forced ART preload: doing
+    the same with the old library also reproduces it. Loading rebuilt ART through
+    an isolated copy of its normal native loader restores the scene; process
+    mappings confirm the rebuilt library. The ownership regression passes with
+    that arrangement as well. No production ART library was overwritten.
+
+18. SurfaceView did not respond to window visibility, leaving a live surface
+    until after engine destruction. It now releases/recreates surfaces when the
+    window hides/shows, and activity stop hides the window before onDestroy.
+    Surface and activity regressions pass on ART and host Java. The real game's
+    next close no longer reports the window-detach timeout or invalid free.
+    The game still requests self-termination with signal 9, which the runner
+    currently reports as a failed process; orderly runner cleanup is not claimed.
+
+**Interactive scene, camera drag, and multitouch zoom verified.** Collider
 warnings still appear. Remaining checks include progress/save persistence,
-native resize behavior, window-detach shutdown, and rebuilt-runtime rendering.
+native resize behavior, and reporting of app-requested process termination.

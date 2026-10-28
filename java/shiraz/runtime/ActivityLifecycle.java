@@ -52,7 +52,7 @@ public final class ActivityLifecycle implements AutoCloseable {
   enter();try{
    requireCreated();if(activity.isFinishing())throw new IllegalStateException("Cannot resume a finishing activity");
    if(!started){call("onRestart");call("onStart");started=true;dispatch(1,null);activity.shirazMoveFragments(3);}
-   if(!resumed){call("onResume");resumed=true;dispatch(2,null);activity.shirazMoveFragments(4);call("onPostResume");}
+   if(!resumed){call("onResume");resumed=true;dispatch(2,null);activity.shirazMoveFragments(4);call("onPostResume");windowVisibility(android.view.View.VISIBLE);}
   }finally{transition=false;}
  }
  /** Deliver a new launch to a retained instance. Android leaves getIntent unchanged. */
@@ -61,7 +61,8 @@ public final class ActivityLifecycle implements AutoCloseable {
  }
  private void requireCreated(){if(activity==null||!created)throw new IllegalStateException("Activity not created");}
  private void pause(){if(resumed){resumed=false;try{activity.shirazMoveFragments(3);}finally{call("onPause");dispatch(3,null);}}}
- private void stop(){if(started){started=false;try{activity.shirazMoveFragments(2);}finally{call("onStop");dispatch(4,null);}}}
+ private void windowVisibility(int visibility){android.view.View root=activity.shirazContentView();if(root!=null)root.shirazSetWindowVisibility(visibility);}
+ private void stop(){if(started){started=false;try{try{activity.shirazMoveFragments(2);}finally{call("onStop");dispatch(4,null);}}finally{windowVisibility(android.view.View.GONE);}}}
  private void destroy(){
   Activity old=activity;if(old==null)return;
   try{try{old.shirazDestroyFragments();}finally{if(created){created=false;old.shirazSetDestroyed();call("onDestroy");dispatch(6,null);}}}finally{old.shirazSetDestroyed();try{old.shirazReleaseServiceBindings();}finally{try{old.shirazReleaseWindow();}finally{activity=null;cleanup.detached(old);}}}

@@ -18,7 +18,7 @@ public class SurfaceView extends View {
  private boolean polling;private long frame=-1;
  private final Runnable poll=new Runnable(){public void run(){polling=false;if(!active||!isAttachedToWindow()||!isShown())return;long next=holder.surface.shirazFrameNumber();if(next!=frame){frame=next;invalidate();}schedule();}};
  private void schedule(){if(!polling&&active&&isAttachedToWindow()&&isShown()){polling=true;postDelayed(poll,16);}}
- private boolean wanted(){return isShown()&&!shirazIsDetaching()&&getWidth()>0&&getHeight()>0;}
+ private boolean wanted(){return isShown()&&getWindowVisibility()==VISIBLE&&!shirazIsDetaching()&&getWidth()>0&&getHeight()>0;}
  private void update(){owner();if(updating){pending=true;return;}updating=true;try{int passes=0;do{pending=false;if(++passes>32)throw new IllegalStateException("Reentrant surface lifecycle limit");updateOnce();}while(pending);}finally{updating=false;}}
  private void updateOnce(){
   if(!wanted()){destroy();return;}
@@ -38,6 +38,7 @@ public class SurfaceView extends View {
  @Override protected void onDetachedFromWindow(){try{destroy();}finally{super.onDetachedFromWindow();}}
  @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){super.onSizeChanged(w,h,oldw,oldh);update();}
  @Override protected void onVisibilityChanged(View changed,int visibility){super.onVisibilityChanged(changed,visibility);update();}
+ @Override protected void onWindowVisibilityChanged(int visibility){super.onWindowVisibilityChanged(visibility);update();}
  @Override protected void onMeasure(int widthSpec,int heightSpec){if(fixedWidth>0)setMeasuredDimension(resolveSize(fixedWidth,widthSpec),resolveSize(fixedHeight,heightSpec));else super.onMeasure(widthSpec,heightSpec);}
  @Override protected void shirazDrawSurface(Canvas canvas){holder.surface.shirazDraw(canvas,getWidth(),getHeight());}
  public void setZOrderOnTop(boolean onTop){if(onTop)throw new UnsupportedOperationException("Surface Z ordering outside the view hierarchy");}

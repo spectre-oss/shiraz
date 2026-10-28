@@ -501,6 +501,7 @@ public class Resources {
         }
     }
     public final class Theme {
+        public android.graphics.drawable.Drawable getDrawable(int id) { return Resources.this.getDrawable(id,this); }
         private final java.util.ArrayList<Integer> styles = new java.util.ArrayList<Integer>();
         private int[] cachedSequence;
         private long generation=-1;

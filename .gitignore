@@ -19,6 +19,7 @@
 !/docs/experiments/react-native/
 !/docs/experiments/unity/
 !/docs/experiments/libgdx/
+!/docs/experiments/godot/
 /docs/experiments/*/*
 !/docs/experiments/flutter/README.md
 !/docs/experiments/flutter/OBTAINIUM.md
@@ -29,6 +30,8 @@
 !/docs/experiments/unity/LUCAS_DOGGIEHOOD.md
 !/docs/experiments/libgdx/README.md
 !/docs/experiments/libgdx/UNCIV.md
+!/docs/experiments/godot/README.md
+!/docs/experiments/godot/ABRA_CA_BUBBLE.md
 /doc/
 *.apk
 *.apks

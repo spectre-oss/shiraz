@@ -91,6 +91,36 @@ public final class SurfaceSmoke {
   view.postInvalidateDelayed(50);view.shirazDetachTree();view.shirazAttachTree(android.view.ViewTreeObserver.shirazCreateWindowObserver());baseline=calls[0];
   Thread.sleep(80);android.os.Looper.myLooper().shirazDispatchDue(100);if(calls[0]!=baseline)throw new AssertionError("Detached redraw leaked into new attachment");view.shirazDetachTree();
  }
+ private static void windowVisibility(){
+  android.content.Context context=new android.content.ContextWrapper(null){public android.content.res.Resources getResources(){return android.content.res.Resources.getSystem();}};
+  android.widget.FrameLayout root=new android.widget.FrameLayout(context);android.view.SurfaceView view=new android.view.SurfaceView(context);root.addView(view);root.layout(0,0,8,8);view.layout(0,0,8,8);
+  final StringBuilder events=new StringBuilder();view.getHolder().addCallback(new android.view.SurfaceHolder.Callback(){public void surfaceCreated(android.view.SurfaceHolder h){events.append("C");}public void surfaceChanged(android.view.SurfaceHolder h,int f,int w,int height){events.append("R");}public void surfaceDestroyed(android.view.SurfaceHolder h){events.append("D");}});
+  root.shirazAttachTree(android.view.ViewTreeObserver.shirazCreateWindowObserver());
+  root.shirazSetWindowVisibility(android.view.View.GONE);root.shirazSetWindowVisibility(android.view.View.GONE);
+  if(view.getHolder().getSurface().isValid()||!events.toString().equals("CRD"))throw new AssertionError("Hidden window kept surface alive: "+events);
+  view.layout(0,0,10,8);if(view.getHolder().getSurface().isValid())throw new AssertionError("Hidden resize recreated surface");
+  root.shirazSetWindowVisibility(android.view.View.VISIBLE);if(!view.getHolder().getSurface().isValid()||!events.toString().equals("CRDCR"))throw new AssertionError("Visible window did not recreate surface: "+events);
+  root.shirazDetachTree();if(!events.toString().equals("CRDCRD"))throw new AssertionError("Duplicate surface teardown: "+events);
+  System.out.println("SURFACE_WINDOW_VISIBILITY_OK");
+ }
+ private static void activitySurface(){
+  final android.content.Context context=new android.content.ContextWrapper(null){public android.content.res.Resources getResources(){return android.content.res.Resources.getSystem();}public Object getSystemService(String name){return null;}};
+  final android.view.SurfaceView view=new android.view.SurfaceView(context);
+  class WindowActivity extends android.app.Activity {
+   WindowActivity(){attachBaseContext(context);}
+   public android.content.Context getApplicationContext(){return null;}
+   public android.content.res.Resources.Theme getTheme(){return getResources().newTheme();}
+   protected void onCreate(android.os.Bundle state){super.onCreate(state);setContentView(view);}
+   protected void onDestroy(){if(view.getHolder().getSurface().isValid())throw new AssertionError("Engine destroyed before its surface");super.onDestroy();}
+  }
+  final WindowActivity activity=new WindowActivity();java.util.Properties facts=new java.util.Properties();facts.setProperty("activity.count","1");facts.setProperty("activity.0.name","sample.Main");
+  shiraz.runtime.ActivityLifecycle life=new shiraz.runtime.ActivityLifecycle(new shiraz.runtime.ActivityLifecycle.Factory(){public android.app.Activity create(){return activity;}},new shiraz.runtime.ActivityLifecycle.Cleanup(){public void detached(android.app.Activity old){old.shirazContentView().shirazDetachTree();}},new shiraz.runtime.ActivityConfigurationPolicy(facts,"sample.Main",27),27);
+  life.start();android.view.View root=activity.shirazContentView();root.layout(0,0,8,8);view.layout(0,0,8,8);root.shirazAttachTree(android.view.ViewTreeObserver.shirazCreateWindowObserver());
+  if(!view.getHolder().getSurface().isValid())throw new AssertionError("Activity surface not created");
+  life.pauseForLaunch();life.stopCovered();if(view.getHolder().getSurface().isValid())throw new AssertionError("Stopped activity surface still valid");
+  life.resumeFromBackStack();if(!view.getHolder().getSurface().isValid())throw new AssertionError("Resumed activity surface not recreated");
+  life.close();life.close();System.out.println("ACTIVITY_SURFACE_STOP_RESUME_DESTROY_OK");
+ }
  public static void main(String[] args)throws Exception {
   nativeInterop();externalTexture();
   android.os.MemoryFile memory=new android.os.MemoryFile("media-test",4);memory.writeBytes(new byte[]{1,2,3,4},0,0,4);
@@ -112,6 +142,8 @@ public final class SurfaceSmoke {
   buffers();
   textures();
   delayedInvalidation();
+  windowVisibility();
+  activitySurface();
   android.content.Context context=new android.content.ContextWrapper(null){public android.content.res.Resources getResources(){return android.content.res.Resources.getSystem();}};
   android.widget.FrameLayout root=org.shiraz.fixture.SurfaceFixture.prepare(context);root.shirazAttachTree(android.view.ViewTreeObserver.shirazCreateWindowObserver());
   try{org.shiraz.fixture.SurfaceFixture.checkAttached(root);}catch(Throwable failure){root.shirazDetachTree();throw failure;}
