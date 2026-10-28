@@ -85,7 +85,11 @@ For the other interfaces:
   GLES2/3 require Shiraz's EGL adapter. Building a proxy does not establish full
   API support: consult the per-app experiment results and test real callbacks.
   `make digitalis-thread-smoke` exercises ARM64 callbacks, TLS, thread identity,
-  join, detach, and key destructors. Configure an existing runtime with
+  join, detach, key destructors, and thread naming. `make guest-thread-names-smoke`
+  checks live handle resolution, cleanup, and fork handling on the host side.
+  The launcher and ARM64 fixture select the configured bridge by absolute path
+  to avoid silently loading a different copy with the same filename.
+  Configure an existing runtime with
   `DIGITALIS_THREAD_OPTIONS`; `scripts/digitalis/thread_smoke.py --help` lists
   the available paths and compiler options. Run this only in your test sandbox.
 

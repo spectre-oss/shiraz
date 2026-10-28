@@ -3,6 +3,10 @@ typedef unsigned long pthread_t;
 extern int pthread_create(pthread_t*,const void*,void*(*)(void*),void*);
 extern int pthread_join(pthread_t,void**);
 extern int pthread_detach(pthread_t);
+extern pthread_t pthread_self(void);
+extern int pthread_setname_np(pthread_t,const char*);
+extern int pthread_getname_np(pthread_t,char*,unsigned long);
+extern int strcmp(const char*,const char*);
 extern int pthread_key_create(int*,void(*)(void*));
 extern int pthread_key_delete(int);
 extern int pthread_setspecific(int,const void*);
@@ -40,8 +44,35 @@ static void* worker(void* argument) {
   work->result=local;
   return work;
 }
+struct Naming { int ready,proceed; pthread_t guest; int ok; };
+static void* naming_worker(void* argument) {
+  struct Naming* n=argument; char buffer[16],signal=1;
+  n->guest=pthread_self();
+  n->ok=!pthread_setname_np(n->guest,"guest-name") &&
+      !pthread_getname_np(n->guest,buffer,sizeof buffer) && !strcmp(buffer,"guest-name") &&
+      pthread_setname_np(n->guest,"this-name-is-far-too-long")==34;
+  write(n->ready,&signal,1);
+  read(n->proceed,&signal,1);
+  n->ok=n->ok && !pthread_getname_np(n->guest,buffer,sizeof buffer) && !strcmp(buffer,"parent-name");
+  return 0;
+}
+static int naming_test(void) {
+  int ready[2],proceed[2]; if(pipe(ready)||pipe(proceed))return 0;
+  struct Naming n={ready[1],proceed[0],0,0}; pthread_t thread; char signal,buffer[16];
+  int ok=pthread_create(&thread,0,naming_worker,&n)==0;
+  if(ok){
+    ok=read(ready[0],&signal,1)==1;
+    ok=ok && !pthread_getname_np(thread,buffer,sizeof buffer) && !strcmp(buffer,"guest-name");
+    ok=ok && !pthread_setname_np(n.guest,"parent-name");
+    write(proceed[1],"x",1); pthread_join(thread,0);
+    ok=ok && n.ok && pthread_getname_np(n.guest,buffer,sizeof buffer)==3;
+  }
+  close(ready[0]);close(ready[1]);close(proceed[0]);close(proceed[1]);
+  return ok;
+}
 int Java_shiraz_ThreadSmoke_run(void* env,void* klass) {
   (void)env;(void)klass;
+  if(!naming_test()) return -7;
   struct Work work[4]={0}; pthread_t threads[4];
   if(pthread_key_create(&key,destroy)) return -1;
   GuestAttr attr;

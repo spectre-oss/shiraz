@@ -36,6 +36,16 @@
    The unchanged APK passes `pthread_attr_init` and creates another native
    thread; it then aborts on unsupported `pthread_setname_np`. Thread naming and
    guest/host thread-handle translation are the next investigation.
+5. Added live-thread handle resolution for naming through both guest
+   `pthread_self()` and host-backed creation handles. Host tests cover naming,
+   invalid sizes, exited handles, and fork cleanup; the ARM64 fixture verifies
+   self/cross-thread naming and retains the thread lifecycle checks. The launcher
+   also now passes the configured translator's absolute path: basename-only
+   selection could load an older deployed copy despite the requested overlay.
+   The unchanged APK retest passes naming. It then exits with status 1; a syscall
+   trace shows a missing `images/engine/icons/supertux-256x256.png` under the app's
+   external-files directory immediately before exit. Game-data initialization
+   needs investigation; the missing file's root cause is not yet established.
 
 **Startup investigation; no rendered game or gameplay verified.** Movement,
 menus, resize/back, audio, and save/restart remain unverified.

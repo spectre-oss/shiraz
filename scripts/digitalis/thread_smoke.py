@@ -44,7 +44,7 @@ def main():
                        BERBERIS_MODE='interpret-only', SHIRAZ_GUEST_STACK_ENVIRONMENT='1',
                        BERBERIS_GUEST_LD_LIBRARY_PATH=str(work), LD_LIBRARY_PATH=search)
     command = [str(args.art_home/'bin/dalvikvm'), '-Xbootclasspath:'+boot,
-               '-XX:NativeBridge='+args.bridge.name, '-Xforce-nb-testing', '-Xusejit:false',
+               '-XX:NativeBridge='+str(args.bridge.resolve()), '-Xforce-nb-testing', '-Xusejit:false',
                '-Xint', '-Xnoimage-dex2oat', '-Djava.library.path='+search,
                '-cp', str(work/'test.jar'), 'shiraz.ThreadSmoke', str(library)]
     if args.loader:

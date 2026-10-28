@@ -102,6 +102,8 @@ static uint32_t PropertyAreaSerial() { return 0; }
 // Follows AOSP native_bridge_support proxy/unistd_thunks.cc: retain the
 // guest thread across host fork, then discard inherited thread-map entries.
 void ShirazRefreshGuestThreadIdentity();
+int ShirazGuestSetThreadName(pthread_t,const char*);
+int ShirazGuestGetThreadName(pthread_t,char*,size_t);
 static pid_t CloneForFork() {
  GuestThread* thread = GetCurrentGuestThread();
  pid_t pid = fork();
@@ -222,7 +224,7 @@ static const KnownTrampoline functions[] = {
 {"pthread_exit", Unsupported, const_cast<char*>("pthread_exit")},
 {"pthread_getattr_np", Unsupported, const_cast<char*>("pthread_getattr_np")},
 {"pthread_getcpuclockid", Unsupported, const_cast<char*>("pthread_getcpuclockid")},
-{"pthread_getname_np", Unsupported, const_cast<char*>("pthread_getname_np")},
+{"pthread_getname_np", GetTrampolineFunc<decltype(ShirazGuestGetThreadName)>(), reinterpret_cast<void*>(ShirazGuestGetThreadName)},
 {"pthread_getschedparam", Unsupported, const_cast<char*>("pthread_getschedparam")},
 {"pthread_getspecific", GetTrampolineFunc<auto(int32_t) -> void*>(), reinterpret_cast<void*>(NULL)},
 {"pthread_gettid_np", Unsupported, const_cast<char*>("pthread_gettid_np")},
@@ -230,7 +232,7 @@ static const KnownTrampoline functions[] = {
 {"pthread_key_create", KeyCreate, nullptr},
 {"pthread_key_delete", GetTrampolineFunc<auto(int32_t) -> int32_t>(), reinterpret_cast<void*>(NULL)},
 {"pthread_kill", Unsupported, const_cast<char*>("pthread_kill")},
-{"pthread_setname_np", Unsupported, const_cast<char*>("pthread_setname_np")},
+{"pthread_setname_np", GetTrampolineFunc<decltype(ShirazGuestSetThreadName)>(), reinterpret_cast<void*>(ShirazGuestSetThreadName)},
 {"pthread_setschedparam", Unsupported, const_cast<char*>("pthread_setschedparam")},
 {"pthread_setschedprio", Unsupported, const_cast<char*>("pthread_setschedprio")},
 {"pthread_setspecific", GetTrampolineFunc<auto(int32_t, void*) -> int32_t>(), reinterpret_cast<void*>(NULL)},

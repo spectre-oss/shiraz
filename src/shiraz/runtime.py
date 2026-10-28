@@ -502,7 +502,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         platform_libraries = (compat, ROOT / 'build/libandroid.so', ROOT / 'build/libshiraz-resources.so')
         env['LD_PRELOAD'] = ':'.join(map(str, platform_libraries)) + (':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
-                   *(['-XX:NativeBridge=' + digitalis.name, '-Xforce-nb-testing', '-Dshiraz.guestAbi=arm64-v8a'] if digitalis else []),
+                   *(['-XX:NativeBridge=' + str(digitalis.resolve()), '-Xforce-nb-testing', '-Dshiraz.guestAbi=arm64-v8a'] if digitalis else []),
                    '-Xcompiler:' + str(HOST / 'bin/dex2oat'), '-Dlog.tag=' + log_level,
                    *(['-Djavax.net.ssl.trustStore=' + os.environ['SHIRAZ_JAVA_TRUST_STORE']]
                      if os.environ.get('SHIRAZ_JAVA_TRUST_STORE') else []),

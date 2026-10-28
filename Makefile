@@ -213,6 +213,14 @@ alert-dialog-builder-smoke: framework build/libshiraz-host.so build/libshiraz-im
 check: alert-dialog-builder-smoke
 
 .PHONY: guest-pthread-attributes-smoke
+.PHONY: guest-thread-names-smoke
+build/test-guest-thread-names: tests/native/guest_thread_names.cpp native/digitalis_guest_tls.cpp native/guest_stack_environment.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -Inative tests/native/guest_thread_names.cpp native/digitalis_guest_tls.cpp -o $@ -pthread
+guest-thread-names-smoke: build/test-guest-thread-names
+	./build/test-guest-thread-names
+check: guest-thread-names-smoke
+
 build/test-guest-pthread-attributes: tests/native/guest_pthread_attributes.cpp native/guest_pthread_attributes.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -Inative $< -o $@ -pthread
