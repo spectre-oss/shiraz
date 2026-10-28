@@ -24,6 +24,8 @@
 #include <cstring>
 #include "berberis/guest_os_primitives/guest_thread.h"
 #include "berberis/guest_os_primitives/guest_thread_manager.h"
+#include "berberis/guest_os_primitives/scoped_pending_signals.h"
+#include "guest_pthread_attributes.h"
 #include <string>
 #include <vector>
 #include "android_profile_properties.h"
@@ -110,6 +112,22 @@ static pid_t CloneForFork() {
  return pid;
 }
 static uintptr_t StackTop() { return GetCurrentGuestThread()->GetStackTop(); }
+static void ThreadCreate(HostCode, ThreadState* state) {
+ using Signature = int(pthread_t*, const ShirazGuestPthreadAttributes*, void*(*)(void*), void*);
+ auto [thread, attributes, function, argument] = GuestParamsValues<Signature>(state);
+ auto&& [result] = GuestReturnReference<Signature>(state);
+ if (!thread || !ToGuestAddr(function)) { result=EINVAL; return; }
+ ShirazHostPthreadAttributes translated(attributes);
+ if (translated.error) { result=translated.error; return; }
+ result=CreateNewGuestThread(thread, &translated.host, translated.stack,
+     translated.stack_size, translated.guard_size, ToGuestAddr(function), ToGuestAddr(argument));
+}
+static void ThreadJoin(HostCode, ThreadState* state) {
+ auto [thread, value] = GuestParamsValues<decltype(pthread_join)>(state);
+ auto&& [result] = GuestReturnReference<decltype(pthread_join)>(state);
+ ScopedPendingSignalsDisabler pending(state->thread);
+ result=pthread_join(thread,value);
+}
 static void KeyCreate(HostCode, ThreadState* state) {
  auto [key, destructor] = GuestParamsValues<int(pthread_key_t*, void(*)(void*))>(state);
  auto&& [result] = GuestReturnReference<int(pthread_key_t*, void(*)(void*))>(state);
@@ -199,8 +217,8 @@ static const KnownTrampoline functions[] = {
 {"pthread_attr_setscope", Unsupported, const_cast<char*>("pthread_attr_setscope")},
 {"pthread_attr_setstack", Unsupported, const_cast<char*>("pthread_attr_setstack")},
 {"pthread_attr_setstacksize", Unsupported, const_cast<char*>("pthread_attr_setstacksize")},
-{"pthread_create", Unsupported, const_cast<char*>("pthread_create")},
-{"pthread_detach", Unsupported, const_cast<char*>("pthread_detach")},
+{"pthread_create", ThreadCreate, nullptr},
+{"pthread_detach", GetTrampolineFunc<int(pthread_t)>(), reinterpret_cast<void*>(pthread_detach)},
 {"pthread_exit", Unsupported, const_cast<char*>("pthread_exit")},
 {"pthread_getattr_np", Unsupported, const_cast<char*>("pthread_getattr_np")},
 {"pthread_getcpuclockid", Unsupported, const_cast<char*>("pthread_getcpuclockid")},
@@ -208,7 +226,7 @@ static const KnownTrampoline functions[] = {
 {"pthread_getschedparam", Unsupported, const_cast<char*>("pthread_getschedparam")},
 {"pthread_getspecific", GetTrampolineFunc<auto(int32_t) -> void*>(), reinterpret_cast<void*>(NULL)},
 {"pthread_gettid_np", Unsupported, const_cast<char*>("pthread_gettid_np")},
-{"pthread_join", Unsupported, const_cast<char*>("pthread_join")},
+{"pthread_join", ThreadJoin, nullptr},
 {"pthread_key_create", KeyCreate, nullptr},
 {"pthread_key_delete", GetTrampolineFunc<auto(int32_t) -> int32_t>(), reinterpret_cast<void*>(NULL)},
 {"pthread_kill", Unsupported, const_cast<char*>("pthread_kill")},

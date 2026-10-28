@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: GPL-3.0-only
+typedef unsigned long pthread_t;
+extern int pthread_create(pthread_t*,const void*,void*(*)(void*),void*);
+extern int pthread_join(pthread_t,void**);
+extern int pthread_detach(pthread_t);
+extern int pthread_key_create(int*,void(*)(void*));
+extern int pthread_key_delete(int);
+extern int pthread_setspecific(int,const void*);
+extern void* pthread_getspecific(int);
+extern int gettid(void);
+extern int getpid(void);
+extern int pipe(int*);
+extern long read(int,void*,unsigned long);
+extern long write(int,const void*,unsigned long);
+extern int close(int);
+static int key;
+static _Thread_local int local;
+struct Work { int parent; int result; int destroyed; int notify; };
+static void destroy(void* value) {
+  struct Work* work=value; work->destroyed=1;
+  if(work->notify>=0) { char done=42; write(work->notify,&done,1); }
+}
+static void* worker(void* argument) {
+  struct Work* work=argument;
+  void** tls;
+  __asm__("mrs %0, tpidr_el0" : "=r"(tls));
+  int* record=(int*)tls[1];
+  if(local || gettid()==work->parent || record[4]!=gettid() || record[5]!=getpid()) return (void*)1;
+  local=42;
+  if(pthread_setspecific(key,work) || pthread_getspecific(key)!=work) return (void*)2;
+  work->result=local;
+  return work;
+}
+int Java_shiraz_ThreadSmoke_run(void* env,void* klass) {
+  (void)env;(void)klass;
+  struct Work work[4]={0}; pthread_t threads[4];
+  if(pthread_key_create(&key,destroy)) return -1;
+  int created=0;
+  for(int i=0;i<4;++i) {
+    work[i].parent=gettid();
+    work[i].notify=-1;
+    if(pthread_create(&threads[i],0,worker,&work[i])) break;
+    ++created;
+  }
+  int ok=created==4;
+  for(int i=0;i<created;++i) {
+    void* result=0;
+    if(pthread_join(threads[i],&result) || result!=&work[i] || work[i].result!=42 || !work[i].destroyed) ok=0;
+  }
+  int fds[2];
+  if(ok && pipe(fds)==0) {
+    struct Work detached={gettid(),0,0,fds[1]}; pthread_t thread;
+    if(pthread_create(&thread,0,worker,&detached)) ok=0;
+    else {
+      if(pthread_detach(thread)) { pthread_join(thread,0); ok=0; }
+      char done=0;
+      if(read(fds[0],&done,1)!=1 || done!=42) ok=0;
+    }
+    close(fds[0]);close(fds[1]);
+  } else ok=0;
+  pthread_key_delete(key);
+  return ok&&!local?42:-2;
+}

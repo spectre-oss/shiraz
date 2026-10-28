@@ -45,10 +45,24 @@
 7. A separate translator rebuild exposed a C++ standard-library compatibility
    issue and an executable-stack link flag. Both have build fixes; application
    acceptance of that rebuilt translator remains separate from the launcher fix.
-8. The rebuilt translator with these proxies now reaches native thread creation.
-   Shiraz's libc proxy explicitly aborts on `pthread_create`. Guest-thread creation,
-   callback execution, and lifecycle coverage are the next work; no successful
-   thread or engine initialization is claimed yet.
+8. The rebuilt translator then aborted on unsupported `pthread_create`. Added
+   Bionic-to-glibc attribute conversion and Digitalis guest-thread creation,
+   join, and detach. An ARM64 fixture passes four concurrent callbacks, distinct
+   thread identities, isolated TLS, return values, key destructors, and detached
+   completion. The unchanged game gets past this failure.
+9. Godot now rejects the device's missing Vulkan capability before creating its
+   render view. Its error-reporting path then fails because
+   `android.app.AlertDialog.Builder` is missing. Vulkan support is not advertised
+   falsely; graphics compatibility and the missing dialog API remain open.
+
+## Thread regression coverage
+
+`make guest-pthread-attributes-smoke` checks host attribute conversion, invalid
+flags and stacks, scheduling selection, and preservation of guest input.
+`make digitalis-thread-smoke` builds and runs the ARM64 lifecycle fixture with
+standalone ART and Digitalis. Use `DIGITALIS_THREAD_OPTIONS` to supply the prepared
+ART home, bridge, loader, compiler, and host library directories; see the script's
+`--help`. These fixtures supplement the real APK retest above.
 
 **Startup blocked; no game scene or gameplay verified.** Further acceptance
 requires engine loading, rendering, and an actual puzzle interaction. No APK

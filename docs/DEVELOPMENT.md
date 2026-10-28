@@ -84,6 +84,10 @@ For the other interfaces:
   Use `--library-dir` and `--android-library-dir` for an existing host runtime;
   GLES3 requires Shiraz's EGL adapter. Building a proxy does not establish full
   API support: consult the per-app experiment results and test real callbacks.
+  `make digitalis-thread-smoke` exercises ARM64 callbacks, TLS, thread identity,
+  join, detach, and key destructors. Configure an existing runtime with
+  `DIGITALIS_THREAD_OPTIONS`; `scripts/digitalis/thread_smoke.py --help` lists
+  the available paths and compiler options. Run this only in your test sandbox.
 
 ## Make and verify a change
 

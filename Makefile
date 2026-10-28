@@ -205,6 +205,18 @@ storage-smoke: framework build/libshiraz-host.so
 	java -Xcheck:jni -Djava.library.path=build -cp build/storage-smoke:build/framework/classes StorageSmoke
 check: storage-smoke
 
+.PHONY: guest-pthread-attributes-smoke
+build/test-guest-pthread-attributes: tests/native/guest_pthread_attributes.cpp native/guest_pthread_attributes.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -Inative $< -o $@ -pthread
+guest-pthread-attributes-smoke: build/test-guest-pthread-attributes
+	./build/test-guest-pthread-attributes
+check: guest-pthread-attributes-smoke
+
+.PHONY: digitalis-thread-smoke
+digitalis-thread-smoke:
+	python3 scripts/digitalis/thread_smoke.py $(DIGITALIS_THREAD_OPTIONS)
+
 .PHONY: framework-resources
 framework-resources: build/framework-res/framework-res.apk
 build/framework-res/framework-res.apk: scripts/bootstrap_framework_resources.py src/shiraz/framework_resources.py scripts/build_apk_fixture.py
