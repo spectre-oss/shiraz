@@ -58,7 +58,7 @@ public class Window {
   }
  }
  public static final int FEATURE_OPTIONS_PANEL=0,FEATURE_NO_TITLE=1,FEATURE_ACTION_BAR=8,FEATURE_ACTION_BAR_OVERLAY=9;
- public interface Callback {boolean dispatchKeyEvent(KeyEvent event);boolean dispatchTouchEvent(MotionEvent event);void onContentChanged();View onCreatePanelView(int feature);boolean onCreatePanelMenu(int feature,Menu menu);boolean onPreparePanel(int feature,View view,Menu menu);boolean onMenuItemSelected(int feature,MenuItem item);boolean onMenuOpened(int feature,Menu menu);void onPanelClosed(int feature,Menu menu);}
+ public interface Callback {default void onWindowFocusChanged(boolean focused){}boolean dispatchKeyEvent(KeyEvent event);boolean dispatchTouchEvent(MotionEvent event);void onContentChanged();View onCreatePanelView(int feature);boolean onCreatePanelMenu(int feature,Menu menu);boolean onPreparePanel(int feature,View view,Menu menu);boolean onMenuItemSelected(int feature,MenuItem item);boolean onMenuOpened(int feature,Menu menu);void onPanelClosed(int feature,Menu menu);}
  private final Context context;private Callback callback;private FrameLayout decor,content;private Runnable rootListener;
  private int features=1,statusBarColor=0xff000000,navigationBarColor=0xff000000;private boolean installed;
  // Selection metadata; host volume-key routing is not implemented yet.
@@ -121,7 +121,7 @@ public class Window {
  public void setNavigationBarContrastEnforced(boolean value){}
  public void setStatusBarContrastEnforced(boolean value){}
  public View getDecorView(){
-  if(decor==null){decor=new FrameLayout(context);content=new FrameLayout(context);content.setId(16908290);decor.addView(content,new FrameLayout.LayoutParams(-1,-1));if(background==null)background=themeBackground();if(background!=null)decor.setBackground(background);if(rootListener!=null)rootListener.run();}return decor;
+  if(decor==null){decor=new FrameLayout(context){@Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(callback!=null&&!destroyed)callback.onWindowFocusChanged(focused);}};content=new FrameLayout(context);content.setId(16908290);decor.addView(content,new FrameLayout.LayoutParams(-1,-1));if(background==null)background=themeBackground();if(background!=null)decor.setBackground(background);if(rootListener!=null)rootListener.run();}return decor;
  }
  public View peekDecorView(){return decor;}
  public LayoutInflater getLayoutInflater(){return LayoutInflater.from(context);}

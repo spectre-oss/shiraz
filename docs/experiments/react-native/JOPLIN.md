@@ -31,6 +31,22 @@
    then fails because `android.content.UriPermission` is missing. Error handling
    subsequently aborts with an invalid native stdio handle; that separate native
    interoperability failure remains open. No Joplin UI or note editing is verified.
+8. Added URI-permission value types and empty persisted-grant queries. Taking a
+   grant still fails explicitly because no host document picker issues one;
+   existing URI parcel transport remains unsupported. Retesting passes module
+   reflection and reaches React Native text measurement.
+9. The app requested optimal StaticLayout breaking. Added bounded paragraph
+   optimization for quality and balanced modes, preserving cluster boundaries.
+   ART regressions verify distinct wrapping behavior. Automatic dictionary
+   hyphen insertion is not implemented.
+10. View mounting then needed TextView's disabled selection and default
+    justification policies. Added those queries/setters; enabling unsupported
+    read-only selection or justification still fails explicitly.
+11. ContentResolver rejected local file-URI output. Added local file descriptor
+    and output modes with owned stream closure; ART regression covers append,
+    truncation, readback, and invalid arguments. Retesting advances to shortcut
+    initialization, where Icon.createWithResource rejects a resource argument.
+    That failure is under investigation; no note-editing pass is established.
 
 ## Acceptance still required
 

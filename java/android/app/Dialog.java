@@ -23,6 +23,7 @@ public class Dialog implements DialogInterface,KeyEvent.Callback,Window.Callback
  public final boolean requestWindowFeature(int feature){return window.requestFeature(feature);}
  public View getCurrentFocus(){return window.getCurrentFocus();}
  public void onContentChanged(){}
+ public void onWindowFocusChanged(boolean focused){}
  public View onCreatePanelView(int feature){return null;}
  public boolean onCreatePanelMenu(int feature,Menu menu){return false;}
  public boolean onPreparePanel(int feature,View view,Menu menu){return true;}

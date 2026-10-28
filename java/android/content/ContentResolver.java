@@ -10,6 +10,11 @@ import java.util.List;
 public class ContentResolver {
  private final Context context;
  public ContentResolver(Context context){if(context==null)throw new NullPointerException("context");this.context=context;}
+ // No host document picker currently issues persistable URI grants.
+ public java.util.List<UriPermission> getPersistedUriPermissions(){return new java.util.ArrayList<UriPermission>();}
+ public java.util.List<UriPermission> getOutgoingPersistedUriPermissions(){return new java.util.ArrayList<UriPermission>();}
+ public void takePersistableUriPermission(Uri uri,int modes){throw new SecurityException("No persistable URI grant is available");}
+ public void releasePersistableUriPermission(Uri uri,int modes){throw new SecurityException("No persisted URI grant is available");}
  private ContentProvider localProvider(Uri uri)throws FileNotFoundException{
   String authority=uri.getAuthority();if("downloads".equals(authority)){android.app.DownloadManager manager=(android.app.DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE);if(manager!=null)return manager.shirazProvider();}
   ContentProvider provider=ContentProvider.shirazLocal(authority);
@@ -42,6 +47,12 @@ public class ContentResolver {
  public final OutputStream openOutputStream(Uri uri)throws FileNotFoundException{return openOutputStream(uri,"w");}
  public final OutputStream openOutputStream(Uri uri,String mode)throws FileNotFoundException{
   if(uri==null)throw new NullPointerException("uri");if(mode==null)throw new NullPointerException("mode");
+  if("file".equals(uri.getScheme())){
+   final ParcelFileDescriptor owner=ParcelFileDescriptor.open(localFile(uri),descriptorMode(mode));
+   return new FileOutputStream(owner.getFileDescriptor()){
+    @Override public void close()throws IOException{try{super.close();}finally{owner.close();}}
+   };
+  }
   if(!"content".equals(uri.getScheme()))throw new FileNotFoundException("No content provider for "+uri);
   AssetFileDescriptor asset=localProvider(uri).openAssetFile(uri,mode);
   if(asset==null)throw new FileNotFoundException("No entry for "+uri);
@@ -49,13 +60,30 @@ public class ContentResolver {
  }
  public final ParcelFileDescriptor openFileDescriptor(Uri uri,String mode)throws FileNotFoundException{
   if(uri==null)throw new NullPointerException("uri");if(mode==null)throw new NullPointerException("mode");
+  if("file".equals(uri.getScheme()))return ParcelFileDescriptor.open(localFile(uri),descriptorMode(mode));
   if(!"content".equals(uri.getScheme()))throw new FileNotFoundException("No content provider for "+uri);
   ParcelFileDescriptor fd=localProvider(uri).openFile(uri,mode);if(fd==null)throw new FileNotFoundException("No entry for "+uri);return fd;
  }
  public final AssetFileDescriptor openAssetFileDescriptor(Uri uri,String mode)throws FileNotFoundException{
   if(uri==null)throw new NullPointerException("uri");if(mode==null)throw new NullPointerException("mode");
+  if("file".equals(uri.getScheme()))return new AssetFileDescriptor(openFileDescriptor(uri,mode),0,AssetFileDescriptor.UNKNOWN_LENGTH);
   if(!"content".equals(uri.getScheme()))throw new FileNotFoundException("No content provider for "+uri);
   AssetFileDescriptor asset=localProvider(uri).openAssetFile(uri,mode);if(asset==null)throw new FileNotFoundException("No entry for "+uri);return asset;
+ }
+ private static File localFile(Uri uri)throws FileNotFoundException{
+  String authority=uri.getAuthority(),path=uri.getPath();
+  if(authority!=null&&!authority.isEmpty()&&!"localhost".equals(authority))throw new FileNotFoundException("Remote file authority unavailable");
+  if(path==null||path.isEmpty()||path.indexOf('\0')>=0)throw new FileNotFoundException("Invalid file path");
+  return new File(path);
+ }
+ private static int descriptorMode(String mode){
+  if("r".equals(mode))return ParcelFileDescriptor.MODE_READ_ONLY;
+  int create=ParcelFileDescriptor.MODE_CREATE;
+  if("w".equals(mode)||"wt".equals(mode))return ParcelFileDescriptor.MODE_WRITE_ONLY|create|ParcelFileDescriptor.MODE_TRUNCATE;
+  if("wa".equals(mode))return ParcelFileDescriptor.MODE_WRITE_ONLY|create|ParcelFileDescriptor.MODE_APPEND;
+  if("rw".equals(mode))return ParcelFileDescriptor.MODE_READ_WRITE|create;
+  if("rwt".equals(mode))return ParcelFileDescriptor.MODE_READ_WRITE|create|ParcelFileDescriptor.MODE_TRUNCATE;
+  throw new IllegalArgumentException("Invalid file mode: "+mode);
  }
  public final String getType(Uri uri){
   if(uri==null)throw new NullPointerException("uri");

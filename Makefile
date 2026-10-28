@@ -40,9 +40,9 @@ build/libEGL_shim.so: native/egl_shim.cpp include/shiraz/native_window.h include
 build/test-egl-window: tests/egl_window.cpp build/libandroid.so build/libEGL_shim.so include/shiraz/native_window.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/egl_window.cpp -o $@ -Lbuild -landroid -lEGL_shim -lGLESv2 -Wl,-rpath,'$$ORIGIN' -pthread
-build/libandroid.so: native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h
+build/libandroid.so: native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h
 	@mkdir -p build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp -o $@ -pthread -ldl -lgbm -lGLESv2 $(shell pkg-config --cflags --libs fontconfig)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp -o $@ -pthread -ldl -lgbm -lGLESv2 $(shell pkg-config --cflags --libs fontconfig)
 
 build/test-surface-lifetime: tests/native/surface_lifetime.cpp native/from_surface.cpp native/native_window.cpp native/shared_frame.cpp include/shiraz/native_window.h include/shiraz/shared_frame.hpp include/shiraz/window_frames.hpp
 	@mkdir -p build
@@ -1254,3 +1254,32 @@ build/test-choreographer: tests/native/choreographer.cpp native/choreographer.cp
 choreographer-smoke: build/test-choreographer
 	./build/test-choreographer
 check: choreographer-smoke provider-metadata-smoke telephony-listener-smoke generic-motion-listener-smoke
+
+build/test-sensors: tests/native/sensors.cpp native/sensors.cpp native/looper.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@ -pthread
+.PHONY: sensors-smoke
+sensors-smoke: build/test-sensors
+	./build/test-sensors
+check: sensors-smoke
+
+.PHONY: uri-permission-smoke
+uri-permission-smoke: framework
+	mkdir -p build/uri-permission-smoke
+	javac --release 8 -cp build/framework/classes -d build/uri-permission-smoke tests/java/UriPermissionSmoke.java
+	java -Djava.library.path=build -cp build/uri-permission-smoke:build/framework/classes UriPermissionSmoke
+check: uri-permission-smoke
+
+.PHONY: configuration-diff-smoke
+configuration-diff-smoke: framework
+	mkdir -p build/configuration-diff-smoke
+	javac --release 8 -cp build/framework/classes -d build/configuration-diff-smoke tests/java/ConfigurationDiffSmoke.java
+	java -Djava.library.path=build -cp build/configuration-diff-smoke:build/framework/classes ConfigurationDiffSmoke
+check: configuration-diff-smoke
+
+.PHONY: window-focus-callback-smoke
+window-focus-callback-smoke: framework
+	mkdir -p build/window-focus-callback-smoke
+	javac --release 8 -cp build/framework/classes -d build/window-focus-callback-smoke tests/java/WindowFocusCallbackSmoke.java
+	java -Djava.library.path=build -cp build/window-focus-callback-smoke:build/framework/classes WindowFocusCallbackSmoke
+check: window-focus-callback-smoke

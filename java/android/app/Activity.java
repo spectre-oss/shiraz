@@ -95,6 +95,7 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
     private android.view.Window window;
     public android.view.Window getWindow(){if(window==null){window=new android.view.Window(this);window.setCallback(this);window.shirazSetRootListener(new Runnable(){public void run(){content=window.peekDecorView();}});}return window;}
     public void onContentChanged(){ }
+    public void onWindowFocusChanged(boolean focused){ }
     private android.view.MenuInflater menuInflater;
     public android.view.MenuInflater getMenuInflater(){if(menuInflater==null)menuInflater=new android.view.MenuInflater(this);return menuInflater;}
     public void invalidateOptionsMenu(){getWindow().invalidatePanelMenu(0);}
@@ -241,6 +242,7 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
         onActivityResult(request, code, data);
     }
     public android.content.ComponentName getCallingActivity() { return null; }
+    public String getCallingPackage() { android.content.ComponentName caller=getCallingActivity();return caller==null?null:caller.getPackageName(); }
     private int[] pendingTransition;
     public void overridePendingTransition(int enterAnim, int exitAnim) {pendingTransition=new int[]{enterAnim,exitAnim};}
     public final int[] shirazTakeTransition(){int[] value=pendingTransition;pendingTransition=null;return value;}

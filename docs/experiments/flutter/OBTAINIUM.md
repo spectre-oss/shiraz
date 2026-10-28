@@ -26,10 +26,16 @@
    captured and inspected. Closing the window completed runtime cleanup.
 5. Restarted the app and inspected the home screen: the selected dark theme
    persisted. This verifies that setting only, not every persisted app workflow.
+6. Focusing the Add app URL field crashed because `DynamicLayout` was missing.
+   Added editable layout reflow using the existing software line breaker, with
+   weak change observers and regression coverage for edits and metric spans.
+   Retesting accepted typed URL text and displayed the app's related options.
+7. Resized that screen to landscape, inspected the relayout and retained text,
+   tapped Back using the new dimensions, and returned the home screen to portrait.
 
 ## Current result and limits
 
-**Interactive settings; not a full compatibility pass.** Background work reports unsupported
+**Interactive settings and text entry; not a full compatibility pass.** Background work reports unsupported
 package-query flags (`134217728`, GET_SIGNING_CERTIFICATES). App installation,
 updates, certificate handling, app-list persistence, and complete plugin behavior
 are not verified. Do not infer that every Flutter app works from this result.

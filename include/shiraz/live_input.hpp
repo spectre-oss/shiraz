@@ -58,6 +58,9 @@ inline SDL_Event live_event(const std::string& line,Uint32 window){
     std::istringstream row(line);std::string action,extra;SDL_Event event{};row>>action;
     if(action=="close"){
         event.type=SDL_WINDOWEVENT;event.window.windowID=window;event.window.event=SDL_WINDOWEVENT_CLOSE;
+    }else if(action=="focus"){
+        int focused;if(!(row>>focused)||(focused!=0&&focused!=1))throw std::invalid_argument("Live focus requires 0 or 1");
+        event.type=SDL_WINDOWEVENT;event.window.windowID=window;event.window.event=focused?SDL_WINDOWEVENT_FOCUS_GAINED:SDL_WINDOWEVENT_FOCUS_LOST;
     }else if(action=="fingerdown"||action=="fingermove"||action=="fingerup"){
         int id;float x,y,pressure;
         if(!(row>>id>>x>>y>>pressure)||id<0||id>31||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(pressure)||x<0||x>1||y<0||y>1||pressure<0||pressure>1)throw std::invalid_argument("Invalid live finger contact");

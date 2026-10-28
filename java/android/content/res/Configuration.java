@@ -37,6 +37,8 @@ public final class Configuration implements Parcelable {
         orientation = other.orientation; screenWidthDp = other.screenWidthDp; screenHeightDp = other.screenHeightDp;
         smallestScreenWidthDp = other.smallestScreenWidthDp; densityDpi = other.densityDpi; screenLayout = other.screenLayout; uiMode = other.uiMode;
     }
+    /** Report defined-field changes without modifying this configuration. */
+    public int diff(Configuration delta) { return new Configuration(this).updateFrom(delta); }
     /** Merge defined fields of the implemented configuration subset. */
     public int updateFrom(Configuration delta) {
         if (delta == null) throw new NullPointerException("delta");
@@ -73,9 +75,10 @@ public final class Configuration implements Parcelable {
         if (delta.smallestScreenWidthDp != 0 && smallestScreenWidthDp != delta.smallestScreenWidthDp) { smallestScreenWidthDp = delta.smallestScreenWidthDp; changed |= 0x800; }
         if (delta.densityDpi != 0 && densityDpi != delta.densityDpi) { densityDpi = delta.densityDpi; changed |= 0x1000; }
         if (delta.uiMode != 0 && uiMode != delta.uiMode) {
-            changed |= 0x200;
+            int previous=uiMode;
             if ((delta.uiMode & 15) != 0) uiMode = (uiMode & ~15) | (delta.uiMode & 15);
             if ((delta.uiMode & 48) != 0) uiMode = (uiMode & ~48) | (delta.uiMode & 48);
+            if(previous!=uiMode)changed|=0x200;
         }
         return changed;
     }

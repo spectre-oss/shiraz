@@ -19,8 +19,8 @@ remain explicit. No unrelated private experiments are included in this list.
 
 | App | Framework | Current observation |
 | --- | --- | --- |
-| [Obtainium](experiments/flutter/OBTAINIUM.md) | Flutter | Home, Settings, and Appearance rendered; touch changed the theme. Background package-query failure remains. |
-| [Joplin](experiments/react-native/JOPLIN.md) | React Native | Native modules and JavaScript start after metadata/asset fixes; missing UriPermission and a native error-handling abort block startup. |
+| [Obtainium](experiments/flutter/OBTAINIUM.md) | Flutter | Settings, text entry, resizing, back navigation, and theme persistence verified. Background package-query failure remains. |
+| [Joplin](experiments/react-native/JOPLIN.md) | React Native | Native modules, JavaScript, and text measurement advance; shortcut icon resource failure now blocks startup. |
 | [2048](experiments/unity/2048.md) | Unity | Release has only 32-bit native code; rejected by this 64-bit runtime. |
-| [Lucas Doggiehood](experiments/unity/LUCAS_DOGGIEHOOD.md) | Unity | Call-state, EGL attributes, and native frame callbacks added; native sensor API now blocks engine loading. |
+| [Lucas Doggiehood](experiments/unity/LUCAS_DOGGIEHOOD.md) | Unity | Splash renders and focused launch executes game initialization; subsequent scene is black and gameplay remains unverified. |
 | [Unciv](experiments/libgdx/UNCIV.md) | libGDX | ES2 context and renderer queries work; missing GLES20 Java bindings block game rendering. |

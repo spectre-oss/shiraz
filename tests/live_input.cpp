@@ -17,6 +17,9 @@ int main(){
     auto wheel=shiraz::live_event("wheel 20 30 0 -0.5",7);assert(wheel.type==SDL_MOUSEWHEEL&&wheel.wheel.windowID==7&&wheel.wheel.preciseY==-0.5f&&wheel.wheel.mouseX==20&&wheel.wheel.mouseY==30);
     auto finger=shiraz::live_event("fingerdown 3 0.25 0.75 0.5",7);assert(finger.type==SDL_FINGERDOWN&&finger.tfinger.windowID==7&&finger.tfinger.fingerId==3&&finger.tfinger.x==.25f&&finger.tfinger.pressure==.5f);
     auto closeEvent=shiraz::live_event("close",7);assert(closeEvent.type==SDL_WINDOWEVENT&&closeEvent.window.windowID==7&&closeEvent.window.event==SDL_WINDOWEVENT_CLOSE);
+    auto gain=shiraz::live_event("focus 1",7);assert(gain.type==SDL_WINDOWEVENT&&gain.window.windowID==7&&gain.window.event==SDL_WINDOWEVENT_FOCUS_GAINED);
+    assert(shiraz::live_event("focus 0",7).window.event==SDL_WINDOWEVENT_FOCUS_LOST);
+    for(const char* invalid:{"focus","focus -1","focus 2","focus 1 extra"}){bool rejected=false;try{shiraz::live_event(invalid,7);}catch(const std::invalid_argument&){rejected=true;}assert(rejected);}
     bool trailing=false;try{shiraz::live_event("close extra",7);}catch(const std::invalid_argument&){trailing=true;}assert(trailing);
     auto text=shiraz::live_event("text \"caf\xc3\xa9\"",7);assert(text.type==SDL_TEXTINPUT&&text.text.windowID==7&&std::string(text.text.text)=="caf\xc3\xa9");
     for(const std::string& bad:{std::string("resize 0 10"),std::string("down -1 3"),std::string("down 1 2 extra"),std::string("text \"\xc0\x80\""),std::string("keydown NO_SUCH_KEY")}){

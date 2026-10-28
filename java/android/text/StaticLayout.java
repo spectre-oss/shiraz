@@ -17,7 +17,7 @@ public class StaticLayout extends Layout {
         private Alignment alignment=Alignment.ALIGN_NORMAL;
         private TextDirectionHeuristic direction=TextDirectionHeuristics.FIRSTSTRONG_LTR;
         private TextUtils.TruncateAt ellipsize; private int ellipsizedWidth;
-        private float add,mult=1; private boolean pad=true; private int maxLines=Integer.MAX_VALUE;
+        private float add,mult=1; private boolean pad=true; private int maxLines=Integer.MAX_VALUE,breakStrategy;
         private Builder(CharSequence text,int start,int end,TextPaint paint,int width){
             if(text==null||paint==null)throw new NullPointerException();
             if(start<0||end<start||end>text.length()||width<0)throw new IllegalArgumentException("StaticLayout bounds");
@@ -29,7 +29,7 @@ public class StaticLayout extends Layout {
         public Builder setLineSpacing(float add,float mult){if(!Float.isFinite(add)||!Float.isFinite(mult)||mult<0)throw new IllegalArgumentException("Line spacing");this.add=add;this.mult=mult;return this;}
         public Builder setIncludePad(boolean value){pad=value;return this;}
         public Builder setMaxLines(int value){if(value<1)throw new IllegalArgumentException("maxLines");maxLines=value;return this;}
-        public Builder setBreakStrategy(int value){if(value!=0)throw new UnsupportedOperationException("StaticLayout optimal breaking");return this;}
+        public Builder setBreakStrategy(int value){if(value<0||value>2)throw new IllegalArgumentException("Break strategy");breakStrategy=value;return this;}
         // Android SIMPLE breaking does not insert automatic hyphens, regardless of frequency.
         public Builder setHyphenationFrequency(int value){if(value<0||value>4)throw new IllegalArgumentException("Hyphenation frequency");return this;}
         public Builder setJustificationMode(int value){if(value!=0)throw new UnsupportedOperationException("StaticLayout justification");return this;}
@@ -66,11 +66,15 @@ public class StaticLayout extends Layout {
             for(int i=from;i<to;i++)if(b.text.charAt(i)=='\n'||b.text.charAt(i)=='\t')throw new UnsupportedOperationException("Replacement across paragraph or tab");
         }
         int start=b.start;
+        java.util.Map<Integer,Integer> optimal=new java.util.HashMap<Integer,Integer>();
         while(start<=b.end&&lines.size()<b.maxLines){
             if(lines.size()>=4096)throw new IllegalArgumentException("StaticLayout line limit");
             int paragraph=start;while(paragraph<b.end&&b.text.charAt(paragraph)!='\n')paragraph++;
             int end=paragraph;
-            if(getDesiredWidth(b.text,start,end,b.paint)>b.width){
+            if(b.breakStrategy!=0&&start<paragraph){
+                if(start==b.start||b.text.charAt(start-1)=='\n')optimal=optimalBreaks(b,start,paragraph);
+                end=optimal.get(start);
+            }else if(getDesiredWidth(b.text,start,end,b.paint)>b.width){
                 ArrayList<Integer> boundaries=new ArrayList<Integer>();boundaries.add(start);
                 for(int at=start;at<paragraph;){at=clusterEnd(b.text,at,paragraph);boundaries.add(at);}
                 int low=0,high=boundaries.size()-1;
@@ -150,6 +154,41 @@ public class StaticLayout extends Layout {
             line.top=top;line.descent=descent+extra;top+=descent-ascent+extra;line.bottom=top;
         }
     }
+    /** Bounded paragraph optimization, shared in policy with TextView's software
+     * breaker: quality leaves the final line ragged; balanced penalizes it too.
+     * Dictionary-based automatic hyphen insertion remains unsupported. */
+    private static java.util.Map<Integer,Integer> optimalBreaks(Builder b,int origin,int limit){
+        java.util.Map<Integer,Integer> result=new java.util.HashMap<Integer,Integer>();
+        if(getDesiredWidth(b.text,origin,limit,b.paint)<=b.width){result.put(origin,limit);return result;}
+        String value=b.text.subSequence(origin,limit).toString();
+        java.text.BreakIterator iterator=java.text.BreakIterator.getLineInstance(b.paint.getTextLocale());iterator.setText(value);
+        boolean[] normal=new boolean[value.length()+1],cluster=new boolean[value.length()+1];cluster[0]=true;
+        for(int at=origin;at<limit;){at=clusterEnd(b.text,at,limit);cluster[at-origin]=true;}
+        java.util.TreeSet<Integer> candidates=new java.util.TreeSet<Integer>();candidates.add(0);normal[0]=true;int previous=0;
+        for(int end=iterator.next();end!=java.text.BreakIterator.DONE;end=iterator.next()){
+            if(!cluster[end])continue;normal[end]=true;candidates.add(end);
+            if(getDesiredWidth(b.text,origin+previous,trimEnd(b.text,origin+previous,origin+end),b.paint)>b.width)
+                for(int at=origin+previous;at<origin+end;){at=clusterEnd(b.text,at,origin+end);candidates.add(at-origin);}
+            previous=end;
+        }
+        candidates.add(value.length());normal[value.length()]=true;Integer[] ends=candidates.toArray(new Integer[0]);int count=ends.length;
+        double[] cost=new double[count];java.util.Arrays.fill(cost,Double.POSITIVE_INFINITY);cost[0]=0;int[] parent=new int[count];long measured=0;
+        for(int end=1;end<count;end++){
+            parent[end]=-1;
+            for(int start=end-1;start>=0;start--){
+                int left=origin+ends[start],right=trimEnd(b.text,left,origin+ends[end]);measured+=right-left;
+                if(measured>8000000)throw new IllegalArgumentException("Optimal text measurement budget");
+                float advance=getDesiredWidth(b.text,left,right,b.paint);if(advance>b.width&&start<end-1)break;
+                double slack=Math.max(0,b.width-advance),penalty=end==count-1&&b.breakStrategy==1?0:slack*slack;
+                if(!normal[ends[end]])penalty+=1e12;if(advance>b.width)penalty+=1e15;
+                double score=cost[start]+penalty+1;if(score<cost[end]){cost[end]=score;parent[end]=start;}
+            }
+            if(parent[end]<0)throw new IllegalStateException("No text break candidate");
+        }
+        for(int at=count-1;at>0;at=parent[at])result.put(origin+ends[parent[at]],origin+ends[at]);
+        return result;
+    }
+    private static int trimEnd(CharSequence text,int start,int end){while(end>start&&(text.charAt(end-1)==' '||text.charAt(end-1)=='\t'))end--;return end;}
     private static CharSequence ellipsisText(CharSequence source,int start,int cut,int end){
         StringBuilder value=new StringBuilder(source.subSequence(start,cut).toString());
         if(cut<end)value.append('\u2026');while(value.length()<end-start)value.append('\ufeff');

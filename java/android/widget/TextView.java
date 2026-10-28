@@ -307,6 +307,10 @@ public class TextView extends View {
     public int getSelectionStart(){return Selection.getSelectionStart(text);}
     public int getSelectionEnd(){return Selection.getSelectionEnd(text);}
     public boolean hasSelection(){return getSelectionStart()>=0&&getSelectionStart()!=getSelectionEnd();}
+    public boolean isTextSelectable(){return false;}
+    public void setTextIsSelectable(boolean selectable){if(selectable)throw new UnsupportedOperationException("Read-only text selection is not implemented");}
+    public int getJustificationMode(){return 0;}
+    public void setJustificationMode(int mode){if(mode!=0)throw new UnsupportedOperationException("Text justification is not implemented");}
     protected void onSelectionChanged(int start,int end){}
     public final void setText(int id){setText(getContext().getString(id));}
     public final void setText(int id,BufferType type){setText(getContext().getString(id),type);}
