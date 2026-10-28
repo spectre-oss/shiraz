@@ -90,6 +90,23 @@ public final class Bitmap {
         try{Canvas canvas=new Canvas(result);canvas.translate(-bounds.left,-bounds.top);canvas.concat(matrix);Paint paint=new Paint();paint.setFilterBitmap(filter);paint.setAntiAlias(!identity&&!matrix.rectStaysRect());canvas.drawBitmap(source,new Rect(x,y,x+width,y+height),target,paint);return result;}
         catch(RuntimeException|Error failure){result.recycle();throw failure;}
     }
+    public static Bitmap createBitmap(int[] colors,int width,int height,Config config){return createBitmap(null,colors,0,width,width,height,config);}
+    public static Bitmap createBitmap(int[] colors,int offset,int stride,int width,int height,Config config){return createBitmap(null,colors,offset,stride,width,height,config);}
+    public static Bitmap createBitmap(android.util.DisplayMetrics metrics,int[] colors,int width,int height,Config config){return createBitmap(metrics,colors,0,width,width,height,config);}
+    public static Bitmap createBitmap(android.util.DisplayMetrics metrics,int[] colors,int offset,int stride,int width,int height,Config config){
+        if(colors==null||config==null)throw new NullPointerException("Bitmap colors/config");
+        if(width<=0||height<=0||Math.abs((long)stride)<width)throw new IllegalArgumentException("Bitmap color geometry");
+        long last=(long)offset+(long)(height-1)*stride;
+        if(offset<0||last<0||(long)offset+width>colors.length||last+width>colors.length)throw new ArrayIndexOutOfBoundsException("Bitmap color bounds");
+        Bitmap result=createBitmap(width,height,config);
+        for(int row=0;row<height;row++){
+            int start=(int)((long)offset+(long)row*stride);
+            for(int col=0;col<width;col++)result.pixels[row*width+col]=result.logicalColor(colors[start+col]);
+        }
+        if(metrics!=null)result.setDensity(metrics.densityDpi);
+        result.mutable=false;
+        return result;
+    }
     public static Bitmap createBitmap(int width, int height, Config config) {
         if (config != Config.ARGB_8888 && config != Config.ALPHA_8) throw new UnsupportedOperationException("Only ARGB_8888 and ALPHA_8 are implemented");
         Bitmap result=new Bitmap(width,height);result.config=config;return result;

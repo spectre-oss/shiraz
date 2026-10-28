@@ -1390,3 +1390,11 @@ check: textview-lineheight-smoke
 .PHONY: art-alt-stack-smoke
 art-alt-stack-smoke: build/libshiraz-test-alt-stack.so
 	python3 scripts/art_alt_stack_smoke.py
+
+
+.PHONY: bitmap-colors-smoke
+bitmap-colors-smoke: framework
+	mkdir -p build/bitmap-colors-smoke
+	javac --release 8 -cp build/framework/classes -d build/bitmap-colors-smoke tests/java/BitmapColorsSmoke.java
+	java -cp build/bitmap-colors-smoke:build/framework/classes BitmapColorsSmoke
+check: bitmap-colors-smoke

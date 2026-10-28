@@ -81,5 +81,25 @@
     the previous abort and reaches Android pixel-format negotiation. The
     observed presentation remains black; this is still not verified gameplay.
 
-**Startup investigation; no rendered game or gameplay verified.** Movement,
-menus, resize/back, audio, and save/restart remain unverified.
+11. A longer two-gear run reaches the animated startup screen. A debugger
+    breakpoint confirms normal EGL swaps call Shiraz's window-frame publisher;
+    the captured window shows the game, not an offscreen debugger buffer.
+    Touch input declines the Internet and release-check prompts and reaches
+    the main menu. Held touches work; immediate press/release pairs were not
+    consistently accepted during this run. Some prompt text is clipped at
+    640 × 360. No timing claim is made: this run overlapped regression checks
+    and debugger pauses.
+12. After selecting Start Game, JNI aborts on the missing color-array
+    `Bitmap.createBitmap` overload. Added immutable, independent pixel copies,
+    density-aware overloads, validated positive/negative row strides, and
+    overflow-safe source bounds within the existing supported bitmap formats.
+    The VM regression passes pixel, immutability, density, and bounds checks.
+    The unchanged APK retest repeats both prompts and the main menu, passes
+    bitmap creation, then aborts on missing `PointerIcon.create(Bitmap, float,
+    float)` during the Start Game interaction. Custom cursor support is the
+    next runtime blocker.
+
+**Animated startup and touch-driven main menu verified; gameplay remains open.**
+Custom cursor support, movement, resize/back, audio, and save/restart remain
+unverified. Startup uses software graphics and ARM64 translation; it is not
+yet evidence of acceptable game performance.
