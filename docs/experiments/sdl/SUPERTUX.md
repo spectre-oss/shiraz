@@ -84,8 +84,8 @@
 11. A longer two-gear run reaches the animated startup screen. A debugger
     breakpoint confirms normal EGL swaps call Shiraz's window-frame publisher;
     the captured window shows the game, not an offscreen debugger buffer.
-    Touch input declines the Internet and release-check prompts and reaches
-    the main menu. Held touches work; immediate press/release pairs were not
+    Touch input advances through the Internet and release-check prompts to
+    the main menu; the selected choices were not independently verified. Held touches work; immediate press/release pairs were not
     consistently accepted during this run. Some prompt text is clipped at
     640 × 360. No timing claim is made: this run overlapped regression checks
     and debugger pauses.
@@ -99,7 +99,22 @@
     float)` during the Start Game interaction. Custom cursor support is the
     next runtime blocker.
 
-**Animated startup and touch-driven main menu verified; gameplay remains open.**
-Custom cursor support, movement, resize/back, audio, and save/restart remain
-unverified. Startup uses software graphics and ARM64 translation; it is not
+13. Added custom bitmap pointer icons with validated hotspots and SDL color
+    cursor delivery. Java tests cover icon data/equality and rejection; JNI
+    tests exercise the active-surface path; native tests create and replace
+    cursors under an X11 virtual display and verify hide/restore behavior.
+    The unchanged APK passes the previous cursor abort. Start Game opens the
+    animated introduction; Escape skips it to the world map. Touch controls
+    move Tux to the next node and enter “Welcome to Antarctica.” The level
+    renders Tux, enemies, terrain and animated blocks; Escape opens its pause
+    menu. Resizing from 640 × 360 to 960 × 540 changes the visible game area,
+    and portrait 360 × 640 and return to landscape do not crash. Portrait touch
+    controls overlap. Direction/jump attempts did not establish reliable
+    player control; death/restart transitions occurred during observation.
+    A tap aimed at Abort Level resumed the game instead, suggesting menu
+    confirmation and precise touch hit-testing must be distinguished. This
+    remains an input/performance investigation, not a gameplay pass.
+
+**Animated startup, menus, world-map navigation, level rendering and resize verified.**
+Reliable in-level movement/jumping, audio, and save/restart remain unverified. Startup uses software graphics and ARM64 translation; it is not
 yet evidence of acceptable game performance.

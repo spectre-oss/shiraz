@@ -31,12 +31,15 @@ public final class NativeSurfaceSmoke {
         try(final NativeSurface surface=new NativeSurface(2,4)) {
             try{surface.requestWindowSize(4,2);throw new AssertionError("inactive window request accepted");}catch(IllegalStateException expected){}
             try{surface.requestPointerIcon(1002);throw new AssertionError("Inactive cursor accepted");}catch(IllegalStateException expected){}
+            final android.graphics.Bitmap cursorBitmap=android.graphics.Bitmap.createBitmap(new int[]{0xffff0000,0xff00ff00,0xff0000ff,0},2,2,android.graphics.Bitmap.Config.ARGB_8888);
+            final android.view.PointerIcon custom=android.view.PointerIcon.create(cursorBitmap,1,0);
+            try{surface.requestPointerIcon(custom);throw new AssertionError("Inactive custom cursor accepted");}catch(IllegalStateException expected){}
             final int[] resizes={0}, frames={0};final java.util.ArrayList<Boolean> visibility=new java.util.ArrayList<Boolean>();final java.util.ArrayList<Boolean> focus=new java.util.ArrayList<Boolean>();
             surface.presentDispatched(5,new NativeSurface.ResizeCallback(){
                 public void onWindowVisibility(boolean value){visibility.add(value);}
                 public void onWindowFocus(boolean value){focus.add(value);}
                 public void onResize(int width,int height){surface.resize(width,height);int[] pixels=new int[width*height];Arrays.fill(pixels,0xff123456);surface.post(pixels);resizes[0]++;}
-                public boolean onFrame(){surface.requestPointerIcon(frames[0]%2==0?1002:0);if(++frames[0]==1){surface.requestWindowSize(4,2);focusWindow(true);focusWindow(false);visibilityWindow(false);visibilityWindow(true);}if(frames[0]==3)surface.requestWindowSize(2,4);return true;}
+                public boolean onFrame(){surface.requestPointerIcon(custom);surface.requestPointerIcon(custom);surface.requestPointerIcon(frames[0]%2==0?1002:0);if(++frames[0]==1){surface.requestWindowSize(4,2);focusWindow(true);focusWindow(false);visibilityWindow(false);visibilityWindow(true);}if(frames[0]==3)surface.requestWindowSize(2,4);return true;}
                 public void onKey(int a,int k,int s,int r,int m,int f,long d,long t){}
                 public void onText(String text,long time){}
                 public void onPointer(int action,float x,float y,int source,long time){}

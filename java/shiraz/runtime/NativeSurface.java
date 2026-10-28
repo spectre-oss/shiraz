@@ -83,9 +83,24 @@ public final class NativeSurface implements AutoCloseable {
         requireOpen();
         if (frames != -1 && (frames < 1 || frames > 600)) throw new IllegalArgumentException("Invalid frame limit");
         if (callback == null) throw new NullPointerException("callback");
-        presentDispatch(handle, frames, callback);
+        lastPointerIcon=null;
+        try{presentDispatch(handle, frames, callback);}finally{lastPointerIcon=null;}
     }
-    public synchronized void requestPointerIcon(int type){requireOpen();requestCursor(handle,type);}
+    private android.view.PointerIcon lastPointerIcon;
+    private int lastPointerGeneration;
+    public synchronized void requestPointerIcon(int type){requireOpen();requestCursor(handle,type);lastPointerIcon=null;}
+    public synchronized void requestPointerIcon(android.view.PointerIcon icon){
+        requireOpen();
+        if(icon==null||icon.getType()!=android.view.PointerIcon.TYPE_CUSTOM){requestPointerIcon(icon==null?1000:icon.getType());return;}
+        android.graphics.Bitmap bitmap=icon.shirazBitmap();
+        int generation=bitmap.getGenerationId();
+        if(icon==lastPointerIcon&&generation==lastPointerGeneration)return;
+        int width=bitmap.getWidth(),height=bitmap.getHeight();
+        int[] pixels=new int[width*height];bitmap.getPixels(pixels,0,width,0,0,width,height);
+        requestColorCursor(handle,pixels,width,height,(int)icon.shirazHotSpotX(),(int)icon.shirazHotSpotY());
+        lastPointerIcon=icon;lastPointerGeneration=generation;
+    }
+    private static native void requestColorCursor(long handle,int[] pixels,int width,int height,int hotX,int hotY);
     private static native void requestCursor(long handle,int type);
     public static native float refreshRate();
     private static native void presentDispatch(long handle, int frames, FrameCallback callback);

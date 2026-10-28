@@ -88,6 +88,21 @@ extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeSurface_requestCurso
     if(presenting_id!=id){error(env,"java/lang/IllegalStateException","Cursor must target the active surface");return;}
     try{shiraz::request_pointer_icon(type);}catch(const std::exception& ex){error(env,"java/lang/IllegalStateException",ex.what());}
 }
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeSurface_requestColorCursor(JNIEnv* env,jclass,jlong id,jintArray pixels,jint width,jint height,jint hotX,jint hotY){
+    if(!find(env,id))return;
+    if(presenting_id!=id){error(env,"java/lang/IllegalStateException","Cursor must target the active surface");return;}
+    int64_t count=int64_t(width)*height;
+    if(!pixels||width<1||height<1||width>8192||height>8192||count>32*1024*1024||hotX<0||hotY<0||hotX>=width||hotY>=height||env->GetArrayLength(pixels)!=count){
+        error(env,"java/lang/IllegalArgumentException","Invalid color cursor geometry");return;
+    }
+    try{
+        std::vector<jint> copy(static_cast<size_t>(count));
+        env->GetIntArrayRegion(pixels,0,static_cast<jsize>(count),copy.data());
+        if(env->ExceptionCheck())return;
+        shiraz::request_color_pointer_icon(reinterpret_cast<const uint32_t*>(copy.data()),width,height,hotX,hotY);
+    }catch(const std::bad_alloc&){error(env,"java/lang/OutOfMemoryError","Cannot copy cursor pixels");}
+    catch(const std::exception& ex){error(env,"java/lang/IllegalStateException",ex.what());}
+}
 extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeSurface_requestScreenAwake(JNIEnv* env,jclass,jlong id,jboolean awake){
     if(!find(env,id))return;
     if(presenting_id!=id){error(env,"java/lang/IllegalStateException","Screen inhibition must target the active surface");return;}

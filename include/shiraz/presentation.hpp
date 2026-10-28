@@ -15,6 +15,7 @@ void request_text_input(bool visible);
 bool uses_wayland_text_input();
 void request_screen_awake(bool awake);
 void request_pointer_icon(int type);
+void request_color_pointer_icon(const uint32_t* pixels,int width,int height,int hotX,int hotY);
 void request_window_title(const std::string& title);
 void request_window_size(int width,int height);
 bool set_clipboard_text(const std::string& text);

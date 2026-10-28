@@ -1398,3 +1398,17 @@ bitmap-colors-smoke: framework
 	javac --release 8 -cp build/framework/classes -d build/bitmap-colors-smoke tests/java/BitmapColorsSmoke.java
 	java -cp build/bitmap-colors-smoke:build/framework/classes BitmapColorsSmoke
 check: bitmap-colors-smoke
+
+
+.PHONY: pointer-icon-smoke color-cursor-smoke
+pointer-icon-smoke: framework
+	mkdir -p build/pointer-icon-smoke
+	javac --release 8 -cp build/framework/classes -d build/pointer-icon-smoke tests/java/PointerIconSmoke.java
+	java -cp build/pointer-icon-smoke:build/framework/classes PointerIconSmoke
+check: pointer-icon-smoke
+
+build/test-color-cursor: tests/color_cursor.cpp native/presentation.cpp include/shiraz/presentation.hpp $(SDL_LOCAL_LIBRARY)
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SDL_CFLAGS) tests/color_cursor.cpp native/presentation.cpp -o $@ $(SDL_LIBS)
+color-cursor-smoke: build/test-color-cursor
+	SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software timeout 10 ./build/test-color-cursor

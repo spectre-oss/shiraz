@@ -121,8 +121,25 @@ void request_pointer_icon(int type) {
     SDL_SystemCursor shape=SDL_SYSTEM_CURSOR_ARROW;
     switch(type){case 1002:case 1020:case 1021:shape=SDL_SYSTEM_CURSOR_HAND;break;case 1004:shape=SDL_SYSTEM_CURSOR_WAIT;break;case 1006:case 1007:shape=SDL_SYSTEM_CURSOR_CROSSHAIR;break;case 1008:case 1009:shape=SDL_SYSTEM_CURSOR_IBEAM;break;case 1012:shape=SDL_SYSTEM_CURSOR_NO;break;case 1013:shape=SDL_SYSTEM_CURSOR_SIZEALL;break;case 1014:shape=SDL_SYSTEM_CURSOR_SIZEWE;break;case 1015:shape=SDL_SYSTEM_CURSOR_SIZENS;break;case 1016:shape=SDL_SYSTEM_CURSOR_SIZENESW;break;case 1017:shape=SDL_SYSTEM_CURSOR_SIZENWSE;break;default:break;}
     SDL_Cursor* next=SDL_CreateSystemCursor(shape);
-    if(!next){const char* driver=SDL_GetCurrentVideoDriver();if(driver&&(std::string(driver)=="dummy"||std::string(driver)=="offscreen")){cursor_type=type;return;}throw std::runtime_error(SDL_GetError());}
+    if(!next){const char* driver=SDL_GetCurrentVideoDriver();if(driver&&(std::string(driver)=="dummy"||std::string(driver)=="offscreen")){SDL_ShowCursor(SDL_ENABLE);cursor_type=type;return;}throw std::runtime_error(SDL_GetError());}
     SDL_SetCursor(next);SDL_ShowCursor(SDL_ENABLE);if(active_cursor)SDL_FreeCursor(active_cursor);active_cursor=next;cursor_type=type;
+}
+void request_color_pointer_icon(const uint32_t* pixels,int width,int height,int hotX,int hotY) {
+    if(!active_window)throw std::runtime_error("No active presentation on this thread");
+    if(!pixels||width<1||height<1||width>8192||height>8192||int64_t(width)*height>32*1024*1024||hotX<0||hotY<0||hotX>=width||hotY>=height)
+        throw std::invalid_argument("Invalid color cursor geometry");
+    SDL_Surface* bitmap=SDL_CreateRGBSurfaceWithFormatFrom(const_cast<uint32_t*>(pixels),width,height,32,width*4,SDL_PIXELFORMAT_ARGB8888);
+    if(!bitmap)throw std::runtime_error(SDL_GetError());
+    SDL_Cursor* next=SDL_CreateColorCursor(bitmap,hotX,hotY);
+    SDL_FreeSurface(bitmap);
+    if(!next){
+        const char* driver=SDL_GetCurrentVideoDriver();
+        if(driver&&(std::string(driver)=="dummy"||std::string(driver)=="offscreen")){SDL_ShowCursor(SDL_ENABLE);cursor_type=-1;return;}
+        throw std::runtime_error(SDL_GetError());
+    }
+    SDL_SetCursor(next);SDL_ShowCursor(SDL_ENABLE);
+    if(active_cursor)SDL_FreeCursor(active_cursor);
+    active_cursor=next;cursor_type=-1;
 }
 void request_screen_awake(bool awake) {
     if(!active_window)throw std::runtime_error("No active presentation on this thread");
