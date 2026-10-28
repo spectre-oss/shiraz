@@ -46,6 +46,15 @@
    trace shows a missing `images/engine/icons/supertux-256x256.png` under the app's
    external-files directory immediately before exit. Game-data initialization
    needs investigation; the missing file's root cause is not yet established.
+6. The NDK asset opener still rejected assets above 128 MiB even after APK
+   inventory accepted the larger game pack. Aligned native access with the
+   384 MiB asset budget. The stream regression reads/seeks a compressed asset
+   larger than 128 MiB and rejects one above 384 MiB. Retesting the unchanged
+   APK lets the game replace its empty data archive with the full pack: the
+   copied file's SHA-256 matches `assets/data.zip` inside the APK, and it contains
+   the previously missing icon. No manual extraction or replacement data was
+   used. Startup now aborts on unsupported ARM64 `setjmp`; gameplay is still
+   unverified.
 
 **Startup investigation; no rendered game or gameplay verified.** Movement,
 menus, resize/back, audio, and save/restart remain unverified.

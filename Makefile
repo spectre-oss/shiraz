@@ -1276,6 +1276,14 @@ generic-motion-listener-smoke: framework build/libshiraz-host.so
 build/test-asset-stream: tests/native/asset_stream.cpp build/libshiraz-resources.so
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -isystem context/art_standalone/libandroidfw/include $< -o $@ -Lbuild -lshiraz-resources -L$(ART_HOST)/lib64 -landroidfw -Wl,--allow-shlib-undefined -Wl,-rpath,'$$ORIGIN'
 
+build/asset-stream-fixture.apk: scripts/build_asset_stream_fixture.py
+	python3 $<
+.PHONY: asset-stream-smoke
+ASSET_STREAM_RUNNER ?=
+asset-stream-smoke: build/test-asset-stream build/asset-stream-fixture.apk
+	LD_LIBRARY_PATH="$(ART_HOST)/lib64:$(CURDIR)/build:$${LD_LIBRARY_PATH}" $(ASSET_STREAM_RUNNER) ./build/test-asset-stream build/asset-stream-fixture.apk
+check: asset-stream-smoke
+
 build/test-choreographer: tests/native/choreographer.cpp native/choreographer.cpp native/looper.cpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@ -pthread

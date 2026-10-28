@@ -37,6 +37,13 @@ int main(int argc,char** argv){
   AAsset_close(asset);
  }
  assert(!AAssetManager_open(manager,"../stored.txt",2));
+ Asset* large=AAssetManager_open(manager,"large.bin",2);assert(large);
+ assert(AAsset_getLength64(large)==128*1024*1024+1);
+ char byte=0;assert(AAsset_read(large,&byte,1)==1&&byte=='x');
+ assert(AAsset_seek64(large,-1,SEEK_END)==128*1024*1024);
+ assert(AAsset_read(large,&byte,1)==1&&byte=='x');
+ AAsset_close(large);
+ assert(!AAssetManager_open(manager,"oversized.bin",2));
  AssetManager_delete(manager);ApkAssets_delete(apk);
  std::puts("NDK_ASSET_STREAM_OK");
 }

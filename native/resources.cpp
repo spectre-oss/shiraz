@@ -791,7 +791,8 @@ extern "C" Asset* AAssetManager_open(AssetManager* manager, const char* name, in
         path += name;
     } catch (const std::bad_alloc&) { return nullptr; }
     Asset* asset = AssetManager_openNonAsset(manager, path.c_str(), static_cast<AccessMode>(mode));
-    if (asset && Asset_getLength(asset) > 128 * 1024 * 1024) {
+    // Match the APK inventory's bounded game-asset budget (MAX_ASSET_ENTRY).
+    if (asset && Asset_getLength(asset) > 384 * 1024 * 1024) {
         Asset_delete(asset);
         return nullptr;
     }
