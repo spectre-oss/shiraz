@@ -46,6 +46,9 @@ PATCHES = {
         }),
     ],
     'art_standalone': [
+        ('art-alt-signal-stack-ownership.patch', {
+            'art/runtime/thread_linux.cc': '42e860f00f402d5168616728618df76fb5a0bb26321ec8b5e0ddb48926f033b3',
+        }),
         ('art-dx-host-bash.patch', {
             'dalvik/dx/etc/dx': '3cf9906026221053b3ed99018f75939462a175d126dcc87924e6a24fc3278147',
         }),

@@ -2,6 +2,9 @@
 package android.webkit;
 /** Chrome-style callbacks for the placeholder WebView. */
 public class WebChromeClient {
+ public interface CustomViewCallback { void onCustomViewHidden(); }
+ public void onShowCustomView(android.view.View view,CustomViewCallback callback){}
+ public void onHideCustomView(){}
  public void onProgressChanged(WebView view,int newProgress){}
  public void onReceivedTitle(WebView view,String title){}
  public void onReceivedIcon(WebView view,android.graphics.Bitmap icon){}

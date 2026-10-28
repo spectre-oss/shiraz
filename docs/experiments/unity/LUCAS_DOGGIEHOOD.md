@@ -65,6 +65,15 @@
     not yet established. A drag replay delivered in one frame acted as a tap,
     so camera dragging has not passed acceptance.
 
+14. Rebuilt ART with explicit ownership of alternate signal stacks. The native
+    regression fails on the old runtime, which replaces an embedding thread's
+    stack, and passes on the rebuilt runtime for both native attachment and
+    managed-thread stack replacement. An isolated game run confirmed the rebuilt
+    library was loaded and no longer reproduced the invalid-free crash. Closing
+    still reports a primary-window detach timeout and exits with signal 9;
+    this is not a successful clean-shutdown result. The reproducible regression
+    is available through `make art-alt-stack-smoke` after rebuilding ART.
+
 **Interactive game scene verified; clean shutdown remains blocked.** Collider
 warnings still appear. Remaining checks include sustained camera dragging,
-progress/save persistence, native resize behavior, and shutdown ownership.
+progress/save persistence, native resize behavior, and window-detach shutdown.

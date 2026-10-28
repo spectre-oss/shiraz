@@ -85,8 +85,23 @@
     validation. Per-line height rendering is the next runtime issue; note editing
     and persistence are still not verified.
 
+21. Implemented LineHeightSpan callbacks with per-line baselines, rendering,
+    hit testing, and invalidation when spans change. Both ART and host JNI-check
+    regressions verify variable-height pixels and touch offsets. The unchanged
+    app opens a note, dismisses its geolocation prompt, and accepts a title.
+    Entering the body editor next fails on WebChromeClient.onHideCustomView.
+    Shiraz's WebView is currently a placeholder without a JavaScript engine;
+    resolving callback discovery alone does not establish body-editor support.
+22. Restarting the app preserves the entered title in its notes list. Opening
+    that note displays the same title. This verifies title persistence only;
+    no body text has been created or recovered.
+23. Added the default custom-view callbacks to WebChromeClient. Retesting passes
+    that missing method and reaches WebView.setWebContentsDebuggingEnabled,
+    which is not implemented. Body-editor initialization remains blocked.
+
 ## Acceptance still required
 
 Open the app, create and edit an offline note, navigate away and back, and verify
 persistence after restart. Synchronization and account workflows are out of this
-initial offline experiment. Current outcome: **notes list and Add menu render; note creation blocked**.
+initial offline experiment. Current outcome: **note screen and title input work;
+title persists across restart; body editing remains unverified**.

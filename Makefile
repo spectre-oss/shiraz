@@ -1,6 +1,7 @@
 SHELL := /bin/sh
 .DEFAULT_GOAL := all
 CXX ?= c++
+JAVA ?= java
 JAVA_HOME ?= $(shell dirname $$(dirname $$(readlink -f $$(command -v javac))))
 JNI_CFLAGS = -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
 CPPFLAGS += -Iinclude -Ibuild
@@ -1324,6 +1325,10 @@ pixel-copy-smoke: framework build/libshiraz-gles2.so build/libshiraz-gles1.so bu
 	LD_LIBRARY_PATH="$(CURDIR)/build:$${LD_LIBRARY_PATH}" java -Xcheck:jni -Djava.library.path=build -cp build/pixel-copy-smoke:build/framework/classes PixelCopySmoke
 check: pixel-copy-smoke
 
+build/libshiraz-test-alt-stack.so: tests/native/alt_signal_stack.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -pthread $< -o $@
+
 .PHONY: view-rotation-smoke
 view-rotation-smoke: framework build/libshiraz-bitmap.so build/libshiraz-path.so
 	mkdir -p build/view-rotation-smoke
@@ -1337,3 +1342,14 @@ qwerty-key-smoke: framework
 	javac --release 8 -cp build/framework/classes -d build/qwerty-key-smoke tests/java/QwertyKeySmoke.java
 	java -cp build/qwerty-key-smoke:build/framework/classes QwertyKeySmoke
 check: qwerty-key-smoke
+
+.PHONY: textview-lineheight-smoke
+textview-lineheight-smoke: framework build/libshiraz-text.so build/libshiraz-bitmap.so build/libshiraz-path.so build/libshiraz-resources.so
+	mkdir -p build/textview-lineheight-smoke
+	javac --release 8 -cp build/framework/classes -d build/textview-lineheight-smoke tests/java/TextViewLineHeightSmoke.java
+	LD_LIBRARY_PATH="$(CURDIR)/context/art_standalone/out/host/linux-x86/lib64:$(CURDIR)/.local/lib:$(CURDIR)/build:$${LD_LIBRARY_PATH}" $(JAVA) -Xcheck:jni -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -Djava.library.path=build -cp build/textview-lineheight-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar TextViewLineHeightSmoke
+check: textview-lineheight-smoke
+
+.PHONY: art-alt-stack-smoke
+art-alt-stack-smoke: build/libshiraz-test-alt-stack.so
+	python3 scripts/art_alt_stack_smoke.py

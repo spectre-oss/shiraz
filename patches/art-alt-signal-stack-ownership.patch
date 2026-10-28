@@ -1,0 +1,58 @@
+--- a/art/runtime/thread_linux.cc
++++ b/art/runtime/thread_linux.cc
+@@ -36,13 +36,22 @@
+ static /*constexpr*/ int kHostAltSigStackSize =
+     32 * KB < MINSIGSTKSZ ? MINSIGSTKSZ : 32 * KB;
+ 
++// Only free stacks allocated by ART; native engines may install their own.
++static thread_local uint8_t* owned_signal_stack = nullptr;
++
+ void Thread::SetUpAlternateSignalStack() {
+   // Create and set an alternate signal stack.
+ #ifdef ART_TARGET_ANDROID
+   LOG(FATAL) << "Invalid use of alternate signal stack on Android";
+ #endif
++  CHECK(owned_signal_stack == nullptr);
+   stack_t ss;
+-  ss.ss_sp = new uint8_t[kHostAltSigStackSize];
++  SigAltStack(nullptr, &ss);
++  if ((ss.ss_flags & SS_DISABLE) == 0) {
++    return;  // The embedding thread already owns a usable stack.
++  }
++  owned_signal_stack = new uint8_t[kHostAltSigStackSize];
++  ss.ss_sp = owned_signal_stack;
+   ss.ss_size = kHostAltSigStackSize;
+   ss.ss_flags = 0;
+   CHECK(ss.ss_sp != nullptr);
+@@ -55,19 +64,20 @@
+ }
+ 
+ void Thread::TearDownAlternateSignalStack() {
+-  // Get the pointer so we can free the memory.
++  if (owned_signal_stack == nullptr) {
++    return;
++  }
+   stack_t ss;
+   SigAltStack(nullptr, &ss);
+-  uint8_t* allocated_signal_stack = reinterpret_cast<uint8_t*>(ss.ss_sp);
+-
+-  // Tell the kernel to stop using it.
+-  ss.ss_sp = nullptr;
+-  ss.ss_flags = SS_DISABLE;
+-  ss.ss_size = kHostAltSigStackSize;  // Avoid ENOMEM failure with Mac OS' buggy libc.
+-  SigAltStack(&ss, nullptr);
+-
+-  // Free it.
+-  delete[] allocated_signal_stack;
++  if (ss.ss_sp == owned_signal_stack && (ss.ss_flags & SS_DISABLE) == 0) {
++    ss.ss_sp = nullptr;
++    ss.ss_flags = SS_DISABLE;
++    ss.ss_size = kHostAltSigStackSize;
++    SigAltStack(&ss, nullptr);
++  }
++  // An app replacement remains owned by the app and must not be freed here.
++  delete[] owned_signal_stack;
++  owned_signal_stack = nullptr;
+ }
+ 
+ }  // namespace art

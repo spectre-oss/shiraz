@@ -90,15 +90,15 @@ public class TextView extends View {
     private Layout measuredLayout;
     public final Layout getLayout(){return measuredLayout;}
     private static final class MeasuredLayout extends Layout {
-        ArrayList<byte[]> levels;ArrayList<Integer> bases;
+        ArrayList<byte[]> levels;ArrayList<Integer> bases;int[] tops,baselines;
         public int getParagraphDirection(int line){return bases.get(line)==0?DIR_LEFT_TO_RIGHT:DIR_RIGHT_TO_LEFT;}
         public Directions getLineDirections(int line){return new Directions(shiraz.runtime.TextGeometry.directions(levels.get(line)));}
         final int[] starts;final float[] widths;final int baseline,step,height;
         MeasuredLayout(CharSequence text,TextPaint paint,int width,Alignment alignment,float mult,float add,int[] starts,float[] widths,int baseline,int step,int height){super(text,paint,width,alignment,mult,add);this.starts=starts;this.widths=widths;this.baseline=baseline;this.step=step;this.height=height;}
         private void index(int line,boolean end){if(line<0||line>(end?widths.length:widths.length-1))throw new IndexOutOfBoundsException("Layout line");}
         public int getLineCount(){return widths.length;}
-        public int getLineTop(int line){index(line,true);return line==widths.length?height:line*step;}
-        public int getLineDescent(int line){index(line,false);return getLineTop(line+1)-(baseline+line*step);}
+        public int getLineTop(int line){index(line,true);return tops!=null?tops[line]:line==widths.length?height:line*step;}
+        public int getLineDescent(int line){index(line,false);return getLineTop(line+1)-(baselines!=null?baselines[line]:baseline+line*step);}
         public int getLineStart(int line){index(line,true);return starts[line];}
         public float getLineWidth(int line){index(line,false);return widths[line];}
         public float getLineLeft(int line){index(line,false);return getAlignment()==Alignment.ALIGN_CENTER?(getWidth()-widths[line])/2:getAlignment()==Alignment.ALIGN_OPPOSITE?getWidth()-widths[line]:0;}
@@ -245,7 +245,7 @@ public class TextView extends View {
     private void changed(){measuredLayout=null;layoutWidth=-1;requestLayout();invalidate();}
     private static String plain(CharSequence value){
         if(value==null)return "";
-        if(value instanceof Spanned){for(Object span:((Spanned)value).getSpans(0,value.length(),Object.class))if(span instanceof android.text.style.ParagraphStyle)throw new UnsupportedOperationException("TextView span rendering is not implemented: "+span.getClass().getName());}
+        if(value instanceof Spanned){for(Object span:((Spanned)value).getSpans(0,value.length(),Object.class))if(span instanceof android.text.style.ParagraphStyle&&!(span instanceof android.text.style.LineHeightSpan))throw new UnsupportedOperationException("TextView span rendering is not implemented: "+span.getClass().getName());}
         else if(!(value instanceof String||value instanceof StringBuilder||value instanceof StringBuffer))throw new UnsupportedOperationException("Styled text is not implemented");
         if(value.length()>32768)throw new IllegalArgumentException("TextView text limit");
         String result=value.toString();
@@ -260,7 +260,7 @@ public class TextView extends View {
         public void onSpanAdded(Spannable value,Object what,int start,int end){spanChanged(value,what);}
         public void onSpanRemoved(Spannable value,Object what,int start,int end){spanChanged(value,what);}
         public void onSpanChanged(Spannable value,Object what,int a,int b,int c,int d){spanChanged(value,what);}
-        private void spanChanged(Spannable value,Object what){if(value==text){if(what instanceof android.text.style.MetricAffectingSpan)changed();else invalidate();if(what==Selection.SELECTION_END)onSelectionChanged(getSelectionStart(),getSelectionEnd());}}
+        private void spanChanged(Spannable value,Object what){if(value==text){if(what instanceof android.text.style.MetricAffectingSpan||what instanceof android.text.style.LineHeightSpan)changed();else invalidate();if(what==Selection.SELECTION_END)onSelectionChanged(getSelectionStart(),getSelectionEnd());}}
     }
     private TextWatcher[] snapshot(){return watchers.toArray(new TextWatcher[0]);}
     public void addTextChangedListener(TextWatcher watcher){if(watcher==null)throw new NullPointerException("watcher");if(watchers.size()>=1024)throw new IllegalStateException("Text watcher limit");watchers.add(watcher);}
@@ -298,7 +298,7 @@ public class TextView extends View {
     public final void setMovementMethod(android.text.method.MovementMethod value){if(movement==value)return;movement=value;if(value!=null){if(!(text instanceof Spannable))setText(text,BufferType.SPANNABLE);else value.initialize(this,(Spannable)text);setFocusable(true);}}
     @Override public boolean onTouchEvent(android.view.MotionEvent event){if(isEnabled()&&movement!=null&&text instanceof Spannable&&movement.onTouchEvent(this,(Spannable)text,event))return true;return super.onTouchEvent(event);}
     public android.text.style.ClickableSpan shirazLinkAt(float x,float y){
-        if(!(text instanceof Spanned)||!displayed().equals(text.toString()))return null;ensure(available(getWidth()));float localY=y-getCompoundPaddingTop()-verticalOffset(getHeight());int line=(int)(localY/Math.max(1,lineStep));if(localY<0||line<0||line>=Math.min(lines.size(),maxLines)||x<lineX(line)||x>=lineX(line)+advances.get(line))return null;
+        if(!(text instanceof Spanned)||!displayed().equals(text.toString()))return null;ensure(available(getWidth()));float localY=y-getCompoundPaddingTop()-verticalOffset(getHeight());int line=measuredLayout.getLineForVertical((int)localY);if(localY<0||localY>=contentHeight||line<0||line>=Math.min(lines.size(),maxLines)||x<lineX(line)||x>=lineX(line)+advances.get(line))return null;
         int offset=getOffsetForPosition(x,y);Spanned spans=(Spanned)text;for(android.text.style.ClickableSpan link:spans.getSpans(offset,offset,android.text.style.ClickableSpan.class))if(offset>=spans.getSpanStart(link)&&offset<spans.getSpanEnd(link))return link;return null;
     }
     public Editable getEditableText(){return text instanceof Editable?(Editable)text:null;}
@@ -541,8 +541,37 @@ public class TextView extends View {
         int[] starts=new int[count+1];float[] widths=new float[count];for(int i=0;i<count;i++){starts[i]=lineStarts.get(i);widths[i]=advances.get(i);}starts[count]=rendered.length();
         int alignment=Gravity.getAbsoluteGravity(gravity,getLayoutDirection())&Gravity.HORIZONTAL_GRAVITY_MASK;
         measuredLayout=new MeasuredLayout(rendered,new TextPaint(paint),width,alignment==Gravity.CENTER_HORIZONTAL?Layout.Alignment.ALIGN_CENTER:alignment==Gravity.RIGHT?Layout.Alignment.ALIGN_OPPOSITE:Layout.Alignment.ALIGN_NORMAL,spacingMult,spacingAdd,starts,widths,firstBaseline,lineStep,contentHeight);
+        applyLineHeights((MeasuredLayout)measuredLayout,metrics,rendered,count);
         ((MeasuredLayout)measuredLayout).levels=new ArrayList<byte[]>(lineLevels);((MeasuredLayout)measuredLayout).bases=new ArrayList<Integer>(lineBaseLevels);
         layoutWidth=width;layoutSize=paint.getTextSize();layoutFace=paint.getTypeface();layoutText=rendered;layoutLocale=getResources().getConfiguration().locale;
+    }
+    private void applyLineHeights(MeasuredLayout layout,Paint.FontMetricsInt original,String rendered,int count){
+        if(!(text instanceof Spanned)||count==0)return;
+        Spanned spans=(Spanned)text;
+        if(spans.getSpans(0,text.length(),android.text.style.LineHeightSpan.class).length==0)return;
+        if(!rendered.equals(text.toString())||ellipsize!=null)throw new UnsupportedOperationException("Line-height spans with transformed or ellipsized text");
+        layout.tops=new int[count+1];layout.baselines=new int[count];
+        java.util.IdentityHashMap<android.text.style.LineHeightSpan,Integer> origins=new java.util.IdentityHashMap<android.text.style.LineHeightSpan,Integer>();
+        for(int line=0;line<count;line++){
+            Paint.FontMetricsInt fm=new Paint.FontMetricsInt();fm.top=original.top;fm.ascent=original.ascent;fm.descent=original.descent;fm.bottom=original.bottom;fm.leading=original.leading;
+            int start=lineStarts.get(line),end=line+1<lines.size()?lineStarts.get(line+1):text.length();
+            int paragraphStart=start,paragraphEnd=start;
+            while(paragraphStart>0&&text.charAt(paragraphStart-1)!='\n')paragraphStart--;
+            while(paragraphEnd<text.length()&&text.charAt(paragraphEnd)!='\n')paragraphEnd++;
+            if(paragraphEnd<text.length())paragraphEnd++;
+            for(android.text.style.LineHeightSpan span:spans.getSpans(paragraphStart,paragraphEnd,android.text.style.LineHeightSpan.class)){
+                Integer origin=origins.get(span);if(origin==null){origin=layout.tops[line];origins.put(span,origin);}
+                if(span instanceof android.text.style.LineHeightSpan.WithDensity)((android.text.style.LineHeightSpan.WithDensity)span).chooseHeight(text,start,end,origin,layout.tops[line],fm,paint);
+                else span.chooseHeight(text,start,end,origin,layout.tops[line],fm);
+            }
+            if(fm.ascent>fm.descent||Math.abs((long)fm.top)>1000000||Math.abs((long)fm.ascent)>1000000||Math.abs((long)fm.descent)>1000000||Math.abs((long)fm.bottom)>1000000)throw new IllegalArgumentException("Line-height span metrics");
+            int ascent=includePadding&&line==0?fm.top:fm.ascent,descent=includePadding&&line==count-1?fm.bottom:fm.descent;
+            if(ascent>descent)throw new IllegalArgumentException("Negative line-height extent");
+            int extra=line==count-1?0:Math.max(ascent-descent,Math.round((fm.descent-fm.ascent)*(spacingMult-1)+spacingAdd));
+            layout.baselines[line]=dimension((long)layout.tops[line]-ascent);
+            layout.tops[line+1]=dimension((long)layout.tops[line]+descent-ascent+extra);
+        }
+        firstBaseline=layout.baselines[0];contentHeight=layout.tops[count];
     }
     @Override protected void onMeasure(int widthSpec,int heightSpec){
         autoSizeForBounds(widthSpec,heightSpec);
@@ -566,7 +595,7 @@ public class TextView extends View {
     public int getOffsetForPosition(float x,float y){
         if(ellipsize!=null)throw new UnsupportedOperationException("Ellipsized text offset mapping is not implemented");
         ensure(available(getWidth()));if(lines.isEmpty()||maxLines==0)return 0;
-        int line=Math.max(0,Math.min(Math.min(lines.size(),maxLines)-1,(int)((y-getCompoundPaddingTop()-verticalOffset(getHeight()))/Math.max(1,lineStep))));String value=lines.get(line);if(hasMetrics()&&!uniformMetrics()&&java.text.Bidi.requiresBidi(value.toCharArray(),0,value.length()))throw new UnsupportedOperationException("Bidirectional metric hit testing");
+        int line=measuredLayout.getLineForVertical((int)(y-getCompoundPaddingTop()-verticalOffset(getHeight())));String value=lines.get(line);if(hasMetrics()&&!uniformMetrics()&&java.text.Bidi.requiresBidi(value.toCharArray(),0,value.length()))throw new UnsupportedOperationException("Bidirectional metric hit testing");
         if(!hasMetrics()||uniformMetrics())return Math.min(text.length(),lineStarts.get(line)+new shiraz.runtime.TextGeometry(value,linePaint(line),lineBaseLevels.get(line)).hit(x-lineX(line)));
         float local=x-lineX(line);int previous=0;float before=0;
         for(int at=0;at<value.length();){int end=next(value,at);float after=advance(value,0,end,lineStarts.get(line));if(local<(before+after)/2)return Math.min(text.length(),lineStarts.get(line)+previous);previous=end;before=after;at=end;}
@@ -604,7 +633,7 @@ public class TextView extends View {
         super.onDraw(canvas);drawCompounds(canvas);ensure(available(getWidth()));paint.setColor(text.length()==0&&hint!=null?getCurrentHintTextColor():getCurrentTextColor());paint.drawableState=getDrawableState();
         int save=canvas.save();try{canvas.clipRect(getCompoundPaddingLeft(),getCompoundPaddingTop(),getWidth()-getCompoundPaddingRight(),getHeight()-getCompoundPaddingBottom());
             float baseline=getCompoundPaddingTop()+verticalOffset(getHeight())+firstBaseline;int alignment=Gravity.getAbsoluteGravity(gravity,getLayoutDirection())&Gravity.HORIZONTAL_GRAVITY_MASK;
-            for(int i=0;i<Math.min(lines.size(),maxLines);i++){float x=getCompoundPaddingLeft();if(alignment==Gravity.RIGHT)x+=layoutWidth-advances.get(i);else if(alignment==Gravity.CENTER_HORIZONTAL)x+=(layoutWidth-advances.get(i))/2;drawEditor(canvas,i,x,baseline);drawStyledLine(canvas,i,x,baseline);baseline+=lineStep;}
+            for(int i=0;i<Math.min(lines.size(),maxLines);i++){baseline=getCompoundPaddingTop()+verticalOffset(getHeight())+measuredLayout.getLineBaseline(i);float x=getCompoundPaddingLeft();if(alignment==Gravity.RIGHT)x+=layoutWidth-advances.get(i);else if(alignment==Gravity.CENTER_HORIZONTAL)x+=(layoutWidth-advances.get(i))/2;drawEditor(canvas,i,x,baseline);drawStyledLine(canvas,i,x,baseline);baseline+=lineStep;}
         }finally{paint.shirazSetBidiLevels(null);canvas.restoreToCount(save);}
     }
 }
