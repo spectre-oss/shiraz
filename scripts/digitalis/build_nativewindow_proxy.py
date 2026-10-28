@@ -129,6 +129,9 @@ bool isSLID(SLInterfaceID id, SLInterfaceID id2) {
             raise SystemExit('Incomplete GLES1 declarations')
         (work/'digitalis-gles1.inc').write_text(''.join('ENTRY('+name+')\n' for name in functions))
     command += ['-I'+str(work), str(source), '-L'+str(args.library_dir), '-L'+str(args.android_library_dir), '-lberberis_arm64']
+    if args.kind == 'libc':
+        upstream = ROOT/'context/digitalis-native-bridge-support/android_api/libc/proxy'
+        command += ['-I'+str(upstream), str(upstream/'setjmp_thunks.cc')]
     if args.kind == 'nativewindow':
         command += ['-landroid']
     if args.kind == 'opensles':

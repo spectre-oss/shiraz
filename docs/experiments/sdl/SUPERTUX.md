@@ -55,6 +55,16 @@
    the previously missing icon. No manual extraction or replacement data was
    used. Startup now aborts on unsupported ARM64 `setjmp`; gameplay is still
    unverified.
+7. Connected the pinned native-bridge setjmp thunks to Digitalis's ARM64
+   register save/restore implementation, including zero-to-one longjmp return
+   normalization. The ARM64 fixture passes ordinary and signal-aware jumps,
+   negative/nonzero returns, saved-mask restoration, and unsaved-mask retention.
+   Retesting passes the previous setjmp abort and reaches SDL haptic discovery.
+8. SDL then aborts JNI dispatch because `InputDevice.getVibrator()` is absent.
+   Connected the aggregate desktop input device to the existing vibrator object
+   that reports no hardware. The next run passes that call and remains on a
+   black surface during the observed startup interval; rendering and gameplay
+   are not established. The VM also reports unavailable audio hardware.
 
 **Startup investigation; no rendered game or gameplay verified.** Movement,
 menus, resize/back, audio, and save/restart remain unverified.

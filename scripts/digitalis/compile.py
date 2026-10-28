@@ -89,4 +89,8 @@ lib=A/'out/host/linux-x86/lib64'
 subprocess.run([flags[0],'-shared','-Wl,-z,defs','-Wl,-z,noexecstack','-o',str(W/'libberberis_arm64.so'),*[str(p) for p in (W/'obj').glob('*.o')],'-L'+str(lib),'-Wl,-rpath,'+str(lib),'-lbase','-llog','-ldl','-pthread','-latomic'],check=True)
 
 for source, name in [('digitalis_libc_proxy.cpp', 'libberberis_proxy_libc.so'), ('digitalis_libm_proxy.cpp', 'libberberis_proxy_libm.so')]:
- subprocess.run(flags+['-shared',str(R/'native'/source),'-L'+str(W),'-lberberis_arm64','-o',str(W/name)],check=True)
+ extra=[]
+ if source=='digitalis_libc_proxy.cpp':
+  upstream=B/'android_api/libc/proxy'
+  extra=['-I'+str(upstream),str(upstream/'setjmp_thunks.cc')]
+ subprocess.run(flags+extra+['-shared',str(R/'native'/source),'-L'+str(W),'-lberberis_arm64','-o',str(W/name)],check=True)

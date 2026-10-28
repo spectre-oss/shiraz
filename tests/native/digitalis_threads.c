@@ -44,6 +44,34 @@ static void* worker(void* argument) {
   work->result=local;
   return work;
 }
+typedef unsigned long JumpBuffer[32];
+extern int setjmp(JumpBuffer) __attribute__((returns_twice));
+extern int _setjmp(JumpBuffer) __attribute__((returns_twice));
+extern int sigsetjmp(JumpBuffer,int) __attribute__((returns_twice));
+extern void longjmp(JumpBuffer,int) __attribute__((noreturn));
+extern void _longjmp(JumpBuffer,int) __attribute__((noreturn));
+extern void siglongjmp(JumpBuffer,int) __attribute__((noreturn));
+extern int sigprocmask(int,const unsigned long*,unsigned long*);
+static int jump_test(void) {
+  JumpBuffer a,b; volatile int phase=0;
+  int value=setjmp(a);
+  if(!phase){phase=1;longjmp(a,0);}
+  if(value!=1 || phase!=1)return -81;
+  value=_setjmp(b);
+  if(phase==1){phase=2;_longjmp(b,42);}
+  if(value!=42)return -82;
+  unsigned long original=0,blocked=1ul<<11,mask=0;
+  volatile unsigned long expected=0;
+  if(sigprocmask(0,0,&original))return -83;
+  value=sigsetjmp(a,1);
+  if(phase==2){phase=3;sigprocmask(0,&blocked,0);siglongjmp(a,-7);}
+  sigprocmask(0,0,&mask);
+  if(value!=-7 || mask!=original){sigprocmask(2,&original,0);return -84;}
+  value=sigsetjmp(b,0);
+  if(phase==3){phase=4;sigprocmask(0,&blocked,0);sigprocmask(0,0,&mask);expected=mask;siglongjmp(b,9);}
+  sigprocmask(0,0,&mask);sigprocmask(2,&original,0);
+  return value!=9?-851:((mask!=expected || !(mask&blocked))?-852:1);
+}
 struct Naming { int ready,proceed; pthread_t guest; int ok; };
 static void* naming_worker(void* argument) {
   struct Naming* n=argument; char buffer[16],signal=1;
@@ -72,6 +100,7 @@ static int naming_test(void) {
 }
 int Java_shiraz_ThreadSmoke_run(void* env,void* klass) {
   (void)env;(void)klass;
+  int jumps=jump_test();if(jumps!=1)return jumps;
   if(!naming_test()) return -7;
   struct Work work[4]={0}; pthread_t threads[4];
   if(pthread_key_create(&key,destroy)) return -1;

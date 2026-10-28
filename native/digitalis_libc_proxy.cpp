@@ -26,6 +26,7 @@
 #include "berberis/guest_os_primitives/guest_thread_manager.h"
 #include "berberis/guest_os_primitives/scoped_pending_signals.h"
 #include "guest_pthread_attributes.h"
+#include "setjmp_thunks.h"
 #include <string>
 #include <vector>
 #include "android_profile_properties.h"
@@ -113,6 +114,7 @@ static pid_t CloneForFork() {
  }
  return pid;
 }
+static void ShirazLongJump(void* buffer,int value){DoThunk_siglongjmp(buffer,value?value:1);}
 static uintptr_t StackTop() { return GetCurrentGuestThread()->GetStackTop(); }
 static void ThreadCreate(HostCode, ThreadState* state) {
  using Signature = int(pthread_t*, const ShirazGuestPthreadAttributes*, void*(*)(void*), void*);
@@ -160,8 +162,8 @@ static const KnownTrampoline functions[] = {
 {"__system_property_update", Unsupported, const_cast<char*>("__system_property_update")},
 {"__system_property_wait", Unsupported, const_cast<char*>("__system_property_wait")},
 {"__system_property_wait_any", Unsupported, const_cast<char*>("__system_property_wait_any")},
-{"_longjmp", Unsupported, const_cast<char*>("_longjmp")},
-{"_setjmp", Unsupported, const_cast<char*>("_setjmp")},
+{"_longjmp", GetTrampolineFunc<decltype(ShirazLongJump)>(), reinterpret_cast<void*>(ShirazLongJump)},
+{"_setjmp", GetTrampolineFunc<decltype(DoThunk__setjmp)>(), reinterpret_cast<void*>(DoThunk__setjmp)},
 {"android_crash_detail_register", Unsupported, const_cast<char*>("android_crash_detail_register")},
 {"android_crash_detail_replace_data", Unsupported, const_cast<char*>("android_crash_detail_replace_data")},
 {"android_crash_detail_replace_name", Unsupported, const_cast<char*>("android_crash_detail_replace_name")},
@@ -179,7 +181,7 @@ static const KnownTrampoline functions[] = {
 {"gethostbyname", Unsupported, const_cast<char*>("gethostbyname")},
 {"getnameinfo", Unsupported, const_cast<char*>("getnameinfo")},
 {"gettimeofday", GetTrampolineFunc<auto(void*, void*) -> int32_t>(), reinterpret_cast<void*>(NULL)},
-{"longjmp", Unsupported, const_cast<char*>("longjmp")},
+{"longjmp", GetTrampolineFunc<decltype(ShirazLongJump)>(), reinterpret_cast<void*>(ShirazLongJump)},
 {"memchr", GetTrampolineFunc<auto(const void*, int, size_t) -> void*>(), nullptr},
 {"memcmp", GetTrampolineFunc<auto(const void*, const void*, size_t) -> int>(), nullptr},
 {"memcpy", GetTrampolineFunc<auto(void*, const void*, size_t) -> void*>(), nullptr},
@@ -237,9 +239,9 @@ static const KnownTrampoline functions[] = {
 {"pthread_setschedprio", Unsupported, const_cast<char*>("pthread_setschedprio")},
 {"pthread_setspecific", GetTrampolineFunc<auto(int32_t, void*) -> int32_t>(), reinterpret_cast<void*>(NULL)},
 {"pthread_sigqueue", Unsupported, const_cast<char*>("pthread_sigqueue")},
-{"setjmp", Unsupported, const_cast<char*>("setjmp")},
-{"siglongjmp", Unsupported, const_cast<char*>("siglongjmp")},
-{"sigsetjmp", Unsupported, const_cast<char*>("sigsetjmp")},
+{"setjmp", GetTrampolineFunc<decltype(DoThunk_setjmp)>(), reinterpret_cast<void*>(DoThunk_setjmp)},
+{"siglongjmp", GetTrampolineFunc<decltype(ShirazLongJump)>(), reinterpret_cast<void*>(ShirazLongJump)},
+{"sigsetjmp", GetTrampolineFunc<decltype(DoThunk_sigsetjmp)>(), reinterpret_cast<void*>(DoThunk_sigsetjmp)},
 {"time", GetTrampolineFunc<auto(void*) -> long>(), reinterpret_cast<void*>(NULL)},
 };
 static const KnownVariable variables[] = {{"environ", sizeof(void*)}};
