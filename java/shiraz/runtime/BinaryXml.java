@@ -50,7 +50,8 @@ public final class BinaryXml {
     private void pool(int start,int header,int end) {
         if (strings != null || header < 28) throw bad();
         int count=i32(start+8,end),styles=i32(start+12,end),flags=i32(start+16,end),offset=i32(start+20,end),styleOffset=i32(start+24,end);
-        if (count < 0 || count > 65536 || styles != 0 || (flags&~0x101) != 0 || offset < header+(long)count*4 || (long)start+offset > end || styleOffset != 0) throw bad();
+        // AAPT can point an empty style section at the end of the pool.
+        if (count < 0 || count > 65536 || styles != 0 || (flags&~0x101) != 0 || offset < header+(long)count*4 || (long)start+offset > end || (styleOffset != 0 && styleOffset != end-start)) throw bad();
         range(start+header,(long)count*4,end); strings=new String[count];
         Charset charset=(flags&256) != 0 ? StandardCharsets.UTF_8 : StandardCharsets.UTF_16LE;
         for (int i=0;i<count;i++) {

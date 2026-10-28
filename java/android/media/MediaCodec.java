@@ -59,6 +59,22 @@ public final class MediaCodec {
     private boolean decoding;private long decoder;private int outputRate,outputChannels;
     private MediaCodec(){}
     private MediaFormat format;private long encoder;private boolean started,formatPending,inputOwned,ended;private long samples,baseTime;
+    public synchronized void setParameters(android.os.Bundle parameters) {
+        if (!started) throw new IllegalStateException("Codec stopped");
+        if (parameters == null) return;
+        for (String key : parameters.keySet()) {
+            if (!"operating-rate".equals(key))
+                throw new UnsupportedOperationException("Codec parameter: " + key);
+            Object value = parameters.get(key);
+            if (!(value instanceof Number)) throw new IllegalArgumentException("Operating rate must be numeric");
+            float rate = ((Number)value).floatValue();
+            if (!(rate > 0) || Float.isInfinite(rate)) throw new IllegalArgumentException("Operating rate must be finite and positive");
+        }
+        // Resource-allocation hint, not playback speed: these software codecs
+        // already process queued input as capacity permits.
+        if (parameters.containsKey("operating-rate"))
+            format.setFloat("operating-rate", ((Number)parameters.get("operating-rate")).floatValue());
+    }
     private java.nio.ByteBuffer input=java.nio.ByteBuffer.allocateDirect(65536);private final java.io.ByteArrayOutputStream pending=new java.io.ByteArrayOutputStream();
     private static final class Packet {final byte[] bytes;final long time;final int flags;java.nio.ByteBuffer direct;Packet(byte[] b,long t,int f){bytes=b;time=t;flags=f;}}
     private final java.util.ArrayDeque<Packet> output=new java.util.ArrayDeque<Packet>();private Packet held;

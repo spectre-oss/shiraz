@@ -208,8 +208,11 @@ public class Resources {
         if (value.type >= 16 && value.type <= 31) return value.data;
         throw new NotFoundException("Resource is not numeric");
     }
+    synchronized byte[] shirazReadNonAsset(int cookie,String path) {
+        requireOpen();return nativeResourceFile(handle,cookie,path.getBytes(StandardCharsets.UTF_8));
+    }
     private byte[] fileBytes(android.util.TypedValue value) {
-        requireOpen(); if (value.type != 3 || value.string == null || !value.string.toString().startsWith("res/")) throw new NotFoundException("Resource is not a packaged file");
+        requireOpen(); if (value.type != 3 || value.string == null) throw new NotFoundException("Resource is not a packaged file");
         return nativeResourceFile(handle,value.assetCookie,value.string.toString().getBytes(StandardCharsets.UTF_8));
     }
     public synchronized byte[] shirazReadResourceFile(int id,android.util.TypedValue out) {
@@ -225,11 +228,44 @@ public class Resources {
         try{parsed=new shiraz.runtime.CompiledXmlParser(bytes,id);if(bytes.length<=65536){xmlCache.put(id,parsed);xmlBytes+=bytes.length;while(xmlCache.size()>32||xmlBytes>262144){Integer oldest=xmlCache.keySet().iterator().next();xmlBytes-=xmlCache.remove(oldest).shirazEncodedSize();}}return parsed.shirazFork();}
         catch(RuntimeException failure){throw new NotFoundException("Cannot parse XML resource #"+Integer.toHexString(id),failure);}
     }
+    public android.graphics.Typeface getFont(int id) {
+        android.util.TypedValue value=new android.util.TypedValue();getValue(id,value,true);
+        if(value.type!=3||value.string==null)throw new NotFoundException("Resource is not a font");
+        String path=value.string.toString();int weight=400,italic=0,ttc=0;
+        if(path.endsWith(".xml")) {
+            XmlResourceParser parser=getXml(id);int best=Integer.MAX_VALUE;String selected=null;int cookie=0;
+            try {
+                int event;
+                while((event=parser.next())!=org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                    if(event!=org.xmlpull.v1.XmlPullParser.START_TAG)continue;
+                    if("font-family".equals(parser.getName())) {
+                        for(int i=0;i<parser.getAttributeCount();i++)if(parser.getAttributeName(i).startsWith("fontProvider"))throw new UnsupportedOperationException("Provider fonts are not supported");
+                    }
+                    if(!"font".equals(parser.getName()))continue;
+                    int resource=0,w=400,it=0,index=0;
+                    for(int i=0;i<parser.getAttributeCount();i++) {
+                        String name=parser.getAttributeName(i);
+                        if("font".equals(name))resource=parser.getAttributeResourceValue(i,0);
+                        else if("fontWeight".equals(name))w=parser.getAttributeIntValue(i,400);
+                        else if("fontStyle".equals(name))it=parser.getAttributeIntValue(i,0);
+                        else if("ttcIndex".equals(name))index=parser.getAttributeIntValue(i,0);
+                        else if("fontVariationSettings".equals(name))throw new UnsupportedOperationException("Variable resource fonts are not supported");
+                    }
+                    int score=Math.abs(w-400)*2+(it==0?0:1);
+                    if(resource!=0&&score<best){android.util.TypedValue item=new android.util.TypedValue();getValue(resource,item,true);if(item.string==null)throw new NotFoundException("Invalid font entry");selected=item.string.toString();cookie=item.assetCookie;weight=w;italic=it;ttc=index;best=score;}
+                }
+            } catch(java.io.IOException|org.xmlpull.v1.XmlPullParserException error){throw new NotFoundException("Cannot read font family",error);} finally {parser.close();}
+            if(selected==null)throw new NotFoundException("Empty font family");path=selected;value.assetCookie=cookie;
+        }
+        android.graphics.FontFamily family=new android.graphics.FontFamily();
+        if(!family.addFontFromAssetManager(getAssets(),path,value.assetCookie,false,ttc,weight,italic,null)||!family.freeze())throw new NotFoundException("Cannot load font resource #"+Integer.toHexString(id));
+        return android.graphics.Typeface.createFromFamiliesWithDefault(new android.graphics.FontFamily[]{family},weight,italic);
+    }
     public XmlResourceParser getLayout(int id) { return getXml(id); }
     public XmlResourceParser getAnimation(int id) { return getXml(id); }
     public synchronized AssetFileDescriptor openRawResourceFd(int id) throws NotFoundException {
         requireOpen();android.util.TypedValue value=new android.util.TypedValue();getValue(id,value,true);
-        if(value.type!=3||value.string==null||!value.string.toString().startsWith("res/"))throw new NotFoundException("Resource is not a packaged file");
+        if(value.type!=3||value.string==null)throw new NotFoundException("Resource is not a packaged file");
         long[] region=nativeResourceFd(handle,value.assetCookie,value.string.toString().getBytes(StandardCharsets.UTF_8));
         if(region==null)return null;
         int raw=(int)region[0];android.os.ParcelFileDescriptor descriptor=null;

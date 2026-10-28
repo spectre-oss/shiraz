@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include <androidfw/androidfw_c_api.h>
+#include "shiraz/archive_path.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -78,8 +79,8 @@ struct ColorReader {
             return {{result.value.data, {}}};
         if (result.value.dataType != TYPE_STRING) throw std::runtime_error("Resource is not a color");
         auto filename = utf8(string(AssetManager_getStringPoolForCookie(manager, result.cookie), result.value.data, 65536));
-        if (filename.compare(0, 4, "res/") || filename.size() < 5 || filename.substr(filename.size() - 4) != ".xml")
-            throw std::runtime_error("Color is not a compiled XML resource");
+        if (!shiraz::validArchiveFilePath(filename))
+            throw std::runtime_error("Invalid color resource archive path");
         auto key = std::make_pair(result.cookie, filename);
         if (!active.insert(key).second) throw std::runtime_error("Cyclic color selector");
         const ApkAssets* owner = result.cookie == 0 && framework ? framework : result.cookie == (framework ? 1 : 0) ? app : nullptr;

@@ -8,7 +8,58 @@ public final class MotionEvent extends InputEvent {
     public static final int ACTION_MASK = 255, ACTION_POINTER_INDEX_MASK = 0xff00, ACTION_POINTER_INDEX_SHIFT = 8;
     public static final int FLAG_WINDOW_IS_OBSCURED = 0x1, FLAG_WINDOW_IS_PARTIALLY_OBSCURED = 0x2, FLAG_IS_GENERATED_GESTURE = 0x8, FLAG_NO_FOCUS_CHANGE = 0x1000;
     public static final int BUTTON_PRIMARY = 1, TOOL_TYPE_UNKNOWN = 0, TOOL_TYPE_FINGER = 1, TOOL_TYPE_MOUSE = 3;
-    public static final int AXIS_VSCROLL=9,AXIS_HSCROLL=10;
+    public static final int AXIS_X=0;
+    public static final int AXIS_Y=1;
+    public static final int AXIS_PRESSURE=2;
+    public static final int AXIS_SIZE=3;
+    public static final int AXIS_TOUCH_MAJOR=4;
+    public static final int AXIS_TOUCH_MINOR=5;
+    public static final int AXIS_TOOL_MAJOR=6;
+    public static final int AXIS_TOOL_MINOR=7;
+    public static final int AXIS_ORIENTATION=8;
+    public static final int AXIS_VSCROLL=9;
+    public static final int AXIS_HSCROLL=10;
+    public static final int AXIS_Z=11;
+    public static final int AXIS_RX=12;
+    public static final int AXIS_RY=13;
+    public static final int AXIS_RZ=14;
+    public static final int AXIS_HAT_X=15;
+    public static final int AXIS_HAT_Y=16;
+    public static final int AXIS_LTRIGGER=17;
+    public static final int AXIS_RTRIGGER=18;
+    public static final int AXIS_THROTTLE=19;
+    public static final int AXIS_RUDDER=20;
+    public static final int AXIS_WHEEL=21;
+    public static final int AXIS_GAS=22;
+    public static final int AXIS_BRAKE=23;
+    public static final int AXIS_DISTANCE=24;
+    public static final int AXIS_TILT=25;
+    public static final int AXIS_SCROLL=26;
+    public static final int AXIS_RELATIVE_X=27;
+    public static final int AXIS_RELATIVE_Y=28;
+    public static final int AXIS_GENERIC_1=32;
+    public static final int AXIS_GENERIC_2=33;
+    public static final int AXIS_GENERIC_3=34;
+    public static final int AXIS_GENERIC_4=35;
+    public static final int AXIS_GENERIC_5=36;
+    public static final int AXIS_GENERIC_6=37;
+    public static final int AXIS_GENERIC_7=38;
+    public static final int AXIS_GENERIC_8=39;
+    public static final int AXIS_GENERIC_9=40;
+    public static final int AXIS_GENERIC_10=41;
+    public static final int AXIS_GENERIC_11=42;
+    public static final int AXIS_GENERIC_12=43;
+    public static final int AXIS_GENERIC_13=44;
+    public static final int AXIS_GENERIC_14=45;
+    public static final int AXIS_GENERIC_15=46;
+    public static final int AXIS_GENERIC_16=47;
+    private static final String[] AXIS_NAMES={"AXIS_X", "AXIS_Y", "AXIS_PRESSURE", "AXIS_SIZE", "AXIS_TOUCH_MAJOR", "AXIS_TOUCH_MINOR", "AXIS_TOOL_MAJOR", "AXIS_TOOL_MINOR", "AXIS_ORIENTATION", "AXIS_VSCROLL", "AXIS_HSCROLL", "AXIS_Z", "AXIS_RX", "AXIS_RY", "AXIS_RZ", "AXIS_HAT_X", "AXIS_HAT_Y", "AXIS_LTRIGGER", "AXIS_RTRIGGER", "AXIS_THROTTLE", "AXIS_RUDDER", "AXIS_WHEEL", "AXIS_GAS", "AXIS_BRAKE", "AXIS_DISTANCE", "AXIS_TILT", "AXIS_SCROLL", "AXIS_RELATIVE_X", "AXIS_RELATIVE_Y", null, null, null, "AXIS_GENERIC_1", "AXIS_GENERIC_2", "AXIS_GENERIC_3", "AXIS_GENERIC_4", "AXIS_GENERIC_5", "AXIS_GENERIC_6", "AXIS_GENERIC_7", "AXIS_GENERIC_8", "AXIS_GENERIC_9", "AXIS_GENERIC_10", "AXIS_GENERIC_11", "AXIS_GENERIC_12", "AXIS_GENERIC_13", "AXIS_GENERIC_14", "AXIS_GENERIC_15", "AXIS_GENERIC_16"};
+    public static String axisToString(int axis){return axis>=0&&axis<AXIS_NAMES.length&&AXIS_NAMES[axis]!=null?AXIS_NAMES[axis]:Integer.toString(axis);}
+    public static int axisFromString(String name){
+        if(name==null)throw new IllegalArgumentException("Axis name must not be null");
+        for(int i=0;i<AXIS_NAMES.length;i++)if(name.equals(AXIS_NAMES[i]))return i;
+        try{return Integer.parseInt(name);}catch(NumberFormatException error){return -1;}
+    }
     public float getAxisValue(int axis){return getAxisValue(axis,0);}
     public float getAxisValue(int axis,int pointer){index(pointer);return axis==0?coords[pointer].x:axis==1?coords[pointer].y:axis==9?coords[pointer].vscroll:axis==10?coords[pointer].hscroll:0;}
     public static MotionEvent shirazScroll(long time,float x,float y,float horizontal,float vertical){MotionEvent e=shirazObtain(time,time,ACTION_SCROLL,x,y,0x2002);e.buttons=0;e.coords[0].pressure=0;e.coords[0].hscroll=horizontal;e.coords[0].vscroll=vertical;return e;}

@@ -329,6 +329,10 @@ extern "C" JNIEXPORT jint JNICALL Java_android_graphics_FontFamily_nativeRegiste
         env->GetByteArrayRegion(bytes, 0, count, reinterpret_cast<jbyte*>(owned->data()));
         if (env->ExceptionCheck()) return 0;
         std::lock_guard<std::mutex> lock(memoryFontMutex);
+        // Reloading the same resource must not consume another permanent font slot.
+        for (size_t i = 0; i < memoryFonts.size(); ++i) {
+            if (*memoryFonts[i] == *owned) return static_cast<jint>(i + 1);
+        }
         if (memoryFonts.size() >= 64) throw std::invalid_argument("Memory font limit");
         memoryFonts.push_back(std::move(owned));
         return static_cast<jint>(memoryFonts.size());

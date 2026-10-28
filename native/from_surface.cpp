@@ -3,6 +3,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <dlfcn.h>
+#include <cstdio>
+#include <cstdlib>
 #include <jni.h>
 #include <mutex>
 #include <unordered_map>
@@ -112,6 +114,15 @@ extern "C" JNIEXPORT jlong JNICALL Java_android_view_Surface_nativeEglCreateCont
 extern "C" JNIEXPORT void JNICALL Java_android_view_Surface_nativeEglDestroyContext(JNIEnv*, jclass, jlong context) {
     Egl* e = egl();
     if (e && context) e->destroyContext(e->display, reinterpret_cast<EGLContext>(context));
+}
+extern "C" JNIEXPORT jlong JNICALL Java_android_view_Surface_nativeEglCreateContextVersion(JNIEnv*, jclass, jint version) {
+    Egl* e = egl();
+    if (!e || version < 1 || version > 3) return 0;
+    const EGLint attribs[] = {EGL_CONTEXT_CLIENT_VERSION, version, EGL_NONE};
+    // ES1 fixed-function state cannot share the ES3 root's objects.
+    EGLContext context = e->createContext(e->display, nullptr, version==1?EGL_NO_CONTEXT:e->root, attribs);
+    if(std::getenv("SHIRAZ_TRACE_EGL"))std::fprintf(stderr,"Shiraz EGL context version=%d handle=%p\n",version,context);
+    return context == EGL_NO_CONTEXT ? 0 : reinterpret_cast<jlong>(context);
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_android_view_Surface_nativeEglMakeCurrent(JNIEnv*, jclass, jlong window, jlong context) {
     Egl* e = egl();

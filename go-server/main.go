@@ -268,7 +268,7 @@ func (s *server) savedLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	for _, name := range []string{"stdout.log", "stderr.log"} {
+	for _, name := range []string{"runner.log", "stdout.log", "stderr.log"} {
 		path := filepath.Join(dir, name)
 		info, err := os.Stat(path)
 		if err != nil || info.ModTime().Before(started) {
@@ -296,6 +296,19 @@ func (s *server) run(dir, path string) {
 		os.RemoveAll(dir)
 		s.runs.Done()
 	}()
+	s.mu.Lock()
+	logDir := s.latestLogDir
+	s.mu.Unlock()
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		s.broadcast(event{"error", err.Error()})
+		return
+	}
+	runnerLog, err := os.OpenFile(filepath.Join(logDir, "runner.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		s.broadcast(event{"error", err.Error()})
+		return
+	}
+	defer runnerLog.Close()
 	s.broadcast(event{"status", "Starting Shiraz"})
 	base := s.ctx
 	if base == nil {
@@ -341,6 +354,7 @@ func (s *server) run(dir, path string) {
 		scan := bufio.NewScanner(rd)
 		scan.Buffer(make([]byte, 4096), 1<<20)
 		for scan.Scan() {
+			fmt.Fprintln(runnerLog, scan.Text())
 			s.broadcast(event{"log", scan.Text()})
 		}
 		if scan.Err() != nil {

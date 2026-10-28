@@ -112,8 +112,13 @@ bool prepare(Draw& draw, EGLContext context) {
         glGenFramebuffers(1, &framebuffer);
         bind(GL_FRAMEBUFFER, framebuffer);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, draw.color);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, draw.depth);
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { glDeleteFramebuffers(1, &framebuffer); return false; }
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, draw.depth);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, draw.depth);
+        GLenum status=glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            if(std::getenv("SHIRAZ_TRACE_EGL"))std::fprintf(stderr,"Shiraz EGL FBO failed: version=%s status=%x error=%x framebuffer=%u color=%u depth=%u\n",glGetString(GL_VERSION),status,glGetError(),framebuffer,draw.color,draw.depth);
+            glDeleteFramebuffers(1, &framebuffer); return false;
+        }
         std::lock_guard<std::mutex> guard(drawsMutex);
         draw.framebuffers[context] = framebuffer;
     }

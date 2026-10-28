@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <vector>
 #include "resource_colors.hpp"
+#include "shiraz/archive_path.hpp"
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -496,16 +497,16 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_android_content_res_Resources_nativ
     try {
         auto resources=find(env,handle); if (!resources) return nullptr;
         if (!path) { error(env,"java/lang/NullPointerException","Resource file path"); return nullptr; }
-        jsize length=env->GetArrayLength(path); if (length < 5 || length > 65536) throw std::invalid_argument("Resource file path length");
+        jsize length=env->GetArrayLength(path); if (length < 1 || length > 65536) throw std::invalid_argument("Resource file path length");
         std::string name(static_cast<size_t>(length),'\0'); env->GetByteArrayRegion(path,0,length,reinterpret_cast<jbyte*>(&name[0])); if (env->ExceptionCheck()) return nullptr;
-        if (name.compare(0,4,"res/") || name.find('\0') != std::string::npos || name.find("/../") != std::string::npos || name.find("/./") != std::string::npos || name.find("//") != std::string::npos || name.find('\\') != std::string::npos || name.compare(name.size()-3,3,"/..") == 0)
+        if (!shiraz::validArchiveFilePath(name))
             throw std::invalid_argument("Invalid resource file path");
         std::lock_guard<std::mutex> lock(resources->mutex);
         const ApkAssets* owner=javaCookie == 1 && resources->framework ? resources->framework : javaCookie == (resources->framework ? 2 : 1) ? resources->assets : nullptr;
-        if (!owner) throw std::invalid_argument("Unknown resource asset cookie");
+        if (!owner && javaCookie != 0) throw std::invalid_argument("Unknown resource asset cookie");
         std::unique_ptr<AssetManager,decltype(&AssetManager_delete)> files(AssetManager_new(),AssetManager_delete); if (!files) throw std::bad_alloc();
-        if (!AssetManager_setApkAssets(files.get(),&owner,1,true,false)) throw std::runtime_error("Cannot open resource file owner");
-        std::unique_ptr<Asset,decltype(&Asset_delete)> asset(AssetManager_openNonAsset(files.get(),name.c_str(),ACCESS_BUFFER),Asset_delete);
+        if (owner && !AssetManager_setApkAssets(files.get(),&owner,1,true,false)) throw std::runtime_error("Cannot open resource file owner");
+        std::unique_ptr<Asset,decltype(&Asset_delete)> asset(AssetManager_openNonAsset(javaCookie == 0 ? resources->manager : files.get(),name.c_str(),ACCESS_BUFFER),Asset_delete);
         if (!asset) throw std::runtime_error("Missing resource file");
         size_t count=Asset_getLength(asset.get()); if (count > 16*1024*1024) throw std::runtime_error("Resource file exceeds 16MiB");
         const void* bytes=count ? Asset_getBuffer(asset.get(),true) : nullptr; if (count && !bytes) throw std::runtime_error("Cannot read resource file");
@@ -520,9 +521,9 @@ extern "C" JNIEXPORT jlongArray JNICALL Java_android_content_res_Resources_nativ
     try {
         auto resources=find(env,handle); if (!resources) return nullptr;
         if (!path) { error(env,"java/lang/NullPointerException","Resource file path"); return nullptr; }
-        jsize length=env->GetArrayLength(path); if (length < 5 || length > 65536) throw std::invalid_argument("Resource file path length");
+        jsize length=env->GetArrayLength(path); if (length < 1 || length > 65536) throw std::invalid_argument("Resource file path length");
         std::string name(static_cast<size_t>(length),'\0'); env->GetByteArrayRegion(path,0,length,reinterpret_cast<jbyte*>(&name[0])); if (env->ExceptionCheck()) return nullptr;
-        if (name.compare(0,4,"res/") || name.find('\0') != std::string::npos || name.find("/../") != std::string::npos || name.find("/./") != std::string::npos || name.find("//") != std::string::npos || name.find('\\') != std::string::npos || name.compare(name.size()-3,3,"/..") == 0)
+        if (!shiraz::validArchiveFilePath(name))
             throw std::invalid_argument("Invalid resource file path");
         std::lock_guard<std::mutex> lock(resources->mutex);
         const ApkAssets* owner=javaCookie == 1 && resources->framework ? resources->framework : javaCookie == (resources->framework ? 2 : 1) ? resources->assets : nullptr;

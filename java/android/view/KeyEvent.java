@@ -5,6 +5,7 @@ import java.util.*;
 
 /** Key values and callback dispatch. Hardware character maps/parcel IPC are separate. */
 public class KeyEvent extends InputEvent implements Parcelable {
+    public static int getDeadChar(int accent,int character){return KeyCharacterMap.getDeadChar(accent,character);}
     // Public constant names/values follow the stock Android SDK 35 API metadata.
     public static final int ACTION_DOWN = 0, ACTION_MULTIPLE = 2, ACTION_UP = 1, FLAG_CANCELED = 32;
     public static final int FLAG_CANCELED_LONG_PRESS = 256, FLAG_EDITOR_ACTION = 16, FLAG_FALLBACK = 1024, FLAG_FROM_SYSTEM = 8;

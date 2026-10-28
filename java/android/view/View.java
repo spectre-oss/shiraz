@@ -195,7 +195,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     protected void onAnimationEnd(){}
     final void shirazApplyLegacyAnimation(Canvas canvas,long time){
         animationAlpha=1;android.view.animation.Animation current=animation;if(current==null)return;
-        if(current.getZAdjustment()!=0||current.getBackgroundColor()!=0||current.getDetachWallpaper())throw new UnsupportedOperationException("Legacy animation z-order/background/wallpaper effects are not implemented");
+        if(current.getBackgroundColor()!=0||current.getDetachWallpaper())throw new UnsupportedOperationException("Legacy animation background/wallpaper effects are not implemented");
         try{
             if(!current.isInitialized())current.initialize(getWidth(),getHeight(),parent==null?getWidth():parent.getWidth(),parent==null?getHeight():parent.getHeight());
             animationTransform.clear();boolean more=current.getTransformation(time,animationTransform);
@@ -314,6 +314,8 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     }
     public boolean dispatchNestedFling(float x,float y,boolean consumed){return nestedScrollingEnabled&&nestedScrollingParent!=null&&nestedScrollingParent.onNestedFling(this,x,y,consumed);}
     public boolean dispatchNestedPreFling(float x,float y){return nestedScrollingEnabled&&nestedScrollingParent!=null&&nestedScrollingParent.onNestedPreFling(this,x,y);}
+    // TextView currently positions text through its gravity; report that mode to widgets.
+    public int getTextAlignment() { return 1; } // TEXT_ALIGNMENT_GRAVITY
     public int getLayoutDirection() { if(layoutDirection==LAYOUT_DIRECTION_LOCALE)return android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault());return layoutDirection == LAYOUT_DIRECTION_INHERIT ? parent == null ? LAYOUT_DIRECTION_LTR : parent.getLayoutDirection() : layoutDirection; }
     public void setLayoutDirection(int value) {
         if (value != LAYOUT_DIRECTION_LTR && value != LAYOUT_DIRECTION_RTL && value != LAYOUT_DIRECTION_INHERIT && value != LAYOUT_DIRECTION_LOCALE) throw new IllegalArgumentException("layout direction");
@@ -400,8 +402,15 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
 
     public void drawableHotspotChanged(float x,float y){if(backgroundDrawable!=null)backgroundDrawable.setHotspot(x,y);if(foregroundDrawable!=null)foregroundDrawable.setHotspot(x,y);}
     public void requestUnbufferedDispatch(MotionEvent event) { if(event==null)throw new NullPointerException("event"); }
+    private boolean filterTouchesWhenObscured;
+    public void setFilterTouchesWhenObscured(boolean filter) { filterTouchesWhenObscured = filter; }
+    public boolean getFilterTouchesWhenObscured() { return filterTouchesWhenObscured; }
+    public boolean onFilterTouchEventForSecurity(MotionEvent event) {
+        return !filterTouchesWhenObscured || (event.getFlags() & MotionEvent.FLAG_WINDOW_IS_OBSCURED) == 0;
+    }
     public boolean dispatchTouchEvent(MotionEvent event) {
         if (event == null) throw new NullPointerException("event");
+        if (!onFilterTouchEventForSecurity(event)) return false;
         shiraz.runtime.ViewDiagnostics.input(this,event.getActionMasked(),false);
         if(enabled&&(event.getActionMasked()==MotionEvent.ACTION_DOWN||event.getActionMasked()==MotionEvent.ACTION_MOVE))drawableHotspotChanged(event.getX(),event.getY());
         if (enabled && touchListener != null && touchListener.onTouch(this, event)) {
@@ -937,6 +946,10 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     final float shirazLocalX(float x){float px=getPivotX();return (x-px)/(shirazMirroredY()?-scaleX:scaleX)+px;}
     final float shirazLocalY(float y){float py=getPivotY();return (y-py)/scaleY+py;}
     final boolean shirazCollapsed(){return scaleX==0||scaleY==0;}
+    public float getRotation(){return 0;}
+    public float getRotationX(){return 0;}
+    public void setRotation(float value){if(!Float.isFinite(value))throw new IllegalArgumentException("View rotation");if(value!=0)throw new UnsupportedOperationException("Planar View rotation is not implemented");}
+    public void setRotationX(float value){if(!Float.isFinite(value))throw new IllegalArgumentException("View rotationX");if(value!=0)throw new UnsupportedOperationException("Perspective View rotationX is not implemented");}
     public float getRotationY(){return rotationY;}
     /** Exact planar half-turns; perspective rotations require a 3D renderer. */
     public void setRotationY(float value){if(!Float.isFinite(value)||Math.abs(value)>10000000)throw new IllegalArgumentException("View rotation bound");if(value%180!=0)throw new UnsupportedOperationException("Perspective View rotationY is not implemented");if(rotationY!=value){rotationY=value;invalidate();}}

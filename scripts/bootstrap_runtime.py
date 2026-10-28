@@ -55,6 +55,24 @@ PATCHES = {
         ('art-imageless-dex-load.patch', {
             'art/runtime/oat_file_assistant.cc': '386decefc023334528af89dfbc43f10307c5cbd2f2ba766aae94b46777bdaad0',
         }),
+        ('art-short-apk-path.patch', {
+            'art/runtime/oat_file_assistant.cc': '34e52ba3ee39b00126ed72e04b767cf1188e2ca29e8d8941fbfab61872903b99',
+        }),
+        ('art-in-memory-dex-cookie.patch', {
+            'libcore/dalvik/src/main/java/dalvik/system/DexFile.java': '0b6c3f76f11ac3c505027b20478bd300768c1d8fe2177c6b14f8c021a504f42a',
+        }),
+        ('art-linkage-diagnostics.patch', {
+            'art/runtime/thread.cc': '2df7108d93021291d88116eb07694d39d0adb23b704ba7884c6c5bfc77d6c31b',
+        }),
+        ('art-managed-diagnostics.patch', {
+            'art/runtime/interpreter/interpreter.cc': '6e52434cf9d8ee90abe781934433abb19d3122ae4e44fa50db0b1edf88453f2a',
+        }),
+        ('art-reflection-diagnostics.patch', {
+            'art/runtime/reflection.cc': '1197d545b93db726a972043324b582a8ed9cb1ff610864ed174de60d3b846342',
+        }),
+        ('art-native-bridge-load-error.patch', {
+            'art/runtime/jni/java_vm_ext.cc': '0c07a835e1ffdbf35843852f211e3666bbc5daf7a49eb24c239691bfaeb648e4',
+        }),
         ('art-low4g-fallback.patch', {
             'art/libartbase/base/mem_map.cc': '34c6948b8fab5418d0f53fed77d55e44902792c7730a5b6f477fd8bb01250bee',
         }),

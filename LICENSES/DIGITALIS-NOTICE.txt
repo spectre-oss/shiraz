@@ -1,0 +1,94 @@
+Digitalis / Berberis integration in Shiraz
+========================================
+
+Shiraz's optional ARM64 translation support uses Digitalis, based on the
+Android Open Source Project's Berberis binary translator. Credit belongs to
+utzcoz (https://github.com/utzcoz), the Digitalis contributors, and the
+upstream Android Open Source Project authors. Digitalis identifies utzcoz
+in its project attribution: https://digitalisx64.github.io/
+The pinned translator revision also credits kuloPo (https://github.com/kuloPo)
+as its author and utzcoz as its committer.
+Their code retains its upstream licenses; Shiraz's GPL-3.0-only license does
+not replace those notices.
+
+Pinned source provenance
+------------------------
+
+Digitalis (AOSP Berberis fork; Apache License 2.0):
+https://github.com/DigitalisX64/platform_frameworks_libs_binary_translation
+Revision: 8ab8e93225ce10e10ef411de7e377dda6673c335
+Upstream: https://android.googlesource.com/platform/frameworks/libs/binary_translation/
+
+AOSP native_bridge_support (Apache License 2.0):
+https://android.googlesource.com/platform/frameworks/libs/native_bridge_support
+Revision: b41bf84a958aad713dd7f1e3e0b9f39a03701b4d
+
+AOSP Bionic (file-specific BSD-style and other upstream notices):
+https://android.googlesource.com/platform/bionic
+Revision: 731631f300090436d7f5df80d50b6275c8c60a93
+The build uses Bionic platform/private headers. Preserve the headers' notices
+and the applicable upstream NOTICE files when redistributing their contents.
+
+The Apache license text is available at:
+https://www.apache.org/licenses/LICENSE-2.0
+Digitalis and native_bridge_support Android.bp files declare Android-Apache-2.0;
+individual source headers retain their copyright years and attribution.
+
+Shiraz adaptations
+------------------
+
+scripts/digitalis/ contains Shiraz's local build integration and generated
+source overlays. native/digitalis_bridge.cpp, digitalis_guest_tls.cpp,
+digitalis_file_profile.cpp and digitalis_libm_proxy.cpp implement Shiraz's
+experimental ART/JNI, guest TLS, file-profile and math adapters.
+native/digitalis_nativewindow_proxy.cpp bridges the supported native-window
+and hardware-buffer functions to Shiraz and is GPL-3.0-only.
+native/digitalis_egl_proxy.cpp and native/digitalis_gles1_proxy.cpp adapt
+registered EGL/GLES calls using Digitalis/Berberis ABI trampolines. These Shiraz
+adapters and scripts/digitalis/build_nativewindow_proxy.py are GPL-3.0-only;
+the upstream trampoline implementation retains its own license above.
+native/guest_stack_environment.h provides Shiraz's bounded attached-stack
+environment storage and is licensed GPL-3.0-only.
+native/digitalis_libc_proxy.cpp retains its AOSP copyright and Apache-2.0
+header; Shiraz's additions are GPL-3.0-only, as stated in that file.
+These adaptations are not an unmodified upstream Digitalis distribution.
+Source checkouts and generated binaries are kept outside tracked source files.
+
+Guest-library provenance
+------------------------
+
+The experimental deployment obtains ARM64 guest libraries from the Digitalis
+prebuilts distributed with Refract:
+https://github.com/MIXIDtheSilly/Refract
+Revision: ddef6e6ae7de37dd3e400d6a07d3f18cb21a0ebc
+Path: prebuilts/digitalis/system/
+
+Credit: Refract contributors, for distributing the guest bundle.
+The host translator is built from the pinned Digitalis source above, rather
+than using Refract's prebuilt host translator. Refract application code is not
+part of this integration. The guest binaries retain their component licenses;
+they are not all covered by the license of the Refract application.
+
+The following upstream bundle notice is retained verbatim from
+prebuilts/digitalis/NOTICE at the revision above. It describes the whole upstream
+bundle, not a claim that Shiraz ships every listed component. This provenance
+notice does not replace component license texts and notices needed with any
+redistributed binary bundle.
+
+Digitalis prebuilts, redistributed with Refract so the ARM64 translator does not have to
+be built from AOSP source.
+
+Digitalis / Berberis (system/lib64/libberberis_*, system/bin/berberis_program_runner_*,
+system/etc/*): Apache License 2.0. Berberis is part of the Android Open Source Project:
+https://android.googlesource.com/platform/frameworks/libs/binary_translation/
+system/lib64/libberberis_arm64.so includes Refract's change in
+tools/translator/digitalis-performance-fix.patch.
+
+arm64 guest libraries (system/lib64/arm64/*, system/bin/arm64/*): built from the Android
+Open Source Project. Each keeps its upstream license: mostly Apache License 2.0; bionic
+(libc, libm, libdl, linker) BSD-style; ICU (libicu*) Unicode License; BoringSSL
+(libcrypto, libssl) OpenSSL/ISC; zlib (libz) zlib License; SQLite (libsqlite) public
+domain; libc++ Apache 2.0 with LLVM exception. Full texts are in the AOSP source tree
+(https://source.android.com/), under each project's LICENSE or NOTICE file.
+
+These binaries are distributed "AS IS", without warranty of any kind.

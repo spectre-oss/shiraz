@@ -18,7 +18,11 @@ class AppImageLauncherTests(unittest.TestCase):
         self.bin=self.app/'usr/bin';self.bin.mkdir(parents=True)
         self.exe=self.bin/'shiraz-app';shutil.copy2(ROOT/'build/shiraz-app',self.exe)
         lib=self.app/'usr/lib';lib.mkdir()
-        (lib/'ld-linux-x86-64.so.2').symlink_to('/usr/lib/ld-linux-x86-64.so.2')
+        loader=next((p for p in (Path('/lib64/ld-linux-x86-64.so.2'),
+                    Path('/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2'),
+                    Path('/usr/lib/ld-linux-x86-64.so.2')) if p.is_file()),None)
+        if loader is None:self.skipTest('x86_64 glibc loader unavailable')
+        (lib/'ld-linux-x86-64.so.2').symlink_to(loader.resolve())
         (lib/'libart-compiler.so').touch()
         for path in ['usr/art/bin/dalvikvm','usr/bin/dex2oat']:
             p=self.app/path;p.parent.mkdir(parents=True,exist_ok=True);shutil.copy2('/usr/bin/true',p)

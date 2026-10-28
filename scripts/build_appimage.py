@@ -35,7 +35,7 @@ ARM64_DOWNLOADS = {
     'runtime': ('https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-aarch64', '00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444'),
 }
 RUNTIME_LIBS = ('jnigraphics', 'shiraz-android-fonts', 'shiraz-android-process', 'android', 'shiraz-jni', 'shiraz-host', 'shiraz-text', 'shiraz-path',
-                'shiraz-image', 'shiraz-gpu', 'shiraz-bitmap', 'shiraz-resources', 'shiraz-sqlite',
+                'shiraz-image', 'shiraz-gpu', 'shiraz-gles1', 'shiraz-bitmap', 'shiraz-resources', 'shiraz-sqlite',
                 'shiraz-audio', 'shiraz-capture', 'shiraz-playback', 'shiraz-speech', 'shiraz-notifications')
 DISPLAY_LIBS = ('libwayland-client.so.0', 'libwayland-egl.so.1', 'libwayland-cursor.so.0',
                 'libxkbcommon.so.0', 'libX11.so.6', 'libXext.so.6', 'libXcursor.so.1',

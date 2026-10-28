@@ -1,0 +1,46 @@
+--- a/art/runtime/interpreter/interpreter.cc
++++ b/art/runtime/interpreter/interpreter.cc
+@@ -244,7 +244,7 @@
+ static constexpr InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
+ #endif
+ 
+-static inline JValue Execute(
++static inline JValue ExecuteImpl(
+     Thread* self,
+     const CodeItemDataAccessor& accessor,
+     ShadowFrame& shadow_frame,
+@@ -395,6 +395,34 @@
+     }
+   }
+ }
++
++// Optional direct interpreted-call diagnostics. Values and exceptions are preserved.
++static inline JValue Execute(
++    Thread* self, const CodeItemDataAccessor& accessor, ShadowFrame& shadow_frame,
++    JValue result_register, bool stay_in_interpreter = false,
++    bool from_deoptimize = false) REQUIRES_SHARED(Locks::mutator_lock_) {
++  JValue result = ExecuteImpl(self, accessor, shadow_frame, result_register,
++                             stay_in_interpreter, from_deoptimize);
++  const char* filter = getenv("SHIRAZ_TRACE_MANAGED_METHOD");
++  ArtMethod* method = shadow_frame.GetMethod();
++  if (filter != nullptr && filter[0] != '\0' && !self->IsExceptionPending() &&
++      method->PrettyMethod().find(filter) != std::string::npos &&
++      method->GetShorty()[0] == 'L' && result.GetL() != nullptr &&
++      result.GetL()->IsObjectArray()) {
++    auto outer = result.GetL()->AsObjectArray<mirror::Object>();
++    for (int32_t i = 0; i < outer->GetLength() && i < 16; ++i) {
++      auto item = outer->Get(i);
++      if (item != nullptr && item->GetClass()->DescriptorEquals("[I")) {
++        auto values = item->AsIntArray();
++        for (int32_t j = 0; j < values->GetLength() && j < 4; ++j)
++          LOG(INFO) << "SHIRAZ_MANAGED_INTS " << method->PrettyMethod()
++                    << " " << i << ":" << j << " " << values->Get(j);
++      }
++    }
++  }
++  return result;
++}
++
+ 
+ void EnterInterpreterFromInvoke(Thread* self,
+                                 ArtMethod* method,

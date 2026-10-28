@@ -30,7 +30,7 @@ public final class ActivityLaunchResolver {
    try{info=packages.getActivityInfo(component,0);}catch(PackageManager.NameNotFoundException missing){throw new ActivityNotFoundException("Activity is unavailable: "+component.flattenToString());}
   }else{
    List<ResolveInfo> matches=packages.queryIntentActivities(snapshot,PackageManager.MATCH_DEFAULT_ONLY);
-   if(matches.isEmpty())throw new ActivityNotFoundException("No matching activity in loaded APK");
+   if(matches.isEmpty())throw new ActivityNotFoundException("No matching activity in loaded APK: scheme="+snapshot.getScheme()+", host="+(snapshot.getData()==null?null:snapshot.getData().getHost())+", path="+(snapshot.getData()==null?null:snapshot.getData().getPath())+", queryKeys="+(snapshot.getData()==null||snapshot.getData().isOpaque()?null:snapshot.getData().getQueryParameterNames())+", action="+snapshot.getAction()+", categories="+snapshot.getCategories()+", selectorAction="+(snapshot.getSelector()==null?null:snapshot.getSelector().getAction())+", selectorCategories="+(snapshot.getSelector()==null?null:snapshot.getSelector().getCategories()));
    ResolveInfo best=matches.get(0);
    if(matches.size()>1&&matches.get(1).priority==best.priority&&matches.get(1).match==best.match)throw new UnsupportedOperationException("Activity chooser is not implemented");
    info=best.activityInfo;component=new ComponentName(info.packageName,info.name);snapshot.setComponent(component);

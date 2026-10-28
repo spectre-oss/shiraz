@@ -1,0 +1,73 @@
+--- a/art/runtime/reflection.cc
++++ b/art/runtime/reflection.cc
+@@ -695,6 +695,30 @@
+     return nullptr;
+   }
+ 
++  // Opt-in bounded primitive argument diagnostics for reflected calls.
++  const char* trace_method = getenv("SHIRAZ_TRACE_REFLECT_METHOD");
++  if (trace_method != nullptr && trace_method[0] != '\0' &&
++      m->PrettyMethod().find(trace_method) != std::string::npos) {
++    LOG(INFO) << "SHIRAZ_REFLECT " << m->PrettyMethod();
++    if (objects != nullptr) {
++      for (int32_t i = 0; i < objects->GetLength() && i < 16; ++i) {
++        ObjPtr<mirror::Object> value = objects->Get(i);
++        if (value == nullptr) continue;
++        ObjPtr<mirror::Class> type = value->GetClass();
++        if (getenv("SHIRAZ_TRACE_REFLECT_STRINGS") != nullptr && type->IsStringClass()) {
++          LOG(INFO) << "SHIRAZ_REFLECT_ARG " << i << " string=" << value->AsString()->ToModifiedUtf8().substr(0, 256);
++        }
++        if (type->DescriptorEquals("Ljava/lang/Long;")) {
++          LOG(INFO) << "SHIRAZ_REFLECT_ARG " << i << " long="
++                    << type->GetIFieldsPtr()->At(0).GetLong(value);
++        } else if (type->DescriptorEquals("Ljava/lang/Integer;")) {
++          LOG(INFO) << "SHIRAZ_REFLECT_ARG " << i << " int="
++                    << type->GetIFieldsPtr()->At(0).GetInt(value);
++        }
++      }
++    }
++  }
++
+   // If method is not set to be accessible, verify it can be accessed by the caller.
+   ObjPtr<mirror::Class> calling_class;
+   if (!accessible && !VerifyAccess(soa.Self(),
+@@ -718,6 +742,39 @@
+   const char* shorty;
+   if (!InvokeMethodImpl(soa, m, np_method, receiver, objects, &shorty, &result)) {
+     return nullptr;
++  }
++  if (getenv("SHIRAZ_TRACE_REFLECT_ARRAYS") != nullptr && shorty[0] == 'L' &&
++      result.GetL() != nullptr && result.GetL()->IsObjectArray()) {
++    auto outer = result.GetL()->AsObjectArray<mirror::Object>();
++    for (int32_t i = 0; i < outer->GetLength() && i < 16; ++i) {
++      auto item = outer->Get(i);
++      if (item != nullptr && item->GetClass()->DescriptorEquals("[I")) {
++        auto values = item->AsIntArray();
++        for (int32_t j = 0; j < values->GetLength() && j < 4; ++j) {
++          LOG(INFO) << "SHIRAZ_REFLECT_INTS " << m->PrettyMethod()
++              << " " << i << ":" << j << " " << values->Get(j);
++        }
++      }
++      if (item != nullptr && item->GetClass()->DescriptorEquals("[Ljava/lang/String;")) {
++        auto messages = item->AsObjectArray<mirror::String>();
++        for (int32_t j = 0; j < messages->GetLength() && j < 16; ++j) {
++          auto message = messages->Get(j);
++          if (message != nullptr) LOG(INFO) << "SHIRAZ_REFLECT_ARRAY " << m->PrettyMethod()
++              << " " << i << ":" << j << " " << message->ToModifiedUtf8().substr(0, 256);
++        }
++      }
++    }
++  }
++  if (getenv("SHIRAZ_TRACE_REFLECT_STRINGS") != nullptr && trace_method != nullptr &&
++      trace_method[0] != '\0' && m->PrettyMethod().find(trace_method) != std::string::npos &&
++      shorty[0] == 'L' && result.GetL() != nullptr && result.GetL()->GetClass()->IsStringClass()) {
++    LOG(INFO) << "SHIRAZ_REFLECT_STRING " << m->PrettyMethod() << " " << result.GetL()->AsString()->ToModifiedUtf8().substr(0, 256);
++  }
++  if (trace_method != nullptr && trace_method[0] != '\0' &&
++      m->PrettyMethod().find(trace_method) != std::string::npos) {
++    if (shorty[0] == 'J') LOG(INFO) << "SHIRAZ_REFLECT_RESULT " << m->PrettyMethod() << " long=" << result.GetJ();
++    if (shorty[0] == 'I') LOG(INFO) << "SHIRAZ_REFLECT_RESULT " << m->PrettyMethod() << " int=" << result.GetI();
++    if (shorty[0] == 'Z') LOG(INFO) << "SHIRAZ_REFLECT_RESULT " << m->PrettyMethod() << " boolean=" << result.GetZ();
+   }
+   return soa.AddLocalReference<jobject>(BoxPrimitive(Primitive::GetType(shorty[0]), result));
+ }

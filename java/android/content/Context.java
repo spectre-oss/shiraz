@@ -6,6 +6,8 @@ import android.content.pm.PackageManager;
 
 /** Initial host context subset. Unsupported services/resources are not stubbed. */
 public abstract class Context {
+    public static final String ACCOUNT_SERVICE="account";
+    public static final String NFC_SERVICE="nfc";
     public static final String VIBRATOR_SERVICE="vibrator";
     public static final String UI_MODE_SERVICE="uimode";
     public static final String AUDIO_SERVICE="audio";
@@ -22,6 +24,11 @@ public abstract class Context {
     public void enforceCallingOrSelfPermission(String permission,String message){if(checkCallingOrSelfPermission(permission)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException((message==null?"Permission denied":message)+": "+permission);}
     public boolean isRestricted() { return false; }
     public abstract SharedPreferences getSharedPreferences(String name, int mode);
+    public boolean moveSharedPreferencesFrom(Context sourceContext, String name) {
+        if (sourceContext == null) throw new NullPointerException("sourceContext");
+        return shiraz.runtime.HostPreferences.move(sourceContext.getSharedPreferences(name, MODE_PRIVATE),
+                getSharedPreferences(name, MODE_PRIVATE));
+    }
     public abstract void setTheme(int id);
     public abstract android.content.res.Resources.Theme getTheme();
     public final android.content.res.TypedArray obtainStyledAttributes(int[] attrs){return getTheme().obtainStyledAttributes(attrs);}
@@ -57,6 +64,8 @@ public abstract class Context {
         return serviceClass.cast(getSystemService(name));
     }
     public String getSystemServiceName(Class<?> serviceClass) {
+        if (serviceClass == android.nfc.NfcManager.class) return NFC_SERVICE;
+        if (serviceClass == android.accounts.AccountManager.class) return ACCOUNT_SERVICE;
         if (serviceClass == android.hardware.input.InputManager.class) return INPUT_SERVICE;
         if (serviceClass == android.app.DownloadManager.class) return DOWNLOAD_SERVICE;
         if (serviceClass == android.os.Vibrator.class) return VIBRATOR_SERVICE;

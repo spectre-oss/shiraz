@@ -2,6 +2,28 @@
 package android.webkit;
 /** Settings for the placeholder WebView; values are retained but no engine is present. */
 public class WebSettings {
+ public enum PluginState { ON, ON_DEMAND, OFF }
+ public enum RenderPriority { NORMAL, HIGH, LOW }
+ private PluginState pluginState=PluginState.OFF;
+ private boolean savePassword=true,saveFormData=true,lightTouch,smoothTransition;
+ private String databasePath="";
+ /** Deprecated engine hints; the placeholder has no browser database or plugins. */
+ public void setGeolocationDatabasePath(String path){}
+ public void setDatabasePath(String path){databasePath=path;}
+ public String getDatabasePath(){return databasePath;}
+ public void setSavePassword(boolean value){savePassword=value;}
+ public boolean getSavePassword(){return savePassword;}
+ public void setSaveFormData(boolean value){saveFormData=value;}
+ public boolean getSaveFormData(){return saveFormData;}
+ public void setLightTouchEnabled(boolean value){lightTouch=value;}
+ public boolean getLightTouchEnabled(){return lightTouch;}
+ public void setEnableSmoothTransition(boolean value){smoothTransition=value;}
+ public boolean enableSmoothTransition(){return smoothTransition;}
+ public void setNeedInitialFocus(boolean value){}
+ public void setPluginState(PluginState value){pluginState=value;}
+ public PluginState getPluginState(){return pluginState;}
+ public void setRenderPriority(RenderPriority value){}
+ public static String getDefaultUserAgent(android.content.Context context){return WebViewFactory.getProvider().getStatics().getDefaultUserAgent(context);}
  public static final int LOAD_DEFAULT=-1,LOAD_NORMAL=0,LOAD_CACHE_ELSE_NETWORK=1,LOAD_NO_CACHE=2,LOAD_CACHE_ONLY=3;
  public static final int MIXED_CONTENT_ALWAYS_ALLOW=0,MIXED_CONTENT_NEVER_ALLOW=1,MIXED_CONTENT_COMPATIBILITY_MODE=2;
  private boolean javaScript=true,domStorage,zoom=true,builtInZoom,displayZoom=true,overview,wideViewport=true,fileAccess=true,contentAccess=true,mediaGesture=true;

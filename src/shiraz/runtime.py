@@ -396,15 +396,28 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
     activity = launcher[0]['target']
     if not all(NAME.fullmatch(name) for name in (package, app, activity)):
         raise FormatError('Invalid package or component class name')
-    if not supports_native_abis(report['native_abis']):
+    digitalis = None
+    if not supports_native_abis(report['native_abis']) and native_abi() == 'x86_64' and 'arm64-v8a' in report['native_abis']:
+        if configured_bridge := os.environ.get('SHIRAZ_DIGITALIS_LIBRARY'):
+            digitalis = Path(configured_bridge).resolve()
+            if not digitalis.is_file():
+                raise FormatError('Configured Digitalis native bridge is missing')
+    if not supports_native_abis(report['native_abis']) and digitalis is None:
         raise FormatError('APK has no native ABI candidate for this host (' + str(native_abi()) + ')')
     vm = HOST / 'bin/dalvikvm64'
     if not vm.is_file():
         vm = HOST / 'bin/dalvikvm'
     framework = ROOT / 'build/shiraz-framework.jar'
+    # Optional Apache HTTP compatibility DEX, built separately from licensed
+    # upstream jars. Keep APK classes ahead of this fallback library.
+    legacy_http = ROOT / 'build/shiraz-legacy-http.jar'
+    classpath = str(framework) + ':' + str(apk)
+    if legacy_http.is_file():
+        classpath += ':' + str(legacy_http)
     framework_resources = ROOT / 'build/framework-res/framework-res.apk'
     required = [ROOT / 'build/libshiraz-capture.so', ROOT / 'build/libshiraz-speech.so', ROOT / '.local/share/espeak-ng-data/phondata', vm, framework, framework_resources, HOST / 'lib64/libwolfssljni.so', ROOT / '.local/lib/libwolfssl.so', ROOT / 'build/libshiraz-bitmap.so', ROOT / 'build/libshiraz-notifications.so', ROOT / 'build/libshiraz-sqlite.so', ROOT / 'build/libshiraz-audio.so', ROOT / 'build/libshiraz-text.so', ROOT / 'build/libshiraz-resources.so', ROOT / 'build/libshiraz-android-process.so', HOST / 'lib64/libandroidfw.so', ROOT / 'build/libshiraz-host.so', ROOT / 'build/libshiraz-jni.so', ROOT / 'build/libandroid.so', ROOT / 'build/libandroid.so.0', ROOT / 'build/libEGL.so.1',
                 *(HOST / 'framework' / jar for jar in JARS)]
+    required.append(ROOT / 'build/libshiraz-gles1.so')
     required.extend(ROOT / '.local/share/shiraz/fonts' / name for name in (
         'NotoSansArabic-Regular.ttf', 'NotoSansArabic-Bold.ttf', 'NotoSansHebrew-Regular.ttf',
         'NotoSansHebrew-Bold.ttf', 'NotoSans-Regular.ttf', 'NotoSans-Bold.ttf',
@@ -440,7 +453,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
             shutil.rmtree(app_lib)
         if report['native_abis']:
             try:
-                libraries = extract_native(apk, app_lib, 'x86_64' if native_abi() == 'x86_64' else 'aarch64')
+                libraries = extract_native(apk, app_lib, 'x86_64' if native_abi() == 'x86_64' and digitalis is None else 'aarch64')
             except (ValueError, OSError, zipfile.BadZipFile) as exc:
                 raise FormatError('Cannot prepare APK native libraries: ' + str(exc)) from exc
             print(f'SHIRAZ_NATIVE_LIBRARIES installed={len(libraries)}', flush=True)
@@ -455,12 +468,31 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                'BIONIC_LD_LIBRARY_PATH': str(app_lib),
                'SHIRAZ_FONT_DIR': str(ROOT / '.local/share/shiraz/fonts'),
                'XDG_DATA_DIRS': str(ROOT / '.local/share') + ':/usr/share'}
+        if digitalis:
+            env['LD_LIBRARY_PATH'] = str(digitalis.parent) + ':' + env['LD_LIBRARY_PATH']
         profile_values = validate_device_profile(device_profile) if device_profile else {}
         env['SHIRAZ_ANDROID_DISPLAY_ID'] = profile_values.get('build.display', 'Shiraz ' + (ROOT / 'VERSION').read_text(encoding='ascii').strip())
         env['SHIRAZ_ANDROID_RELEASE'] = profile_values.get('build.release', '8.1')
+        # Keep native property reads consistent with the explicitly selected profile.
+        for field in ('model', 'manufacturer', 'brand', 'device', 'product', 'board',
+                      'hardware', 'bootloader', 'serial', 'host', 'user', 'id', 'type',
+                      'tags', 'incremental', 'securityPatch'):
+            variable = 'SHIRAZ_ANDROID_' + ('SECURITY_PATCH' if field == 'securityPatch' else field.upper())
+            env.pop(variable, None)
+            if 'build.' + field in profile_values:
+                env[variable] = profile_values['build.' + field]
+        env.pop('SHIRAZ_ANDROID_FINGERPRINT', None)
+        if profile_values:
+            env['SHIRAZ_ANDROID_FINGERPRINT'] = (
+                '/'.join(profile_values['build.' + k] for k in ('brand', 'product', 'device'))
+                + ':' + profile_values['build.release'] + '/' + profile_values['build.id']
+                + '/' + profile_values['build.incremental'] + ':' + profile_values['build.type']
+                + '/' + profile_values['build.tags']
+            )
         compat = ROOT / 'build/libshiraz-android-process.so'
         env['LD_PRELOAD'] = str(compat) + (':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
+                   *(['-XX:NativeBridge=' + digitalis.name, '-Xforce-nb-testing', '-Dshiraz.guestAbi=arm64-v8a'] if digitalis else []),
                    '-Xcompiler:' + str(HOST / 'bin/dex2oat'), '-Dlog.tag=' + log_level,
                    *(['-Djavax.net.ssl.trustStore=' + os.environ['SHIRAZ_JAVA_TRUST_STORE']]
                      if os.environ.get('SHIRAZ_JAVA_TRUST_STORE') else []),
@@ -469,14 +501,18 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                    *(['-Dshiraz.deviceProfile=' + str(device_profile)] if device_profile else []),
                    '-Dshiraz.speechData=' + str(ROOT / '.local/share'),
                    '-Djava.io.tmpdir=' + str(work / 'tmp'), '-Duser.home=' + str(work / 'home'),
-                   '-cp', str(framework) + ':' + str(apk), 'shiraz.runtime.ActivityRunner',
+                   '-cp', classpath, 'shiraz.runtime.ActivityRunner',
                    package, app, activity, str(width), str(height), str(frames if frames is not None else -1),
                    str(data), str(snapshot) if snapshot else '-', str(metadata)]
         if loader := os.environ.get('SHIRAZ_RUNTIME_LOADER'):
             # The private loader must also find its matching C++ runtime. Debian
             # 12's system libstdc++ lacks symbols required by the bundled ART.
-            env['LD_LIBRARY_PATH'] += ':' + str(Path(loader).parent)
-            command = [loader, '--library-path', env['LD_LIBRARY_PATH'], *command]
+            library_path = env.pop('LD_LIBRARY_PATH') + ':' + str(Path(loader).parent)
+            preload = env.pop('LD_PRELOAD', '')
+            # Scope private glibc and compatibility libraries to ART. Child host
+            # executables must use their own loader and libraries.
+            command = [loader, '--library-path', library_path,
+                       *(['--preload', preload] if preload else []), *command]
         print(f'Launching experimental activity {activity}; logs: {work.relative_to(ROOT)}', flush=True)
         try:
             result = run_with_live_logs(command, data, env, work, timeout)

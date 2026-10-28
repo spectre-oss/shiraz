@@ -18,8 +18,10 @@ commit:
 	python3 scripts/commit.py
 
 all: build
-build: build/libshiraz-host.so build/shiraz-preview build/libandroid.so build/libandroid.so.0 build/libEGL.so.1 build/libshiraz-jni.so build/shiraz-framework.jar
+build: build/libshiraz-host.so build/shiraz-preview build/libandroid.so build/libandroid.so.0 build/libnativewindow.so build/libEGL.so.1 build/libshiraz-jni.so build/shiraz-framework.jar
 build/libandroid.so.0: build/libandroid.so
+	ln -sfn libandroid.so $@
+build/libnativewindow.so: build/libandroid.so
 	ln -sfn libandroid.so $@
 build/libEGL.so.1: build/libEGL_shim.so
 	ln -sfn libEGL_shim.so $@
@@ -46,7 +48,12 @@ build/test-native-window: tests/native_window.cpp native/native_window.cpp nativ
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp -o $@ -pthread
 
-test: build/test-shared-memory build/test-compositor build/test-native-window build/test-pointer build/test-audio build/test-egl-window gles-smoke
+build/test-archive-path: tests/native/archive_path.cpp include/shiraz/archive_path.hpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/native/archive_path.cpp -o $@
+
+test: build/test-archive-path build/test-shared-memory build/test-compositor build/test-native-window build/test-pointer build/test-audio build/test-egl-window build/shiraz-app build/libshiraz-android-process.so build/libshiraz-android-fonts.so gles-smoke
+	./build/test-archive-path
 	./build/test-shared-memory
 	./build/test-compositor
 	./build/test-native-window
@@ -134,7 +141,7 @@ runtime-resources:
 	python3 scripts/bootstrap_runtime.py resources
 
 ART_HOST := context/art_standalone/out/host/linux-x86
-build/libshiraz-resources.so: native/resources.cpp native/resource_colors.hpp $(ART_HOST)/lib64/libandroidfw.so
+build/libshiraz-resources.so: native/resources.cpp native/resource_colors.hpp include/shiraz/archive_path.hpp $(ART_HOST)/lib64/libandroidfw.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -isystem context/art_standalone/libandroidfw/include -fPIC -shared -Wl,-z,defs native/resources.cpp -o $@ -L$(ART_HOST)/lib64 -landroidfw -pthread
 build/runtime-resources.stamp: scripts/bootstrap_runtime.py patches/art-resource-lifetime.patch patches/art-resource-size-configurations.patch patches/art-resource-identifier-status.patch patches/art-resource-private-attribute-io.patch
@@ -972,7 +979,7 @@ build/libshiraz-android-fonts.so: native/android_font_files.c
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared -Wl,-z,defs $< -o $@ -ldl -pthread
 build: build/libshiraz-android-fonts.so
 
-build/libshiraz-android-process.so: native/android_process_compat.c
+build/libshiraz-android-process.so: native/android_process_compat.c native/android_profile_properties.h native/virtual_file_metadata.h
 	@mkdir -p build
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared -Wl,-z,defs $< -o $@ -ldl
 build: build/libshiraz-android-process.so
@@ -1191,3 +1198,25 @@ build/test-media-ndk: tests/media_ndk.cpp build/libandroid.so
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< -o $@ -Lbuild -landroid -ldl -Wl,-rpath,'$$ORIGIN'
 media-ndk-smoke: build/test-media-ndk
 	./build/test-media-ndk
+
+# Optional experimental ARM64 translation. Requires pinned Digitalis sources,
+# standalone ART libraries and compiler headers; never runs guest APKs locally.
+.PHONY: runtime-digitalis
+runtime-digitalis:
+	python3 scripts/digitalis/build.py
+
+.PHONY: test-software-keystore
+test-software-keystore: framework
+	mkdir -p build/keystore-smoke/classes
+	javac --release 8 -cp build/framework/classes -d build/keystore-smoke/classes tests/java/KeyStoreSmoke.java
+	java -cp build/keystore-smoke/classes:build/framework/classes KeyStoreSmoke build/keystore-smoke/data
+	java -cp build/keystore-smoke/classes:build/framework/classes KeyStoreSmoke build/keystore-smoke/data reopen
+
+.PHONY: digitalis-nativewindow-proxy
+build/libshiraz-gles1.so: native/gles1_jni.cpp
+	mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs $< -o $@ -lGLESv1_CM
+build: build/libshiraz-gles1.so
+
+digitalis-nativewindow-proxy:
+	python3 scripts/digitalis/build_nativewindow_proxy.py $(DIGITALIS_PROXY_OPTIONS)

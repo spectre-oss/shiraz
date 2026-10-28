@@ -281,10 +281,16 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
         try {
             if (clipChildren) canvas.clipRect(getScrollX(),getScrollY(),(float)getScrollX()+getWidth(),(float)getScrollY()+getHeight());
             if (clipPadding && (getPaddingLeft() != 0 || getPaddingTop() != 0 || getPaddingRight() != 0 || getPaddingBottom() != 0)) canvas.clipRect((float)getScrollX()+getPaddingLeft(),(float)getScrollY()+getPaddingTop(),(float)getScrollX()+getWidth()-getPaddingRight(),(float)getScrollY()+getHeight()-getPaddingBottom());
-            for (View child:orderedChildren()) if (child.getParent() == this && child.getVisibility() == VISIBLE&&!disappearing.contains(child)) drawChild(canvas,child,getDrawingTime());
-            ArrayList<View> fading=new ArrayList<View>(disappearing);for(int i=fading.size()-1;i>=0;i--){View child=fading.get(i);if(disappearing.contains(child)&&child.getParent()==this )drawChild(canvas,child,getDrawingTime());}
+            ArrayList<View> drawing=new ArrayList<View>();
+            for(View child:orderedChildren())if(child.getVisibility()==VISIBLE&&!disappearing.contains(child))drawing.add(child);
+            ArrayList<View> fading=new ArrayList<View>(disappearing);for(int i=fading.size()-1;i>=0;i--)drawing.add(fading.get(i));
+            // Animation ordering affects painting only, never hit testing or child indices.
+            // Stable sorting preserves the existing elevation/custom/disappearing order.
+            java.util.Collections.sort(drawing,new java.util.Comparator<View>(){public int compare(View a,View b){return Integer.compare(animationOrder(a),animationOrder(b));}});
+            for(View child:drawing)if(child.getParent()==this)drawChild(canvas,child,getDrawingTime());
         } finally { canvas.restoreToCount(saved); }
     }
+    private static int animationOrder(View view){android.view.animation.Animation animation=view.getAnimation();return animation==null?0:animation.getZAdjustment();}
     protected boolean drawChild(Canvas canvas,View child,long time) {
         // Only Shiraz's initialized GPU Canvas can execute this traversal on hardware.
         // A caller advertising acceleration on a placeholder remains unsupported.
@@ -355,6 +361,7 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
         return super.dispatchGenericMotionEvent(event);
     }
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (!onFilterTouchEventForSecurity(event)) return false;
         int action=event.getActionMasked();
         if(action==MotionEvent.ACTION_DOWN){cancelTarget(lastTouch);cancelSelf();disallowIntercept=false;gestureSplit=splitMotionEvents;}
         if(lastTouch!=null)lastTouch.recycle();lastTouch=MotionEvent.obtain(event);

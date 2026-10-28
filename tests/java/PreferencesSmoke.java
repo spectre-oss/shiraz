@@ -73,6 +73,23 @@ public final class PreferencesSmoke {
             try (HostPreferences manager = new HostPreferences(directory.toFile())) {
                 require(manager.get("state", 0).getBoolean("shutdown-applied", false), "Close did not flush apply");
             }
+            Path moved = root.resolve("moved");
+            try (HostPreferences source = new HostPreferences(directory.toFile());
+                 HostPreferences destination = new HostPreferences(moved.toFile())) {
+                SharedPreferences from = source.get("move", 0), to = destination.get("move", 0);
+                from.edit().putString("value", "pending").apply();
+                to.edit().putString("obsolete", "old").apply();
+                require(HostPreferences.move(from, from), "Same-store move succeeds");
+                require(from.getString("value", "").equals("pending"), "Same-store move preserves data");
+                require(HostPreferences.move(from, to), "Move flushes pending writes");
+                require(to.getString("value", "").equals("pending") && !to.contains("obsolete"), "Destination replaced");
+                require(from.getAll().isEmpty(), "Source cache cleared");
+                require(HostPreferences.move(from, to), "Missing source move succeeds");
+                require(to.getString("value", "").equals("pending"), "Missing source preserves destination");
+            }
+            try (HostPreferences destination = new HostPreferences(moved.toFile())) {
+                require(destination.get("move", 0).getString("value", "").equals("pending"), "Move persists across restart");
+            }
             Path file;
             try (Stream<Path> paths = Files.walk(directory)) { file = paths.filter(path -> path.toString().endsWith(".spr")).findFirst().get(); }
             byte[] malformed = {0x53, 0x50, 0x52, 0x31, 0, 0, 0, 1, 0x7f, -1, -1, -1};

@@ -23,11 +23,13 @@ public class Surface implements android.os.Parcelable {
  private static native void nativeReleaseWindow(long window);
  private static native boolean nativePostArgb(long window, int[] pixels);
  private static native long nativeEglCreateContext();
+ private static native long nativeEglCreateContextVersion(int version);
  private static native void nativeEglDestroyContext(long context);
  private static native boolean nativeEglMakeCurrent(long window, long context);
  private static native boolean nativeEglSwap(long window);
  private static native void nativeEglForgetWindow(long window);
  public static long shirazEglCreateContext() { return nativeEglCreateContext(); }
+ public static long shirazEglCreateContext(int version) { return nativeEglCreateContextVersion(version); }
  public static void shirazEglDestroyContext(long context) { if (context != 0) nativeEglDestroyContext(context); }
  public static boolean shirazEglRelease() { return nativeEglMakeCurrent(0, 0); }
  public boolean shirazEglMakeCurrent(long context) { long window = shirazNativeWindow(); return window != 0 && context != 0 && nativeEglMakeCurrent(window, context); }

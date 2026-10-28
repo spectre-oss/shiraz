@@ -1,0 +1,14 @@
+--- a/art/runtime/oat_file_assistant.cc
++++ b/art/runtime/oat_file_assistant.cc
+@@ -206,7 +206,10 @@
+ 
+ std::unique_ptr<OatFile> OatFileAssistant::GetBestOatFile() {
+   // framework-res.apk contains no dex files.
+-  bool is_framework_res = dex_location_.compare(dex_location_.size() - (sizeof("framework-res.apk")-1), sizeof("framework-res.apk")-1, "framework-res.apk") == 0;
++  constexpr size_t resource_name_size = sizeof("framework-res.apk") - 1;
++  bool is_framework_res = dex_location_.size() >= resource_name_size &&
++      dex_location_.compare(dex_location_.size() - resource_name_size,
++                            resource_name_size, "framework-res.apk") == 0;
+   // The host compiler below requires a boot image. With an imageless JIT
+   // runtime it can only fail, so load the original dex without forking it.
+   if (!IsUpToDate() && !is_framework_res && Runtime::Current()->GetHeap()->HasBootImageSpace()) {

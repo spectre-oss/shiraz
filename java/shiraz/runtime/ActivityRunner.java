@@ -94,6 +94,8 @@ public final class ActivityRunner {
             if(AUDIO_SERVICE.equals(service)){if(audio==null)audio=android.media.AudioManager.shirazForProcess();return audio;}
             if(POWER_SERVICE.equals(service)){if(power==null)power=new android.os.PowerManager();return power;}
             if(KEYGUARD_SERVICE.equals(service)){if(keyguard==null)keyguard=new android.app.KeyguardManager();return keyguard;}
+            if(NFC_SERVICE.equals(service))return new android.nfc.NfcManager(this);
+            if(ACCOUNT_SERVICE.equals(service))return android.accounts.AccountManager.get(this);
             if(TELEPHONY_SERVICE.equals(service))return new android.telephony.TelephonyManager();
             if(APP_OPS_SERVICE.equals(service))return new android.app.AppOpsManager(this);
             if(WIFI_SERVICE.equals(service)){capture.wifiAccess("service:requested");if(wifi==null)wifi=android.net.wifi.WifiManager.shirazForHost(capture);return wifi;}
@@ -238,6 +240,7 @@ public final class ActivityRunner {
             android.os.Looper.prepareMainLooper();
             ActivityRunner.run(args);
         }},new DedicatedProcess.Task(){public void run() throws Throwable {
+            android.app.ActivityThread.shirazClear();
             try { android.os.AsyncTask.shirazShutdown(); }
             finally {
                 try { try { android.database.sqlite.SQLiteDatabase.shirazShutdown(); } finally { try { android.media.SoundPool.shirazShutdown(); } finally { android.speech.tts.TextToSpeech.shirazShutdown(); } } }
@@ -269,12 +272,15 @@ public final class ActivityRunner {
         if (!name.equals(metadata.getProperty("package"))) throw new IllegalArgumentException("Package metadata identity mismatch");
         HostStorage storage = new HostStorage(new File(args[6]), name);
         android.os.Environment.shirazInitialize(storage);
+        HostKeyStoreProvider.install(storage.files());
+        android.os.Process.shirazSetDumpable("true".equals(metadata.getProperty("debuggable")));
         Application app = Class.forName(args[1]).asSubclass(Application.class).newInstance();
         HostContext context = new HostContext(name, new File(args[6]), storage, app, metadata, width, height, startupDensity);
         android.os.StrictMode.ThreadPolicy oldPolicy = android.os.StrictMode.getThreadPolicy();
         if (context.getApplicationInfo().targetSdkVersion >= 11)
             android.os.StrictMode.setThreadPolicy(new android.os.StrictMode.ThreadPolicy.Builder().detectNetwork().penaltyDeathOnNetwork().build());
         try {
+            android.app.ActivityThread.shirazBind(app, name);
             attach(app, context);if(context.getApplicationInfo().theme!=0)context.setTheme(context.getApplicationInfo().theme);context.capture.setAppName(context.packages.getApplicationLabel(context.getApplicationInfo())); ProviderHost.attach(context, metadata); app.onCreate();
             final android.view.ViewTreeObserver[] windowObserver={android.view.ViewTreeObserver.shirazCreateWindowObserver()};
             final View[] attachedRoot={null};

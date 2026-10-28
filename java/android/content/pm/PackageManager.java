@@ -2,7 +2,7 @@
 package android.content.pm;
 import android.util.AndroidException;
 
-/** Loaded-APK metadata subset; permissions, signatures and installed-app discovery are unsupported. */
+/** Loaded-APK metadata and host package-query contracts. */
 public abstract class PackageManager {
     public static final String FEATURE_CAMERA="android.hardware.camera",FEATURE_CAMERA_ANY="android.hardware.camera.any",FEATURE_MICROPHONE="android.hardware.microphone";
     public static final String FEATURE_TOUCHSCREEN="android.hardware.touchscreen";
@@ -23,6 +23,7 @@ public abstract class PackageManager {
     public java.util.List<ResolveInfo> queryBroadcastReceivers(android.content.Intent intent,int flags){if(intent==null)throw new NullPointerException("intent");return new java.util.ArrayList<ResolveInfo>();}
     public java.util.List<ResolveInfo> queryIntentActivities(android.content.Intent intent,int flags){throw new UnsupportedOperationException("Activity resolution");}
     public static final int PERMISSION_GRANTED=0,PERMISSION_DENIED=-1;
+    public int checkPermission(String permission,String packageName){return PERMISSION_DENIED;}
     public static final int GET_SERVICES = 4;
     public static final int GET_SIGNATURES = 0x40, GET_META_DATA = 0x80, GET_PERMISSIONS = 0x1000;
     public static final int GET_DISABLED_COMPONENTS=0x200,MATCH_DISABLED_COMPONENTS=0x200,MATCH_DIRECT_BOOT_UNAWARE=0x40000,MATCH_DIRECT_BOOT_AWARE=0x80000;

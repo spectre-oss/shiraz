@@ -17,7 +17,7 @@ public final class Build {
     public static final String DISPLAY = shiraz.runtime.DeviceProfile.get("build.display", "Shiraz " + shiraz.runtime.RuntimeVersion.get());
     public static final String FINGERPRINT = BRAND + "/" + PRODUCT + "/" + DEVICE + ":" + VERSION.RELEASE
         + "/" + ID + "/" + VERSION.INCREMENTAL + ":" + TYPE + "/" + TAGS;
-    public static final String CPU_ABI = shiraz.runtime.DeviceProfile.get("build.abi", ("aarch64".equals(HARDWARE) || "arm64".equals(HARDWARE)) ? "arm64-v8a" : "x86_64"), CPU_ABI2 = "";
+    public static final String CPU_ABI = System.getProperty("shiraz.guestAbi", shiraz.runtime.DeviceProfile.get("build.abi", ("aarch64".equals(HARDWARE) || "arm64".equals(HARDWARE)) ? "arm64-v8a" : "x86_64")), CPU_ABI2 = "";
     public static final String[] SUPPORTED_ABIS = {CPU_ABI};
     public static final String[] SUPPORTED_64_BIT_ABIS = {CPU_ABI}, SUPPORTED_32_BIT_ABIS = {};
     private Build() { }

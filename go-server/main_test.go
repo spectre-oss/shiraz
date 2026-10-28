@@ -217,3 +217,17 @@ func TestWebRTCInput(t *testing.T) {
 	}
 	t.Fatal("WebRTC input did not reach live-input file")
 }
+
+func TestSavedLogsIncludesPreRuntimeFailure(t *testing.T) {
+	dir := t.TempDir()
+	message := "shiraz: APK has no native ABI candidate for this host\n"
+	if err := os.WriteFile(filepath.Join(dir, "runner.log"), []byte(message), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{latestLogDir: dir, latestRunStarted: time.Now().Add(-time.Minute)}
+	w := httptest.NewRecorder()
+	s.savedLogs(w, httptest.NewRequest(http.MethodGet, "/logs", nil))
+	if !strings.Contains(w.Body.String(), message) {
+		t.Fatal("startup failure lost on reconnect")
+	}
+}

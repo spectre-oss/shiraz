@@ -30,6 +30,8 @@ public class Intent implements Parcelable, Cloneable {
     private Bundle extras;
     public ComponentName resolveActivity(android.content.pm.PackageManager manager){if(component!=null)return component;android.content.pm.ResolveInfo resolved=manager.resolveActivity(this,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);return resolved==null||resolved.activityInfo==null?null:new ComponentName(resolved.activityInfo.packageName,resolved.activityInfo.name);}
     public android.content.pm.ActivityInfo resolveActivityInfo(android.content.pm.PackageManager manager,int flags){if(component!=null){try{return manager.getActivityInfo(component,flags);}catch(android.content.pm.PackageManager.NameNotFoundException missing){return null;}}android.content.pm.ResolveInfo resolved=manager.resolveActivity(this,flags);return resolved==null?null:resolved.activityInfo;}
+    public static Intent makeMainActivity(ComponentName component){return new Intent(ACTION_MAIN).setComponent(component).addCategory(CATEGORY_LAUNCHER);}
+    public static Intent makeMainSelectorActivity(String selectorAction,String selectorCategory){Intent main=makeMainActivity(null);main.setSelector(new Intent(selectorAction).addCategory(selectorCategory));return main;}
     public Intent() { }
     public Intent(String action) { this.action = action; }
     public Intent(String action, Uri uri) { this.action = action; data = uri; }

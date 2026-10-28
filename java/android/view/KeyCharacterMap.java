@@ -8,6 +8,24 @@ public final class KeyCharacterMap {
  public static final int COMBINING_ACCENT=0x80000000,COMBINING_ACCENT_MASK=0x7fffffff;
  private static final KeyCharacterMap DESKTOP=new KeyCharacterMap();
  private KeyCharacterMap(){}
+ public static int getDeadChar(int accent,int character){
+  if(character==accent||character==' ')return accent;
+  if(!Character.isValidCodePoint(accent)||!Character.isValidCodePoint(character))return 0;
+  int combining;
+  switch(accent){
+   case '`':combining=0x300;break;
+   case '\'':case 0xb4:combining=0x301;break;
+   case '^':combining=0x302;break;
+   case '~':combining=0x303;break;
+   case '"':case 0xa8:combining=0x308;break;
+   default:
+    String decomposed=java.text.Normalizer.normalize(new String(Character.toChars(accent)),java.text.Normalizer.Form.NFKD);
+    if(decomposed.length()!=2||decomposed.charAt(0)!=' '||Character.getType(decomposed.charAt(1))!=Character.NON_SPACING_MARK)return 0;
+    combining=decomposed.charAt(1);
+  }
+  String composed=java.text.Normalizer.normalize(new String(Character.toChars(character))+new String(Character.toChars(combining)),java.text.Normalizer.Form.NFC);
+  return composed.codePointCount(0,composed.length())==1?composed.codePointAt(0):0;
+ }
  /** Missing physical devices fall back to the virtual keyboard, as on Android. */
  public static KeyCharacterMap load(int deviceId){return DESKTOP;}
  public int getKeyboardType(){return FULL;}

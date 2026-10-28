@@ -39,6 +39,12 @@ public final class AssetManager implements AutoCloseable {
         }
         return children.toArray(new String[children.size()]);
     }
+    public synchronized InputStream openNonAsset(int cookie,String name,int mode) throws IOException {
+        check(name);if(cookie<0)throw new IllegalArgumentException("Asset cookie");
+        try{return new ByteArrayInputStream(resources.shirazReadNonAsset(cookie,name));}
+        catch(Resources.NotFoundException failure){throw new FileNotFoundException("Missing packaged file: "+name);}
+    }
+    public InputStream openNonAsset(String name) throws IOException {return openNonAsset(0,name,ACCESS_STREAMING);}
     public synchronized InputStream open(String name) throws IOException { return open(name, ACCESS_STREAMING); }
     public synchronized InputStream open(String name, int mode) throws IOException {
         check(name);

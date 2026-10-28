@@ -152,6 +152,15 @@ public final class DrawableXml {
             for(int i=0;i<4;i++){BinaryXml.Value value=resolve(n.android(names[i])==null?n.android("inset"):n.android(names[i]));if(value!=null&&n.android(names[i])!=null&&value.type==5&&TypedValue.complexToDimensionPixelOffset(value.data,resources.getDisplayMetrics())==0)value=resolve(n.android("inset"));if(value==null)continue;if(value.type==6)fractions[i]=TypedValue.complexToFloat(value.data);else if(value.type==5){float dimension=TypedValue.complexToDimension(value.data,resources.getDisplayMetrics());if(!Float.isFinite(dimension)||Math.abs(dimension)>8192)throw new IllegalArgumentException("Inset dimension bound");dimensions[i]=(int)dimension;}else if(value.type>=16&&value.type<=31&&value.data==0)dimensions[i]=0;else throw new IllegalArgumentException("Inset requires dimension or fraction");}
             InsetDrawable result=InsetDrawable.shirazCreate(child,dimensions,fractions);result.setVisible(integer(n,"visible",1)!=0,true);return result;
         }
+        if(n.name.equals("rotate")){
+            attrs(n,"drawable visible fromDegrees toDegrees pivotX pivotY");BinaryXml.Value ref=n.android("drawable");Drawable child;
+            if(ref!=null){if(!n.children.isEmpty())throw new IllegalArgumentException("Duplicate rotate drawable");child=reference(ref);}else{if(n.children.size()!=1)throw new IllegalArgumentException("Rotate requires one drawable");child=node(n.children.get(0),depth+1);}
+            RotateDrawable result=new RotateDrawable();result.setDrawable(child);result.setFromDegrees(decimal(n,"fromDegrees",0));result.setToDegrees(decimal(n,"toDegrees",360));
+            BinaryXml.Value x=resolve(n.android("pivotX")),y=resolve(n.android("pivotY"));
+            result.setPivotXRelative(x==null||x.type==6);result.setPivotYRelative(y==null||y.type==6);
+            result.setPivotX(decimal(n,"pivotX",.5f));result.setPivotY(decimal(n,"pivotY",.5f));
+            result.setVisible(integer(n,"visible",1)!=0,true);return result;
+        }
         if(n.name.equals("scale")){
             attrs(n,"drawable scaleWidth scaleHeight scaleGravity useIntrinsicSizeAsMinimum level visible");BinaryXml.Value ref=n.android("drawable");Drawable child;
             if(ref!=null){if(!n.children.isEmpty())throw new IllegalArgumentException("Duplicate scale drawable");child=reference(ref);}else{if(n.children.size()!=1)throw new IllegalArgumentException("Scale requires one drawable");child=node(n.children.get(0),depth+1);}

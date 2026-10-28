@@ -37,6 +37,7 @@ public class ContextWrapper extends Context {
     @Override public void setTheme(int id) { requireBase().setTheme(id); }
     @Override public android.content.res.Resources.Theme getTheme() { return requireBase().getTheme(); }
     @Override public SharedPreferences getSharedPreferences(String name, int mode) { return requireBase().getSharedPreferences(name, mode); }
+    @Override public boolean moveSharedPreferencesFrom(Context source, String name) { return requireBase().moveSharedPreferencesFrom(source, name); }
     @Override public Context createConfigurationContext(android.content.res.Configuration configuration) { return requireBase().createConfigurationContext(configuration); }
     @Override public android.content.res.Resources getResources() { return requireBase().getResources(); }
     @Override public PackageManager getPackageManager() { return requireBase().getPackageManager(); }

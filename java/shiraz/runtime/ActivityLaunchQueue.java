@@ -13,6 +13,14 @@ public final class ActivityLaunchQueue implements AutoCloseable {
  private void live(){if(closed)throw new IllegalStateException("Activity launch session closed");}
  public void enqueue(Intent intent){
   synchronized(this){live();}
+  if("1".equals(System.getenv("SHIRAZ_TRACE_ACTIVITY_EXTRAS"))&&intent!=null){
+   android.os.Bundle extras=intent.getExtras();int remaining=8192,count=0;
+   if(extras!=null)for(String key:extras.keySet()){
+    if(++count>32||remaining<=0)break;
+    Object value=extras.get(key);
+    if(value instanceof String){String text=(String)value;int length=Math.min(text.length(),remaining);System.err.println("SHIRAZ_ACTIVITY_EXTRA "+key.substring(0,Math.min(key.length(),128))+"="+text.substring(0,length));remaining-=length;}
+   }
+  }
   if(HostAppInstaller.open(intent,resolver.packageName()))return;
   if(ExternalLauncher.open(intent))return;
   if(HostContentPicker.handles(intent)){System.err.println("SHIRAZ_CONTENT_PICK_REQUIRES_FOR_RESULT");return;}

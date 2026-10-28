@@ -8,6 +8,9 @@ public class Process {
     public static native void setThreadPriority(int priority);
     public static native int getThreadPriority(int tid);
     public static native void setArgV0(String name);
+    public static native void shirazSetDumpable(boolean enabled);
+    public static native int getUidForName(String name);
+    public static native int getGidForName(String name);
     public Process() { }
     /** Shiraz runs as the host user, never as an Android isolated UID. */
     public static boolean isIsolated() { return false; }

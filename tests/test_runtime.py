@@ -123,6 +123,22 @@ class RuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(FormatError, 'Runtime is not built'):
                     run_activity(Path('missing.apk'), report)
 
+    def test_digitalis_requires_explicit_existing_library(self):
+        report = deepcopy(self.report)
+        report['native_abis'] = ['arm64-v8a']
+        with patch('shiraz.architecture.platform.machine', return_value='x86_64'):
+            with patch.dict(os.environ, {'SHIRAZ_DIGITALIS_LIBRARY': '/missing/bridge.so'}):
+                with patch.object(Path, 'is_file', return_value=False):
+                    with self.assertRaisesRegex(FormatError, 'Digitalis native bridge is missing'):
+                        run_activity(Path('missing.apk'), report)
+            with tempfile.TemporaryDirectory() as directory:
+                bridge = Path(directory) / 'bridge.so'
+                bridge.touch()
+                with patch.dict(os.environ, {'SHIRAZ_DIGITALIS_LIBRARY': str(bridge)}):
+                    with patch.object(Path, 'is_file', return_value=True), patch('shiraz.runtime.selected_device_profile', side_effect=RuntimeError('past ABI gate')):
+                        with self.assertRaisesRegex(RuntimeError, 'past ABI gate'):
+                            run_activity(Path('missing.apk'), report)
+
     def test_invalid_component_never_launches(self):
         self.report['manifest']['launcher_activities'][0]['target'] = '../escape'
         with self.assertRaisesRegex(FormatError, 'component'):

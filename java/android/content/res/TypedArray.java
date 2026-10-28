@@ -41,6 +41,7 @@ public class TypedArray {
  public ColorStateList getColorStateList(int index){TypedValue v=value(index);if(!present(v))return null;if(v.isColorType())return ColorStateList.valueOf(v.data);if(v.resourceId!=0)return resources.getColorStateList(v.resourceId,theme);throw mismatch(index);}
  public int getColor(int index,int fallback){TypedValue v=value(index);if(v!=null&&v.type>=16&&v.type<=31)return v.data;ColorStateList color=getColorStateList(index);return color==null?fallback:color.getDefaultColor();}
  public android.graphics.drawable.Drawable getDrawable(int index){TypedValue v=value(index);if(!present(v))return null;if(v.isColorType())return new android.graphics.drawable.ColorDrawable(v.data);if(v.resourceId!=0)return resources.getDrawable(v.resourceId,theme);throw mismatch(index);}
+ public android.graphics.Typeface getFont(int index){TypedValue v=value(index);if(!present(v))return null;if(v.resourceId!=0)return resources.getFont(v.resourceId);throw mismatch(index);}
  public int getChangingConfigurations(){live();int flags=0;for(TypedValue v:values)if(v!=null)flags|=v.changingConfigurations;return flags;}
  public void recycle(){live();values=null;}
 }

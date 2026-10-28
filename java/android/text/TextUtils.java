@@ -5,6 +5,25 @@ import java.util.regex.Pattern;
 
 /** Plain character operations. Styled text, layout and parcel transport are separate APIs. */
 public class TextUtils {
+    public interface StringSplitter extends Iterable<String> { void setString(String string); }
+    public static class SimpleStringSplitter implements StringSplitter, java.util.Iterator<String> {
+        private final char delimiter;
+        private String string = "";
+        private int position;
+        public SimpleStringSplitter(char delimiter) { this.delimiter = delimiter; }
+        public void setString(String string) { this.string = java.util.Objects.requireNonNull(string); position = 0; }
+        public java.util.Iterator<String> iterator() { return this; }
+        public boolean hasNext() { return position < string.length(); }
+        public String next() {
+            if (!hasNext()) throw new java.util.NoSuchElementException();
+            int end = string.indexOf(delimiter, position);
+            if (end < 0) end = string.length();
+            String result = string.substring(position, end);
+            position = end + 1;
+            return result;
+        }
+        public void remove() { throw new UnsupportedOperationException(); }
+    }
     public static final int CAP_MODE_CHARACTERS=0x1000,CAP_MODE_WORDS=0x2000,CAP_MODE_SENTENCES=0x4000;
     public static int getCapsMode(CharSequence text,int offset,int modes){return CapsMode.getCapsMode(text,offset,modes);}
     public enum TruncateAt {START,MIDDLE,END,MARQUEE,END_SMALL}
@@ -37,6 +56,81 @@ public class TextUtils {
         return text.substring(0,left)+mark+text.substring(right);
     }
     private TextUtils() { }
+    public static CharSequence concat(CharSequence... parts) {
+        if (parts.length == 0) return "";
+        if (parts.length == 1) return parts[0];
+        boolean styled = false;
+        for (CharSequence part : parts) styled |= part instanceof Spanned;
+        if (styled) {
+            SpannableStringBuilder joined = new SpannableStringBuilder();
+            for (CharSequence part : parts) joined.append(part == null ? "null" : part);
+            return new SpannedString(joined);
+        }
+        StringBuilder joined = new StringBuilder();
+        for (CharSequence part : parts) joined.append(part);
+        return joined.toString();
+    }
+    public static String htmlEncode(String text) {
+        StringBuilder encoded = new StringBuilder();
+        for (int i=0; i<text.length(); i++) {
+            char value=text.charAt(i);
+            switch(value) {
+                case '&': encoded.append("&amp;"); break;
+                case '<': encoded.append("&lt;"); break;
+                case '>': encoded.append("&gt;"); break;
+                case '"': encoded.append("&quot;"); break;
+                case '\'': encoded.append("&#39;"); break;
+                default: encoded.append(value);
+            }
+        }
+        return encoded.toString();
+    }
+    public static int indexOf(CharSequence text, char value) { return indexOf(text, value, 0); }
+    public static int indexOf(CharSequence text, char value, int start) { return indexOf(text, value, start, text.length()); }
+    public static int indexOf(CharSequence text, char value, int start, int end) {
+        for (int i = start; i < end; i++) if (text.charAt(i) == value) return i;
+        return -1;
+    }
+    public static int lastIndexOf(CharSequence text, char value) { return lastIndexOf(text, value, text.length()-1); }
+    public static int lastIndexOf(CharSequence text, char value, int last) { return lastIndexOf(text, value, 0, last); }
+    public static int lastIndexOf(CharSequence text, char value, int start, int last) {
+        for (int i = Math.min(last, text.length()-1); i >= start; i--) if (text.charAt(i) == value) return i;
+        return -1;
+    }
+    public static int indexOf(CharSequence text, CharSequence value) { return indexOf(text, value, 0); }
+    public static int indexOf(CharSequence text, CharSequence value, int start) { return indexOf(text, value, start, text.length()); }
+    public static int indexOf(CharSequence text, CharSequence value, int start, int end) {
+        if (value.length() == 0) return start;
+        for (int i = start; i <= end-value.length(); i++) if (regionMatches(text, i, value, 0, value.length())) return i;
+        return -1;
+    }
+    public static boolean regionMatches(CharSequence first, int firstStart, CharSequence second, int secondStart, int length) {
+        if (firstStart < 0 || secondStart < 0 || length < 0 || firstStart > first.length()-length || secondStart > second.length()-length) throw new IndexOutOfBoundsException();
+        for (int i = 0; i < length; i++) if (first.charAt(firstStart+i) != second.charAt(secondStart+i)) return false;
+        return true;
+    }
+    public static int getOffsetAfter(CharSequence text, int offset) {
+        if (offset < 0 || offset > text.length()) throw new IndexOutOfBoundsException();
+        if (offset == text.length()) return offset;
+        int next = offset + Character.charCount(Character.codePointAt(text, offset));
+        return outsideReplacement(text, next, true);
+    }
+    public static int getOffsetBefore(CharSequence text, int offset) {
+        if (offset < 0 || offset > text.length()) throw new IndexOutOfBoundsException();
+        if (offset == 0) return 0;
+        int previous = offset - Character.charCount(Character.codePointBefore(text, offset));
+        return outsideReplacement(text, previous, false);
+    }
+    private static int outsideReplacement(CharSequence text, int offset, boolean forward) {
+        if (text instanceof Spanned) {
+            Spanned spans = (Spanned) text;
+            for (android.text.style.ReplacementSpan span : spans.getSpans(offset, offset, android.text.style.ReplacementSpan.class)) {
+                int start = spans.getSpanStart(span), end = spans.getSpanEnd(span);
+                if (start < offset && offset < end) offset = forward ? end : start;
+            }
+        }
+        return offset;
+    }
     public static int getLayoutDirectionFromLocale(java.util.Locale locale) {
         return locale != null && !java.util.Locale.ROOT.equals(locale) && android.icu.util.ULocale.forLocale(locale).isRightToLeft() ? 1 : 0;
     }

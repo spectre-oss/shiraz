@@ -6,6 +6,8 @@ import android.os.Parcelable;
 import android.os.Parcel;
 
 public final class Configuration implements Parcelable {
+    public static final int MNC_ZERO = 0xffff;
+    public int mcc, mnc;
     public static final int ORIENTATION_UNDEFINED = 0, ORIENTATION_PORTRAIT = 1, ORIENTATION_LANDSCAPE = 2;
     public static final int SCREENLAYOUT_LAYOUTDIR_MASK = 0xc0, SCREENLAYOUT_LAYOUTDIR_LTR = 0x40, SCREENLAYOUT_LAYOUTDIR_RTL = 0x80;
     public static final int UI_MODE_TYPE_NORMAL = 1, UI_MODE_NIGHT_MASK = 0x30, UI_MODE_NIGHT_NO = 0x10, UI_MODE_NIGHT_YES = 0x20;
@@ -28,6 +30,7 @@ public final class Configuration implements Parcelable {
     public Configuration() { }
     public Configuration(Configuration other) { setTo(other); }
     public void setTo(Configuration other) {
+        mcc=other.mcc; mnc=other.mnc;
         keyboard=other.keyboard;keyboardHidden=other.keyboardHidden;hardKeyboardHidden=other.hardKeyboardHidden;
         navigation=other.navigation;navigationHidden=other.navigationHidden;touchscreen=other.touchscreen;
         fontScale = other.fontScale; locale = other.locale; locales = other.locales;
@@ -38,6 +41,8 @@ public final class Configuration implements Parcelable {
     public int updateFrom(Configuration delta) {
         if (delta == null) throw new NullPointerException("delta");
         int changed = 0;
+        if (delta.mcc!=0 && mcc!=delta.mcc) { mcc=delta.mcc; changed|=1; }
+        if (delta.mnc!=0 && mnc!=delta.mnc) { mnc=delta.mnc; changed|=2; }
         if(delta.keyboard!=0&&keyboard!=delta.keyboard){keyboard=delta.keyboard;changed|=0x10;}
         if(delta.keyboardHidden!=0&&keyboardHidden!=delta.keyboardHidden){keyboardHidden=delta.keyboardHidden;changed|=0x20;}
         if(delta.hardKeyboardHidden!=0&&hardKeyboardHidden!=delta.hardKeyboardHidden){hardKeyboardHidden=delta.hardKeyboardHidden;changed|=0x20;}
@@ -91,13 +96,14 @@ public final class Configuration implements Parcelable {
     @Override public boolean equals(Object other) {
         if (!(other instanceof Configuration)) return false;
         Configuration c = (Configuration) other;
+        if (mcc!=c.mcc || mnc!=c.mnc) return false;
         return keyboard==c.keyboard&&keyboardHidden==c.keyboardHidden&&hardKeyboardHidden==c.hardKeyboardHidden&&navigation==c.navigation&&navigationHidden==c.navigationHidden&&touchscreen==c.touchscreen&&Float.compare(fontScale, c.fontScale) == 0 && getLocales().equals(c.getLocales())
             && orientation == c.orientation && screenWidthDp == c.screenWidthDp && screenHeightDp == c.screenHeightDp
             && smallestScreenWidthDp == c.smallestScreenWidthDp && densityDpi == c.densityDpi && screenLayout == c.screenLayout && uiMode == c.uiMode;
     }
     public boolean equals(Configuration other) { return equals((Object)other); }
     @Override public int hashCode() {
-        return java.util.Objects.hash(keyboard,keyboardHidden,hardKeyboardHidden,navigation,navigationHidden,touchscreen,fontScale, getLocales(), orientation, screenWidthDp, screenHeightDp, smallestScreenWidthDp, densityDpi, screenLayout, uiMode);
+        return java.util.Objects.hash(mcc,mnc,keyboard,keyboardHidden,hardKeyboardHidden,navigation,navigationHidden,touchscreen,fontScale, getLocales(), orientation, screenWidthDp, screenHeightDp, smallestScreenWidthDp, densityDpi, screenLayout, uiMode);
     }
     public int describeContents() { return 0; }
     public void writeToParcel(Parcel out, int flags) { throw new UnsupportedOperationException("Configuration parcel transport is not implemented"); }

@@ -26,7 +26,7 @@ public final class SystemProperties {
    case "ro.build.version.incremental":return Build.VERSION.INCREMENTAL;
    case "ro.build.version.sdk":return Integer.toString(Build.VERSION.SDK_INT);
    case "ro.build.version.security_patch":return Build.VERSION.SECURITY_PATCH;
-   case "ro.kernel.qemu":return shiraz.runtime.DeviceProfile.selected()?"1":fallback;
+   case "ro.kernel.qemu":return "0";
    case "gsm.sim.state":return shiraz.runtime.DeviceProfile.selected()?"ABSENT":fallback;
    default:return fallback;
   }

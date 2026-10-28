@@ -6,6 +6,10 @@ import java.util.List;
 
 /** In-process service for the loaded APK, not a host-wide task/process monitor. */
 public class ActivityManager {
+    /** Whether Android's test-harness mode is enabled for this runtime. */
+    public static boolean isRunningInTestHarness() {
+        return android.os.SystemProperties.getBoolean("ro.test_harness", false);
+    }
  public static final class TaskDescription {
   public final String label;public final android.graphics.Bitmap icon;public final int color;
   public TaskDescription(String label,android.graphics.Bitmap icon,int color){this.label=label;this.icon=icon;this.color=color;}

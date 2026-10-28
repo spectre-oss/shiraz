@@ -1,0 +1,16 @@
+--- a/art/runtime/thread.cc
++++ b/art/runtime/thread.cc
+@@ -3190,6 +3190,13 @@
+ 
+ void Thread::ThrowNewWrappedException(const char* exception_class_descriptor,
+                                       const char* msg) {
++  if (getenv("SHIRAZ_TRACE_LINKAGE") != nullptr &&
++      (strstr(exception_class_descriptor, "NoSuch") != nullptr ||
++       strstr(exception_class_descriptor, "ClassNotFound") != nullptr ||
++       strstr(exception_class_descriptor, "NoClassDefFound") != nullptr)) {
++    LOG(INFO) << "SHIRAZ_LINKAGE " << exception_class_descriptor << " "
++              << (msg == nullptr ? std::string() : std::string(msg).substr(0, 512));
++  }
+   DCHECK_EQ(this, Thread::Current());
+   ScopedObjectAccessUnchecked soa(this);
+   StackHandleScope<3> hs(soa.Self());

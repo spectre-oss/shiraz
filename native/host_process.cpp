@@ -2,6 +2,7 @@
 #include <jni.h>
 #include <signal.h>
 #include <sys/resource.h>
+#include <sys/prctl.h>
 #include <cerrno>
 #include <sys/syscall.h>
 #include <time.h>
@@ -19,6 +20,46 @@
 #include <cstdlib>
 #include <cstdint>
 #include <mutex>
+#include <grp.h>
+#include <pwd.h>
+#include <vector>
+#include <charconv>
+
+namespace {
+jint lookupHostIdentity(JNIEnv* env, jstring name, bool group) {
+    if (!name) {
+        env->ThrowNew(env->FindClass("java/lang/NullPointerException"), "name");
+        return -1;
+    }
+    const char* chars = env->GetStringUTFChars(name, nullptr);
+    if (!chars) return -1;
+    std::string value(chars);
+    env->ReleaseStringUTFChars(name, chars);
+    if (value.empty() || value.size() > 4096) return -1;
+    if (value[0] >= '0' && value[0] <= '9') {
+        jint numeric;
+        auto parsed = std::from_chars(value.data(), value.data()+value.size(), numeric);
+        return parsed.ec == std::errc() && parsed.ptr == value.data()+value.size() ? numeric : -1;
+    }
+    for (size_t size = 4096; size <= 1024*1024; size *= 2) {
+        std::vector<char> storage(size);
+        int error;
+        if (group) {
+            struct group entry{}, *result = nullptr;
+            error = getgrnam_r(value.c_str(), &entry, storage.data(), storage.size(), &result);
+            if (!error) return result && entry.gr_gid <= unsigned(INT32_MAX) ? jint(entry.gr_gid) : -1;
+        } else {
+            struct passwd entry{}, *result = nullptr;
+            error = getpwnam_r(value.c_str(), &entry, storage.data(), storage.size(), &result);
+            if (!error) return result && entry.pw_uid <= unsigned(INT32_MAX) ? jint(entry.pw_uid) : -1;
+        }
+        if (error != ERANGE) return -1;
+    }
+    return -1;
+}
+}
+extern "C" JNIEXPORT jint JNICALL Java_android_os_Process_getUidForName(JNIEnv* env,jclass,jstring name) { return lookupHostIdentity(env,name,false); }
+extern "C" JNIEXPORT jint JNICALL Java_android_os_Process_getGidForName(JNIEnv* env,jclass,jstring name) { return lookupHostIdentity(env,name,true); }
 namespace {
 char* processArguments=nullptr;size_t processArgumentBytes=0;std::mutex processNameMutex;
 // glibc supplies the original argv to ELF constructors, including dlopen constructors.
@@ -120,9 +161,9 @@ extern "C" JNIEXPORT void JNICALL Java_android_os_Process_setThreadPriority(JNIE
         processError(env, "java/lang/SecurityException", "Linux rejected the thread priority change");
 }
 extern "C" JNIEXPORT jint JNICALL Java_android_os_Process_getThreadPriority(JNIEnv* env, jclass, jint tid) {
-    if (tid != syscall(SYS_gettid)) { processError(env, "java/lang/UnsupportedOperationException", "Priority queries currently support only the calling host thread"); return 0; }
+    if (tid < 0) { processError(env, "java/lang/IllegalArgumentException", "Invalid thread ID"); return 0; }
     errno = 0; int value = getpriority(PRIO_PROCESS, id_t(tid));
-    if (value == -1 && errno) processError(env, "java/lang/IllegalStateException", "Cannot read thread priority");
+    if (value == -1 && errno) processError(env, "java/lang/IllegalArgumentException", "Cannot read thread priority");
     return value;
 }
 
@@ -164,3 +205,8 @@ extern "C" JNIEXPORT jlong JNICALL Java_android_os_Debug_getNativeHeapSize(JNIEn
 extern "C" JNIEXPORT jlong JNICALL Java_android_os_Debug_getNativeHeapFreeSize(JNIEnv*,jclass){return heapBytes(mallinfo2().fordblks);}
 
 extern "C" JNIEXPORT void JNICALL Java_android_os_Process_killSelf(JNIEnv*,jclass){kill(getpid(),SIGKILL);}
+
+extern "C" JNIEXPORT void JNICALL Java_android_os_Process_shirazSetDumpable(JNIEnv* env,jclass,jboolean enabled) {
+    if(prctl(PR_SET_DUMPABLE, enabled ? 1 : 0, 0, 0, 0)!=0)
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), "Cannot configure application dumpability");
+}

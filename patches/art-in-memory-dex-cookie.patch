@@ -1,0 +1,35 @@
+--- a/libcore/dalvik/src/main/java/dalvik/system/DexFile.java
++++ b/libcore/dalvik/src/main/java/dalvik/system/DexFile.java
+@@ -363,7 +363,8 @@
+         if (buf.isDirect()) {
+             return createCookieWithDirectBuffer(buf, buf.position(), buf.limit());
+         } else {
+-            return createCookieWithArray(buf.array(), buf.position(), buf.limit());
++            return createCookieWithArray(buf.array(), buf.arrayOffset() + buf.position(),
++                    buf.arrayOffset() + buf.limit());
+         }
+     }
+ 
+@@ -376,8 +377,20 @@
+     /*package*/ static native String getClassLoaderContext(ClassLoader classLoader,
+             DexPathList.Element[] elements);
+ 
+-    private static native Object createCookieWithDirectBuffer(ByteBuffer buf, int start, int end);
+-    private static native Object createCookieWithArray(byte[] buf, int start, int end);
++    private static Object createCookieWithDirectBuffer(ByteBuffer buf, int start, int end) {
++        if (!buf.isDirect() || start < 0 || end < start || end > buf.capacity()) {
++            throw new IllegalArgumentException("Invalid direct DEX buffer range");
++        }
++        return openInMemoryDexFilesNative(new ByteBuffer[] {buf}, new byte[][] {null},
++                new int[] {start}, new int[] {end}, null, null);
++    }
++    private static Object createCookieWithArray(byte[] buf, int start, int end) {
++        if (start < 0 || end < start || end > buf.length) {
++            throw new IllegalArgumentException("Invalid DEX array range");
++        }
++        return openInMemoryDexFilesNative(new ByteBuffer[] {null}, new byte[][] {buf},
++                new int[] {start}, new int[] {end}, null, null);
++    }
+ 
+     /*
+      * Returns true if the dex file is backed by a valid oat file.

@@ -37,7 +37,9 @@ public class NotificationManager {
         Notification copy=value.clone();copy.extras=copy.extras.shirazBroadcastCopy();int bytes=copy.extras.shirazBroadcastCopiedBytes();
         if(copy.contentView!=null||copy.bigContentView!=null||copy.headsUpContentView!=null)throw new UnsupportedOperationException("Custom notification views");
         if(copy.getSmallIcon()!=null&&copy.getSmallIcon().getType()!=android.graphics.drawable.Icon.TYPE_RESOURCE)throw new UnsupportedOperationException("Notification small icon type");
-        String title=summary(copy),body=text(copy,Notification.EXTRA_TEXT);String key=key(tag,id);Posted previous=posted.get(key);
+        String title=summary(copy),body=text(copy,Notification.EXTRA_TEXT);
+        if("1".equals(System.getenv("SHIRAZ_TRACE_NOTIFICATIONS")))System.err.println("SHIRAZ_NOTIFICATION "+title+" | "+body);
+        String key=key(tag,id);Posted previous=posted.get(key);
         if(postedBytes-(previous==null?0:previous.bytes)+bytes>16*1024*1024L)throw new IllegalStateException("Notification payload limit");
         if(previous!=null)copy.flags|=previous.value.flags&Notification.FLAG_FOREGROUND_SERVICE;
         if(previous==null&&posted.size()>=256)throw new IllegalStateException("Posted notification limit");

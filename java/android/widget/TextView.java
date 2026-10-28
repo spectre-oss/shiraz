@@ -16,6 +16,40 @@ import java.util.ArrayList;
 
 /** Software text widget. Visual glyph clusters are shared with native shaping. */
 public class TextView extends View {
+    public static final int AUTO_SIZE_TEXT_TYPE_NONE=0,AUTO_SIZE_TEXT_TYPE_UNIFORM=1;
+    private int autoSizeType,autoSizeMin=-1,autoSizeMax=-1,autoSizeStep=-1;
+    private int[] autoSizes=new int[0];
+    public int getAutoSizeTextType(){return autoSizeType;}
+    public int getAutoSizeMinTextSize(){return autoSizeMin;}
+    public int getAutoSizeMaxTextSize(){return autoSizeMax;}
+    public int getAutoSizeStepGranularity(){return autoSizeStep;}
+    public int[] getAutoSizeTextAvailableSizes(){return autoSizes.clone();}
+    public void setAutoSizeTextTypeWithDefaults(int type){
+        if(type==AUTO_SIZE_TEXT_TYPE_NONE){autoSizeType=0;autoSizeMin=autoSizeMax=autoSizeStep=-1;autoSizes=new int[0];changed();}
+        else if(type==AUTO_SIZE_TEXT_TYPE_UNIFORM)setAutoSizeTextTypeUniformWithConfiguration(12,112,1,TypedValue.COMPLEX_UNIT_SP);
+        else throw new IllegalArgumentException("Auto-size type");
+    }
+    public void setAutoSizeTextTypeUniformWithConfiguration(int min,int max,int step,int unit){
+        int low=Math.round(TypedValue.applyDimension(unit,min,getResources().getDisplayMetrics())),high=Math.round(TypedValue.applyDimension(unit,max,getResources().getDisplayMetrics())),stride=Math.round(TypedValue.applyDimension(unit,step,getResources().getDisplayMetrics()));
+        if(low<=0||high<=low||stride<=0||(high-low)/stride>10000)throw new IllegalArgumentException("Auto-size range");
+        int[] sizes=new int[(high-low)/stride+1];for(int i=0;i<sizes.length;i++)sizes[i]=low+i*stride;
+        autoSizes=sizes;autoSizeType=1;autoSizeMin=low;autoSizeMax=high;autoSizeStep=stride;changed();
+    }
+    public void setAutoSizeTextTypeUniformWithPresetSizes(int[] sizes,int unit){
+        if(sizes==null)throw new NullPointerException("sizes");if(sizes.length>10000)throw new IllegalArgumentException("Auto-size count");
+        java.util.TreeSet<Integer> sorted=new java.util.TreeSet<Integer>();for(int size:sizes){int px=Math.round(TypedValue.applyDimension(unit,size,getResources().getDisplayMetrics()));if(px>0)sorted.add(px);}
+        if(sorted.isEmpty())throw new IllegalArgumentException("No positive auto-size values");
+        autoSizes=new int[sorted.size()];int at=0;for(int size:sorted)autoSizes[at++]=size;
+        autoSizeType=1;autoSizeMin=autoSizes[0];autoSizeMax=autoSizes[autoSizes.length-1];autoSizeStep=-1;changed();
+    }
+    private void autoSizeForBounds(int widthSpec,int heightSpec){
+        if(autoSizeType==0||autoSizes.length==0||this instanceof EditText||MeasureSpec.getMode(widthSpec)==MeasureSpec.UNSPECIFIED)return;
+        int width=Math.max(1,MeasureSpec.getSize(widthSpec)-getCompoundPaddingLeft()-getCompoundPaddingRight());
+        int height=MeasureSpec.getMode(heightSpec)==MeasureSpec.UNSPECIFIED?Integer.MAX_VALUE:Math.max(1,MeasureSpec.getSize(heightSpec)-getCompoundPaddingTop()-getCompoundPaddingBottom());
+        int low=0,high=autoSizes.length-1,best=0;TextUtils.TruncateAt saved=ellipsize;ellipsize=null;
+        try{while(low<=high){int middle=(low+high)>>>1;paint.setTextSize(autoSizes[middle]);layoutWidth=-1;ensure(width);boolean fits=lines.size()<=maxLines&&contentHeight<=height;for(float advance:advances)if(advance>width)fits=false;if(fits){best=middle;low=middle+1;}else high=middle-1;}}
+        finally{ellipsize=saved;paint.setTextSize(autoSizes[best]);layoutWidth=-1;}
+    }
     private boolean showSoftInputOnFocus=true;
     public void setShowSoftInputOnFocus(boolean value){showSoftInputOnFocus=value;}
     public boolean getShowSoftInputOnFocus(){return showSoftInputOnFocus;}
@@ -200,7 +234,7 @@ public class TextView extends View {
         if(values.hasValue(3)||values.hasValue(4)||values.hasValue(5)){
             Typeface face=resetTypeface?null:getTypeface();int style=values.getInt(3,face==null?Typeface.NORMAL:face.getStyle());if(style<0||style>3)throw new IllegalArgumentException("Text style");
             if(values.hasValue(4)){int index=values.getInt(4,0);switch(index){case 0:face=null;break;case 1:face=Typeface.SANS_SERIF;break;case 2:face=Typeface.SERIF;break;case 3:face=Typeface.MONOSPACE;break;default:throw new IllegalArgumentException("Text typeface");}}
-            if(values.hasValue(5)){String family=values.getString(5);if(family!=null&&family.startsWith("res/"))throw new UnsupportedOperationException("Resource fonts are not implemented");face=Typeface.create(family,style);}
+            if(values.hasValue(5)){String family=values.getString(5);if(family!=null&&family.startsWith("res/"))face=values.getFont(5);else face=Typeface.create(family,style);}
             if(face==null&&style==0)setTypeface((Typeface)null);else setTypeface(face,style);
         }
     }
@@ -492,6 +526,7 @@ public class TextView extends View {
         layoutWidth=width;layoutSize=paint.getTextSize();layoutFace=paint.getTypeface();layoutText=rendered;layoutLocale=getResources().getConfiguration().locale;
     }
     @Override protected void onMeasure(int widthSpec,int heightSpec){
+        autoSizeForBounds(widthSpec,heightSpec);
         float widest=0;int origin=0;for(String part:displayed().split("\n",-1)){widest=Math.max(widest,advance(part,0,part.length(),origin));origin+=part.length()+1;}
         int desired=dimension((long)Math.max((int)Math.ceil(widest),Math.max(dw(compoundTop),dw(compoundBottom)))+getCompoundPaddingLeft()+getCompoundPaddingRight());
         desired=Math.max(widthLimit(textMinWidth,minWidthEms),Math.min(widthLimit(textMaxWidth,maxWidthEms),desired));

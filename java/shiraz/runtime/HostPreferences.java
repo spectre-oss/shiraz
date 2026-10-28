@@ -29,6 +29,42 @@ public final class HostPreferences implements AutoCloseable {
     private boolean closed;
 
     public HostPreferences(File directory) { this.directory = directory; }
+    private static final Object migrationLock = new Object();
+    public static boolean move(SharedPreferences source, SharedPreferences destination) {
+        if (source == destination) return true;
+        if (!(source instanceof HostPreferences.Store) || !(destination instanceof HostPreferences.Store)) return false;
+        Store from = (Store) source, to = (Store) destination;
+        synchronized (migrationLock) {
+            synchronized (from.owner()) {
+                synchronized (to.owner()) {
+                    if (from.owner().closed || to.owner().closed) throw new IllegalStateException("Preference session is closed");
+                    try {
+                        if (from.file.getCanonicalFile().equals(to.file.getCanonicalFile())) return true;
+                        // Drain apply() writes before moving; owner locks prevent new submissions.
+                        from.owner().writer.submit(new Runnable(){public void run(){}}).get();
+                        to.owner().writer.submit(new Runnable(){public void run(){}}).get();
+                        if (!from.file.exists()) return true;
+                        Files.move(from.file.toPath(), to.file.toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                        synchronized (to) {
+                            to.values = read(to.file);
+                            to.encodedValues = to.durableBytes = null;
+                        }
+                        synchronized (from) {
+                            from.values = new HashMap<String, Object>();
+                            from.encodedValues = from.durableBytes = null;
+                        }
+                        return true;
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt(); return false;
+                    } catch (IOException | ExecutionException | RejectedExecutionException error) {
+                        Log.w("SharedPreferences", "Preference move failed", error); return false;
+                    }
+                }
+            }
+        }
+    }
     public synchronized SharedPreferences get(String name, int mode) {
         if (closed) throw new IllegalStateException("Preference session is closed");
         if (mode != 0) throw new UnsupportedOperationException("Only MODE_PRIVATE preferences are supported");
@@ -158,6 +194,7 @@ public final class HostPreferences implements AutoCloseable {
     }
 
     private final class Store implements SharedPreferences {
+        HostPreferences owner() { return HostPreferences.this; }
         private final File file;
         private Map<String, Object> values;
         // Encoded current memory state (Store lock), and last durable state

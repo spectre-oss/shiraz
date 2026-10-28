@@ -1,0 +1,12 @@
+--- a/art/runtime/jni/java_vm_ext.cc
++++ b/art/runtime/jni/java_vm_ext.cc
+@@ -1006,7 +1006,8 @@
+   }
+ 
+   if (handle == nullptr) {
+-    *error_msg = bionic_dlerror();
++    const char* detail = needs_native_bridge ? android::NativeBridgeGetError() : bionic_dlerror();
++    *error_msg = detail != nullptr ? detail : "Native library loader returned no diagnostic";
+     VLOG(jni) << "bionic_dlopen(\"" << path << "\", RTLD_NOW) failed: " << *error_msg;
+     return false;
+   }

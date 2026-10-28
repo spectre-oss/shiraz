@@ -8,6 +8,10 @@ import java.util.Properties;
 
 /** Immutable manifest facts with fresh mutable Android metadata snapshots. */
 public final class HostPackageManager extends PackageManager {
+    @Override public int checkPermission(String permission,String packageName){
+        return name.equals(packageName)&&name.equals(context.getPackageName())
+                ? context.checkSelfPermission(permission) : PERMISSION_DENIED;
+    }
     @Override public java.util.List<PackageInfo> getInstalledPackages(int flags){java.util.ArrayList<PackageInfo> result=new java.util.ArrayList<>();try{result.add(getPackageInfo(name,flags));for(String pkg:HostAppInstaller.packages())if(!name.equals(pkg))result.add(getPackageInfo(pkg,flags));}catch(NameNotFoundException e){throw new IllegalStateException(e);}return result;}
     @Override public android.content.Intent getLaunchIntentForPackage(String pkg){if(!name.equals(pkg))return HostAppInstaller.launchIntent(pkg);android.content.Intent intent=new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER).setPackage(pkg);android.content.pm.ResolveInfo info=resolveActivity(intent,0);if(info!=null)return intent.setComponent(new android.content.ComponentName(pkg,info.activityInfo.name)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
         // Launcher aliases are resolved to their declared target by the APK parser.

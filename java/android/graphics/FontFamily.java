@@ -19,7 +19,7 @@ public final class FontFamily {
         if (frozen || id != 0 || path == null || cookie < 0 || ttcIndex != 0 || axes != null) return false;
         if (isAsset && manager == null) return false;
         try {
-            byte[] bytes = isAsset ? readStream(manager.open(path)) : readFile(path);
+            byte[] bytes = isAsset ? readStream(manager.open(path)) : manager != null ? readStream(manager.openNonAsset(cookie,path,AssetManager.ACCESS_BUFFER)) : readFile(path);
             if (bytes == null) return false;
             id = nativeRegister(bytes);
             return id > 0;

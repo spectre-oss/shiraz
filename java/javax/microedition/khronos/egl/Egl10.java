@@ -6,13 +6,9 @@ final class Egl10 implements EGL10 {
     static final Egl10 INSTANCE = new Egl10();
     private int error = EGL_SUCCESS;
     static final class NoContext extends EGLContext { public GL getGL() { return null; } }
-    static final class HostGl implements javax.microedition.khronos.opengles.GL10 {
-        public void glFlush() {}
-        public void glFinish() {}
-        public void glReadPixels(int x, int y, int width, int height, int format, int type, java.nio.Buffer pixels) {}
-    }
     static final class HostContext extends EGLContext {
-        private final HostGl gl = new HostGl();
+        private final shiraz.runtime.HostGL10 gl = new shiraz.runtime.HostGL10();
+        int version=1;
         long handle;
         public GL getGL() { return gl; }
     }
@@ -100,7 +96,10 @@ final class Egl10 implements EGL10 {
     public boolean eglTerminate(EGLDisplay target) { error = target == display ? EGL_SUCCESS : EGL_BAD_DISPLAY; return target == display; }
     public EGLContext eglCreateContext(EGLDisplay target, EGLConfig config, EGLContext share, int[] attribs) {
         if (target != display) { error = EGL_BAD_DISPLAY; return EGL_NO_CONTEXT; }
-        error = EGL_SUCCESS; return new HostContext();
+        HostContext context=new HostContext();
+        if(attribs!=null)for(int i=0;i+1<attribs.length&&attribs[i]!=EGL_NONE;i+=2)if(attribs[i]==0x3098)context.version=attribs[i+1];
+        if(context.version<1||context.version>3){error=EGL_BAD_ATTRIBUTE;return EGL_NO_CONTEXT;}
+        error = EGL_SUCCESS; return context;
     }
     public EGLSurface eglCreatePbufferSurface(EGLDisplay target, EGLConfig config, int[] attribs) {
         if (target != display || !(config instanceof HostConfig)) { error = EGL_BAD_CONFIG; return EGL_NO_SURFACE; }
@@ -155,7 +154,7 @@ final class Egl10 implements EGL10 {
             HostContext host = (HostContext) context;
             long handle;
             synchronized (host) {
-                if (host.handle == 0) host.handle = android.view.Surface.shirazEglCreateContext();
+                if (host.handle == 0) host.handle = android.view.Surface.shirazEglCreateContext(host.version);
                 handle = host.handle;
             }
             if (handle == 0 || !((WindowSurface) draw).holder.shirazEglMakeCurrent(handle)) { error = EGL_BAD_ACCESS; return false; }

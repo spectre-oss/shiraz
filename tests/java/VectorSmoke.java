@@ -5,7 +5,7 @@ import shiraz.runtime.BinaryXml;
 import java.util.Arrays;
 import java.util.Random;
 public final class VectorSmoke {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         Resources r=Resources.shirazOpen(args[0],96,160);
         try {
             org.shiraz.fixture.VectorFixture.check(r);
@@ -18,7 +18,21 @@ public final class VectorSmoke {
             if(pixels.getPixel(40,12)!=0xff2266bb||pixels.getPixel(60,12)!=0)throw new AssertionError("Reflected nonuniform vector cache/pixels");
             pixels.recycle();
             byte[] xml=r.shirazReadResourceFile(r.getIdentifier("vector_group","drawable","org.shiraz.fixture"),new TypedValue());
+            TypedValue packaged=new TypedValue();r.getValue(r.getIdentifier("vector_group","drawable","org.shiraz.fixture"),packaged,true);
+            for(int cookie:new int[]{0,packaged.assetCookie})try(java.io.InputStream input=r.getAssets().openNonAsset(cookie,packaged.string.toString(),android.content.res.AssetManager.ACCESS_BUFFER)){
+                java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();byte[] chunk=new byte[1024];int count;while((count=input.read(chunk))!=-1)output.write(chunk,0,count);
+                if(!Arrays.equals(xml,output.toByteArray()))throw new AssertionError("Packaged file cookie lookup");
+            }
+            try{r.getAssets().openNonAsset("../escape");throw new AssertionError("Traversal accepted");}catch(IllegalArgumentException expected){}
             if (!BinaryXml.parse(xml).name.equals("vector")) throw new AssertionError("compiled vector root");
+            byte[] emptyStyles=xml.clone();
+            java.nio.ByteBuffer pool=java.nio.ByteBuffer.wrap(emptyStyles).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            int poolSize=pool.getInt(12);
+            pool.putInt(32,poolSize);
+            if (!BinaryXml.parse(emptyStyles).name.equals("vector")) throw new AssertionError("Empty style section at pool end");
+            pool.putInt(32,poolSize+4);
+            try { BinaryXml.parse(emptyStyles); throw new AssertionError("Out-of-range empty style section accepted"); }
+            catch (IllegalArgumentException expected) { }
             for (int n=0;n<xml.length;n++) { try { BinaryXml.parse(Arrays.copyOf(xml,n)); throw new AssertionError("truncated XML accepted "+n); } catch (IllegalArgumentException expected) { } }
             Random random=new Random(541002);
             for (int n=0;n<1000;n++) {

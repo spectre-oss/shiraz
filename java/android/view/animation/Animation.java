@@ -615,7 +615,7 @@ public abstract class Animation implements Cloneable {
      * @attr ref android.R.styleable#Animation_zAdjustment
      */
     public void setZAdjustment(int zAdjustment) {
-        if(zAdjustment!=ZORDER_NORMAL)throw new UnsupportedOperationException("Legacy animation z-order is not implemented");
+        if(zAdjustment!=ZORDER_NORMAL&&zAdjustment!=ZORDER_TOP&&zAdjustment!=ZORDER_BOTTOM)throw new IllegalArgumentException("Invalid animation z-order");
         mZAdjustment = zAdjustment;
     }
 
