@@ -196,12 +196,25 @@
     exception. The host uses a circular mask; launcher-specific mask selection
     and themed monochrome presentation are not implemented.
 
+24. Opened the saved entry, selected **Download release asset**, and continued
+    with the x86_64 release. The app displayed a handled `PathNotFoundException`
+    for the partial download; no successful download was observed. Inspection of
+    the [v1.7.3 download implementation](https://github.com/ImranR98/Obtainium/blob/v1.7.3/lib/providers/apps_provider_install.dart)
+    explains the mismatch: `getStorageRootPath()` retains only the first three
+    components of the app storage path, then the download action appends
+    `Download`. This assumes Android's storage layout and does not identify
+    Shiraz's app-scoped external volume. Creating a directory at that incorrectly
+    derived location would conceal the incompatibility. The APK was unchanged;
+    storage-layout compatibility remains unresolved. The bounded runner later
+    reached its configured timeout; this was not an app crash.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full
 compatibility pass.** Package metadata and icon-query missing-method failures
 are passed. The saved-entry landscape/portrait resize and navigation sequence
 now works after GL routing fixes. Adaptive icons render with the host circular mask.
+Release-asset download is blocked by an Android storage-path assumption.
 Installation, updates, certificate
 verification, and complete plugin behavior are not verified. Do not infer that
 every Flutter app works from this result.
