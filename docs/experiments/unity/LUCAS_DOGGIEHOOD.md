@@ -132,8 +132,25 @@
     in portrait. This resolves step 20's stale-buffer/input failure; it does not
     establish that the game's full UI supports portrait.
 
+22. Followed the tutorial through dragging, two-finger zoom, Bailey's moving
+    speech bubble, and **Accept** in the quest dialogue. The moving bubble was
+    located from the current app frame on the VM, then clicked through the
+    normal pointer path; no app state or APK content was edited. After the
+    bounded runner timed out, a new launch restored the accepted quest's world
+    marker. Clicking that marker removed it and increased displayed currency
+    from 0 to 20. The initial drag tutorial restarted, so tutorial-step
+    persistence is not established. A subsequent reward-check launch stalled
+    after the splash; thread inspection again showed the Unity main thread
+    waiting and its preload thread sleeping. Startup reliability remains open.
+
+23. After closing that stalled process, another unchanged launch rendered the
+    neighborhood with currency still at 20 and the collected marker absent.
+    This verifies persistence of the accepted quest and its collected reward
+    across restarts. It is not a full campaign/save-system pass.
+
 **Interactive scene, camera drag, multitouch zoom, and repeated native resizing
 verified in successful runs; startup is intermittent.** Collider warnings still
 appear. Portrait Settings input now works, but parts of the UI are clipped.
-Progress/save persistence, startup reliability, full portrait usability,
+Accepted-quest and reward persistence are verified. Longer progression,
+startup reliability, full portrait usability,
 and reporting of app-requested process termination remain open.
