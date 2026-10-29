@@ -139,9 +139,9 @@ presentation-smoke: build/test-presentation
 	SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software timeout 10 ./build/test-presentation
 	env -u SDL_VIDEODRIVER -u SDL_RENDER_DRIVER SHIRAZ_HOST_SDL_VIDEODRIVER=dummy SHIRAZ_HOST_SDL_RENDER_DRIVER=software timeout 10 ./build/test-presentation
 
-build/libshiraz-host.so: native/host_process.cpp native/fds.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp include/shiraz/ipc_channel.hpp
+build/libshiraz-host.so: native/host_process.cpp native/fds.cpp native/file_observer.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp include/shiraz/ipc_channel.hpp
 	@mkdir -p build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/host_process.cpp native/fds.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp -o $@ -lEGL -ldl
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/host_process.cpp native/fds.cpp native/file_observer.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp -o $@ -lEGL -ldl
 
 build/test-gles-probe: tests/native/gles_probe.cpp native/gles_version.cpp
 	@mkdir -p build
@@ -1550,3 +1550,10 @@ locale-defaults-smoke: framework
 	javac --release 8 -cp build/framework/classes -d build/locale-defaults-smoke tests/java/LocaleDefaultsSmoke.java
 	$(JAVA) -cp build/locale-defaults-smoke:build/framework/classes LocaleDefaultsSmoke
 check: locale-defaults-smoke
+
+.PHONY: file-observer-smoke
+file-observer-smoke: framework build/libshiraz-host.so
+	mkdir -p build/file-observer-smoke
+	javac --release 8 -cp build/framework/classes -d build/file-observer-smoke tests/java/FileObserverSmoke.java
+	$(JAVA) -Djava.library.path=build -cp build/file-observer-smoke:build/framework/classes FileObserverSmoke
+check: file-observer-smoke
