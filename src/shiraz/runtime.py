@@ -194,8 +194,11 @@ def application_metadata(manifest, apk, data):
     values = {'package': manifest['package'], 'applicationClass': manifest.get('application_class'),
             'versionName': manifest.get('version_name'), 'versionCode': manifest.get('version_code') or '0',
             'versionCodeMajor': manifest.get('version_code_major') or '0',
+            'sharedUserId': manifest.get('shared_user_id'), 'sharedUserLabel': manifest.get('shared_user_label', 0),
+            'baseRevisionCode': manifest.get('revision_code', 0), 'installLocation': manifest.get('install_location', -1),
             'minSdk': manifest.get('min_sdk') or '1', 'targetSdk': manifest.get('target_sdk') or manifest.get('min_sdk') or '1',
             'theme': manifest.get('application_theme', 0), 'labelRes': manifest.get('application_label_resource'), 'versionNameRes': manifest.get('version_name_resource'),
+            'icon': manifest.get('application_icon', 0), 'logo': manifest.get('application_logo', 0), 'banner': manifest.get('application_banner', 0),
             'sourceDir': str(apk), 'dataDir': str(data), 'label': manifest.get('application_label'),
             'enabled': manifest.get('application_enabled'), 'debuggable': manifest.get('application_debuggable'),
             'hasCode': manifest.get('application_has_code')}

@@ -19,7 +19,7 @@ remain explicit. No unrelated private experiments are included in this list.
 
 | App | Framework | Current observation |
 | --- | --- | --- |
-| [Obtainium](experiments/flutter/OBTAINIUM.md) | Flutter | Settings, text entry, resizing, back navigation, and theme persistence verified. Signing-query flags are supported; package inventory now fails on missing shared-user metadata. |
+| [Obtainium](experiments/flutter/OBTAINIUM.md) | Flutter | Settings, text entry, resizing, back navigation, and theme persistence verified. Signing and package declaration queries advance; inventory now fails on missing application backup-agent metadata. |
 | [Joplin](experiments/react-native/JOPLIN.md) | React Native | Notes list, Add menu, note screen, title input, and title persistence across restart verified after line-height fixes. Editor toolbar and notice now render; body editing is unsupported because WebView has no JavaScript/DOM engine. |
 | [2048](experiments/unity/2048.md) | Unity | Release has only 32-bit native code; rejected by this 64-bit runtime. |
 | [Lucas Doggiehood](experiments/unity/LUCAS_DOGGIEHOOD.md) | Unity | Animated scene, house/Settings input, camera drag, and multitouch zoom verified. Rebuilt ART renders with normal library loading; surface lifecycle fix removes the detach timeout. Native resize, gameplay persistence, and app-requested termination reporting remain open. |

@@ -44,9 +44,19 @@
    currently supported monolithic APKs. Retesting passes it and next fails on
    missing `PackageInfo.sharedUserId` during the background package inventory.
 
+9. Preserved shared-user ID/label, base revision, and install-location metadata
+   from the manifest through the launcher and PackageInfo. Exposed monolithic
+   split-revision metadata and the non-APEX state. Retesting passes the previous
+   shared-user failure and next requires the common package icon field. Added
+   icon/logo/banner fields and application resource-ID propagation. Text and
+   binary-manifest regressions, launcher transfer checks, and package-query
+   integration pass on the VM. The unchanged APK passes those failures and
+   next stops at missing `ApplicationInfo.backupAgentName`. These declaration
+   fields do not implement Android shared-UID isolation or backup services.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The signing-query flag failure is fixed, but background package inventory now
-fails on missing `PackageInfo.sharedUserId`. App installation,
+fails on missing `ApplicationInfo.backupAgentName`. App installation,
 updates, certificate handling, app-list persistence, and complete plugin behavior
 are not verified. Do not infer that every Flutter app works from this result.

@@ -3,7 +3,7 @@ package android.content.pm;
 import android.content.res.XmlResourceParser;
 public class PackageItemInfo {
     public String name, packageName;
-    public int labelRes;
+    public int labelRes, icon, logo, banner;
     public android.os.Bundle metaData;
     public CharSequence nonLocalizedLabel;
     protected ApplicationInfo getApplicationInfo() { return null; }

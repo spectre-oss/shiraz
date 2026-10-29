@@ -159,6 +159,19 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(values['targetSdk'], '27')
         self.assertEqual(values['versionCode'], '0')
 
+    def test_package_manifest_identity_metadata(self):
+        manifest = {**self.report['manifest'], 'shared_user_id': 'test.shared',
+                    'shared_user_label': 0x7f010001, 'revision_code': 3, 'install_location': 2,
+                    'application_icon': 0x7f010002, 'application_logo': 0x7f010003, 'application_banner': 0x7f010004}
+        values = application_metadata(manifest, Path('/app.apk'), Path('/data'))
+        self.assertEqual(values['sharedUserId'], 'test.shared')
+        self.assertEqual(values['sharedUserLabel'], 0x7f010001)
+        self.assertEqual(values['baseRevisionCode'], 3)
+        self.assertEqual(values['installLocation'], 2)
+        self.assertEqual(values['icon'], 0x7f010002)
+        self.assertEqual(values['logo'], 0x7f010003)
+        self.assertEqual(values['banner'], 0x7f010004)
+
     def test_permission_metadata_is_bounded(self):
         manifest = {**self.report['manifest'], 'permissions': ['android.permission.ACCESS_FINE_LOCATION']}
         values = application_metadata(manifest, Path('/app.apk'), Path('/data'))

@@ -4,11 +4,11 @@ import unittest
 from shiraz.manifest import ANDROID, BinaryXml, ManifestError, inspect_manifest
 
 
-def binary_fixture(utf8=True, label_reference=False, service_metadata=False, activity_config=False, launch_mode=None, themes=False):
+def binary_fixture(utf8=True, label_reference=False, service_metadata=False, activity_config=False, launch_mode=None, themes=False, package_metadata=False):
     strings = [ANDROID, 'manifest', 'package', 'sample.app', 'application', 'activity', 'name', '.Main',
                'intent-filter', 'action', 'android.intent.action.MAIN', 'category', 'android.intent.category.LAUNCHER',
                'uses-sdk', 'minSdkVersion', 'label', '@0x7f010001',
-               'service', 'meta-data', 'value', 'resource', '.Worker', 'text_true', 'bool_true', 'negative', 'float_value', 'resource_value', 'true', 'configChanges', 'screenOrientation', 'launchMode', 'theme']
+               'service', 'meta-data', 'value', 'resource', '.Worker', 'text_true', 'bool_true', 'negative', 'float_value', 'resource_value', 'true', 'configChanges', 'screenOrientation', 'launchMode', 'theme', 'icon', 'logo', 'banner', 'sharedUserId', 'test.shared', 'sharedUserLabel', 'revisionCode', 'installLocation']
     def index(value):
         return 0xffffffff if value is None else strings.index(value)
     raw, offsets = b'', []
@@ -40,11 +40,31 @@ def binary_fixture(utf8=True, label_reference=False, service_metadata=False, act
                    ('resource_value', 'resource', (1, 0x7f010001))]
         children = b''.join(node('meta-data', [(ANDROID, 'name', key), (ANDROID, field, value)]) for key, field, value in entries)
         service = node('service', [(ANDROID, 'name', '.Worker')], children)
-    tree = node('manifest', [(None, 'package', 'sample.app')], node('uses-sdk', [(ANDROID, 'minSdkVersion', 24)]) + node('application', [(ANDROID, 'label', (1, 0x7f010001) if label_reference else '@0x7f010001')] + ([(ANDROID, 'theme', (1, 0x7f120001))] if themes else []), children=activity+service))
+    tree = node('manifest', [(None, 'package', 'sample.app')] + ([(ANDROID, 'sharedUserId', 'test.shared'), (ANDROID, 'sharedUserLabel', (1, 0x7f010005)), (ANDROID, 'revisionCode', 3), (ANDROID, 'installLocation', 2)] if package_metadata else []), node('uses-sdk', [(ANDROID, 'minSdkVersion', 24)]) + node('application', [(ANDROID, 'label', (1, 0x7f010001) if label_reference else '@0x7f010001')] + ([(ANDROID, 'theme', (1, 0x7f120001))] if themes else []) + ([(ANDROID, 'icon', (1, 0x7f010002)), (ANDROID, 'logo', (1, 0x7f010003)), (ANDROID, 'banner', (1, 0x7f010004))] if package_metadata else []), children=activity+service))
     return struct.pack('<HHI', 3, 8, 8 + len(pool) + len(tree)) + pool + tree
 
 
 class ManifestTests(unittest.TestCase):
+    def test_binary_package_metadata(self):
+        manifest = inspect_manifest(binary_fixture(package_metadata=True))
+        self.assertEqual(manifest['shared_user_id'], 'test.shared')
+        self.assertEqual(manifest['shared_user_label'], 0x7f010005)
+        self.assertEqual(manifest['revision_code'], 3)
+        self.assertEqual(manifest['install_location'], 2)
+        self.assertEqual(manifest['application_icon'], 0x7f010002)
+        self.assertEqual(manifest['application_logo'], 0x7f010003)
+        self.assertEqual(manifest['application_banner'], 0x7f010004)
+
+    def test_package_identity_and_install_location(self):
+        manifest = inspect_manifest(f'<manifest xmlns:android="{ANDROID}" package="test.app" android:sharedUserId="test.shared" android:revisionCode="3" android:installLocation="preferExternal"><application/></manifest>'.encode())
+        self.assertEqual(manifest['shared_user_id'], 'test.shared')
+        self.assertEqual(manifest['revision_code'], 3)
+        self.assertEqual(manifest['install_location'], 2)
+        self.assertEqual(manifest['shared_user_label'], 0)
+        plain = inspect_manifest(b'<manifest package="test.app"><application/></manifest>')
+        self.assertIsNone(plain['shared_user_id'])
+        self.assertEqual(plain['install_location'], -1)
+
     def test_binary_pools_and_launcher(self):
         for utf8 in (True, False):
             manifest = inspect_manifest(binary_fixture(utf8))

@@ -321,6 +321,11 @@ public final class HostPackageManager extends PackageManager {
         query(packageName, flags);
         PackageInfo info = new PackageInfo();
         info.packageName = name;
+        info.sharedUserId=values.getProperty("sharedUserId");
+        info.sharedUserLabel=resourceId("sharedUserLabel");
+        info.baseRevisionCode=integer("baseRevisionCode",0);
+        info.installLocation=integer("installLocation",-1);
+        if(info.baseRevisionCode<0||info.installLocation< -1||info.installLocation>2)throw new IllegalArgumentException("Package revision/install location");
         info.firstInstallTime=Long.parseLong(values.getProperty("firstInstallTime","0"));info.lastUpdateTime=Long.parseLong(values.getProperty("lastUpdateTime","0"));
         if(info.firstInstallTime<0||info.lastUpdateTime<info.firstInstallTime)throw new IllegalArgumentException("Package timestamps");
         int versionResource = resourceId("versionNameRes");
@@ -350,6 +355,7 @@ public final class HostPackageManager extends PackageManager {
         info.processName = name; info.uid = Process.myUid();
         info.sourceDir = required("sourceDir"); info.publicSourceDir = info.sourceDir; info.dataDir = required("dataDir"); info.nativeLibraryDir = values.getProperty("nativeLibraryDir");
         info.theme=integer("theme",0);
+        info.icon=resourceId("icon");info.logo=resourceId("logo");info.banner=resourceId("banner");
         info.minSdkVersion = integer("minSdk", 1); info.targetSdkVersion = integer("targetSdk", info.minSdkVersion);
         info.enabled = bool("enabled", true);
         info.flags = (bool("debuggable", false) ? ApplicationInfo.FLAG_DEBUGGABLE : 0) | (bool("hasCode", true) ? ApplicationInfo.FLAG_HAS_CODE : 0);

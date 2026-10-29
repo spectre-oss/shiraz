@@ -6,7 +6,11 @@ public class PackageInfo implements Parcelable {
     public String packageName, versionName;
     /** Null for the monolithic APKs currently supported by Shiraz. */
     public String[] splitNames;
-    public int versionCode;
+    public int versionCode, baseRevisionCode, sharedUserLabel;
+    public String sharedUserId;
+    public int installLocation=-1;
+    public int[] splitRevisionCodes;
+    public boolean isApex;
     public long firstInstallTime,lastUpdateTime;
     public ApplicationInfo applicationInfo;
     public Signature[] signatures;
