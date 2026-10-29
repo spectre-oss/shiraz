@@ -45,6 +45,20 @@ def binary_fixture(utf8=True, label_reference=False, service_metadata=False, act
 
 
 class ManifestTests(unittest.TestCase):
+    def test_application_declarations(self):
+        manifest = inspect_manifest(f'<manifest xmlns:android="{ANDROID}" package="test.app" android:compileSdkVersion="35"><supports-screens android:requiresSmallestWidthDp="320"/><application android:backupAgent=".Backup" android:manageSpaceActivity=".Storage" android:appComponentFactory=".Factory" android:permission="test.P" android:process=":worker" android:taskAffinity=":tasks" android:appCategory="productivity" android:uiOptions="splitActionBarWhenNarrow"/></manifest>'.encode())
+        info = manifest['application_info']
+        self.assertEqual(info['backupAgent'], 'test.app.Backup')
+        self.assertEqual(info['manageSpaceActivity'], 'test.app.Storage')
+        self.assertEqual(info['appComponentFactory'], 'test.app.Factory')
+        self.assertEqual(info['processName'], 'test.app:worker')
+        self.assertEqual(info['taskAffinity'], 'test.app:tasks')
+        self.assertEqual(info['permission'], 'test.P')
+        self.assertEqual(info['category'], 7)
+        self.assertEqual(info['uiOptions'], 1)
+        self.assertEqual(info['compileSdkVersion'], 35)
+        self.assertEqual(info['requiresSmallestWidthDp'], 320)
+
     def test_binary_package_metadata(self):
         manifest = inspect_manifest(binary_fixture(package_metadata=True))
         self.assertEqual(manifest['shared_user_id'], 'test.shared')

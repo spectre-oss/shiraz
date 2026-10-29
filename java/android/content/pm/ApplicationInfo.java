@@ -6,6 +6,12 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable {
     public static final int FLAG_DEBUGGABLE = 2, FLAG_HAS_CODE = 4;
     public String className, processName, sourceDir, publicSourceDir, dataDir, nativeLibraryDir;
     public String[] splitSourceDirs, splitPublicSourceDirs;
+    public String backupAgentName, manageSpaceActivityName, appComponentFactory, permission, taskAffinity;
+    public String compileSdkVersionCodename, deviceProtectedDataDir;
+    public String[] sharedLibraryFiles, splitNames;
+    public java.util.UUID storageUuid;
+    public int category=-1, descriptionRes, uiOptions, compileSdkVersion;
+    public int requiresSmallestWidthDp, compatibleWidthLimitDp, largestWidthLimitDp;
     public int theme;
     public int uid, targetSdkVersion, minSdkVersion, flags;
     public boolean enabled;

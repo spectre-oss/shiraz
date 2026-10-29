@@ -352,8 +352,23 @@ public final class HostPackageManager extends PackageManager {
         info.packageName = name;
         if((flags&GET_META_DATA)!=0)info.metaData=componentMetadata("application.");
         info.className = values.getProperty("applicationClass"); info.name = info.className;
-        info.processName = name; info.uid = Process.myUid();
+        info.processName = values.getProperty("applicationInfo.processName",name); info.uid = Process.myUid();
+        info.backupAgentName=values.getProperty("applicationInfo.backupAgent");
+        info.manageSpaceActivityName=values.getProperty("applicationInfo.manageSpaceActivity");
+        info.appComponentFactory=values.getProperty("applicationInfo.appComponentFactory");
+        info.permission=values.getProperty("applicationInfo.permission");
+        info.taskAffinity=values.getProperty("applicationInfo.taskAffinity",name);
+        info.descriptionRes=resourceId("applicationInfo.descriptionRes");
+        info.uiOptions=integer("applicationInfo.uiOptions",0);info.category=integer("applicationInfo.category",-1);
+        info.compileSdkVersion=integer("applicationInfo.compileSdkVersion",0);
+        info.compileSdkVersionCodename=values.getProperty("applicationInfo.compileSdkVersionCodename");
+        info.requiresSmallestWidthDp=integer("applicationInfo.requiresSmallestWidthDp",0);
+        info.compatibleWidthLimitDp=integer("applicationInfo.compatibleWidthLimitDp",0);
+        info.largestWidthLimitDp=integer("applicationInfo.largestWidthLimitDp",0);
         info.sourceDir = required("sourceDir"); info.publicSourceDir = info.sourceDir; info.dataDir = required("dataDir"); info.nativeLibraryDir = values.getProperty("nativeLibraryDir");
+        // Device-protected Context currently uses the same app storage on Linux.
+        info.deviceProtectedDataDir=info.dataDir;
+        info.storageUuid=android.os.storage.StorageManager.UUID_DEFAULT;
         info.theme=integer("theme",0);
         info.icon=resourceId("icon");info.logo=resourceId("logo");info.banner=resourceId("banner");
         info.minSdkVersion = integer("minSdk", 1); info.targetSdkVersion = integer("targetSdk", info.minSdkVersion);

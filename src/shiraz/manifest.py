@@ -342,7 +342,24 @@ def inspect_manifest(data):
             providers.append({'name': name, 'filters': activity_filters(provider), 'authorities': attr(provider, 'authorities'), 'enabled': attr(provider, 'enabled'),
                               'exported': attr(provider, 'exported'), 'grantUriPermissions': attr(provider, 'grantUriPermissions'), 'multiprocess': attr(provider, 'multiprocess'), 'initOrder': attr(provider, 'initOrder'), 'metadata': component_metadata(provider),
                               'process': attr(provider, 'process') or attr(app, 'process') or package})
-    return {'shared_user_id': attr(root, 'sharedUserId'),
+    screens = root.find('supports-screens')
+    application_info = {}
+    if app is not None:
+        for field in ('backupAgent', 'manageSpaceActivity', 'appComponentFactory'):
+            application_info[field] = qualify(attr(app, field))
+        application_info['permission'] = attr(app, 'permission')
+        process = attr(app, 'process') or package
+        application_info['processName'] = package + process if process.startswith(':') else process
+        affinity = attr(app, 'taskAffinity')
+        application_info['taskAffinity'] = package if affinity is None else (package + affinity if affinity.startswith(':') else affinity)
+        application_info['descriptionRes'] = references.get((id(app), '{' + ANDROID + '}description'), 0)
+        application_info['uiOptions'] = enum_value(app, 'uiOptions', {'none': 0, 'splitActionBarWhenNarrow': 1}, 0)
+        application_info['category'] = enum_value(app, 'appCategory', {'game': 0, 'audio': 1, 'video': 2, 'image': 3, 'social': 4, 'news': 5, 'maps': 6, 'productivity': 7, 'accessibility': 8}, -1)
+    for field in ('requiresSmallestWidthDp', 'compatibleWidthLimitDp', 'largestWidthLimitDp'):
+        application_info[field] = enum_value(screens, field, {}, 0) if screens is not None else 0
+    application_info['compileSdkVersion'] = enum_value(root, 'compileSdkVersion', {}, 0)
+    application_info['compileSdkVersionCodename'] = attr(root, 'compileSdkVersionCodename')
+    return {'application_info': application_info, 'shared_user_id': attr(root, 'sharedUserId'),
             'shared_user_label': references.get((id(root), '{' + ANDROID + '}sharedUserLabel'), 0),
             'revision_code': enum_value(root, 'revisionCode', {}, 0),
             'install_location': enum_value(root, 'installLocation', {'auto': 0, 'internalOnly': 1, 'preferExternal': 2}, -1),

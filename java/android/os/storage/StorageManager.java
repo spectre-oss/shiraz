@@ -8,6 +8,8 @@ import shiraz.runtime.HostStorage;
 
 /** Reports Shiraz's existing app-scoped primary volume; no host disk enumeration. */
 public class StorageManager {
+    /** Android API identifier for default internal storage, not a device identity. */
+    public static final java.util.UUID UUID_DEFAULT=java.util.UUID.fromString("41217664-9172-527a-b3d5-edabb50a7d69");
     private final HostStorage storage;
     private final StorageVolume primary;
     private StorageManager(HostStorage storage) {

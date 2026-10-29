@@ -54,9 +54,21 @@
    next stops at missing `ApplicationInfo.backupAgentName`. These declaration
    fields do not implement Android shared-UID isolation or backup services.
 
+10. Added application declaration metadata for backup/manage-space/factory
+    class names, permission, process name, task affinity, category, UI options,
+    compile SDK, and screen-width limits. Values pass from manifest parsing
+    through launcher metadata into ApplicationInfo; backup services are not
+    implemented by these fields. The existing device-protected Context uses
+    the same app directory, which is reflected in its metadata. The unchanged
+    APK passes the missing fields and reaches the home screen, but package
+    inventory dereferences a null storage UUID. Reporting Android's standard
+    default-internal-storage UUID fixes that failure; the next retest stops
+    at missing `ApplicationInfo.isVirtualPreload()`. VM parser, transfer, and
+    package-query regressions cover the added metadata.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The signing-query flag failure is fixed, but background package inventory now
-fails on missing `ApplicationInfo.backupAgentName`. App installation,
+fails on missing `ApplicationInfo.isVirtualPreload()`. App installation,
 updates, certificate handling, app-list persistence, and complete plugin behavior
 are not verified. Do not infer that every Flutter app works from this result.

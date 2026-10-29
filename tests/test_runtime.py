@@ -159,6 +159,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(values['targetSdk'], '27')
         self.assertEqual(values['versionCode'], '0')
 
+    def test_application_declaration_transfer(self):
+        values = application_metadata({**self.report['manifest'], 'application_info': {'backupAgent': 'test.Backup', 'category': 7, 'processName': 'test:worker', 'unexpected': 'ignored'}}, Path('/app.apk'), Path('/data'))
+        self.assertEqual(values['applicationInfo.backupAgent'], 'test.Backup')
+        self.assertEqual(values['applicationInfo.category'], 7)
+        self.assertEqual(values['applicationInfo.processName'], 'test:worker')
+        self.assertNotIn('applicationInfo.unexpected', values)
+
     def test_package_manifest_identity_metadata(self):
         manifest = {**self.report['manifest'], 'shared_user_id': 'test.shared',
                     'shared_user_label': 0x7f010001, 'revision_code': 3, 'install_location': 2,

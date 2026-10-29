@@ -38,8 +38,12 @@ public final class InstallerSmoke {
   check(manager.getPackageInfo("test.signer",0).signingInfo==null,"unrequested signing metadata");
   facts.setProperty("sharedUserId","test.shared");facts.setProperty("sharedUserLabel","2130771969");facts.setProperty("baseRevisionCode","3");facts.setProperty("installLocation","2");
   facts.setProperty("icon","2130771970");facts.setProperty("logo","2130771971");facts.setProperty("banner","2130771972");
+  facts.setProperty("applicationInfo.backupAgent","test.Backup");facts.setProperty("applicationInfo.category","7");facts.setProperty("applicationInfo.processName","test:worker");
   metadata=new shiraz.runtime.HostPackageManager(facts,new ContextWrapper(null)).getPackageInfo("test.signer",0);
   check("test.shared".equals(metadata.sharedUserId)&&metadata.sharedUserLabel==0x7f010001&&metadata.baseRevisionCode==3&&metadata.installLocation==2,"manifest identity fields");
+  check("test.Backup".equals(metadata.applicationInfo.backupAgentName)&&metadata.applicationInfo.category==7&&"test:worker".equals(metadata.applicationInfo.processName),"application declaration fields");
+  check(android.os.storage.StorageManager.UUID_DEFAULT.equals(metadata.applicationInfo.storageUuid),"default app storage identity");
+  check(root.getPath().equals(metadata.applicationInfo.deviceProtectedDataDir),"same app storage context");
   check(metadata.applicationInfo.icon==0x7f010002&&metadata.applicationInfo.logo==0x7f010003&&metadata.applicationInfo.banner==0x7f010004,"application image resource IDs");
   check(metadata.splitNames==null&&metadata.splitRevisionCodes==null&&!metadata.isApex,"monolithic APK metadata");
   apk.putLong(0,1);Files.write(file.toPath(),apk.array());try{method.invoke(null,file.getPath());throw new AssertionError("corrupt signing size accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof IllegalStateException,"wrong malformed signer failure");}file.delete();

@@ -202,6 +202,8 @@ def application_metadata(manifest, apk, data):
             'sourceDir': str(apk), 'dataDir': str(data), 'label': manifest.get('application_label'),
             'enabled': manifest.get('application_enabled'), 'debuggable': manifest.get('application_debuggable'),
             'hasCode': manifest.get('application_has_code')}
+    for field in ('backupAgent', 'manageSpaceActivity', 'appComponentFactory', 'permission', 'processName', 'taskAffinity', 'descriptionRes', 'uiOptions', 'category', 'requiresSmallestWidthDp', 'compatibleWidthLimitDp', 'largestWidthLimitDp', 'compileSdkVersion', 'compileSdkVersionCodename'):
+        values['applicationInfo.' + field] = manifest.get('application_info', {}).get(field)
     metadata = manifest.get('application_metadata', [])
     if len(metadata) > 128:
         raise FormatError('Application metadata limit')
