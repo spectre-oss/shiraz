@@ -1464,3 +1464,10 @@ content-file-smoke: framework build/libshiraz-host.so
 	javac --release 8 -cp build/framework/classes -d build/content-file-smoke tests/java/ContentFileSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/content-file-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ContentFileSmoke
 check: content-file-smoke
+
+.PHONY: documents-uri-smoke
+documents-uri-smoke: framework
+	mkdir -p build/documents-uri-smoke
+	javac --release 8 -cp build/framework/classes -d build/documents-uri-smoke tests/java/DocumentsUriSmoke.java
+	$(JAVA) -cp build/documents-uri-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar DocumentsUriSmoke
+check: documents-uri-smoke

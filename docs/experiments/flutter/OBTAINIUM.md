@@ -240,6 +240,15 @@
     result, not an Obtainium export result: selection UI, tree-provider support
     and persisted grants are still missing.
 
+28. Inspected the app's document-tree bridge and its pinned
+    [shared-storage plugin](https://github.com/AlexBacich/shared-storage/tree/6dbcdf2c2045e326f59c062f542724aedf73cb6e).
+    Added the missing `DocumentsContract` URI construction/parsing layer needed
+    by that path. Tests cover escaped IDs containing slashes, Unicode and percent
+    signs, preservation of tree scope in child queries, search encoding and
+    invalid URI shapes. URI construction does not authorize filesystem access.
+    This is preparation for the provider/picker implementation; no additional
+    Obtainium workflow is claimed to pass from these helpers alone.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full
