@@ -19,6 +19,7 @@ public class WebView extends FrameLayout {
  private final TextView body;
  private String url="";
  private int progress;
+ private String title;
  private FindListener findListener;
  private WebViewClient client;
  private WebChromeClient chrome;
@@ -42,22 +43,33 @@ public class WebView extends FrameLayout {
  public void loadUrl(String url){
   this.url=url==null?"":url;
   progress=0;
+  title=null;
   if(client!=null)client.onPageStarted(this,this.url,null);
   CharSequence page=fetch(this.url);
   show(page);
   progress=100;
   if(client!=null)client.onPageFinished(this,this.url);
-  if(chrome!=null)chrome.onProgressChanged(this,100);
+  if(chrome!=null){chrome.onProgressChanged(this,100);if(title!=null)chrome.onReceivedTitle(this,title);}
  }
  public void loadData(String data,String mimeType,String encoding){loadDataWithBaseURL(null,data,mimeType,encoding,null);}
  public void loadDataWithBaseURL(String baseUrl,String data,String mimeType,String encoding,String historyUrl){
   url=historyUrl==null?(baseUrl==null?"":baseUrl):historyUrl;
   progress=0;
+  title=null;
   if(client!=null)client.onPageStarted(this,url,null);
-  show(plain(data));
+  show(htmlContent(data));
   progress=100;
   if(client!=null)client.onPageFinished(this,url);
-  if(chrome!=null){chrome.onProgressChanged(this,100);chrome.onReceivedTitle(this,url);}
+  if(chrome!=null){chrome.onProgressChanged(this,100);if(title!=null)chrome.onReceivedTitle(this,title);}
+ }
+ /** Static HTML metadata only; script-driven document titles require a web engine. */
+ private CharSequence htmlContent(String html){
+  if(html!=null){
+   String metadata=html.replaceAll("(?is)<!--.*?-->|<script\\b[^>]*>.*?</script\\s*>|<style\\b[^>]*>.*?</style\\s*>","");
+   java.util.regex.Matcher match=java.util.regex.Pattern.compile("(?is)<title\\b[^>]*>(.*?)</title\\s*>").matcher(metadata);
+   if(match.find())title=plain(match.group(1)).toString().replaceAll("[\\t\\n\\r\\f ]+"," ").trim();
+  }
+  return plain(html);
  }
  private void show(CharSequence text){body.setText(text==null?"":text);}
  private CharSequence fetch(String target){
@@ -67,7 +79,7 @@ public class WebView extends FrameLayout {
    try{
     byte[] bytes=readAsset(asset);
     Charset charset=charsetOf(null);
-    return plain(new String(bytes,charset));
+    return htmlContent(new String(bytes,charset));
    }catch(Exception error){
     System.err.println("SHIRAZ_WEBVIEW_ASSET_FAILED "+asset+" "+error.getMessage());
     return target;
@@ -80,7 +92,7 @@ public class WebView extends FrameLayout {
     String payload=target.substring(comma+1);
     try{
      byte[] bytes=meta.toLowerCase().contains(";base64")?java.util.Base64.getDecoder().decode(payload):payload.getBytes(StandardCharsets.UTF_8);
-     return plain(new String(bytes,charsetOf(meta)));
+     return htmlContent(new String(bytes,charsetOf(meta)));
     }catch(RuntimeException error){return target;}
    }
   }
@@ -178,6 +190,7 @@ public class WebView extends FrameLayout {
   if(name.startsWith("#"))try{return new String(Character.toChars(Integer.parseInt(name.substring(1))));}catch(RuntimeException error){return "&"+name+";";}
   return "&"+name+";";
  }
+ public String getTitle(){return title;}
  public int getProgress(){return progress;}
  public String getUrl(){return url;}
  public void stopLoading(){}

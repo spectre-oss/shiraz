@@ -34,6 +34,13 @@ public final class WebViewProgressSmoke {
   view.loadDataWithBaseURL("about:blank","<p>Local content</p>","text/html","UTF-8",null);
   view.loadUrl("data:text/html,<p>Second load</p>");
   if(starts[0]!=2||finishes[0]!=2||notifications[0]!=2)throw new AssertionError("callback counts");
+  if(view.getTitle()!=null)throw new AssertionError("absent title");
+  view.loadData("<!-- <title>Wrong</title> --><TITLE> A &amp; B </TITLE><p>Body</p>","text/html","UTF-8");
+  if(!"A & B".equals(view.getTitle()))throw new AssertionError("HTML title");
+  view.loadUrl("data:text/html,<title>Second</title>");
+  if(!"Second".equals(view.getTitle()))throw new AssertionError("URL title");
+  view.loadData("<script>var x='<title>Fake</title>';</script><p>No title</p>","text/html","UTF-8");
+  if(view.getTitle()!=null)throw new AssertionError("stale/script title");
   view.destroy();
   System.out.println("WEBVIEW_PLACEHOLDER_PROGRESS_OK");
  }

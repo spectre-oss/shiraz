@@ -109,6 +109,14 @@
     `WebView.getTitle()`. This is API initialization progress only: no browser
     engine or working body editor is established.
 
+25. Added static HTML title metadata to the placeholder WebView, including
+    `getTitle()`, title callbacks, entity decoding, and reset on navigation.
+    The VM regression verifies data/URL titles and excludes titles inside
+    comments or script bodies; dynamic JavaScript titles remain unsupported.
+    The unchanged APK passes the former title-method failure. Opening the
+    editor next fails in TextView with “Line-height spans with transformed or
+    ellipsized text.” No body-editing success is claimed.
+
 ## Acceptance still required
 
 Open the app, create and edit an offline note, navigate away and back, and verify
