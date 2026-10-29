@@ -302,7 +302,7 @@ EGLBoolean destroySurface(EGLDisplay display, EGLSurface surface) {
 }
 }
 /** Android's framebuffer 0 is the window; here the window is the shim framebuffer of the current context. */
-extern "C" void glBindFramebuffer(GLenum target, GLuint framebuffer) {
+static void bindWindowFramebuffer(GLenum target, GLuint framebuffer) {
     BindFramebuffer bind = realBindFramebuffer();
     if (!bind) return;
     // Engines may cache the window FBO returned by GL_FRAMEBUFFER_BINDING.
@@ -317,6 +317,9 @@ extern "C" void glBindFramebuffer(GLenum target, GLuint framebuffer) {
     }
     bind(target, framebuffer);
 }
+extern "C" void glBindFramebuffer(GLenum target, GLuint framebuffer) { bindWindowFramebuffer(target,framebuffer); }
+// Native library handles otherwise resolve this directly from the host GLES library.
+extern "C" void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer) { bindWindowFramebuffer(target,framebuffer); }
 extern "C" __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char* name) {
     if (!name) return nullptr;
     if (std::strcmp(name, "eglGetDisplay") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(eglGetDisplay);
@@ -333,7 +336,7 @@ extern "C" __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char
     if (std::strcmp(name, "eglQuerySurface") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(querySurface);
     if (std::strcmp(name, "eglDestroySurface") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(destroySurface);
     if (std::strcmp(name, "eglGetCurrentSurface") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(currentSurface);
-    if (std::strcmp(name, "glBindFramebuffer") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(glBindFramebuffer);
+    if (std::strcmp(name, "glBindFramebuffer") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(bindWindowFramebuffer);
     if (std::strcmp(name, "eglSetDamageRegionKHR") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(setDamageRegion);
     if (std::strcmp(name, "eglSwapBuffersWithDamageKHR") == 0 || std::strcmp(name, "eglSwapBuffersWithDamageEXT") == 0) return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(swapWithDamage);
     Proc next = realProc();

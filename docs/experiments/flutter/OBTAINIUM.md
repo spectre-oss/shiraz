@@ -178,11 +178,20 @@
     is the next investigation; the startup improvement in step 20 was a bounded
     observation, not proof that every white-frame path was fixed.
 
+22. Added the loader's `bionic_glBindFramebuffer` override and made
+    `eglGetProcAddress` return an internal adapter function, avoiding host symbol
+    interposition. VM EGL regressions exercise both routes with zero and cached
+    framebuffer bindings across repeated resizes; full checks pass. The unchanged
+    APK now renders startup and saved-entry details, relayouts in landscape,
+    responds to Back there, and returns to a rendered portrait app list. This
+    verifies the previously failing saved-entry resize/navigation sequence.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full
 compatibility pass.** Package metadata and icon-query missing-method failures
-are passed. Adaptive-icon XML remains unsupported, and the saved-entry resize
-flow produced a persistent white surface. Installation, updates, certificate
+are passed. The saved-entry landscape/portrait resize and navigation sequence
+now works after GL routing fixes. Adaptive-icon XML remains unsupported.
+Installation, updates, certificate
 verification, and complete plugin behavior are not verified. Do not infer that
 every Flutter app works from this result.
