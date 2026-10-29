@@ -524,6 +524,9 @@ public final class ActivityRunner {
                                     }finally{ViewDiagnostics.layoutPass(false);}
                                     if(dumpAfterLayout){dumpAfterLayout=false;ViewDiagnostics.dump(view,System.err);DialogOverlay.dumpVisible(System.err);}
                                 }
+                                // A newly laid-out window needs an initial keyboard target.
+                                // Preserve app-selected focus and avoid focusing behind modal windows.
+                                if(changed&&!touchMode&&!modalFocus&&!view.hasFocus())view.restoreDefaultFocus();
                                 long laidOut=measureFrames?System.nanoTime():0;
                                 android.widget.PopupWindow.shirazWindowState(hostFocused,hostVisible,touchMode);
                                 long overlays = context.capture.revision()+ToastOverlay.revision()+TooltipOverlay.revision()+android.widget.PopupWindow.shirazRevision(width,height), dialogs=DialogOverlay.revision();

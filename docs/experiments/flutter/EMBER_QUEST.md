@@ -1,6 +1,6 @@
 # Ember Quest — Flutter / Flame
 
-Status: **scene and menu render; gameplay input under investigation**.
+Status: **scene, menu, keyboard movement/jump and loss/retry verified; broader gameplay remains under test**.
 
 ## Artifact
 
@@ -34,14 +34,25 @@ Play dismisses the menu and the animated scene remains. This differs from
 launching in portrait and then resizing to landscape, which leaves the player
 partly below the window edge. Resize compatibility remains unresolved.
 
-The displayed controls are WASD/arrows and Space. Holding Right for two seconds,
-including after a Tab attempt, did not visibly move the player. The opt-in view
-dump now includes focus state and focus eligibility. After clicking Play, the
-Flutter view is focusable, including in touch mode, but is not focused; none of
-the four reported views has focus. This is a lead for investigating keyboard
-dispatch, not a verified input fix.
+## Keyboard focus fix
 
-Movement, jumping, collection, loss/retry, persistence, audio and portrait
-usability remain unverified. Earlier bounded runs closed normally. These results
-were observed with the unchanged APK on the separate VM; rendering a scene does
-not establish playable gameplay.
+The displayed controls are WASD/arrows and Space. Initially holding Right,
+including after a Tab attempt, did not move the player. Opt-in view diagnostics
+showed the Flutter view was focusable in touch mode but had no focus.
+
+Shiraz now assigns default focus after the first layout of a new root when
+outside touch mode, provided the app has not already chosen focus and no modal
+window is active. This follows the initial-focus behavior in Android's
+[ViewRootImpl](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/view/ViewRootImpl.java).
+It does not force focus on every frame or change the APK.
+
+With the fix, the VM trace reports the Flutter view focused. Real input moves
+the player right and left; Space plus Right produces a visible jump and
+horizontal movement. Enemy encounters reach Game Over, and clicking Play Again
+restores the scene and three hearts. These interactions do not establish full
+level completion or correct collision timing. A thin focus outline is visible
+around the game surface after focus is assigned.
+
+Collection, progression, persistence, audio and portrait usability remain
+unverified. Portrait-to-landscape clipping remains unresolved. The tested run
+closed normally. All app execution used the unchanged APK on the separate VM.
