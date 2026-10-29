@@ -37,6 +37,37 @@ public final class HostConnectivity {
         }
     }
 
+    public static android.net.LinkProperties linkProperties(){
+        android.os.StrictMode.ThreadPolicy old=android.os.StrictMode.allowThreadDiskReads();
+        try{return resolver(text(new File("/etc/resolv.conf")));}
+        catch(IOException error){throw new IllegalStateException("Cannot read host resolver configuration",error);}
+        finally{android.os.StrictMode.setThreadPolicy(old);}
+    }
+    // Parses numeric servers only; metadata collection must not perform DNS lookups.
+    static android.net.LinkProperties resolver(String contents)throws IOException{
+        if(contents.length()>65536)throw new IOException("Resolver configuration limit");
+        android.net.LinkProperties result=new android.net.LinkProperties();
+        for(String line:contents.split("\\n")){
+            line=line.split("[#;]",2)[0].trim();if(line.isEmpty())continue;
+            String[] words=line.split("\\s+");
+            if(words[0].equals("nameserver")&&words.length>=2){
+                String address=words[1];java.net.InetAddress parsed;
+                if(address.indexOf(':')>=0&&address.matches("[0-9a-fA-F:.]+(%[a-zA-Z0-9_.-]+)?"))parsed=java.net.InetAddress.getByName(address);
+                else{
+                    String[] octets=address.split("\\.",-1);if(octets.length!=4)throw new IOException("Non-numeric resolver address");byte[] bytes=new byte[4];
+                    for(int i=0;i<4;i++){if(!octets[i].matches("[0-9]{1,3}"))throw new IOException("Invalid resolver address");int value=Integer.parseInt(octets[i]);if(value>255)throw new IOException("Invalid resolver octet");bytes[i]=(byte)value;}
+                    parsed=java.net.InetAddress.getByAddress(bytes);
+                }
+                if(result.getDnsServers().size()>=32)throw new IOException("Resolver server count");result.addDnsServer(parsed);
+            }else if((words[0].equals("search")||words[0].equals("domain"))&&words.length>=2){
+                StringBuilder domains=new StringBuilder();int count=words[0].equals("domain")?2:words.length;
+                for(int i=1;i<count;i++){if(domains.length()>0)domains.append(' ');domains.append(words[i]);}
+                result.setDomains(domains.toString());
+            }
+        }
+        return result;
+    }
+
     /** Whether a wireless interface is administratively up; no scan or network identifiers. */
     public static boolean wifiEnabled(){if(DeviceProfile.selected()){HostAppInstaller.recordAccess("connectivity:wifiEnabled");return Boolean.parseBoolean(DeviceProfile.get("wifi.enabled","false"));}android.os.StrictMode.ThreadPolicy old=android.os.StrictMode.allowThreadDiskReads();try{return wifiEnabled(new File("/sys/class/net"));}catch(IOException error){throw new IllegalStateException("Cannot read Wi-Fi interface status",error);}finally{android.os.StrictMode.setThreadPolicy(old);}}
     static boolean wifiEnabled(File sysNet)throws IOException{

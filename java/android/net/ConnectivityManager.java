@@ -32,6 +32,7 @@ public final class ConnectivityManager {
         public void onLost(Network network) {}
         public void onUnavailable() {}
         public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {}
+        public void onLinkPropertiesChanged(Network network, LinkProperties properties) {}
         public void onBlockedStatusChanged(Network network, boolean blocked) {}
     }
 
@@ -42,6 +43,7 @@ public final class ConnectivityManager {
         NetworkInfo info = getActiveNetworkInfo();
         return info != null && info.isConnected() ? info : null;
     }
+    public Network[] getAllNetworks(){Network network=getActiveNetwork();return network==null?new Network[0]:new Network[]{network};}
     public Network getActiveNetwork() { return connected() == null ? null : HOST_NETWORK; }
     public NetworkInfo getNetworkInfo(Network network) { return network == null ? null : connected(); }
     public NetworkCapabilities getNetworkCapabilities(Network network) {
@@ -49,6 +51,7 @@ public final class ConnectivityManager {
         if (info == null) return null;
         return NetworkCapabilities.shirazHost(info.getType() == TYPE_WIFI ? NetworkCapabilities.TRANSPORT_WIFI : info.getType() == TYPE_MOBILE ? NetworkCapabilities.TRANSPORT_CELLULAR : NetworkCapabilities.TRANSPORT_ETHERNET);
     }
+    public LinkProperties getLinkProperties(Network network){return !HOST_NETWORK.equals(network)||connected()==null?null:shiraz.runtime.HostConnectivity.linkProperties();}
     public boolean isActiveNetworkMetered() { return false; }
     public void registerNetworkCallback(NetworkRequest request, NetworkCallback callback) { register(callback); }
     public void registerDefaultNetworkCallback(NetworkCallback callback) { register(callback); }
@@ -60,6 +63,7 @@ public final class ConnectivityManager {
         if (network != null) {
             callback.onAvailable(network);
             callback.onCapabilitiesChanged(network, getNetworkCapabilities(network));
+            callback.onLinkPropertiesChanged(network, getLinkProperties(network));
         }
     }
     public void unregisterNetworkCallback(NetworkCallback callback) {

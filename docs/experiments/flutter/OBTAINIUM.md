@@ -106,11 +106,21 @@
     Initialization next fails on `ConnectivityManager.getLinkProperties(Network)`
     while querying DNS status. No completed release retrieval is claimed.
 
+15. Added host resolver snapshots for `getLinkProperties`, including numeric
+    IPv4/IPv6 DNS servers and search domains, plus default-network enumeration
+    through `getAllNetworks`. There is no Android-managed Private DNS service.
+    VM regressions cover parsing, malformed input, immutable snapshots, and
+    unknown networks; the full check suite passes. Repeating Add in the
+    unchanged APK passes both queries. Cronet next stops at the missing
+    handler-based `registerNetworkCallback` overload. Release retrieval remains
+    unverified.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The
 previous package-metadata failure sequence is passed. Adding an upstream URL
-now loads Cronet but fails on the missing network link-properties query. App
+now loads Cronet and reads network resolver metadata, but fails on the missing
+handler-based network callback registration. App
 installation, updates, certificate verification, app-list persistence, and
 complete plugin behavior are not verified. Do not infer that every Flutter
 app works from this result.
