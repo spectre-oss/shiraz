@@ -76,7 +76,17 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_shiraz_runtime_NativePlayback_decod
  SF_VIRTUAL_IO io={audioLength,audioSeek,audioRead,audioWrite,audioTell};SF_INFO info={};
  std::unique_ptr<SNDFILE,decltype(&sf_close)> decoder(sf_open_virtual(&io,SFM_READ,&info,&file),sf_close);
  if(!decoder||info.channels<1||info.channels>2||info.samplerate<8000||info.samplerate>192000||info.frames<1||info.frames>32*1024*1024/info.channels)throw std::invalid_argument("Unsupported audio format or decoded size");
- std::vector<short> samples(info.frames*info.channels);sf_count_t frames=sf_readf_short(decoder.get(),samples.data(),info.frames);if(frames!=info.frames||sf_error(decoder.get()))throw std::runtime_error("Truncated audio asset");
+ std::vector<short> samples(info.frames*info.channels);sf_count_t frames=0;
+ while(frames<info.frames){
+  sf_count_t count=sf_readf_short(decoder.get(),samples.data()+frames*info.channels,info.frames-frames);
+  if(count<=0){
+   // Headerless MPEG duration is an estimate; retain only decoded frames at clean EOF.
+   if(count==0&&frames>0&&(info.format&SF_FORMAT_TYPEMASK)==SF_FORMAT_MPEG&&sf_error(decoder.get())==SF_ERR_NO_ERROR){samples.resize(frames*info.channels);break;}
+   throw std::runtime_error("Truncated audio asset");
+  }
+  frames+=count;
+ }
+ short extra[2];if(sf_readf_short(decoder.get(),extra,1)!=0||sf_error(decoder.get())!=SF_ERR_NO_ERROR)throw std::runtime_error("Audio asset frame count mismatch");
  std::vector<jbyte> pcm(samples.size()*2);for(size_t i=0;i<samples.size();++i){pcm[2*i]=samples[i]&255;pcm[2*i+1]=(uint16_t(samples[i])>>8)&255;}
  jint values[]={info.samplerate,info.channels};env->SetIntArrayRegion(format,0,2,values);jbyteArray out=env->NewByteArray(pcm.size());if(out)env->SetByteArrayRegion(out,0,pcm.size(),pcm.data());return out;
 });}

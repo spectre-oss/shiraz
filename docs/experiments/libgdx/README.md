@@ -5,7 +5,8 @@ input devices, window lifecycle, and EGL/GLES behavior can fail independently.
 
 - [Unciv](UNCIV.md): offline unit actions, city founding, six turns through
   research and Worker completion, restart persistence, and responsive resizing.
-  Rendering and audio limitations remain documented.
+  Downloaded music and pause/resume produce PCM in a VM file sink; rendering
+  limitations, physical audio output and timing remain open.
 
 Verify a rendered menu, a user-selected game flow, and input-driven state changes
 before describing a game as playable.

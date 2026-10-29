@@ -1490,3 +1490,9 @@ host-documents-smoke: framework build/libshiraz-host.so
 	javac --release 8 -cp build/framework/classes -d build/host-documents-smoke tests/java/HostDocumentsSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/host-documents-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar HostDocumentsSmoke
 check: host-documents-smoke
+
+.PHONY: media-file-smoke
+media-file-smoke: framework build/libshiraz-playback.so audio-mpeg-smoke
+	mkdir -p build/media-file-smoke
+	javac --release 8 -cp build/framework/classes -d build/media-file-smoke tests/java/MediaFileDecodeSmoke.java
+	$(JAVA) -Djava.library.path=build -cp build/media-file-smoke:build/framework/classes MediaFileDecodeSmoke build/audio-mpeg-smoke

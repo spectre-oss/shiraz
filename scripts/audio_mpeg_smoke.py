@@ -20,6 +20,7 @@ for name, header in [('estimated', '0'), ('indexed', '1')]:
         'ffmpeg', '-v', 'error', '-i', str(encoded), '-f', 'f32le',
         '-acodec', 'pcm_f32le', '-ac', '1', '-',
     ], check=True, capture_output=True, timeout=20).stdout
+    (work / (name + '.frames')).write_text(str(len(reference) // 4))
     result = subprocess.run([str(ROOT / 'build/test-audio'), str(encoded)],
                             capture_output=True, text=True, timeout=20)
     (work / (name + '.log')).write_text(result.stdout + result.stderr)

@@ -54,6 +54,19 @@
    in that walkthrough; the direct asset probe is the evidence for this specific
    decode fix. Longer effects exceeding the decoded-size limit remain unsupported.
 
+9. Used an ALSA file sink on the VM to separate missing hardware from playback
+   failures. Options → Sound → Download music downloaded the app's track, but
+   its separate `MediaPlayer` decoder rejected an estimated MPEG frame count as
+   a truncated asset. Applied clean-EOF handling to that PCM16 decoder too,
+   retaining bounds and error checks. The native Java regression fails against
+   the old library and passes on both OpenJDK and ART after the fix, matching
+   FFmpeg reference frame counts for indexed and nonindexed MP3 files.
+   After deployment, the unchanged app displays the track as playing and writes
+   stereo PCM to the file sink. Pause stops file growth; Play resumes it. Both
+   sound-effect and music captures contain finite, nonzero samples. No playback
+   or truncated-asset error appears in this retest. This establishes the tested
+   file-sink path, not speaker output, accurate timing, or audio/video sync.
+
 ## Observed walkthrough
 
 - Selected English, opened Quickstart, and dismissed tutorial/leader dialogs.
@@ -80,12 +93,14 @@
   created an autosave.
 
 **Interactive offline gameplay observed; partial compatibility.** The bounded
-walkthrough does not establish a complete campaign, multiplayer, mods, or audio.
+walkthrough does not establish a complete campaign, multiplayer, mods, or
+speaker playback.
 The VM has no audio output device. A direct tile tap briefly left the map blank;
 the Explore action restored it. This rendering issue remains under investigation.
 Six-turn progression, research completion and Worker production are verified;
-longer campaigns remain untested. A handled `MediaPlayer not prepared` error
-also appeared during music resume; music playback remains unresolved.
+longer campaigns remain untested. Earlier music resume/decoding errors were
+recorded above; the latest file-sink run verifies downloaded music playback
+and pause/resume, while physical output and timing remain unverified.
 
 The GLES20 bridge is a subset: client vertex-array buffers and several less-used
 entry points remain unsupported. These observations apply to this APK and the
