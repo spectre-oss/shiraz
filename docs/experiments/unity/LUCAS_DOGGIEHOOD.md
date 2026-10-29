@@ -101,6 +101,24 @@
     The game still requests self-termination with signal 9, which the runner
     currently reports as a failed process; orderly runner cleanup is not claimed.
 
-**Interactive scene, camera drag, and multitouch zoom verified.** Collider
-warnings still appear. Remaining checks include progress/save persistence,
-native resize behavior, and reporting of app-requested process termination.
+19. Later repeat launches exposed intermittent startup stalls after the splash.
+    Comparing EGL adapter revisions initially suggested a graphics regression,
+    but repeated runs with the intermediate and current adapters rendered the
+    neighborhood successfully when tracing was enabled. That is not proof of
+    a fix or a deterministic adapter regression. A stalled-run thread snapshot
+    showed the Unity loader waiting; the startup cause remains unresolved.
+    Stalled runs also reproduced pause/detach timeouts on close, so step 18's
+    successful lifecycle observation does not cover every startup state.
+
+20. On a successful current-adapter run, resizing from 640×360 to 800×450 kept
+    the scene animated. At 360×640 the scene stretched instead of adjusting its layout;
+    pressing the visible Settings button, including a held press/release, did
+    not open the panel. Returning to 640×360 restored the normal image and a
+    press on Settings opened the panel. This verifies a recoverable resize/input
+    limitation, not responsive portrait support. The APK remained unchanged.
+
+**Interactive scene, camera drag, and multitouch zoom verified in successful
+runs; startup is intermittent.** Collider warnings still appear. Portrait
+resizing stretches the scene and Settings input fails until landscape is
+restored. Progress/save persistence, startup reliability, responsive resizing,
+and reporting of app-requested process termination remain open.
