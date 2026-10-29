@@ -2,6 +2,7 @@
 #include "shiraz/audio.hpp"
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -22,6 +23,21 @@ std::vector<std::uint8_t> wave() {
     number(48000, 4); number(96000, 4); number(2, 2); number(16, 2); text("data"); number(8, 4);
     number(0, 2); number(8192, 2); number(16384, 2); number(0xe000, 2); return result;
 }
+std::vector<std::uint8_t> floatWave(const std::vector<float>& samples) {
+    auto result = wave(); result.resize(44);
+    auto number = [&](std::size_t offset, unsigned value, int count) {
+        for (int i = 0; i < count; ++i) result[offset + i] = (value >> (8 * i)) & 255;
+    };
+    number(4, 36 + samples.size() * 4, 4); number(20, 3, 2);
+    number(28, 48000 * 4, 4); number(32, 4, 2); number(34, 32, 2);
+    number(40, samples.size() * 4, 4);
+    for (float sample : samples) {
+        std::uint32_t bits; static_assert(sizeof(bits) == sizeof(sample));
+        std::memcpy(&bits, &sample, sizeof(bits));
+        for (int i = 0; i < 4; ++i) result.push_back((bits >> (8 * i)) & 255);
+    }
+    return result;
+}
 std::shared_ptr<const Clip> clip(std::vector<float> values, int channels = 1, int rate = 48000) {
     auto result = std::make_shared<Clip>(); result->rate = rate; result->channels = channels; result->samples = std::move(values); return result;
 }
@@ -29,6 +45,13 @@ std::shared_ptr<const Clip> clip(std::vector<float> values, int channels = 1, in
 int main(int argc, char** argv) {
     auto decoded = decode(wave()); assert(decoded->channels == 1 && decoded->rate == 48000 && decoded->frames() == 4);
     near(decoded->samples[1], .25f); near(decoded->samples[2], .5f); near(decoded->samples[3], -.25f);
+    auto saturated = decode(floatWave({-1.5f, -.25f, 0, .75f, 1.9f}));
+    const float expected[] = {-1, -.25f, 0, .75f, 1};
+    assert(saturated->frames() == 5);
+    for (int i = 0; i < 5; ++i) near(saturated->samples[i], expected[i]);
+    invalid([] { decode(floatWave({std::numeric_limits<float>::quiet_NaN()})); });
+    invalid([] { decode(floatWave({std::numeric_limits<float>::infinity()})); });
+    invalid([] { decode(floatWave({-std::numeric_limits<float>::infinity()})); });
     invalid([] { decode({}); }); invalid([] { decode(std::vector<std::uint8_t>(100, 0)); });
     invalid([] { decode(std::vector<std::uint8_t>(maxEncodedBytes + 1)); });
     auto oversized = wave(); oversized.resize(44 + (maxDecodedSamples + 1) * 2);

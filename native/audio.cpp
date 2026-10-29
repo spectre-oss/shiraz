@@ -62,6 +62,13 @@ std::shared_ptr<const Clip> decode(const std::vector<std::uint8_t>& encoded) {
     float extra[2];
     if (sf_readf_float(file.get(), extra, 1) != 0 || sf_error(file.get()) != SF_ERR_NO_ERROR)
         throw std::invalid_argument("Encoded sound frame count mismatch");
+    // Lossy codecs and floating-point files can decode beyond full scale.
+    // Saturate finite samples at the decoder boundary; malformed non-finite
+    // values must still fail rather than entering the mixer.
+    for (float& sample : result->samples) {
+        if (!std::isfinite(sample)) throw std::invalid_argument("Decoded audio sample is not finite");
+        sample = std::clamp(sample, -1.f, 1.f);
+    }
     validClip(*result); return result;
 }
 Mixer::Mixer(int maxStreams, int outputRate) : maxStreams_(maxStreams), outputRate_(outputRate) {
