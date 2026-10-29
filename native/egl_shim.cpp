@@ -227,7 +227,7 @@ EGLBoolean swapBuffers(EGLDisplay display, EGLSurface surface) {
         }
     }
     // A concurrent host resize supersedes this frame; do not reset Gecko's compositor.
-    int result=shiraz_window_post_argb(draw.window, draw.argb.data(), draw.argb.size());
+    int result=shiraz_window_post_argb_sized(draw.window, draw.argb.data(), draw.argb.size(), draw.width, draw.height);
     EGLBoolean posted = result==0 || result==-EAGAIN ? EGL_TRUE : EGL_FALSE;
     traceSwap(started);
     return posted;

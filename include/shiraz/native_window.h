@@ -24,6 +24,8 @@ ANativeWindow* shiraz_window_import(int descriptor);
 int32_t shiraz_window_copy_argb(ANativeWindow*, uint32_t* output, uint64_t capacity);
 /* Host CPU path posts complete straight-alpha ARGB without an RGBA round trip. */
 int32_t shiraz_window_post_argb(ANativeWindow*, const uint32_t* pixels, uint64_t count);
+// A frame superseded by a host resize returns -EAGAIN without publishing pixels.
+int32_t shiraz_window_post_argb_sized(ANativeWindow*, const uint32_t* pixels, uint64_t count, int32_t width, int32_t height);
 /* Posted-buffer revision; changes on successful post/geometry reset, zero for null. */
 uint64_t shiraz_window_revision(ANativeWindow*);
 int32_t shiraz_window_known(ANativeWindow*);

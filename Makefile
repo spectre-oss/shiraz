@@ -143,6 +143,25 @@ build/libshiraz-host.so: native/host_process.cpp native/fds.cpp native/gles_vers
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/host_process.cpp native/fds.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp -o $@ -lEGL -ldl
 
+build/test-gles-probe: tests/native/gles_probe.cpp native/gles_version.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/native/gles_probe.cpp native/gles_version.cpp -o $@ -lEGL
+.PHONY: gles-probe-smoke
+gles-probe-smoke: build/test-gles-probe
+	$(ASSET_STREAM_RUNNER) ./build/test-gles-probe
+check: gles-probe-smoke
+
+build/libshiraz-egl-resize-test.so: tests/native/egl_surface_resize.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared tests/native/egl_surface_resize.cpp -o $@ -ldl
+build/libEGL_shiraz.so.1: build/libEGL_shim.so
+	ln -sfn libEGL_shim.so $@
+.PHONY: egl-surface-resize-smoke
+egl-surface-resize-smoke: framework build/libandroid.so build/libEGL_shiraz.so.1 build/libshiraz-egl-resize-test.so
+	mkdir -p build/egl-surface-resize-smoke
+	javac --release 8 -cp build/framework/classes -d build/egl-surface-resize-smoke tests/java/EglSurfaceResizeSmoke.java
+	LD_LIBRARY_PATH="$(CURDIR)/build:$${LD_LIBRARY_PATH}" $(JAVA) -Djava.library.path=build -cp build/egl-surface-resize-smoke:build/framework/classes EglSurfaceResizeSmoke
+
 .PHONY: runtime-resources
 runtime-resources:
 	python3 scripts/bootstrap_runtime.py resources

@@ -11,7 +11,9 @@ bool extension(EGLDisplay display, const char* name) {
 }
 jint contextVersion(EGLDisplay display) {
     if (display == EGL_NO_DISPLAY || !eglInitialize(display, nullptr, nullptr)) return 0;
-    eglBindAPI(EGL_OPENGL_ES_API);
+    const EGLenum previousApi=eglQueryAPI();
+    struct RestoreApi { EGLenum value; ~RestoreApi(){eglBindAPI(value);} } restore{previousApi};
+    if(!eglBindAPI(EGL_OPENGL_ES_API))return 0;
     const EGLint configAttribs[] = {EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_NONE};
     EGLConfig config = nullptr;
     EGLint count = 0;
@@ -22,27 +24,35 @@ jint contextVersion(EGLDisplay display) {
         context = eglCreateContext(display, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, contextAttribs);
     bool created = context != EGL_NO_CONTEXT;
     if (created) eglDestroyContext(display, context);
-    eglTerminate(display);
+    // EGL displays are shared process-wide, and eglInitialize is not reference
+    // counted. Terminating this display can destroy an application's live
+    // rendering context. Retain the display until process teardown; only the
+    // temporary probe context belongs to us.
     return created ? 0x30000 : 0;
 }
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_android_app_ActivityManager_nativeGlesVersion(JNIEnv*, jclass) {
-    auto query = reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(eglGetProcAddress("eglQueryDevicesEXT"));
-    auto platform = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYPROC>(eglGetProcAddress("eglGetPlatformDisplay"));
-    if (query && platform) {
-        EGLDeviceEXT devices[8];
-        EGLint count = 0;
-        if (query(8, devices, &count)) {
-            for (EGLint i = 0; i < count; ++i) {
-                jint version = contextVersion(platform(EGL_PLATFORM_DEVICE_EXT, devices[i], nullptr));
-                if (version != 0) return version;
+    // Devices/capabilities are stable for this process. Probe once, including
+    // when the first query happens after an application has started rendering.
+    static const jint result=[]() -> jint {
+        auto query = reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(eglGetProcAddress("eglQueryDevicesEXT"));
+        auto platform = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYPROC>(eglGetProcAddress("eglGetPlatformDisplay"));
+        if (query && platform) {
+            EGLDeviceEXT devices[8];
+            EGLint count = 0;
+            if (query(8, devices, &count)) {
+                for (EGLint i = 0; i < count; ++i) {
+                    jint version = contextVersion(platform(EGL_PLATFORM_DEVICE_EXT, devices[i], nullptr));
+                    if (version != 0) return version;
+                }
             }
         }
-    }
-    if (platform) {
-        jint version = contextVersion(platform(EGL_PLATFORM_SURFACELESS_MESA, nullptr, nullptr));
-        if (version != 0) return version;
-    }
-    return contextVersion(eglGetDisplay(EGL_DEFAULT_DISPLAY));
+        if (platform) {
+            jint version = contextVersion(platform(EGL_PLATFORM_SURFACELESS_MESA, nullptr, nullptr));
+            if (version != 0) return version;
+        }
+        return contextVersion(eglGetDisplay(EGL_DEFAULT_DISPLAY));
+    }();
+    return result;
 }

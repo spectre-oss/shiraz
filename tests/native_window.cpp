@@ -61,6 +61,10 @@ int main() {
     uint32_t host[16];for(int i=0;i<16;i++)host[i]=0x10010203u+i*0x01030507u;
     auto* storage=image.pixels.data();auto posted=revision;
     assert(shiraz_window_post_argb(w,host,15)==-EINVAL&&shiraz_window_revision(w)==posted);
+    assert(shiraz_window_post_argb_sized(w,host,16,8,2)==-EAGAIN&&shiraz_window_revision(w)==posted);
+    assert(shiraz_window_post_argb_sized(w,host,6,2,3)==-EAGAIN&&shiraz_window_revision(w)==posted);
+    assert(shiraz_window_post_argb_sized(w,host,15,4,4)==-EINVAL&&shiraz_window_revision(w)==posted);
+    assert(shiraz_window_post_argb_sized(w,host,16,4,4)==0);
     assert(shiraz_window_post_argb(w,host,16)==0&&shiraz::refresh_window_snapshot(w,image,revision));
     assert(image.pixels.data()==storage);for(int i=0;i<16;i++)assert(image.pixels[i]==host[i]);
     assert(ANativeWindow_lock(w,&b,nullptr)==0);assert(shiraz_window_post_argb(w,host,16)==-EBUSY);

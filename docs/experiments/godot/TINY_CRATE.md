@@ -32,12 +32,36 @@
    `eglMakeCurrent failed: EGL_BAD_ACCESS` and produces a black frame. Returning
    to landscape did not establish recovery. This remaining graphics failure
    needs investigation; responsive resizing is **not verified**.
+6. Tracing that failure found the GLES capability probe terminating the shared
+   EGL display during resize. The probe now preserves the caller's client API,
+   retains the shared display and caches its result. A regression probes with a
+   live rendering context: the old implementation changes the API and destroys
+   the usable display/context; the fixed implementation preserves both.
+7. Further resizing exposed two independent surface-lifetime problems. Host
+   geometry updates destroyed an EGL surface that was still current on the
+   render thread. They now retain it while the renderer resizes its buffers.
+   A Java/JNI regression checks that a surface remains valid and current across
+   UI-thread geometry changes; it fails before the fix and passes afterward on
+   OpenJDK and ART. An in-flight frame with obsolete dimensions also produced
+   `EINVAL`, which Godot treated as a dead surface. Frame publication now checks
+   dimensions atomically and discards obsolete frames with `EAGAIN`; tests cover
+   changed dimensions with both equal and unequal pixel counts.
+8. The unchanged APK now remains animated through 640×360 → 360×640 → 800×450
+   → 360×640 → 640×360. Touching its on-screen X button selects Play after
+   resizing; keyboard input then returns to the saved map with one star and
+   the prior completion time. Portrait is letterboxed, preserving the game's
+   landscape layout. This supersedes step 5's black-frame result, but is not
+   evidence of a native portrait UI or arbitrary resize-stress reliability.
+
+The focused regressions are `make gles-probe-smoke` and
+`make egl-surface-resize-smoke` in an isolated test environment with EGL support.
 
 ## Current result
 
 **Animated menu, keyboard navigation, first-level movement/completion, and saved
-progress after restart verified.** Portrait resizing is broken. Jumping, crate
-mechanics, later levels, touchscreen controls, audio and clean shutdown remain
+progress after restart verified.** Repeated resizing renders correctly with
+portrait letterboxing; touch selection through the on-screen X button works.
+Jumping, crate mechanics, later levels, full touchscreen gameplay, audio and clean shutdown remain
 unverified. The VM had no default ALSA output device during this run; engine
 startup alone is not an audio pass.
 

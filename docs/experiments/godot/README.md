@@ -9,7 +9,8 @@ host also requires the optional native-code translation path.
   Vulkan requirements warning. Vulkan rendering is unsupported.
 - [Tiny Crate](TINY_CRATE.md): Godot 3, ARM64/OpenGL ES; animated menu,
   keyboard input, first-level completion and saved progress verified after
-  framework-theme fixes. Portrait resize remains broken.
+  framework-theme fixes. EGL lifetime fixes restore repeated resizing with
+  portrait letterboxing; on-screen touch selection also works.
 
 Acceptance requires a visible game scene, working gameplay input, resizing,
 and any save/restart behavior offered by the game. Loading the engine or showing

@@ -161,15 +161,25 @@ extern "C" int32_t shiraz_window_copy_argb(ANativeWindow* w, uint32_t* output, u
 
 extern "C" uint64_t shiraz_window_revision(ANativeWindow* w){if(!w)return 0;std::lock_guard<std::mutex> guard(w->mutex);if(sync_shared(w))return 0;return w->revision;}
 
-extern "C" int32_t shiraz_window_post_argb(ANativeWindow* w,const uint32_t* pixels,uint64_t count){
-    if(!w||!pixels)return -EINVAL;
-    std::lock_guard<std::mutex> guard(w->mutex);
+static int32_t post_argb_locked(ANativeWindow* w,const uint32_t* pixels,uint64_t count){
     if(w->locked)return -EBUSY;
     if(count!=uint64_t(w->width)*w->height)return -EINVAL;
     std::memcpy(w->front.data(),pixels,size_t(count)*4);w->front_argb=true;++w->revision;
     int error=publish_shared(w,false);if(error)return error;
     if(w->frameSink)w->frameSink(reinterpret_cast<const uint32_t*>(w->front.data()),w->width,w->height,true);
     return 0;
+}
+
+extern "C" int32_t shiraz_window_post_argb(ANativeWindow* w,const uint32_t* pixels,uint64_t count){
+    if(!w||!pixels)return -EINVAL;
+    std::lock_guard<std::mutex> guard(w->mutex);
+    return post_argb_locked(w,pixels,count);
+}
+extern "C" int32_t shiraz_window_post_argb_sized(ANativeWindow* w,const uint32_t* pixels,uint64_t count,int32_t width,int32_t height){
+    if(!w||!pixels||!valid_size(width,height)||count!=uint64_t(width)*height)return -EINVAL;
+    std::lock_guard<std::mutex> guard(w->mutex);
+    if(width!=w->width||height!=w->height)return -EAGAIN;
+    return post_argb_locked(w,pixels,count);
 }
 
 void shiraz_window_set_frame_sink(ANativeWindow* w, ShirazFrameSink sink) {
