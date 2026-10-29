@@ -99,5 +99,13 @@ resolve the game's washed-out appearance; its cause and visual parity remain
 unverified. With the rebuilt framework, saved-world reload, ongoing copper
 delivery and tech-tree navigation still work; the full VM check suite passes.
 
+The expanded copper operation completes the 100-item objective. The next stage
+asks for 25 lead. World-view pinch zoom works; placing another Mechanical Drill
+on lead and building a longer conveyor route with two bends delivers lead to the
+core. The counter advances through `24/25`, completes, and the tutorial changes
+to building two Duo turrets. No new runtime change was needed for these
+construction and transport interactions. Turret construction and combat are
+still unverified. The full VM check suite passes on this baseline.
+
 Tutorial completion, combat, multiplayer and audio are not established. The app automatically
 fetched its public server list during startup; no multiplayer session was joined.
