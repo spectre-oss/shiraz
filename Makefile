@@ -246,6 +246,11 @@ build/test-audio: tests/audio.cpp native/audio.cpp include/shiraz/audio.hpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AUDIO_CFLAGS) tests/audio.cpp native/audio.cpp -o $@ $(AUDIO_LIBS)
 
+.PHONY: audio-mpeg-smoke
+# Optional integration check: requires ffmpeg with the libmp3lame encoder.
+audio-mpeg-smoke: build/test-audio
+	python3 scripts/audio_mpeg_smoke.py
+
 AUDIO_OUTPUT_CFLAGS = $(shell pkg-config --cflags alsa sndfile 2>/dev/null)
 AUDIO_OUTPUT_LIBS = $(shell pkg-config --libs alsa sndfile 2>/dev/null)
 build/libshiraz-audio.so: native/audio.cpp native/audio_output.cpp native/audio_jni.cpp include/shiraz/audio.hpp include/shiraz/audio_output.hpp

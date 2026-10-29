@@ -39,6 +39,21 @@
    assets at the existing decoded-size limit and report one asset as truncated;
    those decoder limitations remain unresolved.
 
+8. Followed up the asset reported as truncated. libsndfile advertised 83,134
+   frames but decoded 82,944 with no error; FFmpeg also identified duration
+   estimation from bitrate. A generated MP3 without a duration header reproduced
+   Shiraz's rejection. MPEG decoding now accepts nonempty, error-free EOF before
+   the advertised count and removes the unread tail. Existing decoded-size and
+   error checks remain. This follows the decoder's EOF result, not a claim that
+   every damaged MP3 can be detected. The [libsndfile read API](https://libsndfile.github.io/libsndfile/api.html#read)
+   defines short reads at EOF. The optional `make audio-mpeg-smoke` check compares
+   decoded frame counts with FFmpeg for generated files with and without duration
+   metadata; both pass, and the unchanged app asset now decodes all 82,944 frames.
+   After deployment, Resume restores turn six, the research dialog dismisses,
+   and selecting the Worker displays its actions. No truncated-sound error appears
+   in that walkthrough; the direct asset probe is the evidence for this specific
+   decode fix. Longer effects exceeding the decoded-size limit remain unsupported.
+
 ## Observed walkthrough
 
 - Selected English, opened Quickstart, and dismissed tutorial/leader dialogs.

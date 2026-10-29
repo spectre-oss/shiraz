@@ -56,7 +56,16 @@ std::shared_ptr<const Clip> decode(const std::vector<std::uint8_t>& encoded) {
     sf_count_t done = 0;
     while (done < info.frames) {
         auto count = sf_readf_float(file.get(), result->samples.data() + done * info.channels, info.frames - done);
-        if (count <= 0) throw std::invalid_argument("Truncated encoded sound");
+        if (count <= 0) {
+            // MPEG streams without a duration header may have an estimated
+            // frame count. Trust a clean decoder EOF, not zero-padded tail data.
+            if (count == 0 && done > 0 && (info.format & SF_FORMAT_TYPEMASK) == SF_FORMAT_MPEG
+                    && sf_error(file.get()) == SF_ERR_NO_ERROR) {
+                result->samples.resize(static_cast<std::size_t>(done) * info.channels);
+                break;
+            }
+            throw std::invalid_argument("Truncated encoded sound");
+        }
         done += count;
     }
     float extra[2];
