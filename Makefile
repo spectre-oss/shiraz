@@ -1522,3 +1522,10 @@ font-features-smoke: framework build/libshiraz-text.so build/libshiraz-bitmap.so
 	javac --release 8 -cp build/framework/classes -d build/font-features-smoke tests/java/FontFeaturesSmoke.java
 	$(JAVA) -Xcheck:jni -Djava.library.path=build -cp build/font-features-smoke:build/framework/classes FontFeaturesSmoke
 check: font-features-smoke
+
+.PHONY: numeric-input-smoke
+numeric-input-smoke: framework build/libshiraz-text.so build/libshiraz-resources.so
+	mkdir -p build/numeric-input-smoke
+	javac --release 8 -cp build/framework/classes -d build/numeric-input-smoke tests/java/NumericInputSmoke.java
+	$(JAVA) -Xcheck:jni -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -Djava.library.path=build -cp build/numeric-input-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar NumericInputSmoke
+check: numeric-input-smoke

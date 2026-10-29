@@ -150,10 +150,12 @@ public class TextView extends View {
     public void setRawInputType(int value){inputType=value;}
     public void setInputType(int value){
         int kind=value&InputType.TYPE_MASK_CLASS,variation=value&InputType.TYPE_MASK_VARIATION;
-        if(value!=0&&(kind!=InputType.TYPE_CLASS_TEXT||(variation&15)!=0||variation>0xe0||(value&~0xff0ff)!=0))throw new UnsupportedOperationException("Input type requires an unsupported key listener");
-        boolean masksText=variation==InputType.TYPE_TEXT_VARIATION_PASSWORD||variation==InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD;
-        inputType=value;keyListener=value==0?null:new shiraz.runtime.TextKeyListener(value);if(text instanceof Editable)configureFilters((Editable)text);
-        if(value!=0){if(!(text instanceof Editable))setText(text,BufferType.EDITABLE);setSingleLine((value&InputType.TYPE_TEXT_FLAG_MULTI_LINE)==0);}
+        boolean numeric=kind==InputType.TYPE_CLASS_NUMBER;
+        if(value!=0&&!numeric&&(kind!=InputType.TYPE_CLASS_TEXT||(variation&15)!=0||variation>0xe0||(value&~0xff0ff)!=0))throw new UnsupportedOperationException("Input type requires an unsupported key listener");
+        boolean masksText=numeric ? variation==InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                : (variation==InputType.TYPE_TEXT_VARIATION_PASSWORD||variation==InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
+        inputType=value;keyListener=value==0?null:numeric?android.text.method.DigitsKeyListener.getInstance((value&InputType.TYPE_NUMBER_FLAG_SIGNED)!=0,(value&InputType.TYPE_NUMBER_FLAG_DECIMAL)!=0):new shiraz.runtime.TextKeyListener(value);if(text instanceof Editable)configureFilters((Editable)text);
+        if(value!=0){if(!(text instanceof Editable))setText(text,BufferType.EDITABLE);setSingleLine(numeric||(value&InputType.TYPE_TEXT_FLAG_MULTI_LINE)==0);}
         if(masksText)setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());else if(transformation instanceof android.text.method.PasswordTransformationMethod)setTransformationMethod(null);
     }
     protected final boolean shirazAcceptsTextInput(){return keyListener!=null;}
