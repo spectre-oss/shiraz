@@ -17,7 +17,10 @@ public class PackageInfo implements Parcelable {
     public SigningInfo signingInfo;
     public ActivityInfo[] activities, receivers;
     public ProviderInfo[] providers;
+    public InstrumentationInfo[] instrumentation;
     public ServiceInfo[] services;
+    public PermissionInfo[] permissions;
+    public static final int REQUESTED_PERMISSION_REQUIRED=1,REQUESTED_PERMISSION_GRANTED=2;
     public String[] requestedPermissions;
     public int[] requestedPermissionsFlags;
     private int versionCodeMajor;

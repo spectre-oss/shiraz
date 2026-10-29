@@ -76,9 +76,19 @@
     inclusion, and independent result objects. The unchanged APK passes those
     failures and next stops at `PackageInfo.instrumentation`.
 
+12. Added bounded instrumentation declaration parsing, launcher transfer, and
+    flag-dependent PackageInfo queries, including target package and declared
+    profiling/test flags. No instrumentation runner is started. Retesting passes
+    that missing field and reaches missing permission metadata. Added declared
+    permission names/protection levels and requested permission arrays; granted
+    bits follow existing permission checks. VM regressions verify limits,
+    target-package transfer, request flags, and that denied permissions are not
+    marked granted. The unchanged APK passes these failures and next stops at
+    missing `PackageInfo.configPreferences`.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The signing-query flag failure is fixed, but background package inventory now
-fails on missing `PackageInfo.instrumentation`. App installation,
+fails on missing `PackageInfo.configPreferences`. App installation,
 updates, certificate handling, app-list persistence, and complete plugin behavior
 are not verified. Do not infer that every Flutter app works from this result.

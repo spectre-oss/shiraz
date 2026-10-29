@@ -45,6 +45,15 @@ def binary_fixture(utf8=True, label_reference=False, service_metadata=False, act
 
 
 class ManifestTests(unittest.TestCase):
+    def test_instrumentation_declarations(self):
+        data = f'<manifest xmlns:android="{ANDROID}" package="test.app"><instrumentation android:name=".Runner" android:targetPackage="test.target" android:functionalTest="true"/><application/></manifest>'
+        item = inspect_manifest(data.encode())['instrumentation'][0]
+        self.assertEqual(item['name'], 'test.app.Runner')
+        self.assertEqual(item['targetPackage'], 'test.target')
+        self.assertEqual(item['functionalTest'], 'true')
+        with self.assertRaises(ManifestError):
+            inspect_manifest(data.replace('android:targetPackage="test.target"', '').encode())
+
     def test_application_declarations(self):
         manifest = inspect_manifest(f'<manifest xmlns:android="{ANDROID}" package="test.app" android:compileSdkVersion="35"><supports-screens android:requiresSmallestWidthDp="320"/><application android:backupAgent=".Backup" android:manageSpaceActivity=".Storage" android:appComponentFactory=".Factory" android:permission="test.P" android:process=":worker" android:taskAffinity=":tasks" android:appCategory="productivity" android:uiOptions="splitActionBarWhenNarrow"/></manifest>'.encode())
         info = manifest['application_info']

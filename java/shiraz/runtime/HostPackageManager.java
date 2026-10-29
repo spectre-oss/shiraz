@@ -359,6 +359,34 @@ public final class HostPackageManager extends PackageManager {
             }
             info.providers=providers.isEmpty()?null:providers.toArray(new android.content.pm.ProviderInfo[providers.size()]);
         }
+        if((flags&GET_PERMISSIONS)!=0){
+            int count=integer("permission.count",0);if(count<0||count>1024)throw new IllegalArgumentException("Requested permission count");
+            if(count>0){info.requestedPermissions=new String[count];info.requestedPermissionsFlags=new int[count];}
+            for(int i=0;i<count;i++){
+                String permission=required("permission."+i);info.requestedPermissions[i]=permission;
+                info.requestedPermissionsFlags[i]=PackageInfo.REQUESTED_PERMISSION_REQUIRED|(checkPermission(permission,name)==PERMISSION_GRANTED?PackageInfo.REQUESTED_PERMISSION_GRANTED:0);
+            }
+            count=integer("definedPermission.count",0);if(count<0||count>1024)throw new IllegalArgumentException("Defined permission count");
+            if(count>0)info.permissions=new android.content.pm.PermissionInfo[count];
+            for(int i=0;i<count;i++){
+                String prefix="definedPermission."+i+".";android.content.pm.PermissionInfo permission=new android.content.pm.PermissionInfo();
+                permission.name=required(prefix+"name");permission.packageName=name;permission.protectionLevel=integer(prefix+"protection",0);info.permissions[i]=permission;
+            }
+        }
+        if((flags&GET_INSTRUMENTATION)!=0){
+            int count=integer("instrumentation.count",0);if(count<0||count>256)throw new IllegalArgumentException("Instrumentation count");
+            if(count>0)info.instrumentation=new android.content.pm.InstrumentationInfo[count];
+            for(int i=0;i<count;i++){
+                String prefix="instrumentation."+i+".";android.content.pm.InstrumentationInfo entry=new android.content.pm.InstrumentationInfo();
+                entry.name=required(prefix+"name");entry.packageName=name;entry.targetPackage=required(prefix+"targetPackage");entry.targetProcesses=values.getProperty(prefix+"targetProcesses");
+                entry.handleProfiling=bool(prefix+"handleProfiling",false);entry.functionalTest=bool(prefix+"functionalTest",false);
+                entry.labelRes=resourceId(prefix+"labelRes");if(entry.labelRes==0)entry.nonLocalizedLabel=values.getProperty(prefix+"label");
+                entry.icon=resourceId(prefix+"iconRes");entry.logo=resourceId(prefix+"logoRes");entry.banner=resourceId(prefix+"bannerRes");
+                entry.sourceDir=info.applicationInfo.sourceDir;entry.publicSourceDir=info.applicationInfo.publicSourceDir;entry.dataDir=info.applicationInfo.dataDir;
+                if((flags&GET_META_DATA)!=0)entry.metaData=componentMetadata(prefix);
+                info.instrumentation[i]=entry;
+            }
+        }
         if((flags&GET_SERVICES)!=0){
             int count=integer("service.count",0);if(count<0||count>256)throw new IllegalArgumentException("Service declaration count");
             java.util.ArrayList<android.content.pm.ServiceInfo> services=new java.util.ArrayList<android.content.pm.ServiceInfo>();

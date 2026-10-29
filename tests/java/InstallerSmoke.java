@@ -57,6 +57,17 @@ public final class InstallerSmoke {
   check("test.Main".equals(manager.getPackageInfo("test.signer",1).activities[0].name),"component snapshots");
   check(manager.getPackageInfo("test.signer",1|android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS).activities.length==2,"disabled component inclusion");
   check(manager.getPackageInfo("test.signer",0).activities==null,"unrequested components");
+  facts.setProperty("instrumentation.count","1");facts.setProperty("instrumentation.0.name","test.Runner");facts.setProperty("instrumentation.0.targetPackage","test.target");facts.setProperty("instrumentation.0.functionalTest","true");
+  manager=new shiraz.runtime.HostPackageManager(facts,new ContextWrapper(null));
+  check(manager.getPackageInfo("test.signer",0).instrumentation==null,"unrequested instrumentation");
+  metadata=manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_INSTRUMENTATION);
+  check(metadata.instrumentation.length==1&&metadata.instrumentation[0].functionalTest&&"test.target".equals(metadata.instrumentation[0].targetPackage)&&file.getPath().equals(metadata.instrumentation[0].sourceDir),"instrumentation declaration query");
+  facts.setProperty("permission.count","1");facts.setProperty("permission.0","test.ACCESS");facts.setProperty("definedPermission.count","1");facts.setProperty("definedPermission.0.name","test.ACCESS");facts.setProperty("definedPermission.0.protection","18");
+  manager=new shiraz.runtime.HostPackageManager(facts,new ContextWrapper(null){public String getPackageName(){return "test.signer";}public int checkSelfPermission(String permission){return android.content.pm.PackageManager.PERMISSION_DENIED;}});
+  metadata=manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_PERMISSIONS);
+  check(metadata.permissions.length==1&&metadata.permissions[0].getProtection()==2&&metadata.permissions[0].getProtectionFlags()==16,"declared permission metadata");
+  check(metadata.requestedPermissionsFlags[0]==android.content.pm.PackageInfo.REQUESTED_PERMISSION_REQUIRED,"denied permission not advertised as granted");
+  check(manager.getPackageInfo("test.signer",0).permissions==null&&manager.getPackageInfo("test.signer",0).requestedPermissions==null,"unrequested permissions");
   apk.putLong(0,1);Files.write(file.toPath(),apk.array());try{method.invoke(null,file.getPath());throw new AssertionError("corrupt signing size accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof IllegalStateException,"wrong malformed signer failure");}file.delete();
  }
  static byte[] join(byte[] a,byte[] b){byte[] out=java.util.Arrays.copyOf(a,a.length+b.length);System.arraycopy(b,0,out,a.length,b.length);return out;}

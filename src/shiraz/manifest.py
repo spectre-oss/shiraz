@@ -342,6 +342,19 @@ def inspect_manifest(data):
             providers.append({'name': name, 'filters': activity_filters(provider), 'authorities': attr(provider, 'authorities'), 'enabled': attr(provider, 'enabled'),
                               'exported': attr(provider, 'exported'), 'grantUriPermissions': attr(provider, 'grantUriPermissions'), 'multiprocess': attr(provider, 'multiprocess'), 'initOrder': attr(provider, 'initOrder'), 'metadata': component_metadata(provider),
                               'process': attr(provider, 'process') or attr(app, 'process') or package})
+    instrumentation = []
+    seen_instrumentation = set()
+    for item in root.findall('instrumentation'):
+        name = qualify(attr(item, 'name'))
+        target = attr(item, 'targetPackage')
+        if not name or not target or name in seen_instrumentation or len(instrumentation) >= 256:
+            raise ManifestError('invalid, duplicate or excessive instrumentation declarations')
+        seen_instrumentation.add(name)
+        record = {field: attr(item, field) for field in ('targetProcesses', 'handleProfiling', 'functionalTest', 'label')}
+        record.update({'name': name, 'targetPackage': target, 'metadata': component_metadata(item)})
+        for field in ('icon', 'logo', 'banner', 'label'):
+            record[field + 'Res'] = references.get((id(item), '{' + ANDROID + '}' + field), 0)
+        instrumentation.append(record)
     screens = root.find('supports-screens')
     application_info = {}
     if app is not None:
@@ -359,7 +372,7 @@ def inspect_manifest(data):
         application_info[field] = enum_value(screens, field, {}, 0) if screens is not None else 0
     application_info['compileSdkVersion'] = enum_value(root, 'compileSdkVersion', {}, 0)
     application_info['compileSdkVersionCodename'] = attr(root, 'compileSdkVersionCodename')
-    return {'application_info': application_info, 'shared_user_id': attr(root, 'sharedUserId'),
+    return {'instrumentation': instrumentation, 'application_info': application_info, 'shared_user_id': attr(root, 'sharedUserId'),
             'shared_user_label': references.get((id(root), '{' + ANDROID + '}sharedUserLabel'), 0),
             'revision_code': enum_value(root, 'revisionCode', {}, 0),
             'install_location': enum_value(root, 'installLocation', {'auto': 0, 'internalOnly': 1, 'preferExternal': 2}, -1),

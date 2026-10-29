@@ -159,6 +159,21 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(values['targetSdk'], '27')
         self.assertEqual(values['versionCode'], '0')
 
+    def test_declared_permission_transfer(self):
+        manifest = {**self.report['manifest'], 'defined_permissions': [{'name': 'test.ACCESS', 'protection': 18}]}
+        values = application_metadata(manifest, Path('/app.apk'), Path('/data'))
+        self.assertEqual(values['definedPermission.count'], 1)
+        self.assertEqual(values['definedPermission.0.name'], 'test.ACCESS')
+        self.assertEqual(values['definedPermission.0.protection'], 18)
+
+    def test_instrumentation_transfer(self):
+        manifest = {**self.report['manifest'], 'instrumentation': [{'name': 'test.Runner', 'targetPackage': 'test.target', 'functionalTest': 'true'}]}
+        values = application_metadata(manifest, Path('/app.apk'), Path('/data'))
+        self.assertEqual(values['instrumentation.count'], 1)
+        self.assertEqual(values['instrumentation.0.targetPackage'], 'test.target')
+        with self.assertRaises(FormatError):
+            application_metadata({**manifest, 'instrumentation': [{}] * 257}, Path('/app.apk'), Path('/data'))
+
     def test_application_declaration_transfer(self):
         values = application_metadata({**self.report['manifest'], 'application_info': {'backupAgent': 'test.Backup', 'category': 7, 'processName': 'test:worker', 'unexpected': 'ignored'}}, Path('/app.apk'), Path('/data'))
         self.assertEqual(values['applicationInfo.backupAgent'], 'test.Backup')

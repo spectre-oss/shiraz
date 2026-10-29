@@ -24,7 +24,7 @@ public abstract class PackageManager {
     public java.util.List<ResolveInfo> queryIntentActivities(android.content.Intent intent,int flags){throw new UnsupportedOperationException("Activity resolution");}
     public static final int PERMISSION_GRANTED=0,PERMISSION_DENIED=-1;
     public int checkPermission(String permission,String packageName){return PERMISSION_DENIED;}
-    public static final int GET_ACTIVITIES = 1, GET_RECEIVERS = 2, GET_SERVICES = 4, GET_PROVIDERS = 8, GET_GIDS = 0x100;
+    public static final int GET_ACTIVITIES = 1, GET_RECEIVERS = 2, GET_SERVICES = 4, GET_PROVIDERS = 8, GET_INSTRUMENTATION = 0x10, GET_GIDS = 0x100;
     public static final int GET_SIGNING_CERTIFICATES = 0x08000000;
     public static final int GET_SIGNATURES = 0x40, GET_META_DATA = 0x80, GET_PERMISSIONS = 0x1000;
     public static final int GET_DISABLED_COMPONENTS=0x200,MATCH_DISABLED_COMPONENTS=0x200,MATCH_DIRECT_BOOT_UNAWARE=0x40000,MATCH_DIRECT_BOOT_AWARE=0x80000;

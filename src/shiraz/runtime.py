@@ -220,6 +220,10 @@ def application_metadata(manifest, apk, data):
     defined = manifest.get('defined_permissions', [])
     if len(defined) > 1024:
         raise FormatError('Defined permission limit')
+    values['definedPermission.count'] = len(defined)
+    for index, permission in enumerate(defined):
+        values[f'definedPermission.{index}.name'] = permission.get('name')
+        values[f'definedPermission.{index}.protection'] = permission.get('protection', 0)
     own = sorted({item['name'] for item in defined if isinstance(item.get('name'), str)
                   and item['name'].startswith(manifest['package'] + '.')
                   and item['name'] in permissions and item.get('protection', 0) & 15 == 2})
@@ -262,6 +266,20 @@ def application_metadata(manifest, apk, data):
         for entry, item in enumerate(metadata):
             for field in ('name', 'name_resource', 'kind', 'value'):
                 values[f'receiver.{index}.metadata.{entry}.{field}'] = item.get(field)
+    instrumentation = manifest.get('instrumentation', [])
+    if len(instrumentation) > 256:
+        raise FormatError('Instrumentation declaration limit')
+    values['instrumentation.count'] = len(instrumentation)
+    for index, record in enumerate(instrumentation):
+        for field in ('name', 'targetPackage', 'targetProcesses', 'handleProfiling', 'functionalTest', 'label', 'labelRes', 'iconRes', 'logoRes', 'bannerRes'):
+            values[f'instrumentation.{index}.{field}'] = record.get(field)
+        metadata = record.get('metadata', [])
+        if len(metadata) > 128:
+            raise FormatError('Instrumentation metadata limit')
+        values[f'instrumentation.{index}.metadata.count'] = len(metadata)
+        for entry, item in enumerate(metadata):
+            for field in ('name', 'name_resource', 'kind', 'value'):
+                values[f'instrumentation.{index}.metadata.{entry}.{field}'] = item.get(field)
     services = manifest.get('services', [])
     if len(services) > 256:
         raise FormatError('Service declaration limit')
