@@ -104,6 +104,7 @@ public final class HostPackageManager extends PackageManager {
         // Packaged APKs and the in-app camera adapter are not Android system packages.
         if((flags&MATCH_SYSTEM_ONLY)!=0)return result;
         android.content.pm.ResolveInfo capture=HostCameraCapture.resolve(context,intent);if(capture!=null){result.add(capture);return result;}
+        android.content.pm.ResolveInfo picker=HostDocumentPicker.resolve(context,intent);if(picker!=null){result.add(picker);return result;}
         if(intent.getPackage()!=null&&!name.equals(intent.getPackage()))return result;
         int count=integer("activity.count",0);if(count<0||count>256)throw new IllegalArgumentException("Activity count");
         for(int i=0;i<count;i++){

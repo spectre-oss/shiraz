@@ -274,14 +274,30 @@
     The picker currently browses the app-scoped volume; external host directories,
     remote providers and recursive directory deletion are not supported.
 
+31. Tested **Obtainium import** against the app's own exported JSON. Initially,
+    FilePicker could not resolve a file-selection activity. Added package-manager
+    resolution and MIME-filtered file selection in the existing app-window picker,
+    with read-only session access restricted to the selected file. Actual selection
+    then exposed a fatal missing `Intent.getClipData()` method. Added local clip
+    access and copy semantics; unsupported clip parcel/broadcast transport remains
+    an explicit error. On the next walkthrough, selecting the export opened the
+    app's confirmation dialog. Continuing displayed **“Imported 1 app + settings”**
+    and returning to Apps showed the saved entry. The entry also remained visible
+    after a normal close and restart. Full VM checks pass. This was an overwrite of the
+    existing test entry, not a clean-state restore or an exhaustive settings check.
+    VM OpenJDK and ART regressions cover MIME matching, activity resolution,
+    selected-file reads, denied writes/sibling access/persistence, and clip copying.
+    Single-file selection is supported within app storage; multiple selection,
+    persisted file grants and external storage providers remain unsupported.
+
 ## Current result and limits
 
-**Release retrieval, Add, app-list persistence, and manual export verified; not a full
+**Release retrieval, Add, app-list persistence, manual export, and an import round trip verified; not a full
 compatibility pass.** Package metadata and icon-query missing-method failures
 are passed. The saved-entry landscape/portrait resize and navigation sequence
 now works after GL routing fixes. Adaptive icons render with the host circular mask.
 Folder selection and repeated export across restart now work in the app-scoped
 volume. Release-asset download is still blocked by an Android storage-path assumption.
-Import, installation, updates, certificate
+Installation, updates, certificate
 verification, and complete plugin behavior are not verified. Do not infer that
 every Flutter app works from this result.

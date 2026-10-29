@@ -14,6 +14,7 @@ public final class HostContentPicker {
  private static Chooser chooser=new Chooser(){public String choose(String mimeType){return desktopChoose(mimeType);}};
  private HostContentPicker(){}
  public static void setChooser(Chooser replacement){if(replacement==null)throw new NullPointerException("chooser");chooser=replacement;}
+ public static boolean hasConfiguredFile(){String value=System.getenv("SHIRAZ_PICK_FILE");return value!=null&&!value.isEmpty();}
  public static Intent unwrap(Intent intent){
   if(intent==null)return null;
   if(Intent.ACTION_CHOOSER.equals(intent.getAction())){

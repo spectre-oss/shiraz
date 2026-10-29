@@ -17,7 +17,7 @@ public final class HostDocuments extends ContentProvider {
     private final File volume, state;
     private final Map<String,Grant> grants = new LinkedHashMap<String,Grant>();
     private static final class Grant {
-        final File directory; int session, persisted; long time;
+        final File directory; File fileOnly; int session, persisted; long time;
         Grant(File directory, int session, int persisted, long time) {
             this.directory=directory; this.session=session; this.persisted=persisted; this.time=time;
         }
@@ -64,6 +64,13 @@ public final class HostDocuments extends ContentProvider {
         if(grants.size()>=256)throw new IOException("Too many selected folders");
         String id=UUID.randomUUID().toString();grants.put(id,new Grant(selected,selected.canWrite()?3:1,0,0));return tree(id);
     }
+    public synchronized Uri selectFile(File file)throws IOException {
+        File selected=within(volume,file);
+        if(!selected.isFile()||!selected.canRead())throw new IOException("Selected file unavailable");
+        if(grants.size()>=256)throw new IOException("Too many selected documents");
+        String id=UUID.randomUUID().toString();Grant grant=new Grant(selected.getParentFile(),1,0,0);
+        grant.fileOnly=selected;grants.put(id,grant);return documentUri(tree(id),selected);
+    }
     private String treeId(Uri uri){
         if(uri==null||!"content".equals(uri.getScheme())||!AUTHORITY.equals(uri.getAuthority()))throw new SecurityException("Not a host document URI");
         String root=DocumentsContract.getTreeDocumentId(uri);
@@ -77,6 +84,7 @@ public final class HostDocuments extends ContentProvider {
     }
     public synchronized void take(Uri uri,int requested){
         modes(requested);Grant grant=grant(uri,requested);int previous=grant.persisted;long oldTime=grant.time;
+        if(grant.fileOnly!=null)throw new SecurityException("Selected file grant is session-only");
         grant.persisted|=requested;grant.time=System.currentTimeMillis();
         try{save();}catch(IOException error){grant.persisted=previous;grant.time=oldTime;throw new IllegalStateException("Cannot persist document grant",error);}
     }
@@ -110,18 +118,20 @@ public final class HostDocuments extends ContentProvider {
         if(!id.startsWith(tree+":"))throw new SecurityException("Document belongs to another tree");
         String relative=id.substring(tree.length()+1);
         if(new File(relative).isAbsolute()||relative.indexOf('\0')>=0)throw new SecurityException("Invalid document path");
-        return within(volume,within(grant.directory,new File(grant.directory,relative)));
+        File file=within(volume,within(grant.directory,new File(grant.directory,relative)));
+        if(grant.fileOnly!=null&&!file.equals(grant.fileOnly))throw new SecurityException("URI does not identify the selected file");
+        return file;
     }
     private Uri documentUri(Uri scope,File file)throws IOException {
         Grant grant=grant(scope,0);File target=within(grant.directory,file);
         return DocumentsContract.buildDocumentUriUsingTree(scope,treeId(scope)+":"+grant.directory.toPath().relativize(target.toPath()));
     }
     public synchronized boolean permitted(Uri uri,int requested){
-        try {modes(requested);grant(uri,requested);if(uri.getPathSegments().size()>2)document(uri,requested);return true;}
+        try {modes(requested);Grant grant=grant(uri,requested);if(uri.getPathSegments().size()>2)document(uri,requested);else if(grant.fileOnly!=null)return false;return true;}
         catch(IOException|IllegalArgumentException|SecurityException error){return false;}
     }
     public boolean onCreate(){return true;}
-    private static String mime(File file){
+    public static String mime(File file){
         if(file.isDirectory())return DocumentsContract.Document.MIME_TYPE_DIR;
         try{String type=Files.probeContentType(file.toPath());if(type!=null)return type;}catch(IOException ignored){}
         return "application/octet-stream";

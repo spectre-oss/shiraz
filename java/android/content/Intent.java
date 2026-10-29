@@ -29,6 +29,9 @@ public class Intent implements Parcelable, Cloneable {
     private int flags;
     private LinkedHashSet<String> categories;
     private Bundle extras;
+    private ClipData clipData;
+    public ClipData getClipData(){return clipData;}
+    public void setClipData(ClipData value){clipData=value;}
     public ComponentName resolveActivity(android.content.pm.PackageManager manager){if(component!=null)return component;android.content.pm.ResolveInfo resolved=manager.resolveActivity(this,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);return resolved==null||resolved.activityInfo==null?null:new ComponentName(resolved.activityInfo.packageName,resolved.activityInfo.name);}
     public android.content.pm.ActivityInfo resolveActivityInfo(android.content.pm.PackageManager manager,int flags){if(component!=null){try{return manager.getActivityInfo(component,flags);}catch(android.content.pm.PackageManager.NameNotFoundException missing){return null;}}android.content.pm.ResolveInfo resolved=manager.resolveActivity(this,flags);return resolved==null?null:resolved.activityInfo;}
     public static Intent makeMainActivity(ComponentName component){return new Intent(ACTION_MAIN).setComponent(component).addCategory(CATEGORY_LAUNCHER);}
@@ -39,8 +42,8 @@ public class Intent implements Parcelable, Cloneable {
     public Intent(Context context, Class<?> cls) { component = new ComponentName(context, cls); }
     public Intent(String action, Uri uri, Context context, Class<?> cls) { this(action, uri); component = new ComponentName(context, cls); }
     public Intent(Intent source) { this(source,0); }
-    private Intent(Intent source,int depth) { if(depth>32)throw new IllegalArgumentException("Intent selector depth");selector=source.selector==null?null:new Intent(source.selector,depth+1);sourceBounds=source.sourceBounds==null?null:new android.graphics.Rect(source.sourceBounds);action = source.action; type = source.type; pkg = source.pkg; data = source.data; component = source.component; flags = source.flags; categories = source.categories == null ? null : new LinkedHashSet<String>(source.categories); extras = source.extras == null ? null : new Bundle(source.extras); }
-    public Intent cloneFilter() { Intent value = new Intent(this); value.extras = null; return value; }
+    private Intent(Intent source,int depth) { clipData=source.clipData==null?null:new ClipData(source.clipData);if(depth>32)throw new IllegalArgumentException("Intent selector depth");selector=source.selector==null?null:new Intent(source.selector,depth+1);sourceBounds=source.sourceBounds==null?null:new android.graphics.Rect(source.sourceBounds);action = source.action; type = source.type; pkg = source.pkg; data = source.data; component = source.component; flags = source.flags; categories = source.categories == null ? null : new LinkedHashSet<String>(source.categories); extras = source.extras == null ? null : new Bundle(source.extras); }
+    public Intent cloneFilter() { Intent value = new Intent(this); value.extras = null; value.clipData = null; return value; }
     @Override public Object clone() { return new Intent(this); }
     public String getAction() { return action; }
     public Intent setAction(String value) { action = value; return this; }
@@ -152,6 +155,7 @@ public class Intent implements Parcelable, Cloneable {
     private int broadcastBytes;
     public int shirazBroadcastBytes() { return broadcastBytes; }
     public Intent shirazBroadcastCopy() {
+        if(clipData!=null)throw new UnsupportedOperationException("ClipData broadcast transport");
         Intent value = new Intent(this); value.extras = extras == null ? null : extras.shirazBroadcastCopy();
         long bytes = 256 + (value.extras == null ? 0 : value.extras.shirazBroadcastCopiedBytes());
         java.util.ArrayList<String> texts = new java.util.ArrayList<String>(java.util.Arrays.asList(action, type, pkg, data == null ? null : data.toString(), component == null ? null : component.flattenToString()));
@@ -163,7 +167,7 @@ public class Intent implements Parcelable, Cloneable {
     }
     public int describeContents() { return (extras == null ? 0 : extras.describeContents())|(selector==null?0:selector.describeContents()); }
     public void writeToParcel(Parcel out, int flags) { writeParcel(out,flags,0); }
-    private void writeParcel(Parcel out,int flags,int depth) { if(depth>32)throw new IllegalArgumentException("Intent selector depth");out.writeString(action);out.writeString(type);out.writeString(pkg);out.writeString(getDataString());
+    private void writeParcel(Parcel out,int flags,int depth) { if(clipData!=null)throw new UnsupportedOperationException("ClipData parcel transport");if(depth>32)throw new IllegalArgumentException("Intent selector depth");out.writeString(action);out.writeString(type);out.writeString(pkg);out.writeString(getDataString());
         out.writeString(component==null?null:component.flattenToString());out.writeInt(this.flags);
         if(categories!=null&&categories.size()>1024)throw new IllegalArgumentException("Intent category limit");
         out.writeStringArray(categories==null?null:categories.toArray(new String[categories.size()]));out.writeBundle(extras);
