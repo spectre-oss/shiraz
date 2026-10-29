@@ -316,6 +316,15 @@ public final class HostPackageManager extends PackageManager {
         }
         return null;
     }
+    private android.content.pm.FeatureInfo[] packageFeatures(String prefix){
+        int count=integer(prefix+".count",0);if(count<0||count>256)throw new IllegalArgumentException("Feature count");
+        if(count==0)return null;android.content.pm.FeatureInfo[] result=new android.content.pm.FeatureInfo[count];
+        for(int i=0;i<count;i++){
+            String key=prefix+"."+i+".";android.content.pm.FeatureInfo feature=new android.content.pm.FeatureInfo();
+            feature.name=values.getProperty(key+"name");feature.version=integer(key+"version",0);feature.reqGlEsVersion=integer(key+"reqGlEsVersion",0);feature.flags=integer(key+"flags",0);result[i]=feature;
+        }
+        return result;
+    }
     private android.content.pm.ActivityInfo[] packageActivities(boolean receiver,int flags)throws NameNotFoundException{
         String kind=receiver?"receiver":"activity";int count=integer(kind+".count",0);
         if(count<0||count>256)throw new IllegalArgumentException("Package component count");
@@ -371,6 +380,21 @@ public final class HostPackageManager extends PackageManager {
             for(int i=0;i<count;i++){
                 String prefix="definedPermission."+i+".";android.content.pm.PermissionInfo permission=new android.content.pm.PermissionInfo();
                 permission.name=required(prefix+"name");permission.packageName=name;permission.protectionLevel=integer(prefix+"protection",0);info.permissions[i]=permission;
+            }
+        }
+        if((flags&GET_CONFIGURATIONS)!=0){
+            info.reqFeatures=packageFeatures("feature");
+            int count=integer("configuration.count",0);if(count<0||count>256)throw new IllegalArgumentException("Configuration count");
+            if(count>0)info.configPreferences=new android.content.pm.ConfigurationInfo[count];
+            for(int i=0;i<count;i++){
+                String prefix="configuration."+i+".";android.content.pm.ConfigurationInfo config=new android.content.pm.ConfigurationInfo();
+                config.reqTouchScreen=integer(prefix+"reqTouchScreen",0);config.reqKeyboardType=integer(prefix+"reqKeyboardType",0);config.reqNavigation=integer(prefix+"reqNavigation",0);config.reqInputFeatures=integer(prefix+"reqInputFeatures",0);config.reqGlEsVersion=integer(prefix+"reqGlEsVersion",0);info.configPreferences[i]=config;
+            }
+            count=integer("featureGroup.count",0);if(count<0||count>64)throw new IllegalArgumentException("Feature group count");
+            if(count>0)info.featureGroups=new android.content.pm.FeatureGroupInfo[count];
+            int total=0;for(int i=0;i<count;i++){
+                android.content.pm.FeatureGroupInfo group=new android.content.pm.FeatureGroupInfo();group.features=packageFeatures("featureGroup."+i);
+                total+=group.features==null?0:group.features.length;if(total>256)throw new IllegalArgumentException("Grouped feature count");info.featureGroups[i]=group;
             }
         }
         if((flags&GET_INSTRUMENTATION)!=0){

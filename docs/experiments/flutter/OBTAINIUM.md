@@ -86,9 +86,21 @@
     marked granted. The unchanged APK passes these failures and next stops at
     missing `PackageInfo.configPreferences`.
 
+13. Added bounded uses-configuration, uses-feature, and feature-group parsing,
+    launcher transfer, and GET_CONFIGURATIONS snapshots. VM tests cover GLES
+    requirements, optional/named features, groups, input declarations, limits,
+    requested/unrequested metadata, and independent result objects. Retesting
+    the unchanged APK reaches the home and Add screens without the preceding
+    package-metadata failures. Entering its upstream repository URL displays
+    GitHub options. Submitting Add then exposes missing
+    `PackageManager.resolveService(Intent, int)` and a Cronet native-link error
+    for `ATrace_beginSection`; release retrieval does not complete.
+
 ## Current result and limits
 
-**Interactive settings and text entry; not a full compatibility pass.** The signing-query flag failure is fixed, but background package inventory now
-fails on missing `PackageInfo.configPreferences`. App installation,
-updates, certificate handling, app-list persistence, and complete plugin behavior
-are not verified. Do not infer that every Flutter app works from this result.
+**Interactive settings and text entry; not a full compatibility pass.** The
+previous package-metadata failure sequence is passed. Adding an upstream URL
+now exposes service-resolution and native tracing-symbol failures. App
+installation, updates, certificate verification, app-list persistence, and
+complete plugin behavior are not verified. Do not infer that every Flutter
+app works from this result.

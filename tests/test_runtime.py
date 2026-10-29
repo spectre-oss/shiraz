@@ -159,6 +159,15 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(values['targetSdk'], '27')
         self.assertEqual(values['versionCode'], '0')
 
+    def test_feature_transfer(self):
+        manifest = {**self.report['manifest'], 'features': [{'name': 'test.camera', 'flags': 1}], 'configurations': [{'reqInputFeatures': 3}], 'feature_groups': [[{'name': 'test.touch', 'flags': 1}]]}
+        values = application_metadata(manifest, Path('/app.apk'), Path('/data'))
+        self.assertEqual(values['feature.0.name'], 'test.camera')
+        self.assertEqual(values['configuration.0.reqInputFeatures'], 3)
+        self.assertEqual(values['featureGroup.0.0.name'], 'test.touch')
+        with self.assertRaises(FormatError):
+            application_metadata({**manifest, 'features': [{}] * 257}, Path('/app.apk'), Path('/data'))
+
     def test_declared_permission_transfer(self):
         manifest = {**self.report['manifest'], 'defined_permissions': [{'name': 'test.ACCESS', 'protection': 18}]}
         values = application_metadata(manifest, Path('/app.apk'), Path('/data'))

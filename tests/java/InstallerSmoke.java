@@ -68,6 +68,13 @@ public final class InstallerSmoke {
   check(metadata.permissions.length==1&&metadata.permissions[0].getProtection()==2&&metadata.permissions[0].getProtectionFlags()==16,"declared permission metadata");
   check(metadata.requestedPermissionsFlags[0]==android.content.pm.PackageInfo.REQUESTED_PERMISSION_REQUIRED,"denied permission not advertised as granted");
   check(manager.getPackageInfo("test.signer",0).permissions==null&&manager.getPackageInfo("test.signer",0).requestedPermissions==null,"unrequested permissions");
+  facts.setProperty("feature.count","1");facts.setProperty("feature.0.name","test.camera");facts.setProperty("feature.0.flags","1");
+  facts.setProperty("configuration.count","1");facts.setProperty("configuration.0.reqGlEsVersion","196608");facts.setProperty("featureGroup.count","1");facts.setProperty("featureGroup.0.count","1");facts.setProperty("featureGroup.0.0.name","test.touch");
+  manager=new shiraz.runtime.HostPackageManager(facts,new ContextWrapper(null));
+  metadata=manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_CONFIGURATIONS);
+  check("test.camera".equals(metadata.reqFeatures[0].name)&&metadata.reqFeatures[0].flags==1&&metadata.configPreferences[0].reqGlEsVersion==0x30000&&"test.touch".equals(metadata.featureGroups[0].features[0].name),"configuration and feature declarations");
+  metadata.reqFeatures[0].name="mutated";check("test.camera".equals(manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_CONFIGURATIONS).reqFeatures[0].name),"fresh feature metadata");
+  check(manager.getPackageInfo("test.signer",0).reqFeatures==null&&manager.getPackageInfo("test.signer",0).configPreferences==null,"unrequested configuration");
   apk.putLong(0,1);Files.write(file.toPath(),apk.array());try{method.invoke(null,file.getPath());throw new AssertionError("corrupt signing size accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof IllegalStateException,"wrong malformed signer failure");}file.delete();
  }
  static byte[] join(byte[] a,byte[] b){byte[] out=java.util.Arrays.copyOf(a,a.length+b.length);System.arraycopy(b,0,out,a.length,b.length);return out;}

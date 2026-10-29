@@ -266,6 +266,22 @@ def application_metadata(manifest, apk, data):
         for entry, item in enumerate(metadata):
             for field in ('name', 'name_resource', 'kind', 'value'):
                 values[f'receiver.{index}.metadata.{entry}.{field}'] = item.get(field)
+    def emit_declarations(prefix, records, fields, limit):
+        if len(records) > limit:
+            raise FormatError('Package declaration limit: ' + prefix)
+        values[prefix + '.count'] = len(records)
+        for index, record in enumerate(records):
+            for field in fields:
+                values[f'{prefix}.{index}.{field}'] = record.get(field)
+    feature_fields = ('name', 'version', 'reqGlEsVersion', 'flags')
+    emit_declarations('feature', manifest.get('features', []), feature_fields, 256)
+    emit_declarations('configuration', manifest.get('configurations', []), ('reqTouchScreen', 'reqKeyboardType', 'reqNavigation', 'reqInputFeatures', 'reqGlEsVersion'), 256)
+    groups = manifest.get('feature_groups', [])
+    if len(groups) > 64 or sum(map(len, groups)) > 256:
+        raise FormatError('Feature group limit')
+    values['featureGroup.count'] = len(groups)
+    for index, group in enumerate(groups):
+        emit_declarations(f'featureGroup.{index}', group, feature_fields, 256)
     instrumentation = manifest.get('instrumentation', [])
     if len(instrumentation) > 256:
         raise FormatError('Instrumentation declaration limit')

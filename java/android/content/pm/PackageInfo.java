@@ -17,6 +17,9 @@ public class PackageInfo implements Parcelable {
     public SigningInfo signingInfo;
     public ActivityInfo[] activities, receivers;
     public ProviderInfo[] providers;
+    public ConfigurationInfo[] configPreferences;
+    public FeatureInfo[] reqFeatures;
+    public FeatureGroupInfo[] featureGroups;
     public InstrumentationInfo[] instrumentation;
     public ServiceInfo[] services;
     public PermissionInfo[] permissions;

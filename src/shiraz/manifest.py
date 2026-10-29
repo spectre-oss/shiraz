@@ -342,6 +342,31 @@ def inspect_manifest(data):
             providers.append({'name': name, 'filters': activity_filters(provider), 'authorities': attr(provider, 'authorities'), 'enabled': attr(provider, 'enabled'),
                               'exported': attr(provider, 'exported'), 'grantUriPermissions': attr(provider, 'grantUriPermissions'), 'multiprocess': attr(provider, 'multiprocess'), 'initOrder': attr(provider, 'initOrder'), 'metadata': component_metadata(provider),
                               'process': attr(provider, 'process') or attr(app, 'process') or package})
+    def feature_record(item, grouped=False):
+        required = attr(item, 'required')
+        if required not in (None, 'true', 'false'):
+            raise ManifestError('unsupported feature required value')
+        return {'name': attr(item, 'name'), 'version': enum_value(item, 'version', {}, 0),
+                'reqGlEsVersion': enum_value(item, 'glEsVersion', {}, 0),
+                'flags': 1 if grouped or required != 'false' else 0}
+    features = [feature_record(item) for item in root.findall('uses-feature')]
+    feature_groups = [[feature_record(item, True) for item in group.findall('uses-feature')] for group in root.findall('feature-group')]
+    if len(features) > 256 or len(feature_groups) > 64 or sum(map(len, feature_groups)) > 256:
+        raise ManifestError('feature declaration limit')
+    configurations = []
+    for item in root.findall('uses-configuration'):
+        keyboard = attr(item, 'reqHardKeyboard'); navigation = attr(item, 'reqFiveWayNav')
+        if keyboard not in (None, 'true', 'false') or navigation not in (None, 'true', 'false'):
+            raise ManifestError('unsupported configuration boolean')
+        configurations.append({'reqTouchScreen': enum_value(item, 'reqTouchScreen', {'notouch': 1, 'stylus': 2, 'finger': 3}, 0),
+            'reqKeyboardType': enum_value(item, 'reqKeyboardType', {'nokeys': 1, 'qwerty': 2, 'twelvekey': 3}, 0),
+            'reqNavigation': enum_value(item, 'reqNavigation', {'nonav': 1, 'dpad': 2, 'trackball': 3, 'wheel': 4}, 0),
+            'reqInputFeatures': (1 if keyboard == 'true' else 0) | (2 if navigation == 'true' else 0), 'reqGlEsVersion': 0})
+    for feature in features:
+        if feature['name'] is None and feature['reqGlEsVersion']:
+            configurations.append({'reqGlEsVersion': feature['reqGlEsVersion']})
+    if len(configurations) > 256:
+        raise ManifestError('configuration declaration limit')
     instrumentation = []
     seen_instrumentation = set()
     for item in root.findall('instrumentation'):
@@ -372,7 +397,7 @@ def inspect_manifest(data):
         application_info[field] = enum_value(screens, field, {}, 0) if screens is not None else 0
     application_info['compileSdkVersion'] = enum_value(root, 'compileSdkVersion', {}, 0)
     application_info['compileSdkVersionCodename'] = attr(root, 'compileSdkVersionCodename')
-    return {'instrumentation': instrumentation, 'application_info': application_info, 'shared_user_id': attr(root, 'sharedUserId'),
+    return {'features': features, 'feature_groups': feature_groups, 'configurations': configurations, 'instrumentation': instrumentation, 'application_info': application_info, 'shared_user_id': attr(root, 'sharedUserId'),
             'shared_user_label': references.get((id(root), '{' + ANDROID + '}sharedUserLabel'), 0),
             'revision_code': enum_value(root, 'revisionCode', {}, 0),
             'install_location': enum_value(root, 'installLocation', {'auto': 0, 'internalOnly': 1, 'preferExternal': 2}, -1),

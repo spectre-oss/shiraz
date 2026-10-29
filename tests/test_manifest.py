@@ -45,6 +45,14 @@ def binary_fixture(utf8=True, label_reference=False, service_metadata=False, act
 
 
 class ManifestTests(unittest.TestCase):
+    def test_configuration_and_features(self):
+        manifest = inspect_manifest(f'<manifest xmlns:android="{ANDROID}" package="test.app"><uses-feature android:name="test.camera" android:required="false" android:version="2"/><uses-feature android:glEsVersion="0x00030000"/><feature-group><uses-feature android:name="test.touch"/></feature-group><uses-configuration android:reqTouchScreen="finger" android:reqHardKeyboard="true"/><application/></manifest>'.encode())
+        self.assertEqual(manifest['features'][0], {'name': 'test.camera', 'flags': 0, 'version': 2, 'reqGlEsVersion': 0})
+        self.assertEqual(manifest['feature_groups'][0][0]['name'], 'test.touch')
+        self.assertEqual(manifest['configurations'][0]['reqTouchScreen'], 3)
+        self.assertEqual(manifest['configurations'][0]['reqInputFeatures'], 1)
+        self.assertEqual(manifest['configurations'][1]['reqGlEsVersion'], 0x30000)
+
     def test_instrumentation_declarations(self):
         data = f'<manifest xmlns:android="{ANDROID}" package="test.app"><instrumentation android:name=".Runner" android:targetPackage="test.target" android:functionalTest="true"/><application/></manifest>'
         item = inspect_manifest(data.encode())['instrumentation'][0]
