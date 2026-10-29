@@ -1,6 +1,6 @@
 # Mindustry — Arc
 
-Status: **mining, drill construction and saved-world reload verified; tutorial continues**.
+Status: **mining, conveyor delivery and saved-world reload verified; tutorial continues**.
 
 ## Artifact
 
@@ -75,6 +75,19 @@ persistent Android recent-task entry to remove. After rebuilding and restarting
 the unchanged APK, tapping Quit exits with status zero and no missing-method
 or activity-lifecycle failure in the log. The full VM `make check` suite passes.
 
-Conveyor construction, tutorial completion, combat, multiplayer,
-audio and responsive portrait layout are not established. The app automatically
+On baseline `c13b4e1`, the tech tree accepts touch panning and two-finger pinch
+zoom. Researching Conveyor unlocks its build category. Holding a finger, dragging
+and confirming constructs a horizontal run; a second vertical run connects it
+to the core. Copper visibly travels along the belts, the five-item delivery
+objective completes, and the tutorial advances to mining 100 copper. This
+checks construction and resource transport, not completion of the tutorial.
+
+Resizing from 960 × 540 to 540 × 960 redraws the world and tech tree. The Back
+control remains interactive, but tutorial text and a tech-tree detail popup
+extend beyond the portrait edges. Returning to 1280 × 720 restores a usable
+landscape layout. Portrait usability and Android visual parity remain open;
+these observations do not establish whether the clipping originates in the app
+or Shiraz.
+
+Tutorial completion, combat, multiplayer and audio are not established. The app automatically
 fetched its public server list during startup; no multiplayer session was joined.

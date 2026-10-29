@@ -8,7 +8,8 @@ loading alone does not establish working rendering, input or audio.
   failure and allows the main menu to render. A Java framebuffer-routing fix
   restores campaign planet previews and Ground Zero’s tutorial world. Touch
   dragging, landscape resizing, copper collection, drill construction and
-  saved-world reload work; conveyor construction, combat and
+  saved-world reload work. Conveyor research, long-press construction and copper
+  delivery into the core also work; portrait text clips. Combat and
   later campaign progression remain under test.
 
 Require a visible game scene and input-driven gameplay before calling a game
