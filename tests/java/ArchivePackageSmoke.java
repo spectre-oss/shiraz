@@ -19,6 +19,21 @@ public final class ArchivePackageSmoke {
    check(shiraz.runtime.ArchivePackageInfo.read(invalid.getPath(),0)==null,"truncated binary manifest");
   }finally{invalid.delete();}
   try{shiraz.runtime.ArchivePackageInfo.read(args[0],PackageManager.GET_ACTIVITIES);throw new AssertionError("unsupported flag silently accepted");}catch(UnsupportedOperationException expected){}
+  final android.content.res.Resources resources=android.content.res.Resources.shirazOpen(args[0],360,640);
+  try{
+   java.util.Properties facts=new java.util.Properties();facts.setProperty("package",info.packageName);facts.setProperty("sourceDir",args[0]);facts.setProperty("dataDir","unused");facts.setProperty("icon",Integer.toUnsignedString(info.applicationInfo.icon));
+   shiraz.runtime.HostPackageManager manager=new shiraz.runtime.HostPackageManager(facts,new android.content.ContextWrapper(null){
+    public String getPackageName(){return "org.shiraz.fixture";}
+    public android.content.res.Resources getResources(){return resources;}
+   });
+   android.graphics.drawable.Drawable icon=manager.getApplicationIcon(info.packageName);
+   check(icon instanceof android.graphics.drawable.BitmapDrawable&&icon.getIntrinsicWidth()>0,"declared application bitmap");
+   check(info.applicationInfo.loadIcon(manager).getIntrinsicWidth()==icon.getIntrinsicWidth(),"loadIcon uses application resource");
+   check(manager.getApplicationIcon(info.applicationInfo)!=icon,"independent drawable instances");
+   try{manager.getApplicationIcon("missing.package");throw new AssertionError("unknown icon package");}catch(PackageManager.NameNotFoundException expected){}
+   ApplicationInfo noIcon=new ApplicationInfo();noIcon.packageName=info.packageName;
+   check(manager.getApplicationIcon(noIcon)!=null,"framework default icon");
+  }finally{resources.shirazClose();}
   System.out.println("ARCHIVE_PACKAGE_METADATA_OK");
  }
 }

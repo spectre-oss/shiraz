@@ -1444,8 +1444,8 @@ resolver-properties-smoke: framework build/libshiraz-host.so
 check: resolver-properties-smoke
 
 .PHONY: archive-package-smoke
-archive-package-smoke: framework apk-fixture build/libshiraz-host.so build/libshiraz-resources.so
+archive-package-smoke: framework apk-fixture framework-resources build/libshiraz-host.so build/libshiraz-resources.so build/libshiraz-image.so
 	mkdir -p build/archive-package-smoke
 	javac --release 8 -cp build/framework/classes -d build/archive-package-smoke tests/java/ArchivePackageSmoke.java
-	$(JAVA) -Djava.library.path=build -cp build/archive-package-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ArchivePackageSmoke build/apk-fixture/fixture.apk
+	$(JAVA) -Djava.library.path=build -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -cp build/archive-package-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ArchivePackageSmoke build/apk-fixture/fixture.apk
 check: archive-package-smoke

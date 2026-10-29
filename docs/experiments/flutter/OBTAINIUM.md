@@ -147,13 +147,22 @@
     Repeating Add and selecting an x86_64 package now passes archive inspection,
     then crashes on missing `PackageManager.getApplicationIcon(String)`.
 
+19. Added application-icon query overloads and `PackageItemInfo.loadIcon`.
+    VM regressions verify declared bitmap loading, independent drawable instances,
+    unknown-package failure, and a neutral host fallback for applications without
+    a usable icon. Full VM checks pass. The unchanged APK now completes Add and
+    reaches its details screen with version/release information. The entry remains
+    in the app list after restart. Its adaptive-icon XML still raises a handled
+    plugin error; the visible app-provided image does not prove adaptive-icon
+    support. Opening the saved entry and resizing to landscape produces a white
+    surface, which remains white after returning to portrait. This later flow
+    does not inherit the earlier settings-screen resize result.
+
 ## Current result and limits
 
-**Interactive settings and text entry; not a full compatibility pass.** The
-previous package-metadata failure sequence is passed. Adding an upstream URL
-now retrieves releases through Cronet and displays package choices. Continuing
-after selection passes archive metadata inspection, then fails on missing
-application-icon lookup. App
-installation, updates, certificate verification, app-list persistence, and
-complete plugin behavior are not verified. Do not infer that every Flutter
-app works from this result.
+**Release retrieval, Add, and app-list persistence verified; not a full
+compatibility pass.** Package metadata and icon-query missing-method failures
+are passed. Adaptive-icon XML remains unsupported, and the saved-entry resize
+flow produced a persistent white surface. Installation, updates, certificate
+verification, and complete plugin behavior are not verified. Do not infer that
+every Flutter app works from this result.

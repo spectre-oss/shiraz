@@ -46,6 +46,21 @@ public abstract class PackageManager {
     public PackageInfo getPackageArchiveInfo(String path,int flags){return shiraz.runtime.ArchivePackageInfo.read(path,flags);}
     public abstract PackageInfo getPackageInfo(String packageName, int flags) throws NameNotFoundException;
     public abstract ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException;
+    public android.graphics.drawable.Drawable getApplicationIcon(String packageName) throws NameNotFoundException {
+        return getApplicationIcon(getApplicationInfo(packageName,0));
+    }
+    public android.graphics.drawable.Drawable getApplicationIcon(ApplicationInfo info) {
+        if(info==null)throw new NullPointerException("application info");
+        if(info.icon!=0)try{return getResourcesForApplication(info).getDrawable(info.icon);}
+        catch(NameNotFoundException|android.content.res.Resources.NotFoundException unavailable){}
+        return getDefaultActivityIcon();
+    }
+    public android.graphics.drawable.Drawable getDefaultActivityIcon() {
+        // Neutral host placeholder when an application declares no usable icon.
+        android.graphics.drawable.GradientDrawable icon=new android.graphics.drawable.GradientDrawable();
+        icon.setSize(48,48);icon.setCornerRadius(10);icon.setColor(0xff606770);icon.setStroke(2,0xffaeb4bc);
+        return icon;
+    }
     public abstract CharSequence getApplicationLabel(ApplicationInfo info);
     public static class NameNotFoundException extends AndroidException {
         public NameNotFoundException() { }
