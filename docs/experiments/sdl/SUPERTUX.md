@@ -190,13 +190,26 @@
     menu music and its toggle through ARM64/OpenSL and a VM file sink; speaker
     output, hardware timing and gameplay sound effects remain unverified.
 
+21. On baseline `428c774`, entered “Welcome to Antarctica” with the audio
+    sink enabled, moved and jumped, and collected a coin (100 → 101) without
+    the former scheduling abort. Disabled Music through the in-game Audio menu
+    while leaving Sound enabled. A 1.5-second idle PCM window had peak 1 and
+    RMS 0.502; a jump window had peak 1,904 and RMS 151.692. Disabling Sound
+    through the same menu and repeating the jump returned to peak 1 and RMS
+    0.501. These are stereo signed-16-bit samples at 48 kHz captured on the VM.
+    This verifies gameplay sound-effect output and the Sound toggle separately
+    from music, superseding step 20's unverified-effects limitation. It does not
+    verify every effect, physical speakers or hardware latency. Window close
+    ended the runner with exit status zero. This run did not complete the level.
+
 **Animated startup, menus, mouse hover, world-map navigation, level rendering,
 keyboard movement/jumping, touchscreen movement/jumping, coin collection and
 resize verified.** Preference writing/reloading, restoration of the selected
 world-map node, enemy death/restart, mouse-driven level/world exit, and a
 menu-driven clean exit are verified. Completing a level,
-campaign progress persistence, speaker output, gameplay sound effects and general
-network compatibility remain unverified. Menu music and its toggle produce
-verified PCM through a VM file sink. Portrait controls overlap, and precise touchscreen menu selection
+campaign progress persistence, speaker output and general
+network compatibility remain unverified. Menu music, a gameplay sound effect,
+and their separate toggles produce verified PCM through a VM file sink.
+Portrait controls overlap, and precise touchscreen menu selection
 remains limited. Startup uses software graphics and ARM64 translation; these
 bounded interactions are not a performance benchmark or a full-game pass.
