@@ -172,6 +172,26 @@
     after deployment. This fixes a demonstrated synchronization defect, but its
     relationship to the intermittent Unity startup stall remains unproven.
 
+26. A further VM retest on 2026-10-29 (source `2d9d945`) stayed at the
+    splash while the headless window had no input focus. A Java stack snapshot
+    showed UnityMain waiting on its empty MessageQueue. Sending `focus 1`
+    through Shiraz's live-input channel immediately started the neighborhood;
+    Settings opened and saved currency remained 20. Resizing the open panel
+    to 360×640 and back to 640×360 preserved it, with the same portrait clipping.
+    This particular wait was a missing test-window focus event, not evidence
+    of a new runtime deadlock. It does not explain the earlier stalls that
+    occurred after focus and engine initialization. An ALSA file sink was
+    configured, but no audio file was produced: Unity audio remains unverified.
+
+## Headless walkthrough setup
+
+After the app window appears, send `focus 1` through the configured live-input
+file before judging startup. A headless SDL window does not automatically receive
+desktop input focus. Capture the resulting frame and inspect the app's response;
+do not count the splash as a successful launch or treat every idle UnityMain
+thread as a deadlock. Keep audio verification separate: configuring a sink alone
+does not prove that the game opened it or produced sound.
+
 **Interactive scene, camera drag, multitouch zoom, and repeated native resizing
 verified in successful runs; startup is intermittent.** Collider warnings still
 appear. Portrait Settings input now works, but parts of the UI are clipped.
