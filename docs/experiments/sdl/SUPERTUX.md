@@ -147,6 +147,17 @@
     Its title/statistics screen waits for confirmation before play; it should
     not be treated as a stalled level load.
 
+17. On baseline `ff32df7`, another observed keyboard walkthrough advances
+    farther through “Welcome to Antarctica.” Right/Space input scrolls the
+    level, jumps past enemies, reaches successive block/platform sections,
+    and increases the coin counter from 100 to 106. Frames captured before
+    opening the pause menu show Tux's airborne positions and the changing
+    terrain. Pausing between observations keeps inspection time separate from
+    active play. The bounded ten-minute runner then times out; its log records
+    that timeout rather than an application crash. This extends movement,
+    scrolling, and collectible coverage, but does not establish level completion,
+    damage handling, or persistence of completed-level progress.
+
 **Animated startup, menus, mouse hover, world-map navigation, level rendering,
 keyboard movement/jumping, touchscreen movement/jumping, coin collection and
 resize verified.** Preference writing/reloading, restoration of the selected
