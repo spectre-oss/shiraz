@@ -36,6 +36,22 @@ public final class ConnectivityManager {
         public void onBlockedStatusChanged(Network network, boolean blocked) {}
     }
 
+    public interface OnNetworkActiveListener { void onNetworkActive(); }
+    private final java.util.Set<OnNetworkActiveListener> activeListeners =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<OnNetworkActiveListener,Boolean>());
+    /** No Android radio idle timers: active means no radio wake-up deferral, not Internet reachability. */
+    public boolean isDefaultNetworkActive() { return true; }
+    public void addDefaultNetworkActiveListener(OnNetworkActiveListener listener) {
+        if (listener == null) throw new NullPointerException("listener");
+        synchronized (activeListeners) { activeListeners.add(listener); }
+        // There are no inactive-to-active radio transitions on this adapter.
+    }
+    public void removeDefaultNetworkActiveListener(OnNetworkActiveListener listener) {
+        synchronized (activeListeners) {
+            if (!activeListeners.remove(listener)) throw new IllegalArgumentException("Network active listener was not registered");
+        }
+    }
+
     private static final Network HOST_NETWORK = new Network(100);
     private final java.util.IdentityHashMap<NetworkCallback,Object> callbacks = new java.util.IdentityHashMap<NetworkCallback,Object>();
 

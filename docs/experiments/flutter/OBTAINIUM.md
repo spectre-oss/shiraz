@@ -125,12 +125,23 @@
     framework interface, `ConnectivityManager.OnNetworkActiveListener`, is
     missing. No release retrieval completes.
 
+17. Added `OnNetworkActiveListener` and registration/removal APIs. The host has
+    no Android radio idle timers, so `isDefaultNetworkActive` reports active;
+    this is not an Internet-reachability claim and no radio transitions are
+    synthesized. This follows the no-idle-timer behavior in
+    [Android's network service](https://android.googlesource.com/platform/frameworks/base/+/30b6573ec7aa09d14f397772d16f3d69ca2617c9/services/core/java/com/android/server/NetworkManagementService.java).
+    Full VM checks pass. Repeating Add now retrieves release information and
+    displays “Pick an APK” with x86_64 release choices. Selecting the default
+    package and Continue proceeds to archive metadata inspection, then crashes
+    on missing `PackageManager.getPackageArchiveInfo(String, int)`. A saved app
+    entry and installation are not yet verified.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The
 previous package-metadata failure sequence is passed. Adding an upstream URL
-now loads Cronet and reads network resolver metadata, but fails on the missing
-network-active listener interface during Cronet class loading. App
+now retrieves releases through Cronet and displays package choices. Continuing
+after selection fails on missing package-archive metadata inspection. App
 installation, updates, certificate verification, app-list persistence, and
 complete plugin behavior are not verified. Do not infer that every Flutter
 app works from this result.

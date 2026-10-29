@@ -20,6 +20,13 @@ public final class ResolverPropertiesSmoke {
   android.os.Looper.prepare();
   final android.os.Looper loop=android.os.Looper.myLooper();
   final android.net.ConnectivityManager manager=android.net.ConnectivityManager.shirazForHost();
+  check(manager.isDefaultNetworkActive(),"host has no radio idle timers");
+  android.net.ConnectivityManager.OnNetworkActiveListener active=new android.net.ConnectivityManager.OnNetworkActiveListener(){
+   public void onNetworkActive(){throw new AssertionError("no invented radio transition");}
+  };
+  manager.addDefaultNetworkActiveListener(active);
+  manager.removeDefaultNetworkActiveListener(active);
+  try{manager.removeDefaultNetworkActiveListener(active);throw new AssertionError("unregistered active listener");}catch(IllegalArgumentException expected){}
   final int[] calls={0};
   android.net.ConnectivityManager.NetworkCallback callback=new android.net.ConnectivityManager.NetworkCallback(){
    @Override public void onAvailable(android.net.Network network){check(loop.isCurrentThread(),"callback thread");calls[0]++;}
