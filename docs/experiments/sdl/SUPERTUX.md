@@ -170,12 +170,33 @@
     VM; longer held presses worked. No event-loss cause or runtime fix is claimed
     from that observation. Level completion remains unverified.
 
+19. Enabled actual OpenSL ES output through an ALSA file sink on baseline
+    `f6dfcdd`. This exposed an ARM64 libc-bridge abort at
+    `pthread_setschedparam`, previously hidden by missing audio hardware.
+    Added scheduling get/set operations and priority changes through the live
+    guest-thread registry, translating guest self handles and preserving host
+    errors. Host and ARM64/ART fixtures cover both handle forms, invalid requests,
+    and exited threads; host tests also cover fork behavior.
+20. With scheduling calls available, the file sink exposed unpaced OpenSL buffer
+    callbacks: the mixer consumed CPU and emitted PCM far faster than real time
+    while the screen stayed black. The worker now waits for the submitted audio
+    duration, counting time already spent in the device write, and wakes on clear
+    or destruction. A callback-timing regression fails before this change and
+    passes afterward, alongside queue, marker and waveform assertions.
+    The unchanged APK then reaches its animated menu with audio enabled. In
+    Options → Audio, Music off produces a near-zero captured signal (one-second
+    window peak 1, RMS about 0.5); Music on restores a non-silent signal (peak
+    8,664, RMS about 1,742). The game exits normally through Quit. This verifies
+    menu music and its toggle through ARM64/OpenSL and a VM file sink; speaker
+    output, hardware timing and gameplay sound effects remain unverified.
+
 **Animated startup, menus, mouse hover, world-map navigation, level rendering,
 keyboard movement/jumping, touchscreen movement/jumping, coin collection and
 resize verified.** Preference writing/reloading, restoration of the selected
 world-map node, enemy death/restart, mouse-driven level/world exit, and a
 menu-driven clean exit are verified. Completing a level,
-campaign progress persistence, audio and general network compatibility remain
-unverified. Portrait controls overlap, and precise touchscreen menu selection
+campaign progress persistence, speaker output, gameplay sound effects and general
+network compatibility remain unverified. Menu music and its toggle produce
+verified PCM through a VM file sink. Portrait controls overlap, and precise touchscreen menu selection
 remains limited. Startup uses software graphics and ARM64 translation; these
 bounded interactions are not a performance benchmark or a full-game pass.

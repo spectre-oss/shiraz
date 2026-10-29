@@ -6,6 +6,9 @@ extern int pthread_detach(pthread_t);
 extern pthread_t pthread_self(void);
 extern int pthread_setname_np(pthread_t,const char*);
 extern int pthread_getname_np(pthread_t,char*,unsigned long);
+extern int pthread_setschedparam(pthread_t,int,const int*);
+extern int pthread_getschedparam(pthread_t,int*,int*);
+extern int pthread_setschedprio(pthread_t,int);
 extern int strcmp(const char*,const char*);
 extern int pthread_key_create(int*,void(*)(void*));
 extern int pthread_key_delete(int);
@@ -76,9 +79,13 @@ struct Naming { int ready,proceed; pthread_t guest; int ok; };
 static void* naming_worker(void* argument) {
   struct Naming* n=argument; char buffer[16],signal=1;
   n->guest=pthread_self();
+  int policy=-1,priority=-1,normal=0;
   n->ok=!pthread_setname_np(n->guest,"guest-name") &&
       !pthread_getname_np(n->guest,buffer,sizeof buffer) && !strcmp(buffer,"guest-name") &&
-      pthread_setname_np(n->guest,"this-name-is-far-too-long")==34;
+      pthread_setname_np(n->guest,"this-name-is-far-too-long")==34 &&
+      !pthread_setschedparam(n->guest,0,&normal) &&
+      !pthread_getschedparam(n->guest,&policy,&priority) && policy==0 && priority==0 &&
+      pthread_setschedparam(n->guest,-1,&normal)==22 && pthread_setschedprio(n->guest,1)==22;
   write(n->ready,&signal,1);
   read(n->proceed,&signal,1);
   n->ok=n->ok && !pthread_getname_np(n->guest,buffer,sizeof buffer) && !strcmp(buffer,"parent-name");
@@ -92,8 +99,12 @@ static int naming_test(void) {
     ok=read(ready[0],&signal,1)==1;
     ok=ok && !pthread_getname_np(thread,buffer,sizeof buffer) && !strcmp(buffer,"guest-name");
     ok=ok && !pthread_setname_np(n.guest,"parent-name");
+    int policy=-1,priority=-1;
+    ok=ok && !pthread_getschedparam(thread,&policy,&priority) && policy==0 && priority==0 &&
+        !pthread_setschedprio(thread,0);
     write(proceed[1],"x",1); pthread_join(thread,0);
-    ok=ok && n.ok && pthread_getname_np(n.guest,buffer,sizeof buffer)==3;
+    ok=ok && n.ok && pthread_getname_np(n.guest,buffer,sizeof buffer)==3 &&
+        pthread_getschedparam(n.guest,&policy,&priority)==3;
   }
   close(ready[0]);close(ready[1]);close(proceed[0]);close(proceed[1]);
   return ok;

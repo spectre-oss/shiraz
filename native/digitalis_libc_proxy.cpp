@@ -106,6 +106,9 @@ static uint32_t PropertyAreaSerial() { return 0; }
 void ShirazRefreshGuestThreadIdentity();
 int ShirazGuestSetThreadName(pthread_t,const char*);
 int ShirazGuestGetThreadName(pthread_t,char*,size_t);
+int ShirazGuestSetSchedParam(pthread_t,int,const int32_t*);
+int ShirazGuestGetSchedParam(pthread_t,int*,int32_t*);
+int ShirazGuestSetSchedPriority(pthread_t,int);
 static pid_t CloneForFork() {
  GuestThread* thread = GetCurrentGuestThread();
  pid_t pid = fork();
@@ -228,7 +231,7 @@ static const KnownTrampoline functions[] = {
 {"pthread_getattr_np", Unsupported, const_cast<char*>("pthread_getattr_np")},
 {"pthread_getcpuclockid", Unsupported, const_cast<char*>("pthread_getcpuclockid")},
 {"pthread_getname_np", GetTrampolineFunc<decltype(ShirazGuestGetThreadName)>(), reinterpret_cast<void*>(ShirazGuestGetThreadName)},
-{"pthread_getschedparam", Unsupported, const_cast<char*>("pthread_getschedparam")},
+{"pthread_getschedparam", GetTrampolineFunc<decltype(ShirazGuestGetSchedParam)>(), reinterpret_cast<void*>(ShirazGuestGetSchedParam)},
 {"pthread_getspecific", GetTrampolineFunc<auto(int32_t) -> void*>(), reinterpret_cast<void*>(NULL)},
 {"pthread_gettid_np", Unsupported, const_cast<char*>("pthread_gettid_np")},
 {"pthread_join", ThreadJoin, nullptr},
@@ -236,8 +239,8 @@ static const KnownTrampoline functions[] = {
 {"pthread_key_delete", GetTrampolineFunc<auto(int32_t) -> int32_t>(), reinterpret_cast<void*>(NULL)},
 {"pthread_kill", Unsupported, const_cast<char*>("pthread_kill")},
 {"pthread_setname_np", GetTrampolineFunc<decltype(ShirazGuestSetThreadName)>(), reinterpret_cast<void*>(ShirazGuestSetThreadName)},
-{"pthread_setschedparam", Unsupported, const_cast<char*>("pthread_setschedparam")},
-{"pthread_setschedprio", Unsupported, const_cast<char*>("pthread_setschedprio")},
+{"pthread_setschedparam", GetTrampolineFunc<decltype(ShirazGuestSetSchedParam)>(), reinterpret_cast<void*>(ShirazGuestSetSchedParam)},
+{"pthread_setschedprio", GetTrampolineFunc<decltype(ShirazGuestSetSchedPriority)>(), reinterpret_cast<void*>(ShirazGuestSetSchedPriority)},
 {"pthread_setspecific", GetTrampolineFunc<auto(int32_t, void*) -> int32_t>(), reinterpret_cast<void*>(NULL)},
 {"pthread_sigqueue", Unsupported, const_cast<char*>("pthread_sigqueue")},
 {"setjmp", GetTrampolineFunc<decltype(DoThunk_setjmp)>(), reinterpret_cast<void*>(DoThunk_setjmp)},

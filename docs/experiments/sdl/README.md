@@ -9,3 +9,7 @@ does not establish Android compatibility.
 
 Acceptance requires a rendered game, actual movement and menu input, resize/back
 behavior, and save/restart checks. Native library loading alone is insufficient.
+
+SuperTux menu music and its toggle also produce PCM through a VM file sink
+after thread-scheduling and OpenSL callback-pacing fixes. Physical audio output
+and gameplay sound effects remain unverified.

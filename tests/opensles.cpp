@@ -26,8 +26,10 @@ int main(){
  for(int i=0;i<4;i++)check((*queue)->Enqueue(queue,samples.data(),samples.size()*2));
  if((*queue)->Enqueue(queue,samples.data(),samples.size()*2)!=SL_RESULT_BUFFER_INSUFFICIENT)throw std::runtime_error("Unbounded queue");
  std::this_thread::sleep_for(std::chrono::milliseconds(20));if(completed)throw std::runtime_error("Stopped player consumed data");
+ const auto started=std::chrono::steady_clock::now();
  check((*play)->SetPlayState(play,SL_PLAYSTATE_PLAYING));
  for(int i=0;i<200&&completed<4;i++)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+ if(std::chrono::steady_clock::now()-started<std::chrono::milliseconds(75))throw std::runtime_error("Buffer callbacks outran the audio clock");
  if(completed!=4||markers!=1)throw std::runtime_error("Buffer/marker callback missing");
  check((*play)->SetPlayState(play,SL_PLAYSTATE_PAUSED));SLmillisecond position=0;check((*play)->GetPosition(play,&position));if(position!=80)throw std::runtime_error("Playback position");
  check((*queue)->Clear(queue));SLAndroidSimpleBufferQueueState state{};check((*queue)->GetState(queue,&state));if(state.count||state.index)throw std::runtime_error("Clear state");

@@ -6,10 +6,14 @@
 #include <cerrno>
 #include <cstring>
 #include <initializer_list>
+#include <cstdint>
 namespace berberis {
 void* ShirazGuestPthread();
 int ShirazGuestSetThreadName(pthread_t,const char*);
 int ShirazGuestGetThreadName(pthread_t,char*,size_t);
+int ShirazGuestSetSchedParam(pthread_t,int,const int32_t*);
+int ShirazGuestGetSchedParam(pthread_t,int*,int32_t*);
+int ShirazGuestSetSchedPriority(pthread_t,int);
 }
 using namespace berberis;
 struct Work { int ready,proceed; pthread_t guest; };
@@ -32,15 +36,29 @@ int main(){
  assert(ShirazGuestGetThreadName(thread,name,sizeof name)==0&&!strcmp(name,"parent-name"));
  assert(ShirazGuestSetThreadName(self,"name-too-long-for-linux")==ERANGE);
  assert(ShirazGuestGetThreadName(self,name,1)==ERANGE);
+ int policy=-1;int32_t priority=-1,normal=0;
+ assert(ShirazGuestGetSchedParam(work.guest,&policy,&priority)==0&&policy==SCHED_OTHER&&priority==0);
+ assert(ShirazGuestSetSchedParam(thread,SCHED_OTHER,&normal)==0);
+ assert(ShirazGuestSetSchedPriority(work.guest,0)==0);
+ assert(ShirazGuestSetSchedParam(self,-1,&normal)==EINVAL);
+ assert(ShirazGuestSetSchedPriority(self,1)==EINVAL);
+ assert(ShirazGuestSetSchedParam(self,SCHED_OTHER,nullptr)==EINVAL);
+ assert(ShirazGuestGetSchedParam(self,nullptr,&priority)==EINVAL);
+ assert(ShirazGuestGetSchedParam(self,&policy,nullptr)==EINVAL);
+ assert(ShirazGuestSetSchedParam(0,SCHED_OTHER,&normal)==ESRCH);
  pid_t child=fork(); assert(child>=0);
  if(!child){
   bool ok=ShirazGuestGetThreadName(work.guest,name,sizeof name)==ESRCH &&
-      ShirazGuestSetThreadName(self,"fork-child")==0;
+      ShirazGuestSetThreadName(self,"fork-child")==0 &&
+      ShirazGuestGetSchedParam(work.guest,&policy,&priority)==ESRCH &&
+      ShirazGuestSetSchedParam(self,SCHED_OTHER,&normal)==0;
   _exit(ok?0:1);
  }
  int status; assert(waitpid(child,&status,0)==child&&WIFEXITED(status)&&WEXITSTATUS(status)==0);
  assert(write(proceed[1],"x",1)==1); assert(pthread_join(thread,nullptr)==0);
  assert(ShirazGuestGetThreadName(work.guest,name,sizeof name)==ESRCH);
  assert(ShirazGuestGetThreadName(0,name,sizeof name)==ESRCH);
+ assert(ShirazGuestGetSchedParam(work.guest,&policy,&priority)==ESRCH);
+ assert(ShirazGuestSetSchedPriority(work.guest,0)==ESRCH);
  for(int fd:{ready[0],ready[1],proceed[0],proceed[1]})close(fd);
 }

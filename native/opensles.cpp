@@ -18,6 +18,7 @@ static const SLInterfaceID_ iid_RECORD = { 0xc5657aa0, 0xdddb, 0x11db, 0x82f7, {
 extern "C" const SLInterfaceID SL_IID_RECORD = &iid_RECORD;
 #include <alsa/asoundlib.h>
 #include <condition_variable>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <deque>
@@ -56,11 +57,19 @@ SLresult getInterface(SLObjectItf self,SLInterfaceID id,void* out){if(!out)retur
 void run(Object* o){
  for(;;){std::vector<unsigned char> bytes;unsigned generation;float gain;
   {std::unique_lock<std::mutex> lock(o->mutex);o->changed.wait(lock,[&]{return o->done||(o->playState==SL_PLAYSTATE_PLAYING&&!o->buffers.empty());});if(o->done)return;bytes=std::move(o->buffers.front());generation=o->generation;gain=o->muted?0.f:std::pow(10.f,float(o->gain)/2000.f);}
+  const auto started=std::chrono::steady_clock::now();
   if(gain!=1.f){if(o->floating){auto* p=reinterpret_cast<float*>(bytes.data());for(size_t i=0;i<bytes.size()/4;i++)p[i]*=gain;}else{auto* p=reinterpret_cast<int16_t*>(bytes.data());for(size_t i=0;i<bytes.size()/2;i++)p[i]=int16_t(p[i]*gain);}}
   size_t count=bytes.size()/(o->channels*(o->bits/8)),written=0;
   while(written<count){auto n=snd_pcm_writei(o->pcm,bytes.data()+written*o->channels*(o->bits/8),count-written);if(n<0){if(snd_pcm_recover(o->pcm,int(n),1)<0)break;}else if(n==0)break;else written+=size_t(n);}
   slAndroidSimpleBufferQueueCallback callback=nullptr;void* context=nullptr;
-  {std::lock_guard<std::mutex> lock(o->mutex);if(o->done)return;if(o->generation==generation){if(!o->buffers.empty())o->buffers.pop_front();o->frames+=written;++o->completed;callback=o->callback;context=o->callbackContext;}}
+  {std::unique_lock<std::mutex> lock(o->mutex);
+   // A null/file PCM accepts writes immediately. Do not turn its completion
+   // callbacks into a busy loop; time already spent in a hardware write counts.
+   const auto deadline=started+std::chrono::nanoseconds(uint64_t(written)*1000000000/o->rate);
+   o->changed.wait_until(lock,deadline,[&]{return o->done||o->generation!=generation;});
+   if(o->done)return;
+   if(o->generation==generation){if(!o->buffers.empty())o->buffers.pop_front();o->frames+=written;++o->completed;callback=o->callback;context=o->callbackContext;}
+  }
   if(callback)callback(reinterpret_cast<SLAndroidSimpleBufferQueueItf>(&o->queue),context);
   slPlayCallback end=nullptr;void* endContext=nullptr;SLuint32 events=0;{std::lock_guard<std::mutex> lock(o->mutex);if(!o->done){if(o->buffers.empty())events|=o->eventMask&SL_PLAYEVENT_HEADATEND;if(!o->markerFired&&o->marker!=SL_TIME_UNKNOWN&&o->frames*1000/o->rate>=o->marker){events|=o->eventMask&SL_PLAYEVENT_HEADATMARKER;o->markerFired=true;}if(events){end=o->playCallback;endContext=o->playContext;}}}
   if(end)end(reinterpret_cast<SLPlayItf>(&o->play),endContext,events);
@@ -75,7 +84,7 @@ SLresult realize(SLObjectItf self,SLboolean async){if(async)return SL_RESULT_FEA
 void destroy(SLObjectItf self){Object* o=owner(self);{std::lock_guard<std::mutex> lock(o->mutex);o->done=true;o->changed.notify_all();}if(o->worker.joinable()){if(o->worker.get_id()==std::this_thread::get_id()){o->selfDelete=true;o->worker.detach();return;}o->worker.join();}delete o;}
 SLresult setPlay(SLPlayItf self,SLuint32 state){if(state<SL_PLAYSTATE_STOPPED||state>SL_PLAYSTATE_PLAYING)return SL_RESULT_PARAMETER_INVALID;Object* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);if(o->state!=SL_OBJECT_STATE_REALIZED)return SL_RESULT_PRECONDITIONS_VIOLATED;o->playState=state;o->changed.notify_all();return SL_RESULT_SUCCESS;}
 SLresult enqueue(SLAndroidSimpleBufferQueueItf self,const void* data,SLuint32 size){Object* o=owner(self);if(!data||!size||size>4*1024*1024||size%(o->channels*(o->bits/8)))return SL_RESULT_PARAMETER_INVALID;std::lock_guard<std::mutex> lock(o->mutex);if(o->buffers.size()>=o->capacity)return SL_RESULT_BUFFER_INSUFFICIENT;try{o->buffers.emplace_back(static_cast<const unsigned char*>(data),static_cast<const unsigned char*>(data)+size);}catch(const std::bad_alloc&){return SL_RESULT_MEMORY_FAILURE;}o->changed.notify_all();return SL_RESULT_SUCCESS;}
-SLresult clear(SLAndroidSimpleBufferQueueItf self){Object* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);o->buffers.clear();++o->generation;o->completed=0;return SL_RESULT_SUCCESS;}
+SLresult clear(SLAndroidSimpleBufferQueueItf self){Object* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);o->buffers.clear();++o->generation;o->completed=0;o->changed.notify_all();return SL_RESULT_SUCCESS;}
 SLresult createPlayer(SLEngineItf,SLObjectItf* out,SLDataSource* source,SLDataSink* sink,SLuint32 count,const SLInterfaceID* ids,const SLboolean* required){
  if(!out||!source||!sink||!source->pLocator||!source->pFormat||!sink->pLocator||count>32||(count&&(!ids||!required)))return SL_RESULT_PARAMETER_INVALID;
  *out=nullptr;
