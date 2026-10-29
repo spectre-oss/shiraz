@@ -12,6 +12,8 @@ public final class ActivityLifecycle implements AutoCloseable {
  public interface Cleanup { void detached(Activity activity); }
  private final Factory factory;private final Cleanup cleanup;private final ActivityConfigurationPolicy policy;
  private final int targetSdk;private final Thread owner=Thread.currentThread();
+ private java.util.function.BooleanSupplier taskRootQuery;
+ public void setTaskRootQuery(java.util.function.BooleanSupplier query){thread();taskRootQuery=query;}
  private Activity activity;private boolean created,started,resumed,closed,transition;
  public ActivityLifecycle(Factory factory,Cleanup cleanup,ActivityConfigurationPolicy policy,int targetSdk){if(factory==null||cleanup==null||policy==null)throw new NullPointerException();this.factory=factory;this.cleanup=cleanup;this.policy=policy;this.targetSdk=targetSdk;}
  private void thread(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Activity lifecycle must run on its owner thread");}
@@ -31,6 +33,7 @@ public final class ActivityLifecycle implements AutoCloseable {
   long begin=TRACE?System.nanoTime():0;
   activity=factory.create();if(activity==null)throw new IllegalStateException("Activity factory returned null");
   timing("factory",begin);
+  activity.shirazSetTaskRootQuery(taskRootQuery);
   if(state!=null)activity.setIntent(intent);
   activity.shirazSetLifecycleState(false,false,retained);
   activity.shirazRestorePermissionRequests(permissions);

@@ -263,6 +263,9 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
     // The host keeps no persistent Android recents entry. Finishing the root
     // activity closes its host task through the normal runner lifecycle.
     public void finishAndRemoveTask() { finish(); }
+    private java.util.function.BooleanSupplier taskRootQuery;
+    public final void shirazSetTaskRootQuery(java.util.function.BooleanSupplier query){taskRootQuery=query;}
+    public boolean isTaskRoot(){return !isDestroyed()&&taskRootQuery!=null&&taskRootQuery.getAsBoolean();}
     public void finishAffinity() { finish(); }
     public void finishAfterTransition() { finish(); }
     public boolean isFinishing() { return finishing; }

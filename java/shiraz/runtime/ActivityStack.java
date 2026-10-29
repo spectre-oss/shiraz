@@ -51,6 +51,8 @@ public final class ActivityStack implements AutoCloseable {
    if(old!=null)old.pauseForLaunch();
    try{
     next=factory.create(snapshot);if(next==null)throw new IllegalStateException("Activity factory returned null lifecycle");
+    final ActivityLifecycle candidate=next;
+    next.setTaskRootQuery(new java.util.function.BooleanSupplier(){public boolean getAsBoolean(){return !closed&&(entries.isEmpty()||entries.get(0)==candidate);}});
     next.start();
    }catch(RuntimeException|Error failure){
     if(next!=null)try{next.close();}catch(RuntimeException|Error cleanup){if(cleanup!=failure)failure.addSuppressed(cleanup);}

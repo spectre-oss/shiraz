@@ -107,7 +107,8 @@ public final class DrawableXml {
             result.setTintMode(tintMode(n));return result;
         }
         if(n.name.equals("bitmap")){
-            attrs(n,"src gravity filter antialias tint tintMode");if(!n.children.isEmpty())throw new IllegalArgumentException("Bitmap drawable children");
+            // Android ignores scaleType and opacity on bitmap drawables.
+            attrs(n,"src gravity filter antialias tint tintMode scaleType opacity");if(!n.children.isEmpty())throw new IllegalArgumentException("Bitmap drawable children");
             Drawable source=reference(n.android("src"));if(!(source instanceof BitmapDrawable))throw new IllegalArgumentException("Bitmap src must reference a bitmap");
             BitmapDrawable d=new BitmapDrawable(resources,((BitmapDrawable)source).getBitmap());d.setChangingConfigurations(source.getChangingConfigurations());d.setGravity(integer(n,"gravity",119));d.setFilterBitmap(integer(n,"filter",1)!=0);d.setAntiAlias(integer(n,"antialias",0)!=0);if(n.android("tint")!=null)d.setTintList(colors(n.android("tint")));d.setTintMode(tintMode(n));return d;
         }
