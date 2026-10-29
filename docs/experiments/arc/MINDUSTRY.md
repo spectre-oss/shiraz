@@ -89,5 +89,15 @@ landscape layout. Portrait usability and Android visual parity remain open;
 these observations do not establish whether the clipping originates in the app
 or Shiraz.
 
+A subsequent process restart restores both conveyor runs and all three drills;
+copper delivery continues toward the 100-item objective. Investigating the
+washed-out appearance exposed a separate Surface bug: native EGL frames retained
+alpha on opaque consumers, unlike the software Canvas path. A real EGL regression
+reproduced alpha 128 on RGBX and now verifies opaque RGBX/RGB565/OPAQUE output
+while preserving RGBA transparency, on both OpenJDK and ART. The fix does not
+resolve the game's washed-out appearance; its cause and visual parity remain
+unverified. With the rebuilt framework, saved-world reload, ongoing copper
+delivery and tech-tree navigation still work; the full VM check suite passes.
+
 Tutorial completion, combat, multiplayer and audio are not established. The app automatically
 fetched its public server list during startup; no multiplayer session was joined.

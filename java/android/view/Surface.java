@@ -49,7 +49,12 @@ public class Surface implements android.os.Parcelable {
 
   int count = front.getWidth() * front.getHeight();
   if (published == null || published.length != count) published = new int[count];
-  if (nativeCopyArgb(nativeWindow, published)&&revision==nativeWindowRevision(nativeWindow)){front.setPixels(published, 0, front.getWidth(), 0, 0, front.getWidth(), front.getHeight());lastNativeRevision=revision;trace("publish");if(TRACE&&tracedFrames<64){int opaque=0;boolean varied=false;for(int pixel:published){if((pixel>>>24)==255)opaque++;if(pixel!=published[0])varied=true;}System.err.println("SHIRAZ_SURFACE_PIXELS opaque="+opaque+" total="+published.length+" varied="+varied);}}
+  if (nativeCopyArgb(nativeWindow, published)&&revision==nativeWindowRevision(nativeWindow)){
+   // EGL's backing buffer can carry alpha even when this consumer is opaque.
+   // Apply the same opacity contract as the software Canvas producer path.
+   if(format==PixelFormat.RGB_565||format==PixelFormat.RGBX_8888||format==PixelFormat.OPAQUE)
+    for(int i=0;i<published.length;i++)published[i]|=0xff000000;
+   front.setPixels(published, 0, front.getWidth(), 0, 0, front.getWidth(), front.getHeight());lastNativeRevision=revision;trace("publish");if(TRACE&&tracedFrames<64){int opaque=0;boolean varied=false;for(int pixel:published){if((pixel>>>24)==255)opaque++;if(pixel!=published[0])varied=true;}System.err.println("SHIRAZ_SURFACE_PIXELS opaque="+opaque+" total="+published.length+" varied="+varied);}}
  }
  private static void dimensions(int w,int h){if(w<1||h<1||w>8192||h>8192||(long)w*h>16*1024*1024)throw new IllegalArgumentException("Surface dimensions");}
  // Geometry changes retain the EGL surface; the render thread resizes its backing buffers.

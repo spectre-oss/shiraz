@@ -23,6 +23,18 @@ public final class GlesWindowFramebufferSmoke {
   if(GLES20.glGetError()!=0||!egl.eglSwapBuffers(display,surface))throw new AssertionError("clear/swap");
   Bitmap pixels=Bitmap.createBitmap(4,3,Bitmap.Config.ARGB_8888);holder.shirazDraw(new Canvas(pixels),4,3);
   if(pixels.getPixel(2,1)!=0xff00ff00)throw new AssertionError("window pixel");pixels.recycle();
+  // Native producers must obey the consumer surface's opacity just as Canvas does.
+  for(int format:new int[]{PixelFormat.RGBX_8888,PixelFormat.RGB_565,PixelFormat.OPAQUE,PixelFormat.RGBA_8888}){
+   holder.shirazConfigure(4,3,format);
+   GLES20.glClearColor(0,1,0,.5f);GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+   if(!egl.eglSwapBuffers(display,surface))throw new AssertionError("opacity swap");
+   pixels=Bitmap.createBitmap(4,3,Bitmap.Config.ARGB_8888);
+   holder.shirazDraw(new Canvas(pixels),4,3);
+   int alpha=pixels.getPixel(2,1)>>>24;
+   if(format==PixelFormat.RGBA_8888 ? alpha<126||alpha>129 : alpha!=255)
+    throw new AssertionError("native surface alpha="+alpha+" format="+format);
+   pixels.recycle();
+  }
   GLES20.glDeleteFramebuffers(1,offscreen,0);
   egl.eglMakeCurrent(display,EGL10.EGL_NO_SURFACE,EGL10.EGL_NO_SURFACE,EGL10.EGL_NO_CONTEXT);
   egl.eglDestroySurface(display,surface);egl.eglDestroyContext(display,context);holder.release();
