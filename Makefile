@@ -1421,3 +1421,10 @@ build/test-guest-resolver: tests/native/guest_resolver.cpp native/guest_resolver
 guest-resolver-smoke: build/test-guest-resolver
 	./build/test-guest-resolver
 check: guest-resolver-smoke
+
+.PHONY: webview-progress-smoke
+webview-progress-smoke: framework build/libshiraz-host.so build/libshiraz-image.so
+	mkdir -p build/webview-progress-smoke
+	javac --release 8 -cp build/framework/classes -d build/webview-progress-smoke tests/java/WebViewProgressSmoke.java
+	$(JAVA) -Djava.library.path=build -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -cp build/webview-progress-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar WebViewProgressSmoke
+check: webview-progress-smoke

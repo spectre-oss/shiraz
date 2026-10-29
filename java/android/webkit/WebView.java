@@ -18,6 +18,7 @@ public class WebView extends FrameLayout {
  private final PrivateAccess privateAccess=new PrivateAccess();
  private final TextView body;
  private String url="";
+ private int progress;
  private FindListener findListener;
  private WebViewClient client;
  private WebChromeClient chrome;
@@ -32,20 +33,30 @@ public class WebView extends FrameLayout {
   scroll.addView(body,new LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.WRAP_CONTENT));
   addView(scroll,new LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT));
  }
+ /** Disabling debugging is valid without an engine; enabling it is unsupported. */
+ public static void setWebContentsDebuggingEnabled(boolean enabled){
+  if(enabled)throw new UnsupportedOperationException("WebView remote debugging requires a web engine");
+ }
  public static WebViewFactoryProvider getFactory(){return WebViewFactory.getProvider();}
  public WebSettings getSettings(){return settings;}
  public void loadUrl(String url){
   this.url=url==null?"":url;
+  progress=0;
+  if(client!=null)client.onPageStarted(this,this.url,null);
   CharSequence page=fetch(this.url);
   show(page);
-  if(client!=null){client.onPageStarted(this,this.url,null);client.onPageFinished(this,this.url);}
+  progress=100;
+  if(client!=null)client.onPageFinished(this,this.url);
   if(chrome!=null)chrome.onProgressChanged(this,100);
  }
  public void loadData(String data,String mimeType,String encoding){loadDataWithBaseURL(null,data,mimeType,encoding,null);}
  public void loadDataWithBaseURL(String baseUrl,String data,String mimeType,String encoding,String historyUrl){
   url=historyUrl==null?(baseUrl==null?"":baseUrl):historyUrl;
+  progress=0;
+  if(client!=null)client.onPageStarted(this,url,null);
   show(plain(data));
-  if(client!=null){client.onPageStarted(this,url,null);client.onPageFinished(this,url);}
+  progress=100;
+  if(client!=null)client.onPageFinished(this,url);
   if(chrome!=null){chrome.onProgressChanged(this,100);chrome.onReceivedTitle(this,url);}
  }
  private void show(CharSequence text){body.setText(text==null?"":text);}
@@ -167,6 +178,7 @@ public class WebView extends FrameLayout {
   if(name.startsWith("#"))try{return new String(Character.toChars(Integer.parseInt(name.substring(1))));}catch(RuntimeException error){return "&"+name+";";}
   return "&"+name+";";
  }
+ public int getProgress(){return progress;}
  public String getUrl(){return url;}
  public void stopLoading(){}
  public void reload(){}

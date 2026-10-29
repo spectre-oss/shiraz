@@ -99,6 +99,16 @@
     that missing method and reaches WebView.setWebContentsDebuggingEnabled,
     which is not implemented. Body-editor initialization remains blocked.
 
+24. Added `WebView.setWebContentsDebuggingEnabled(false)` for the no-engine
+    case; requesting debugging still fails explicitly. The unchanged APK passes
+    that method and then fails on `getProgress()` while creating the editor.
+    Added progress tracking for the placeholder's synchronous content load,
+    with start/finish callbacks observing 0/100 respectively. A VM regression
+    checks repeated loads, callback order, progress queries, and rejection of
+    unsupported debugging. Retesting passes this call and next fails on
+    `WebView.getTitle()`. This is API initialization progress only: no browser
+    engine or working body editor is established.
+
 ## Acceptance still required
 
 Open the app, create and edit an offline note, navigate away and back, and verify
