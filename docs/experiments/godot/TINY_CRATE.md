@@ -52,18 +52,34 @@
    the prior completion time. Portrait is letterboxed, preserving the game's
    landscape layout. This supersedes step 5's black-frame result, but is not
    evidence of a native portrait UI or arbitrary resize-stress reliability.
+9. On baseline `9f596b7`, enabled an ALSA file sink and completed level 1-2
+   using keyboard movement and jumps across its raised platforms. The map
+   showed two stars, and the two-star save survived restart. In level 1-3,
+   moved to a crate, lifted it with C, put it down and moved away to observe
+   the released crate. Level 1-3 was not completed; crate throwing and puzzle
+   progression beyond this interaction remain unverified.
+10. The engine opened 44.1 kHz stereo signed-16-bit output through OpenSL ES.
+    In Options, reducing Music to minimum changed a one-second PCM window from
+    peak 10,441 / RMS 2,675.44 to exact silence. Raising Music restored output
+    (peak 11,574 / RMS 3,134.78). This verifies music and its volume control
+    through the VM file sink, not speakers, hardware latency or individual
+    gameplay sound effects.
+11. A syscall trace of window close shows the game process sending `SIGKILL`
+    to itself after fragment teardown. This explains the runner's `-9` result
+    for that observed shutdown; it is not evidence that every signal-9 exit
+    is intentional or clean. App-requested termination reporting remains open.
 
 The focused regressions are `make gles-probe-smoke` and
 `make egl-surface-resize-smoke` in an isolated test environment with EGL support.
 
 ## Current result
 
-**Animated menu, keyboard navigation, first-level movement/completion, and saved
+**Animated menu, keyboard navigation, first two levels, jumping, and saved
 progress after restart verified.** Repeated resizing renders correctly with
 portrait letterboxing; touch selection through the on-screen X button works.
-Jumping, crate mechanics, later levels, full touchscreen gameplay, audio and clean shutdown remain
-unverified. The VM had no default ALSA output device during this run; engine
-startup alone is not an audio pass.
+Crate pickup/release and music-volume control through captured PCM also work.
+Later levels, complete crate mechanics, full touchscreen gameplay, physical
+audio output and clean shutdown remain unverified.
 
 Use X to select, C to go back, arrow keys to move, and Enter for the menu, as
 described by the [author](https://harmonymonroe.itch.io/tinycrate). Send a focus
