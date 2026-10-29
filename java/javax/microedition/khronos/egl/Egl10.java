@@ -2,7 +2,7 @@
 package javax.microedition.khronos.egl;
 import javax.microedition.khronos.opengles.GL;
 /** Khronos EGL 1.0 entry points. This host has no multisample EGL config. */
-final class Egl10 implements EGL10 {
+final class Egl10 implements EGL11 {
     static final Egl10 INSTANCE = new Egl10();
     private int error = EGL_SUCCESS;
     static final class NoContext extends EGLContext { public GL getGL() { return null; } }

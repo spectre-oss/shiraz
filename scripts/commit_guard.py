@@ -21,6 +21,7 @@ PUBLIC_DOCS = {'docs/README.md', 'docs/DEVELOPMENT.md', 'docs/BUILDER.md',
                'docs/experiments/libgdx/UNCIV.md',
                'docs/experiments/godot/README.md',
                'docs/experiments/godot/ABRA_CA_BUBBLE.md',
+               'docs/experiments/godot/TINY_CRATE.md',
                'docs/experiments/sdl/README.md',
                'docs/experiments/sdl/SUPERTUX.md'}
 FORBIDDEN_SUFFIXES = {'.apk', '.apks', '.aab', '.dex', '.jar', '.class', '.so', '.a', '.o', '.elf', '.appimage', '.exe', '.bin', '.zip', '.gz', '.xz', '.log', '.sqlite', '.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.pyc'}
