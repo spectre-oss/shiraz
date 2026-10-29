@@ -1442,3 +1442,10 @@ resolver-properties-smoke: framework build/libshiraz-host.so
 	javac --release 8 -cp build/framework/classes -d build/resolver-properties-smoke tests/java/ResolverPropertiesSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/resolver-properties-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar shiraz.runtime.ResolverPropertiesSmoke
 check: resolver-properties-smoke
+
+.PHONY: archive-package-smoke
+archive-package-smoke: framework apk-fixture build/libshiraz-host.so build/libshiraz-resources.so
+	mkdir -p build/archive-package-smoke
+	javac --release 8 -cp build/framework/classes -d build/archive-package-smoke tests/java/ArchivePackageSmoke.java
+	$(JAVA) -Djava.library.path=build -cp build/archive-package-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ArchivePackageSmoke build/apk-fixture/fixture.apk
+check: archive-package-smoke

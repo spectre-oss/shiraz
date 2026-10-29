@@ -136,12 +136,24 @@
     on missing `PackageManager.getPackageArchiveInfo(String, int)`. A saved app
     entry and installation are not yet verified.
 
+18. Added bounded, read-only package-archive identity inspection using the
+    existing binary-XML parser. It reads version information (including resource
+    strings), SDK declarations, application class and resource references;
+    installation state stays unset. Existing signer-metadata flags are supported,
+    but this does not verify APK authenticity. Other archive query flags fail
+    explicitly. VM regressions cover metadata, malformed input and unsupported
+    flags. The first app retest exposed a null storage UUID during serialization;
+    supplying the default storage UUID passes that failure. Full VM checks pass.
+    Repeating Add and selecting an x86_64 package now passes archive inspection,
+    then crashes on missing `PackageManager.getApplicationIcon(String)`.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The
 previous package-metadata failure sequence is passed. Adding an upstream URL
 now retrieves releases through Cronet and displays package choices. Continuing
-after selection fails on missing package-archive metadata inspection. App
+after selection passes archive metadata inspection, then fails on missing
+application-icon lookup. App
 installation, updates, certificate verification, app-list persistence, and
 complete plugin behavior are not verified. Do not infer that every Flutter
 app works from this result.

@@ -43,6 +43,7 @@ public abstract class PackageManager {
     public android.content.res.Resources getResourcesForApplication(ApplicationInfo app) throws NameNotFoundException { throw new NameNotFoundException(String.valueOf(app)); }
     public android.content.res.Resources getResourcesForApplication(String appPackageName) throws NameNotFoundException { throw new NameNotFoundException(String.valueOf(appPackageName)); }
     public abstract ServiceInfo getServiceInfo(android.content.ComponentName component,int flags) throws NameNotFoundException;
+    public PackageInfo getPackageArchiveInfo(String path,int flags){return shiraz.runtime.ArchivePackageInfo.read(path,flags);}
     public abstract PackageInfo getPackageInfo(String packageName, int flags) throws NameNotFoundException;
     public abstract ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException;
     public abstract CharSequence getApplicationLabel(ApplicationInfo info);
