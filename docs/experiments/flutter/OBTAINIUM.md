@@ -66,9 +66,19 @@
     at missing `ApplicationInfo.isVirtualPreload()`. VM parser, transfer, and
     package-query regressions cover the added metadata.
 
+11. Added `isVirtualPreload()` with the correct false result for Shiraz's
+    directly installed APKs. Retesting passes it and reaches missing `gids`.
+    Added flag-dependent Android group metadata: null when not requested and
+    an empty array when requested, since Shiraz assigns no Android permission
+    groups. The next failure is the missing activity list. Added activity,
+    receiver, and provider arrays using existing manifest metadata and query
+    flags. VM regressions check requested/unrequested lists, disabled-activity
+    inclusion, and independent result objects. The unchanged APK passes those
+    failures and next stops at `PackageInfo.instrumentation`.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The signing-query flag failure is fixed, but background package inventory now
-fails on missing `ApplicationInfo.isVirtualPreload()`. App installation,
+fails on missing `PackageInfo.instrumentation`. App installation,
 updates, certificate handling, app-list persistence, and complete plugin behavior
 are not verified. Do not infer that every Flutter app works from this result.

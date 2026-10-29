@@ -36,6 +36,7 @@ public final class InstallerSmoke {
   android.content.pm.PackageInfo metadata=manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
   check(metadata.signatures==null&&metadata.signingInfo.getApkContentsSigners()[0].equals(signer),"modern query returns v2 metadata only when requested");
   check(manager.getPackageInfo("test.signer",0).signingInfo==null,"unrequested signing metadata");
+  check(manager.getPackageInfo("test.signer",0).gids==null&&manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_GIDS).gids.length==0,"Android permission group query flags");
   facts.setProperty("sharedUserId","test.shared");facts.setProperty("sharedUserLabel","2130771969");facts.setProperty("baseRevisionCode","3");facts.setProperty("installLocation","2");
   facts.setProperty("icon","2130771970");facts.setProperty("logo","2130771971");facts.setProperty("banner","2130771972");
   facts.setProperty("applicationInfo.backupAgent","test.Backup");facts.setProperty("applicationInfo.category","7");facts.setProperty("applicationInfo.processName","test:worker");
@@ -46,6 +47,16 @@ public final class InstallerSmoke {
   check(root.getPath().equals(metadata.applicationInfo.deviceProtectedDataDir),"same app storage context");
   check(metadata.applicationInfo.icon==0x7f010002&&metadata.applicationInfo.logo==0x7f010003&&metadata.applicationInfo.banner==0x7f010004,"application image resource IDs");
   check(metadata.splitNames==null&&metadata.splitRevisionCodes==null&&!metadata.isApex,"monolithic APK metadata");
+  facts.setProperty("activity.count","2");facts.setProperty("activity.0.name","test.Main");facts.setProperty("activity.1.name","test.Disabled");facts.setProperty("activity.1.enabled","false");
+  facts.setProperty("receiver.count","1");facts.setProperty("receiver.0.name","test.Receiver");
+  facts.setProperty("provider.count","1");facts.setProperty("provider.0.name","test.Provider");facts.setProperty("provider.0.authorities","test.authority");
+  manager=new shiraz.runtime.HostPackageManager(facts,new ContextWrapper(null));
+  metadata=manager.getPackageInfo("test.signer",1|2|8);
+  check(metadata.activities.length==1&&"test.Main".equals(metadata.activities[0].name)&&metadata.receivers.length==1&&metadata.providers.length==1,"flag-conditioned component lists");
+  metadata.activities[0].name="mutated";
+  check("test.Main".equals(manager.getPackageInfo("test.signer",1).activities[0].name),"component snapshots");
+  check(manager.getPackageInfo("test.signer",1|android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS).activities.length==2,"disabled component inclusion");
+  check(manager.getPackageInfo("test.signer",0).activities==null,"unrequested components");
   apk.putLong(0,1);Files.write(file.toPath(),apk.array());try{method.invoke(null,file.getPath());throw new AssertionError("corrupt signing size accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof IllegalStateException,"wrong malformed signer failure");}file.delete();
  }
  static byte[] join(byte[] a,byte[] b){byte[] out=java.util.Arrays.copyOf(a,a.length+b.length);System.arraycopy(b,0,out,a.length,b.length);return out;}

@@ -15,6 +15,8 @@ public class ApplicationInfo extends PackageItemInfo implements Parcelable {
     public int theme;
     public int uid, targetSdkVersion, minSdkVersion, flags;
     public boolean enabled;
+    /** Shiraz installs APKs directly; it does not provision Android virtual preloads. */
+    public boolean isVirtualPreload(){return false;}
     public int describeContents() { return 0; }
     public void writeToParcel(Parcel destination, int flags) { throw new UnsupportedOperationException("ApplicationInfo parcel transport is not implemented"); }
 }

@@ -9,12 +9,14 @@ public class PackageInfo implements Parcelable {
     public int versionCode, baseRevisionCode, sharedUserLabel;
     public String sharedUserId;
     public int installLocation=-1;
-    public int[] splitRevisionCodes;
+    public int[] splitRevisionCodes, gids;
     public boolean isApex;
     public long firstInstallTime,lastUpdateTime;
     public ApplicationInfo applicationInfo;
     public Signature[] signatures;
     public SigningInfo signingInfo;
+    public ActivityInfo[] activities, receivers;
+    public ProviderInfo[] providers;
     public ServiceInfo[] services;
     public String[] requestedPermissions;
     public int[] requestedPermissionsFlags;
