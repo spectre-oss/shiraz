@@ -4,10 +4,13 @@ import android.content.res.Resources;
 import android.os.Looper;
 import android.webkit.*;
 public final class WebViewProgressSmoke {
- public static void main(String[] args){
+ public static void main(String[] args)throws Exception{
   Looper.prepareMainLooper();
+  final java.nio.file.Path app=java.nio.file.Files.createTempDirectory("shiraz-webview-");
   Context context=new ContextWrapper(null){
    private final Resources.Theme theme=Resources.getSystem().newTheme();
+   public java.io.File getFilesDir(){return app.toFile();}
+   public java.io.File getCacheDir(){return app.toFile();}
    public Resources getResources(){return Resources.getSystem();}
    public Resources.Theme getTheme(){return theme;}
   };
@@ -41,6 +44,15 @@ public final class WebViewProgressSmoke {
   if(!"Second".equals(view.getTitle()))throw new AssertionError("URL title");
   view.loadData("<script>var x='<title>Fake</title>';</script><p>No title</p>","text/html","UTF-8");
   if(view.getTitle()!=null)throw new AssertionError("stale/script title");
+  java.nio.file.Path page=app.resolve("editor.html");
+  java.nio.file.Files.write(page,"<title>Local editor</title><p>Content</p>".getBytes("UTF-8"));
+  view.loadUrl(page.toUri().toString(),java.util.Collections.singletonMap("X-Test","local"));
+  if(!"Local editor".equals(view.getTitle()))throw new AssertionError("app-local HTML");
+  try{view.loadUrl(app.resolve("../outside.html").toUri().toString());throw new AssertionError("outside app storage");}
+  catch(IllegalArgumentException expected){}
+  try{view.loadUrl("https://example.invalid",java.util.Collections.singletonMap("X-Test","value"));throw new AssertionError("HTTP headers silently ignored");}
+  catch(UnsupportedOperationException expected){}
+  java.nio.file.Files.delete(page);java.nio.file.Files.delete(app);
   view.destroy();
   System.out.println("WEBVIEW_PLACEHOLDER_PROGRESS_OK");
  }

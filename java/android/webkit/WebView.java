@@ -40,6 +40,12 @@ public class WebView extends FrameLayout {
  }
  public static WebViewFactoryProvider getFactory(){return WebViewFactory.getProvider();}
  public WebSettings getSettings(){return settings;}
+ public void loadUrl(String url,java.util.Map<String,String> additionalHttpHeaders){
+  if(additionalHttpHeaders!=null&&!additionalHttpHeaders.isEmpty()&&url!=null&&
+      (url.regionMatches(true,0,"http:",0,5)||url.regionMatches(true,0,"https:",0,6)))
+   throw new UnsupportedOperationException("WebView HTTP requests require a web engine");
+  loadUrl(url);
+ }
  public void loadUrl(String url){
   this.url=url==null?"":url;
   progress=0;
@@ -85,6 +91,19 @@ public class WebView extends FrameLayout {
     return target;
    }
   }
+  if(target.startsWith("file:")){
+   try{
+    java.net.URI uri=new java.net.URI(target);
+    if(uri.getAuthority()!=null&&!uri.getAuthority().isEmpty())throw new java.io.IOException("Remote file authority");
+    java.io.File file=new java.io.File(uri.getPath()).getCanonicalFile();
+    java.io.File files=getContext().getFilesDir().getCanonicalFile();
+    java.io.File cache=getContext().getCacheDir().getCanonicalFile();
+    if(!within(file,files)&&!within(file,cache))throw new java.io.IOException("File outside app storage");
+    try(InputStream in=new java.io.FileInputStream(file)){
+     return htmlContent(new String(readContent(in),StandardCharsets.UTF_8));
+    }
+   }catch(Exception error){throw new IllegalArgumentException("Cannot load app-local WebView content",error);}
+  }
   if(target.startsWith("data:")){
    int comma=target.indexOf(',');
    if(comma>5){
@@ -98,11 +117,17 @@ public class WebView extends FrameLayout {
   }
   return target;
  }
+ private static boolean within(java.io.File file,java.io.File directory){
+  return file.getPath().startsWith(directory.getPath()+java.io.File.separator);
+ }
  private byte[] readAsset(String path)throws Exception{
-  try(InputStream in=getContext().getAssets().open(path);ByteArrayOutputStream out=new ByteArrayOutputStream()){
+  try(InputStream in=getContext().getAssets().open(path)){return readContent(in);}
+ }
+ private static byte[] readContent(InputStream in)throws java.io.IOException{
+  try(ByteArrayOutputStream out=new ByteArrayOutputStream()){
    byte[] buffer=new byte[8192];int n;
-   while((n=in.read(buffer))>=0){
-    if(out.size()+n>4*1024*1024)throw new java.io.IOException("Asset too large");
+   while((n=in.read(buffer))!=-1){
+    if(n>4*1024*1024-out.size())throw new java.io.IOException("WebView content too large");
     out.write(buffer,0,n);
    }
    return out.toByteArray();

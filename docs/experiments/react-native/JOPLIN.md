@@ -125,9 +125,20 @@
     layout failure and next requires `WebView.loadUrl(String, Map)`.
     The note body is still blank; body editing remains unsupported.
 
+27. The app generates `MarkdownEditor.html` in its private files directory.
+    Added the URL/header overload for local content and bounded local-file
+    reads under the app's files/cache directories. HTTP requests with headers
+    fail explicitly because the placeholder has no networking browser engine.
+    VM tests cover local HTML loading, title extraction, storage-boundary
+    rejection, and rejection of unsupported HTTP headers. The unchanged APK
+    now opens the editor screen, toolbar, and Markdown notice without the
+    former crash. Its body shows static “Note editor” text; tapping it and
+    sending text does not create body content. JavaScript/DOM execution is
+    required for the CodeMirror editor and remains unsupported.
+
 ## Acceptance still required
 
 Open the app, create and edit an offline note, navigate away and back, and verify
 persistence after restart. Synchronization and account workflows are out of this
 initial offline experiment. Current outcome: **note screen and title input work;
-title persists across restart; body editing remains unverified**.
+title persists across restart; editor chrome opens, but body editing is unsupported without a web engine**.
