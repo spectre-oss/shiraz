@@ -5,14 +5,20 @@ import java.util.ArrayList;
 import java.util.List;
 /** Local event metadata; no system accessibility connection is claimed. */
 public class AccessibilityRecord {
- protected boolean recycled;private View source;private final ArrayList<CharSequence> text=new ArrayList<CharSequence>();
+ protected boolean recycled;private View source;private int sourceId=AccessibilityNodeProvider.HOST_VIEW_ID;private final ArrayList<CharSequence> text=new ArrayList<CharSequence>();
  protected void live(){if(recycled)throw new IllegalStateException("Accessibility record recycled");}
  public static AccessibilityRecord obtain(){return new AccessibilityRecord();}
  public static AccessibilityRecord obtain(AccessibilityRecord other){AccessibilityRecord copy=obtain();copy.copyFrom(other);return copy;}
- public void recycle(){live();recycled=true;source=null;text.clear();}
- public void setSource(View view){live();source=view;}
- public void setSource(View view,int id){if(id!=-1)throw new UnsupportedOperationException("Virtual accessibility source");setSource(view);}
- public AccessibilityNodeInfo getSource(){live();return source==null?null:source.createAccessibilityNodeInfo();}
+ public void recycle(){live();recycled=true;source=null;sourceId=AccessibilityNodeProvider.HOST_VIEW_ID;text.clear();}
+ public void setSource(View view){setSource(view,AccessibilityNodeProvider.HOST_VIEW_ID);}
+ public void setSource(View view,int id){live();source=view;sourceId=id;}
+ public AccessibilityNodeInfo getSource(){
+  live();if(source==null)return null;
+  if(sourceId==AccessibilityNodeProvider.HOST_VIEW_ID)return source.createAccessibilityNodeInfo();
+  // Resolve only through the local provider; never substitute the host for a missing child.
+  AccessibilityNodeProvider provider=source.getAccessibilityNodeProvider();
+  return provider==null?null:provider.createAccessibilityNodeInfo(sourceId);
+ }
  public int getWindowId(){live();return -1;}
  public List<CharSequence> getText(){live();return text;}
  private CharSequence className;
@@ -69,5 +75,5 @@ public class AccessibilityRecord {
  private int removedCount=-1;
  public int getRemovedCount(){live();return removedCount;}
  public void setRemovedCount(int value){live();removedCount=value;}
- protected void copyFrom(AccessibilityRecord other){other.live();source=other.source;text.clear();text.addAll(other.text);className=other.className;contentDescription=other.contentDescription;beforeText=other.beforeText;checked=other.checked;enabled=other.enabled;password=other.password;fullScreen=other.fullScreen;scrollable=other.scrollable;itemCount=other.itemCount;currentItemIndex=other.currentItemIndex;fromIndex=other.fromIndex;toIndex=other.toIndex;scrollX=other.scrollX;scrollY=other.scrollY;maxScrollX=other.maxScrollX;maxScrollY=other.maxScrollY;addedCount=other.addedCount;removedCount=other.removedCount;}
+ protected void copyFrom(AccessibilityRecord other){other.live();source=other.source;sourceId=other.sourceId;text.clear();text.addAll(other.text);className=other.className;contentDescription=other.contentDescription;beforeText=other.beforeText;checked=other.checked;enabled=other.enabled;password=other.password;fullScreen=other.fullScreen;scrollable=other.scrollable;itemCount=other.itemCount;currentItemIndex=other.currentItemIndex;fromIndex=other.fromIndex;toIndex=other.toIndex;scrollX=other.scrollX;scrollY=other.scrollY;maxScrollX=other.maxScrollX;maxScrollY=other.maxScrollY;addedCount=other.addedCount;removedCount=other.removedCount;}
 }

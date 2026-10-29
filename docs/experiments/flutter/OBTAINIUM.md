@@ -214,13 +214,27 @@
     the saved entry and adaptive icon remained visible. This regression check
     does not change the download-path limitation in step 24.
 
+26. Opened Settings → Import/export → Pick export directory. The unchanged
+    app reports `NO_PICKER` for `OPEN_DOCUMENT_TREE` and displays “No file picker
+    available.” Export has not succeeded; a document-tree picker/provider remains
+    unsupported. The same walkthrough exposed a separate handled Flutter
+    accessibility-channel exception: assigning a virtual source ID to an event
+    threw in `AccessibilityRecord.setSource`. Added virtual source metadata,
+    copy retention, and local provider lookup without substituting a host node
+    for a missing child. The VM regression fails with the original implementation
+    and passes after the fix, including missing-provider and recycled-record
+    cases. Repeating the actual APK walkthrough renders the same screens and
+    no longer logs that accessibility exception. No host accessibility service
+    or screen-reader integration is claimed; the picker error remains.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full
 compatibility pass.** Package metadata and icon-query missing-method failures
 are passed. The saved-entry landscape/portrait resize and navigation sequence
 now works after GL routing fixes. Adaptive icons render with the host circular mask.
-Release-asset download is blocked by an Android storage-path assumption.
+Release-asset download is blocked by an Android storage-path assumption;
+export-directory selection is blocked by the missing document-tree picker.
 Installation, updates, certificate
 verification, and complete plugin behavior are not verified. Do not infer that
 every Flutter app works from this result.
