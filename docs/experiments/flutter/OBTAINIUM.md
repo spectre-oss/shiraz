@@ -168,6 +168,16 @@
     frames and remains unresolved. `SHIRAZ_TRACE_SURFACE=1` now logs bounded
     geometry/revision and opacity/variation counts without pixel contents.
 
+21. A VM EGL regression reproduced lost resize contents when an engine rebinds
+    the cached framebuffer ID returned by OpenGL instead of zero. The adapter
+    now prepares resized window attachments for either binding before drawing.
+    The regression fails before the fix and passes afterward, including repeated
+    resizes with both binding forms, damage swaps and readback. Full VM checks
+    pass. This does not yet resolve the app failure: another unchanged APK run
+    still publishes a transparent frame at startup. Dynamic GL symbol resolution
+    is the next investigation; the startup improvement in step 20 was a bounded
+    observation, not proof that every white-frame path was fixed.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full

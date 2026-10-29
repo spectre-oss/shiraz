@@ -305,7 +305,9 @@ EGLBoolean destroySurface(EGLDisplay display, EGLSurface surface) {
 extern "C" void glBindFramebuffer(GLenum target, GLuint framebuffer) {
     BindFramebuffer bind = realBindFramebuffer();
     if (!bind) return;
-    if (framebuffer == 0 && currentWindow != EGL_NO_SURFACE) {
+    // Engines may cache the window FBO returned by GL_FRAMEBUFFER_BINDING.
+    // Prepare its new dimensions before rendering, not during swap/readback.
+    if (currentWindow != EGL_NO_SURFACE && (framebuffer == 0 || framebuffer == currentFramebuffer)) {
         Draw* draw=findDraw(currentWindow);
         GLint previousDraw=0,previousRead=0;
         if(target!=GL_FRAMEBUFFER){glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&previousDraw);glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&previousRead);}

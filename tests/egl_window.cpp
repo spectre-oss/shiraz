@@ -44,13 +44,14 @@ int main() {
     glClearColor(0,0,1,1);glClear(GL_COLOR_BUFFER_BIT);
     if (!swapDamageExt(defaultDisplay, configuredSurface, nullptr, 0) ||
         shiraz_window_copy_argb(configuredWindow, configuredPixels, 4) || configuredPixels[0] != 0xff0000ff) return 37;
-    for(int width: {8,3,12}) {
+    GLint cachedWindowFramebuffer=0;glGetIntegerv(GL_FRAMEBUFFER_BINDING,&cachedWindowFramebuffer);
+    for(bool cached: {false,true}) for(int width: {8,3,12}) {
         int height=width+2;
         if(ANativeWindow_setBuffersGeometry(configuredWindow,width,height,1))return 38;
         EGLint reported=0;
         if(!eglQuerySurface(defaultDisplay,configuredSurface,EGL_WIDTH,&reported)||reported!=width)return 39;
         if(!eglQuerySurface(defaultDisplay,configuredSurface,EGL_HEIGHT,&reported)||reported!=height)return 40;
-        glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,width,height);
+        glBindFramebuffer(GL_FRAMEBUFFER,cached?static_cast<GLuint>(cachedWindowFramebuffer):0);glViewport(0,0,width,height);
         glClearColor(1,0,1,1);glClear(GL_COLOR_BUFFER_BIT);
         if(!eglSwapBuffers(defaultDisplay,configuredSurface))return 41;
         std::vector<uint32_t> resized(width*height);
