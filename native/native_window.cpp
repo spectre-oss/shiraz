@@ -102,6 +102,9 @@ extern "C" int32_t ANativeWindow_setBuffersGeometry(ANativeWindow* w, int32_t wi
     if (w->locked) return -EBUSY;
     if (width == 0 && height == 0) { width = w->initial_width; height = w->initial_height; }
     if (!valid_size(width, height)) return -EINVAL;
+    int error=sync_shared(w);if(error)return error;
+    // Reapplying the current geometry must not erase the last published frame.
+    if(width==w->width&&height==w->height)return 0;
     try {
         std::vector<uint8_t> front(size_t(width) * height * 4), back(front.size());
         w->front.swap(front); w->back.swap(back); w->width = width; w->height = height;w->front_argb=false;++w->revision;

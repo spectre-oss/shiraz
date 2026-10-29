@@ -158,6 +158,16 @@
     surface, which remains white after returning to portrait. This later flow
     does not inherit the earlier settings-screen resize result.
 
+20. Isolated navigation from resizing: opening the saved entry renders normally,
+    then landscape resize produces white. Some subsequent starts also showed
+    white frames. Bounded Surface diagnostics show populated opaque frames followed
+    by a transparent native buffer. Reapplying unchanged native-window geometry
+    was clearing published pixels; changed it to preserve pixels and revision.
+    A VM native regression verifies preservation, and the actual app startup and
+    saved-entry details render again. Landscape resize still publishes transparent
+    frames and remains unresolved. `SHIRAZ_TRACE_SURFACE=1` now logs bounded
+    geometry/revision and opacity/variation counts without pixel contents.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full

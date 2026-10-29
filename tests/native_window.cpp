@@ -48,7 +48,8 @@ int main() {
     assert(ANativeWindow_unlockAndPost(w)==0&&shiraz::refresh_window_snapshot(w,image,revision)&&image.pixels[0]==0x06090807);
     assert(shiraz_window_post_argb(w,host,16)==0&&shiraz::refresh_window_snapshot(w,image,revision)&&image.pixels[0]==host[0]);
     auto before=revision;assert(ANativeWindow_setBuffersGeometry(w,-1,4,1)==-EINVAL&&shiraz_window_revision(w)==before);
-    assert(ANativeWindow_setBuffersGeometry(w,4,4,1)==0&&shiraz::refresh_window_snapshot(w,image,revision));
+    assert(ANativeWindow_setBuffersGeometry(w,4,4,1)==0&&!shiraz::refresh_window_snapshot(w,image,revision));
+    assert(image.pixels[0]==host[0]&&shiraz_window_revision(w)==before);
     assert(ANativeWindow_setBuffersGeometry(w, 0, 0, 0) == 0);
     assert(ANativeWindow_getWidth(w) == 2 && ANativeWindow_getHeight(w) == 3);
     assert(shiraz::refresh_window_snapshot(w,image,revision)&&image.width==2&&image.height==3);

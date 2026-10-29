@@ -4,6 +4,9 @@ import android.graphics.*;
 /** Software producer/presenter buffers. A native window can be taken from a configured surface. */
 public class Surface implements android.os.Parcelable {
  public static class OutOfResourcesException extends RuntimeException {public OutOfResourcesException(){}public OutOfResourcesException(String message){super(message);}}
+ private static final boolean TRACE="1".equals(System.getenv("SHIRAZ_TRACE_SURFACE"));
+ private int tracedFrames;
+ private void trace(String event){if(TRACE&&tracedFrames++<64)System.err.println("SHIRAZ_SURFACE event="+event+" size="+width+"x"+height+" native="+(nativeWindow!=0)+" generation="+generation+" revision="+lastNativeRevision+" valid="+valid);}
  private Bitmap front,back,spare;private Canvas locked;private Thread producer;private boolean valid,accepting;private int width,height,format,generation,lockedGeneration;private long nativeWindow;
  static { System.loadLibrary("android"); }
  private Surface delegate;private boolean proxy;private long posts,lastNativeRevision,initialNativeRevision;private boolean hasPostedFrame;
@@ -46,10 +49,10 @@ public class Surface implements android.os.Parcelable {
 
   int count = front.getWidth() * front.getHeight();
   if (published == null || published.length != count) published = new int[count];
-  if (nativeCopyArgb(nativeWindow, published)&&revision==nativeWindowRevision(nativeWindow)){front.setPixels(published, 0, front.getWidth(), 0, 0, front.getWidth(), front.getHeight());lastNativeRevision=revision;}
+  if (nativeCopyArgb(nativeWindow, published)&&revision==nativeWindowRevision(nativeWindow)){front.setPixels(published, 0, front.getWidth(), 0, 0, front.getWidth(), front.getHeight());lastNativeRevision=revision;trace("publish");if(TRACE&&tracedFrames<64){int opaque=0;boolean varied=false;for(int pixel:published){if((pixel>>>24)==255)opaque++;if(pixel!=published[0])varied=true;}System.err.println("SHIRAZ_SURFACE_PIXELS opaque="+opaque+" total="+published.length+" varied="+varied);}}
  }
  private static void dimensions(int w,int h){if(w<1||h<1||w>8192||h>8192||(long)w*h>16*1024*1024)throw new IllegalArgumentException("Surface dimensions");}
- public synchronized void shirazConfigure(int w,int h,int pixelFormat){dimensions(w,h);if(nativeWindow!=0&&(width!=w||height!=h)){if(!nativeResizeWindow(nativeWindow,w,h))throw new OutOfResourcesException("Native surface resize failed");nativeEglForgetWindow(nativeWindow);}Bitmap replacement=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);replacement.setDensity(Bitmap.DENSITY_NONE);if(pixelFormat!=PixelFormat.RGBA_8888&&pixelFormat!=PixelFormat.TRANSLUCENT&&pixelFormat!=PixelFormat.TRANSPARENT)replacement.eraseColor(0xff000000);if(front!=null)front.recycle();if(spare!=null){spare.recycle();spare=null;}front=replacement;width=w;height=h;format=pixelFormat;hasPostedFrame=false;initialNativeRevision=nativeWindow==0?0:nativeWindowRevision(nativeWindow);generation++;valid=accepting=true;notifyAll();}
+ public synchronized void shirazConfigure(int w,int h,int pixelFormat){dimensions(w,h);if(nativeWindow!=0&&(width!=w||height!=h)){if(!nativeResizeWindow(nativeWindow,w,h))throw new OutOfResourcesException("Native surface resize failed");nativeEglForgetWindow(nativeWindow);}Bitmap replacement=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);replacement.setDensity(Bitmap.DENSITY_NONE);if(pixelFormat!=PixelFormat.RGBA_8888&&pixelFormat!=PixelFormat.TRANSLUCENT&&pixelFormat!=PixelFormat.TRANSPARENT)replacement.eraseColor(0xff000000);if(front!=null)front.recycle();if(spare!=null){spare.recycle();spare=null;}front=replacement;width=w;height=h;format=pixelFormat;hasPostedFrame=false;initialNativeRevision=nativeWindow==0?0:nativeWindowRevision(nativeWindow);generation++;valid=accepting=true;trace("configure");notifyAll();}
  public synchronized boolean isValid(){return proxy?delegate!=null&&delegate.isValid():valid;}
  synchronized void shirazStopProducer(){accepting=false;generation++;notifyAll();}
  public synchronized void release(){if(proxy){delegate=null;return;}lastNativeRevision=0;valid=accepting=false;generation++;if(nativeWindow!=0){nativeEglForgetWindow(nativeWindow);nativeReleaseWindow(nativeWindow);nativeWindow=0;}if(front!=null){front.recycle();front=null;}if(spare!=null){spare.recycle();spare=null;}published=null;notifyAll();}
