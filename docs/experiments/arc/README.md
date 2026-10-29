@@ -5,7 +5,10 @@ Android backend calls Java graphics APIs and native libraries; successful
 loading alone does not establish working rendering, input or audio.
 
 - [Mindustry](MINDUSTRY.md): GLES3 vertex-array support fixes a rendering-thread
-  failure and allows the main menu to render. Campaign interaction is under test.
+  failure and allows the main menu to render. A Java framebuffer-routing fix
+  restores campaign planet previews and Ground Zero’s tutorial world. Touch
+  dragging, landscape resizing and copper collection work; building, combat and
+  save persistence remain under test.
 
 Require a visible game scene and input-driven gameplay before calling a game
 playable. Record software-rendering performance separately from compatibility.

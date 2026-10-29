@@ -1536,3 +1536,10 @@ gles30-smoke: framework build/libshiraz-gles2.so build/libshiraz-gles1.so build/
 	javac --release 8 -cp build/framework/classes -d build/gles30-smoke tests/java/GLES30Smoke.java
 	$(JAVA) -Xcheck:jni -Djava.library.path=build -cp build/gles30-smoke:build/framework/classes GLES30Smoke
 check: gles30-smoke
+
+.PHONY: gles-window-smoke
+gles-window-smoke: framework build/libshiraz-gles2.so build/libshiraz-gles1.so build/libEGL.so.1 build/libshiraz-bitmap.so
+	mkdir -p build/gles-window-smoke
+	javac --release 8 -cp build/framework/classes -d build/gles-window-smoke tests/java/GlesWindowFramebufferSmoke.java
+	LD_PRELOAD="libGLESv2.so.2$${LD_PRELOAD:+:$$LD_PRELOAD}" $(JAVA) -Xcheck:jni -Djava.library.path=build -cp build/gles-window-smoke:build/framework/classes GlesWindowFramebufferSmoke
+check: gles-window-smoke

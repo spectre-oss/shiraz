@@ -7,10 +7,11 @@
 #include <limits>
 #include <algorithm>
 #include <cstring>
+extern "C" void shiraz_egl_bind_framebuffer(GLenum target, GLuint framebuffer);
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glActiveTexture(JNIEnv*,jclass,jint texture){glActiveTexture(texture);}
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glAttachShader(JNIEnv*,jclass,jint program,jint shader){glAttachShader(program,shader);}
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glBindBuffer(JNIEnv*,jclass,jint target,jint buffer){glBindBuffer(target,buffer);}
-extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glBindFramebuffer(JNIEnv*,jclass,jint target,jint framebuffer){glBindFramebuffer(target,framebuffer);}
+extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glBindFramebuffer(JNIEnv*,jclass,jint target,jint framebuffer){shiraz_egl_bind_framebuffer(target,framebuffer);}
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glBindRenderbuffer(JNIEnv*,jclass,jint target,jint renderbuffer){glBindRenderbuffer(target,renderbuffer);}
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glBindTexture(JNIEnv*,jclass,jint target,jint texture){glBindTexture(target,texture);}
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glBlendColor(JNIEnv*,jclass,jfloat r,jfloat g,jfloat b,jfloat a){glBlendColor(r,g,b,a);}

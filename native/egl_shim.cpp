@@ -317,6 +317,8 @@ static void bindWindowFramebuffer(GLenum target, GLuint framebuffer) {
     }
     bind(target, framebuffer);
 }
+// JNI calls use a unique symbol so host GL lookup order cannot bypass window routing.
+extern "C" void shiraz_egl_bind_framebuffer(GLenum target, GLuint framebuffer) { bindWindowFramebuffer(target,framebuffer); }
 extern "C" void glBindFramebuffer(GLenum target, GLuint framebuffer) { bindWindowFramebuffer(target,framebuffer); }
 // Native library handles otherwise resolve this directly from the host GLES library.
 extern "C" void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer) { bindWindowFramebuffer(target,framebuffer); }

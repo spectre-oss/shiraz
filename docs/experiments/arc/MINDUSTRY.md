@@ -1,6 +1,6 @@
 # Mindustry — Arc
 
-Status: **main menu rendered; campaign walkthrough in progress**.
+Status: **Ground Zero renders; tutorial gameplay walkthrough in progress**.
 
 ## Artifact
 
@@ -10,7 +10,7 @@ Status: **main menu rendered; campaign walkthrough in progress**.
 - SHA-256: `64bf33842d8f5495656c44868ea3d11ca5998bf6e36bbb428064dcc58c2e9f44`.
 - Minimum SDK 21; target SDK 36. APK includes ARM32, ARM64, x86 and x86-64
   libraries. Tested x86-64 on the separate Linux VM with software graphics.
-- Shiraz baseline `ba6fa7a` plus the GLES3 VAO bridge below. The APK is unchanged.
+- Shiraz baseline `ba6fa7a` plus the GLES3 VAO and Java framebuffer-routing fixes below. The APK is unchanged.
 
 ## Failure and fix
 
@@ -34,12 +34,27 @@ Custom Game, Settings and other controls. The app reports about 56 seconds to
 load in this run; concurrent VM verification work makes this unsuitable as a
 clean startup benchmark. A resize to 640 × 360 renders the landscape menu.
 
-Mouse input highlights Campaign; touchscreen input advances away from the
-menu, but the frame then remains gray. A live ART thread dump places the GL
-thread inside indexed rendering of a planet mesh; no missing-method exception
-was reported at that point. This does not establish either successful campaign
-rendering or a deadlock. Campaign rendering and actual gameplay still need
-verification. No
-claims are made for building, combat, saves, multiplayer, audio or responsive
-portrait layout. The app automatically fetched its public server list during
-startup; no multiplayer session was joined.
+Mouse input highlights Campaign; touchscreen input opens campaign selection.
+Originally that transition left a gray frame. Temporary VM tracing found that
+Java `glBindFramebuffer(..., 0)` could resolve directly to the host GL library,
+bypassing the window adapter when the host library loaded first. Draws then
+reported `GL_INVALID_FRAMEBUFFER_OPERATION` against the host default framebuffer.
+
+The JNI entry point now calls a uniquely named adapter function, independent of
+GL symbol lookup order. A regression preloads the host GL library, switches
+from an offscreen framebuffer back to zero, and verifies both the mapped window
+binding and a presented green pixel. The old implementation fails this lookup
+order; the fix passes on OpenJDK and ART. Temporary tracing was removed.
+
+The unchanged game now displays both animated campaign planet previews. Touch
+selection of Serpulo, confirmation, and Ground Zero's Launch control work.
+The game world loads with the copper tutorial; touch dragging changes the view,
+and resizing from 640 × 360 to 960 × 540 redraws the world and controls. The
+full VM check suite passes with the routing fix.
+
+Dragging toward the highlighted copper patch and tapping it starts a visible
+mining beam; the tutorial counter advances from `0/15` to `6/15`. This verifies
+resource collection through normal touch input, not completion of the tutorial.
+Building, combat, saves, multiplayer,
+audio and responsive portrait layout are not established. The app automatically
+fetched its public server list during startup; no multiplayer session was joined.
