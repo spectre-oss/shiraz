@@ -186,12 +186,22 @@
     responds to Back there, and returns to a rendered portrait app list. This
     verifies the previously failing saved-entry resize/navigation sequence.
 
+23. Added adaptive-icon XML inflation and circular host-mask composition with
+    background/foreground overscan, following the
+    [adaptive icon API](https://developer.android.com/reference/android/graphics/drawable/AdaptiveIconDrawable).
+    Optional monochrome content is retained separately and is not painted over
+    the normal full-color layers. VM regressions verify clipping, changed bounds,
+    layer overscan and monochrome separation; full checks pass. The unchanged APK now loads its installed-app
+    icon on the list and details screens without the previous handled plugin
+    exception. The host uses a circular mask; launcher-specific mask selection
+    and themed monochrome presentation are not implemented.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full
 compatibility pass.** Package metadata and icon-query missing-method failures
 are passed. The saved-entry landscape/portrait resize and navigation sequence
-now works after GL routing fixes. Adaptive-icon XML remains unsupported.
+now works after GL routing fixes. Adaptive icons render with the host circular mask.
 Installation, updates, certificate
 verification, and complete plugin behavior are not verified. Do not infer that
 every Flutter app works from this result.

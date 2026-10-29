@@ -85,6 +85,18 @@ public final class DrawableXml {
             java.util.List<BinaryXml.Node> targets=new java.util.ArrayList<BinaryXml.Node>();vectorTargets(n,depth,targets);
             for(BinaryXml.Node target:targets){attrs(target,"name animation");BinaryXml.Value name=resolve(target.android("name")),animation=target.android("animation");if(name==null||name.type!=3||name.text==null||animation==null)throw new IllegalArgumentException("Animated vector target attributes");int id;if(animation.type==1)id=animation.data;else if(animation.type==2){TypedValue out=new TypedValue();if(theme==null||!theme.resolveAttribute(animation.data,out,true))throw new Resources.NotFoundException("Animator theme reference");id=out.resourceId;flags|=out.changingConfigurations;}else throw new IllegalArgumentException("Animator resource reference");try{result.shirazAddTarget(name.text,android.animation.AnimatorInflater.loadAnimator(context,id));}catch(Resources.NotFoundException failure){System.err.println("W/AnimatedVector: animation for target "+name.text+" is not supported, drawing it unanimated: "+failure.getCause());}}return result;
         }
+        if(n.name.equals("adaptive-icon")){
+            attrs(n,"");Drawable[] layers=new Drawable[3];boolean[] seen=new boolean[3];
+            for(BinaryXml.Node item:n.children){
+                int index=item.name.equals("background")?0:item.name.equals("foreground")?1:item.name.equals("monochrome")?2:-1;
+                if(index<0||!item.namespace.isEmpty())throw new UnsupportedOperationException("Adaptive icon layer "+item.name);
+                if(seen[index])throw new IllegalArgumentException("Duplicate adaptive icon layer");seen[index]=true;attrs(item,"drawable");
+                BinaryXml.Value ref=item.android("drawable");
+                if(ref!=null){if(!item.children.isEmpty())throw new IllegalArgumentException("Duplicate adaptive drawable");layers[index]=reference(ref);}
+                else{if(item.children.size()!=1)throw new IllegalArgumentException("Adaptive layer requires drawable");layers[index]=node(item.children.get(0),depth+1);}
+            }
+            return new AdaptiveIconDrawable(layers[0],layers[1],layers[2]);
+        }
         if(n.name.equals("shape"))return shape(n);
         if(n.name.equals("color")){attrs(n,"color");if(!n.children.isEmpty())throw new IllegalArgumentException("Color drawable children");return new ColorDrawable(n.android("color")==null?0:colors(n.android("color")).getDefaultColor());}
         if(n.name.equals("nine-patch")){

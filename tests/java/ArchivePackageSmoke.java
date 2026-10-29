@@ -33,6 +33,17 @@ public final class ArchivePackageSmoke {
    try{manager.getApplicationIcon("missing.package");throw new AssertionError("unknown icon package");}catch(PackageManager.NameNotFoundException expected){}
    ApplicationInfo noIcon=new ApplicationInfo();noIcon.packageName=info.packageName;
    check(manager.getApplicationIcon(noIcon)!=null,"framework default icon");
+   android.graphics.drawable.Drawable loaded=resources.getDrawable(resources.getIdentifier("adaptive_fixture","drawable","org.shiraz.fixture"));
+   check(loaded instanceof android.graphics.drawable.AdaptiveIconDrawable,"adaptive XML class");
+   android.graphics.drawable.AdaptiveIconDrawable adaptive=(android.graphics.drawable.AdaptiveIconDrawable)loaded;
+   check(adaptive.getMonochrome()!=null,"monochrome metadata retained separately");
+   adaptive.setBounds(0,0,40,40);
+   check(adaptive.getForeground().getBounds().equals(new android.graphics.Rect(-10,-10,50,50)),"adaptive layer overscan");
+   android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(40,40,android.graphics.Bitmap.Config.ARGB_8888);
+   android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);
+   try{adaptive.draw(canvas);check(bitmap.getPixel(20,20)==0xff0000ff,"foreground composition");check(bitmap.getPixel(0,0)==0,"icon mask clips corners");
+    adaptive.setBounds(5,5,25,25);bitmap.eraseColor(0);adaptive.draw(canvas);check(bitmap.getPixel(15,15)==0xff0000ff&&bitmap.getPixel(30,30)==0,"mask follows bounds");
+   }finally{canvas.setBitmap(null);bitmap.recycle();}
   }finally{resources.shirazClose();}
   System.out.println("ARCHIVE_PACKAGE_METADATA_OK");
  }
