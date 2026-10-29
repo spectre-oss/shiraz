@@ -56,6 +56,7 @@ public final class ViewDiagnostics {
    " bounds="+view.getLeft()+","+view.getTop()+","+view.getRight()+","+view.getBottom()+" visibility="+view.getVisibility()+
    " overlayDrawables="+view.shirazOverlayDrawableCount()+" alpha="+view.getAlpha()+" translation="+view.getTranslationX()+","+view.getTranslationY()+" scroll="+view.getScrollX()+","+view.getScrollY()+
    " clickable="+view.isClickable()+" enabled="+view.isEnabled()+
+   " focused="+view.isFocused()+" focusable="+view.isFocusable()+" touchFocusable="+view.isFocusableInTouchMode()+
    (view instanceof android.widget.TextView?" textColor=0x"+Integer.toHexString(((android.widget.TextView)view).getCurrentTextColor()):""));
   if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;java.util.List<View> children=group.shirazWindowChildren();int count=Math.min(children.size(),4096);out.println("SHIRAZ_VIEW_CHILDREN parent="+index+" regular="+group.getChildCount()+" window="+children.size());for(int i=0;i<count&&budget[0]>0;i++)walk(children.get(i),index,depth+1,seen,budget,out);if(children.size()>count)out.println("SHIRAZ_VIEW_TREE_TRUNCATED");}
  }

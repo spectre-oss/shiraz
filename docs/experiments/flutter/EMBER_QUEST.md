@@ -29,10 +29,19 @@ to Flutter's text renderer.
 
 ## Interaction and remaining work
 
-At 960 × 540, clicking Play dismisses the menu and the animated scene remains.
-The displayed controls are WASD/arrows and Space. Initial keyboard attempts did
-not produce visible player movement; movement, jumping, collection, loss/retry,
-persistence, audio and portrait usability remain unverified. Resizing from the
-initial portrait window leaves the player partly below the landscape edge;
-upstream layout behavior versus runtime input/resize compatibility still needs
-investigation. Earlier bounded runs closed normally.
+Launching directly at 960 × 540 shows the complete player and ground. Clicking
+Play dismisses the menu and the animated scene remains. This differs from
+launching in portrait and then resizing to landscape, which leaves the player
+partly below the window edge. Resize compatibility remains unresolved.
+
+The displayed controls are WASD/arrows and Space. Holding Right for two seconds,
+including after a Tab attempt, did not visibly move the player. The opt-in view
+dump now includes focus state and focus eligibility. After clicking Play, the
+Flutter view is focusable, including in touch mode, but is not focused; none of
+the four reported views has focus. This is a lead for investigating keyboard
+dispatch, not a verified input fix.
+
+Movement, jumping, collection, loss/retry, persistence, audio and portrait
+usability remain unverified. Earlier bounded runs closed normally. These results
+were observed with the unchanged APK on the separate VM; rendering a scene does
+not establish playable gameplay.
