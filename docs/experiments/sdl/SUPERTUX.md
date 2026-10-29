@@ -136,9 +136,22 @@
     had accepted the selected options; they had not reliably chosen the item
     visually under the finger.
 
-**Animated startup, menus, mouse hover, world-map navigation, level rendering
-and resize verified.** Preference writing/reloading and a menu-driven clean exit
-are verified. Reliable in-level movement/jumping, audio, campaign progress
-persistence and general network compatibility remain unverified. Startup uses
-software graphics and ARM64 translation; it is not yet evidence of acceptable
-game performance.
+16. Retested the level on baseline `51d3782`, pausing between observations
+    so enemies could not kill Tux while captures were being inspected. From a
+    live state, held Right and Space visibly move Tux right and into the air.
+    The on-screen Right control also moves Tux; simultaneous Right and Jump
+    touches jump into a block and increase the coin counter to 101. These are
+    actual APK frames delivered through the ordinary input path. Earlier
+    death/restart observations did not establish an input-routing defect.
+    Restart also restores the selected world-map node, “Welcome to Antarctica.”
+    Its title/statistics screen waits for confirmation before play; it should
+    not be treated as a stalled level load.
+
+**Animated startup, menus, mouse hover, world-map navigation, level rendering,
+keyboard movement/jumping, touchscreen movement/jumping, coin collection and
+resize verified.** Preference writing/reloading, restoration of the selected
+world-map node, and a menu-driven clean exit are verified. Completing a level,
+campaign progress persistence, audio and general network compatibility remain
+unverified. Portrait controls overlap, and precise touchscreen menu selection
+remains limited. Startup uses software graphics and ARM64 translation; these
+bounded interactions are not a performance benchmark or a full-game pass.

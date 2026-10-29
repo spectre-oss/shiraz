@@ -5,7 +5,7 @@ audio, controllers, and packaged assets. Shiraz must support the APK's Android
 integration as well as its native ABI; a Linux desktop build of the same game
 does not establish Android compatibility.
 
-- [SuperTux](SUPERTUX.md): ARM64 Android release; animated startup and touch-driven menu, gameplay investigation.
+- [SuperTux](SUPERTUX.md): ARM64 Android release; animated startup, menus, keyboard/touch movement and jumping, coin collection, resizing, and saved preferences verified; full-level completion remains unverified.
 
 Acceptance requires a rendered game, actual movement and menu input, resize/back
 behavior, and save/restart checks. Native library loading alone is insufficient.
