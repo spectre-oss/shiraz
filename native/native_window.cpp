@@ -5,6 +5,8 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <memory>
 #include <new>
@@ -96,20 +98,31 @@ extern "C" int32_t ANativeWindow_getHeight(ANativeWindow* w) {
     std::lock_guard<std::mutex> guard(w->mutex); int error=sync_shared(w);return error?error:w->height;
 }
 extern "C" int32_t ANativeWindow_getFormat(ANativeWindow* w) { return w ? 1 : -EINVAL; }
-extern "C" int32_t ANativeWindow_setBuffersGeometry(ANativeWindow* w, int32_t width, int32_t height, int32_t format) {
+static int32_t set_geometry(ANativeWindow* w, int32_t width, int32_t height, int32_t format, bool hostResize) {
     if (!w || (format != 0 && format != 1)) return -EINVAL;
+    if(hostResize&&!valid_size(width,height))return -EINVAL;
     std::lock_guard<std::mutex> guard(w->mutex);
+    static const bool trace=[] {const char* value=std::getenv("SHIRAZ_TRACE_SURFACE");return value&&std::strcmp(value,"1")==0;}();
+    static std::atomic<unsigned> traces{0};
+    if(trace&&traces.fetch_add(1,std::memory_order_relaxed)<128)std::fprintf(stderr,"SHIRAZ_WINDOW_GEOMETRY requested=%dx%d current=%dx%d default=%dx%d\n",width,height,w->width,w->height,w->initial_width,w->initial_height);
     if (w->locked) return -EBUSY;
     if (width == 0 && height == 0) { width = w->initial_width; height = w->initial_height; }
     if (!valid_size(width, height)) return -EINVAL;
     int error=sync_shared(w);if(error)return error;
     // Reapplying the current geometry must not erase the last published frame.
-    if(width==w->width&&height==w->height)return 0;
+    if(width==w->width&&height==w->height){if(hostResize){w->initial_width=width;w->initial_height=height;}return 0;}
     try {
         std::vector<uint8_t> front(size_t(width) * height * 4), back(front.size());
         w->front.swap(front); w->back.swap(back); w->width = width; w->height = height;w->front_argb=false;++w->revision;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
+    if(hostResize){w->initial_width=width;w->initial_height=height;}
     return publish_shared(w);
+}
+extern "C" int32_t ANativeWindow_setBuffersGeometry(ANativeWindow* w, int32_t width, int32_t height, int32_t format) {
+    return set_geometry(w,width,height,format,false);
+}
+extern "C" int32_t shiraz_window_resize(ANativeWindow* w, int32_t width, int32_t height) {
+    return set_geometry(w,width,height,1,true);
 }
 extern "C" int32_t ANativeWindow_lock(ANativeWindow* w, ANativeWindow_Buffer* buffer, ARect* dirty) {
     if (!w || !buffer) return -EINVAL;

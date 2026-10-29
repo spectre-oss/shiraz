@@ -6,6 +6,8 @@ import android.graphics.*;
 import java.util.ArrayList;
 /** Software surface composed at this view's position; native compositor Z ordering is unsupported. */
 public class SurfaceView extends View {
+ private static final boolean TRACE="1".equals(System.getenv("SHIRAZ_TRACE_SURFACE"));
+ private int tracedUpdates;
  private final Thread ui=Thread.currentThread();private final Holder holder=new Holder();
  private int fixedWidth=-1,fixedHeight=-1,format=PixelFormat.RGB_565,currentWidth,currentHeight,currentFormat;
  private volatile boolean active,creating;private boolean updating,pending;
@@ -21,6 +23,7 @@ public class SurfaceView extends View {
  private boolean wanted(){return isShown()&&getWindowVisibility()==VISIBLE&&!shirazIsDetaching()&&getWidth()>0&&getHeight()>0;}
  private void update(){owner();if(updating){pending=true;return;}updating=true;try{int passes=0;do{pending=false;if(++passes>32)throw new IllegalStateException("Reentrant surface lifecycle limit");updateOnce();}while(pending);}finally{updating=false;}}
  private void updateOnce(){
+  if(TRACE&&tracedUpdates++<128)System.err.println("SHIRAZ_SURFACE_VIEW view="+getWidth()+"x"+getHeight()+" fixed="+fixedWidth+"x"+fixedHeight+" surface="+currentWidth+"x"+currentHeight+" active="+active+" wanted="+wanted());
   if(!wanted()){destroy();return;}
   int w=fixedWidth>0?fixedWidth:getWidth(),h=fixedHeight>0?fixedHeight:getHeight();
   if(active&&w==currentWidth&&h==currentHeight&&format==currentFormat){schedule();return;}

@@ -208,6 +208,12 @@
     storage-layout compatibility remains unresolved. The bounded runner later
     reached its configured timeout; this was not an app crash.
 
+25. Retested after the native-window default-size fix found through Unity:
+    opened the saved entry, resized its details to landscape, used Back there,
+    and returned the app list to portrait. All four states rendered correctly;
+    the saved entry and adaptive icon remained visible. This regression check
+    does not change the download-path limitation in step 24.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full

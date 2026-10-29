@@ -15,6 +15,8 @@ typedef struct ANativeWindow_Buffer {
 } ANativeWindow_Buffer;
 /* Host-only factory, not an Android API. RGBA8888 byte order. */
 ANativeWindow* shiraz_window_create(int32_t width, int32_t height);
+/* Host layout resize: also updates the dimensions restored by a producer's 0,0 request. */
+int32_t shiraz_window_resize(ANativeWindow*, int32_t width, int32_t height);
 /* Host transport: export returns an owned CLOEXEC fd or negative errno. Import duplicates it. */
 int shiraz_window_export(ANativeWindow*);
 ANativeWindow* shiraz_window_import(int descriptor);

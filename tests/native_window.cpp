@@ -11,6 +11,26 @@
 #include <cstdio>
 int main() {
     assert(!shiraz_window_create(-1, 4));
+    auto* resized=shiraz_window_create(6,4);
+    assert(resized);
+    for(int width: {3,8,6}) {
+        int height=width+2;
+        assert(shiraz_window_resize(resized,width,height)==0);
+        assert(ANativeWindow_setBuffersGeometry(resized,2,2,1)==0);
+        assert(ANativeWindow_setBuffersGeometry(resized,0,0,0)==0);
+        assert(ANativeWindow_getWidth(resized)==width&&ANativeWindow_getHeight(resized)==height);
+    }
+    // Updating the host default also matters when the producer already chose that size.
+    assert(ANativeWindow_setBuffersGeometry(resized,5,7,1)==0);
+    assert(shiraz_window_resize(resized,5,7)==0);
+    assert(shiraz_window_resize(resized,0,0)==-EINVAL);
+    ANativeWindow_Buffer held{};assert(ANativeWindow_lock(resized,&held,nullptr)==0);
+    assert(shiraz_window_resize(resized,9,9)==-EBUSY);
+    assert(ANativeWindow_unlockAndPost(resized)==0);
+    assert(ANativeWindow_setBuffersGeometry(resized,2,2,1)==0);
+    assert(ANativeWindow_setBuffersGeometry(resized,0,0,0)==0);
+    assert(ANativeWindow_getWidth(resized)==5&&ANativeWindow_getHeight(resized)==7);
+    ANativeWindow_release(resized);
     auto* w = shiraz_window_create(2, 3);
     assert(w && ANativeWindow_getWidth(w) == 2 && ANativeWindow_getHeight(w) == 3);
     assert(shiraz_window_revision(nullptr)==0);uint64_t revision=0;shiraz::Surface image(1,1);

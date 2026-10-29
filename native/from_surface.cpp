@@ -13,7 +13,7 @@ extern "C" JNIEXPORT jlong JNICALL Java_android_view_Surface_nativeCreateWindow(
     return reinterpret_cast<jlong>(shiraz_window_create(width, height));
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_android_view_Surface_nativeResizeWindow(JNIEnv*, jclass, jlong window, jint width, jint height) {
-    return ANativeWindow_setBuffersGeometry(reinterpret_cast<ANativeWindow*>(window), width, height, 1) == 0;
+    return shiraz_window_resize(reinterpret_cast<ANativeWindow*>(window), width, height) == 0;
 }
 extern "C" JNIEXPORT void JNICALL Java_android_view_Surface_nativeReleaseWindow(JNIEnv*, jclass, jlong window) {
     ANativeWindow_release(reinterpret_cast<ANativeWindow*>(window));

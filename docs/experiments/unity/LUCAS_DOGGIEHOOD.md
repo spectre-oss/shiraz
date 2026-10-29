@@ -117,8 +117,23 @@
     press on Settings opened the panel. This verifies a recoverable resize/input
     limitation, not responsive portrait support. The APK remained unchanged.
 
-**Interactive scene, camera drag, and multitouch zoom verified in successful
-runs; startup is intermittent.** Collider warnings still appear. Portrait
-resizing stretches the scene and Settings input fails until landscape is
-restored. Progress/save persistence, startup reliability, responsive resizing,
+21. Traced SurfaceView layout and native buffer geometry under
+    `SHIRAZ_TRACE_SURFACE=1`. The view resized to portrait, but Unity's subsequent
+    `ANativeWindow_setBuffersGeometry(0, 0, ...)` restored the original landscape
+    buffer dimensions. Host surface resizing now updates the default dimensions
+    used by that reset, matching the
+    [native-window buffer contract](https://developer.android.com/ndk/reference/group/a-native-window#anativewindow_setbuffersgeometry).
+    Native tests cover repeated host resizes, producer overrides, resetting to
+    the latest default, and rejected resizes while a buffer is locked. The reset
+    test fails with the previous host resize behavior and passes with the fix.
+    The unchanged game now renders at the actual portrait dimensions without
+    stretching, responds to the visible Settings button there, and preserves
+    the open panel when resized back to landscape. Some game UI remains clipped
+    in portrait. This resolves step 20's stale-buffer/input failure; it does not
+    establish that the game's full UI supports portrait.
+
+**Interactive scene, camera drag, multitouch zoom, and repeated native resizing
+verified in successful runs; startup is intermittent.** Collider warnings still
+appear. Portrait Settings input now works, but parts of the UI are clipped.
+Progress/save persistence, startup reliability, full portrait usability,
 and reporting of app-requested process termination remain open.
