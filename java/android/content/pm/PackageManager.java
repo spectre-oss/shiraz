@@ -17,6 +17,7 @@ public abstract class PackageManager {
     public boolean isInstantApp(){return false;}
     public boolean hasSystemFeature(String name,int version){return version<=0&&hasSystemFeature(name);}
 
+    public ResolveInfo resolveService(android.content.Intent intent,int flags){java.util.List<ResolveInfo> matches=queryIntentServices(intent,flags);return matches.isEmpty()?null:matches.get(0);}
     public ResolveInfo resolveActivity(android.content.Intent intent,int flags){java.util.List<ResolveInfo> matches=queryIntentActivities(intent,flags);return matches.isEmpty()?null:matches.get(0);}
     public static final int MATCH_DEFAULT_ONLY=0x10000,MATCH_ALL=0x20000,MATCH_SYSTEM_ONLY=0x100000,GET_RESOLVED_FILTER=0x40;
     public java.util.List<ResolveInfo> queryIntentServices(android.content.Intent intent,int flags){if(intent==null)throw new NullPointerException("intent");return new java.util.ArrayList<ResolveInfo>();}

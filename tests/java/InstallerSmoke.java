@@ -75,6 +75,12 @@ public final class InstallerSmoke {
   check("test.camera".equals(metadata.reqFeatures[0].name)&&metadata.reqFeatures[0].flags==1&&metadata.configPreferences[0].reqGlEsVersion==0x30000&&"test.touch".equals(metadata.featureGroups[0].features[0].name),"configuration and feature declarations");
   metadata.reqFeatures[0].name="mutated";check("test.camera".equals(manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_CONFIGURATIONS).reqFeatures[0].name),"fresh feature metadata");
   check(manager.getPackageInfo("test.signer",0).reqFeatures==null&&manager.getPackageInfo("test.signer",0).configPreferences==null,"unrequested configuration");
+  facts.setProperty("service.count","2");
+  for(int i=0;i<2;i++){String prefix="service."+i+".";facts.setProperty(prefix+"name","test.Service"+i);facts.setProperty(prefix+"filter.count","1");facts.setProperty(prefix+"filter.0.action.count","1");facts.setProperty(prefix+"filter.0.action.0","test.SERVICE");facts.setProperty(prefix+"filter.0.priority",String.valueOf(i*10));}
+  manager=new shiraz.runtime.HostPackageManager(facts,new ContextWrapper(null));
+  check("test.Service1".equals(manager.resolveService(new Intent("test.SERVICE"),0).serviceInfo.name),"service priority resolution");
+  check("test.Service0".equals(manager.resolveService(new Intent().setComponent(new ComponentName("test.signer","test.Service0")),0).serviceInfo.name),"explicit service resolution");
+  check(manager.resolveService(new Intent("test.MISSING"),0)==null,"absent service resolution");
   apk.putLong(0,1);Files.write(file.toPath(),apk.array());try{method.invoke(null,file.getPath());throw new AssertionError("corrupt signing size accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof IllegalStateException,"wrong malformed signer failure");}file.delete();
  }
  static byte[] join(byte[] a,byte[] b){byte[] out=java.util.Arrays.copyOf(a,a.length+b.length);System.arraycopy(b,0,out,a.length,b.length);return out;}

@@ -165,7 +165,6 @@ public final class HostPackageManager extends PackageManager {
         int allowed=GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|GET_RESOLVED_FILTER;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Service resolution flags: "+flags);
         java.util.ArrayList<android.content.pm.ResolveInfo> result=new java.util.ArrayList<android.content.pm.ResolveInfo>();
-        android.content.pm.ResolveInfo capture=HostCameraCapture.resolve(context,intent);if(capture!=null){result.add(capture);return result;}
         if(intent.getPackage()!=null&&!name.equals(intent.getPackage()))return result;
         int count=integer("service.count",0);if(count<0||count>256)throw new IllegalArgumentException("Service count");
         for(int i=0;i<count;i++){
@@ -186,6 +185,7 @@ public final class HostPackageManager extends PackageManager {
             }
             if(best!=null){best.serviceInfo=info;result.add(best);}
         }
+        java.util.Collections.sort(result,new java.util.Comparator<android.content.pm.ResolveInfo>(){public int compare(android.content.pm.ResolveInfo a,android.content.pm.ResolveInfo b){return Integer.compare(b.priority,a.priority);}});
         return result;
     }
     @Override public android.content.pm.ActivityInfo getReceiverInfo(android.content.ComponentName component,int flags) throws NameNotFoundException {

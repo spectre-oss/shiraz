@@ -96,11 +96,21 @@
     `PackageManager.resolveService(Intent, int)` and a Cronet native-link error
     for `ATrace_beginSection`; release retrieval does not complete.
 
+14. Added `resolveService` using the manifest-backed service query and ordered
+    results by filter priority; service queries no longer return an activity
+    from the camera adapter. VM tests verify priority, explicit-component, and
+    no-match behavior. Added the NDK tracing entry points with tracing disabled,
+    matching the absence of an Android tracing session. Rebuilt framework and
+    native library on the VM, then repeated Add with the same upstream URL.
+    Cronet now loads and the prior service-resolution/tracing failures pass.
+    Initialization next fails on `ConnectivityManager.getLinkProperties(Network)`
+    while querying DNS status. No completed release retrieval is claimed.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The
 previous package-metadata failure sequence is passed. Adding an upstream URL
-now exposes service-resolution and native tracing-symbol failures. App
+now loads Cronet but fails on the missing network link-properties query. App
 installation, updates, certificate verification, app-list persistence, and
 complete plugin behavior are not verified. Do not infer that every Flutter
 app works from this result.
