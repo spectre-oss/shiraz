@@ -15,6 +15,17 @@ public class ContentResolver {
  public java.util.List<UriPermission> getOutgoingPersistedUriPermissions(){return new java.util.ArrayList<UriPermission>();}
  public void takePersistableUriPermission(Uri uri,int modes){throw new SecurityException("No persistable URI grant is available");}
  public void releasePersistableUriPermission(Uri uri,int modes){throw new SecurityException("No persisted URI grant is available");}
+ public final android.os.Bundle call(Uri uri,String method,String arg,android.os.Bundle extras){
+  if(uri==null)throw new NullPointerException("uri");
+  if(!"content".equals(uri.getScheme()))throw new IllegalArgumentException("Provider calls require a content URI");
+  if(method==null)throw new NullPointerException("method");
+  try{return localProvider(uri).call(method,arg,extras);}
+  catch(FileNotFoundException missing){throw new IllegalArgumentException("Unknown content provider: "+uri.getAuthority(),missing);}
+ }
+ public final android.os.Bundle call(String authority,String method,String arg,android.os.Bundle extras){
+  if(authority==null)throw new NullPointerException("authority");
+  return call(new Uri.Builder().scheme("content").authority(authority).build(),method,arg,extras);
+ }
  private ContentProvider localProvider(Uri uri)throws FileNotFoundException{
   String authority=uri.getAuthority();if("downloads".equals(authority)){android.app.DownloadManager manager=(android.app.DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE);if(manager!=null)return manager.shirazProvider();}
   ContentProvider provider=ContentProvider.shirazLocal(authority);

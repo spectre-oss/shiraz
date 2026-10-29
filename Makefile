@@ -1471,3 +1471,10 @@ documents-uri-smoke: framework
 	javac --release 8 -cp build/framework/classes -d build/documents-uri-smoke tests/java/DocumentsUriSmoke.java
 	$(JAVA) -cp build/documents-uri-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar DocumentsUriSmoke
 check: documents-uri-smoke
+
+.PHONY: documents-provider-smoke
+documents-provider-smoke: framework build/libshiraz-host.so
+	mkdir -p build/documents-provider-smoke
+	javac --release 8 -cp build/framework/classes -d build/documents-provider-smoke tests/java/DocumentsProviderCallSmoke.java
+	$(JAVA) -Djava.library.path=build -cp build/documents-provider-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar DocumentsProviderCallSmoke
+check: documents-provider-smoke

@@ -249,6 +249,15 @@
     This is preparation for the provider/picker implementation; no additional
     Obtainium workflow is claimed to pass from these helpers alone.
 
+29. Added local provider call routing through `ContentResolver` and
+    `ContentProviderClient`, plus `DocumentsContract` create, rename, delete
+    and child-query requests. A file-backed VM fixture creates a Unicode-named
+    document, writes through its content URI, renames it, verifies the bytes,
+    and deletes it. Unknown authorities and denied calls remain errors. This
+    connects document operations to registered local providers; it does not
+    supply a user-selected filesystem provider, grants, or picker UI. Obtainium
+    export remains unverified and blocked at selection.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full
