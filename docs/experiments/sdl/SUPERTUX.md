@@ -158,10 +158,23 @@
     scrolling, and collectible coverage, but does not establish level completion,
     damage handling, or persistence of completed-level progress.
 
+18. On baseline `b7fb92e`, observed an enemy collision and Tux's death animation,
+    followed by an automatic return to the level start with the app still running.
+    This establishes this death/restart path, not every damage or checkpoint case.
+    A subsequent pause menu accepted mouse hover followed by a held click on
+    **Abort Level** and returned to the world map. The same pointer sequence
+    selected **Leave World**, and the main menu's **Quit** ended the runner with
+    exit status zero. These clicks used the actual visible menu coordinates;
+    earlier touchscreen selection limitations do not prevent this mouse path.
+    Short key presses were not consistently reflected in the observed UI on this
+    VM; longer held presses worked. No event-loss cause or runtime fix is claimed
+    from that observation. Level completion remains unverified.
+
 **Animated startup, menus, mouse hover, world-map navigation, level rendering,
 keyboard movement/jumping, touchscreen movement/jumping, coin collection and
 resize verified.** Preference writing/reloading, restoration of the selected
-world-map node, and a menu-driven clean exit are verified. Completing a level,
+world-map node, enemy death/restart, mouse-driven level/world exit, and a
+menu-driven clean exit are verified. Completing a level,
 campaign progress persistence, audio and general network compatibility remain
 unverified. Portrait controls overlap, and precise touchscreen menu selection
 remains limited. Startup uses software graphics and ARM64 translation; these
