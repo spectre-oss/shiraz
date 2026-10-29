@@ -30,8 +30,40 @@ public final class LocaleList implements Parcelable {
         for (int i = 0; i < parts.length; ++i) values[i] = Locale.forLanguageTag(parts[i]);
         return new LocaleList(values);
     }
-    public static LocaleList getDefault() { return new LocaleList(Locale.getDefault()); }
-    public static LocaleList getAdjustedDefault() { return getDefault(); }
+    private static Locale lastDefault;
+    private static LocaleList explicitDefault, defaultList, adjustedDefault;
+    private static LocaleList withFirst(Locale first, LocaleList rest) {
+        LinkedHashSet<Locale> ordered = new LinkedHashSet<Locale>();
+        ordered.add(first);
+        if (rest != null) Collections.addAll(ordered, rest.locales);
+        // Leave room for an externally selected Java default at the existing bound.
+        Locale[] values = ordered.toArray(new Locale[ordered.size()]);
+        return new LocaleList(values.length > 64 ? Arrays.copyOf(values, 64) : values);
+    }
+    public static synchronized LocaleList getDefault() {
+        Locale current = Locale.getDefault();
+        if (!current.equals(lastDefault)) {
+            lastDefault = current;
+            if (defaultList == null || !current.equals(defaultList.get(0)))
+                defaultList = withFirst(current, explicitDefault);
+            adjustedDefault = withFirst(current, defaultList);
+        }
+        return defaultList;
+    }
+    public static synchronized LocaleList getAdjustedDefault() {
+        getDefault();
+        return adjustedDefault;
+    }
+    public static void setDefault(LocaleList values) { setDefault(values, 0); }
+    public static synchronized void setDefault(LocaleList values, int index) {
+        Objects.requireNonNull(values, "locales");
+        if (values.isEmpty()) throw new IllegalArgumentException("Empty default locales");
+        Locale selected = Objects.requireNonNull(values.get(index), "default locale index");
+        Locale.setDefault(selected);
+        lastDefault = selected;
+        explicitDefault = defaultList = values;
+        adjustedDefault = index == 0 ? values : withFirst(selected, values);
+    }
     @Override public boolean equals(Object other) { return other instanceof LocaleList && Arrays.equals(locales, ((LocaleList)other).locales); }
     @Override public int hashCode() { return Arrays.hashCode(locales); }
     @Override public String toString() { return Arrays.toString(locales); }

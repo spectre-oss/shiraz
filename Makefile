@@ -1543,3 +1543,10 @@ gles-window-smoke: framework build/libshiraz-gles2.so build/libshiraz-gles1.so b
 	javac --release 8 -cp build/framework/classes -d build/gles-window-smoke tests/java/GlesWindowFramebufferSmoke.java
 	LD_PRELOAD="libGLESv2.so.2$${LD_PRELOAD:+:$$LD_PRELOAD}" $(JAVA) -Xcheck:jni -Djava.library.path=build -cp build/gles-window-smoke:build/framework/classes GlesWindowFramebufferSmoke
 check: gles-window-smoke
+
+.PHONY: locale-defaults-smoke
+locale-defaults-smoke: framework
+	mkdir -p build/locale-defaults-smoke
+	javac --release 8 -cp build/framework/classes -d build/locale-defaults-smoke tests/java/LocaleDefaultsSmoke.java
+	$(JAVA) -cp build/locale-defaults-smoke:build/framework/classes LocaleDefaultsSmoke
+check: locale-defaults-smoke
