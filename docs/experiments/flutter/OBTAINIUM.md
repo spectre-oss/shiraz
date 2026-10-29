@@ -227,6 +227,19 @@
     no longer logs that accessibility exception. No host accessibility service
     or screen-reader integration is claimed; the picker error remains.
 
+27. Investigation of the missing export provider exposed a separate runtime
+    write defect: `ContentResolver.openOutputStream` discarded a provider's
+    asset offset and length. A VM provider fixture reproduced writes outside
+    its three-byte region. Added bounded, owning output streams and resolver
+    integration; the regression covers surrounding-byte preservation, empty
+    regions, unknown-length output, closure and writes after close. ART testing
+    also caught double accounting through its single-byte write delegation;
+    that was corrected before acceptance. The final fixture passes on both VM
+    OpenJDK and ART; full VM checks pass. Obtainium still renders its saved app
+    list and opens the saved entry's details after deployment. This is a provider I/O regression
+    result, not an Obtainium export result: selection UI, tree-provider support
+    and persisted grants are still missing.
+
 ## Current result and limits
 
 **Release retrieval, Add, and app-list persistence verified; not a full

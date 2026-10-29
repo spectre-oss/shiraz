@@ -1457,3 +1457,10 @@ archive-package-smoke: framework apk-fixture framework-resources build/libshiraz
 	javac --release 8 -cp build/framework/classes -d build/archive-package-smoke tests/java/ArchivePackageSmoke.java
 	$(JAVA) -Djava.library.path=build -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -cp build/archive-package-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ArchivePackageSmoke build/apk-fixture/fixture.apk
 check: archive-package-smoke
+
+.PHONY: content-file-smoke
+content-file-smoke: framework build/libshiraz-host.so
+	mkdir -p build/content-file-smoke
+	javac --release 8 -cp build/framework/classes -d build/content-file-smoke tests/java/ContentFileSmoke.java
+	$(JAVA) -Djava.library.path=build -cp build/content-file-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ContentFileSmoke
+check: content-file-smoke

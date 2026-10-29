@@ -30,6 +30,7 @@ public class AssetFileDescriptor implements Closeable, Parcelable {
     }
     public Bundle getExtras() { return extras; }
     public FileInputStream createInputStream() throws IOException { return new AutoCloseInputStream(this); }
+    public FileOutputStream createOutputStream() throws IOException { return new AutoCloseOutputStream(this); }
     public byte[] shirazReadRegion() throws IOException {
         FileDescriptor fd = descriptor.getFileDescriptor();
         synchronized (fd) {
@@ -42,6 +43,46 @@ public class AssetFileDescriptor implements Closeable, Parcelable {
     @Override public void close() throws IOException { descriptor.close(); }
     public int describeContents() { return CONTENTS_FILE_DESCRIPTOR; }
     public void writeToParcel(Parcel out, int flags) { throw new UnsupportedOperationException("Asset descriptor parcel transport is not implemented"); }
+    public static class AutoCloseOutputStream extends FileOutputStream {
+        private final AssetFileDescriptor owner;
+        private long remaining;
+        private boolean closed;
+        public AutoCloseOutputStream(AssetFileDescriptor owner) throws IOException {
+            super(owner.getFileDescriptor()); this.owner = owner; remaining = owner.length;
+            try { if (owner.length != UNKNOWN_LENGTH) getChannel().position(owner.start); }
+            catch (IOException error) {
+                try { close(); } catch (IOException cleanup) { error.addSuppressed(cleanup); }
+                throw error;
+            }
+        }
+        private void checkOpen() throws IOException {
+            if (closed || !getFD().valid()) throw new IOException("Asset descriptor stream is closed");
+        }
+        @Override public void write(int value) throws IOException {
+            // ART's FileOutputStream.write(int) calls the array overload virtually.
+            // Route here explicitly so region accounting happens exactly once.
+            write(new byte[]{(byte)value}, 0, 1);
+        }
+        @Override public void write(byte[] buffer) throws IOException { write(buffer, 0, buffer.length); }
+        @Override public void write(byte[] buffer, int offset, int count) throws IOException {
+            synchronized (owner.getFileDescriptor()) {
+                checkOpen();
+                if (offset < 0 || count < 0 || offset > buffer.length - count) throw new IndexOutOfBoundsException();
+                int actual = remaining < 0 ? count : (int)Math.min(remaining, count);
+                if (actual == 0) return;
+                super.write(buffer, offset, actual); if (remaining > 0) remaining -= actual;
+            }
+        }
+        @Override public void close() throws IOException {
+            synchronized (owner.getFileDescriptor()) {
+                if (closed) return; closed = true;
+                IOException failure = null;
+                try { super.close(); } catch (IOException error) { failure = error; }
+                try { owner.close(); } catch (IOException error) { if (failure == null) failure = error; else failure.addSuppressed(error); }
+                if (failure != null) throw failure;
+            }
+        }
+    }
     public static class AutoCloseInputStream extends FileInputStream {
         private final AssetFileDescriptor owner;
         private long remaining;

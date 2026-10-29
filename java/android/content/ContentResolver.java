@@ -56,7 +56,11 @@ public class ContentResolver {
   if(!"content".equals(uri.getScheme()))throw new FileNotFoundException("No content provider for "+uri);
   AssetFileDescriptor asset=localProvider(uri).openAssetFile(uri,mode);
   if(asset==null)throw new FileNotFoundException("No entry for "+uri);
-  return new FileOutputStream(asset.getFileDescriptor());
+  try{return asset.createOutputStream();}
+  catch(IOException error){
+   try{asset.close();}catch(IOException cleanup){error.addSuppressed(cleanup);}
+   FileNotFoundException failure=new FileNotFoundException("Unable to create output stream for "+uri);failure.initCause(error);throw failure;
+  }
  }
  public final ParcelFileDescriptor openFileDescriptor(Uri uri,String mode)throws FileNotFoundException{
   if(uri==null)throw new NullPointerException("uri");if(mode==null)throw new NullPointerException("mode");
