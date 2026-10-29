@@ -1437,8 +1437,8 @@ signing-metadata-smoke: framework build/libshiraz-host.so
 check: signing-metadata-smoke
 
 .PHONY: resolver-properties-smoke
-resolver-properties-smoke: framework
+resolver-properties-smoke: framework build/libshiraz-host.so
 	mkdir -p build/resolver-properties-smoke
 	javac --release 8 -cp build/framework/classes -d build/resolver-properties-smoke tests/java/ResolverPropertiesSmoke.java
-	$(JAVA) -cp build/resolver-properties-smoke:build/framework/classes shiraz.runtime.ResolverPropertiesSmoke
+	$(JAVA) -Djava.library.path=build -cp build/resolver-properties-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar shiraz.runtime.ResolverPropertiesSmoke
 check: resolver-properties-smoke

@@ -37,7 +37,7 @@ public final class ConnectivityManager {
     }
 
     private static final Network HOST_NETWORK = new Network(100);
-    private final java.util.ArrayList<NetworkCallback> callbacks = new java.util.ArrayList<NetworkCallback>();
+    private final java.util.IdentityHashMap<NetworkCallback,Object> callbacks = new java.util.IdentityHashMap<NetworkCallback,Object>();
 
     private NetworkInfo connected() {
         NetworkInfo info = getActiveNetworkInfo();
@@ -56,17 +56,39 @@ public final class ConnectivityManager {
     public void registerNetworkCallback(NetworkRequest request, NetworkCallback callback) { register(callback); }
     public void registerDefaultNetworkCallback(NetworkCallback callback) { register(callback); }
     public void requestNetwork(NetworkRequest request, NetworkCallback callback) { register(callback); }
-    private void register(NetworkCallback callback) {
+    public void registerNetworkCallback(NetworkRequest request, NetworkCallback callback, android.os.Handler handler) {
+        if (request == null) throw new NullPointerException("request");
+        if (handler == null) throw new NullPointerException("handler");
+        register(callback, handler);
+    }
+    public void registerDefaultNetworkCallback(NetworkCallback callback, android.os.Handler handler) {
+        if (handler == null) throw new NullPointerException("handler");
+        register(callback, handler);
+    }
+    private void register(NetworkCallback callback) { register(callback, null); }
+    private void register(final NetworkCallback callback, android.os.Handler handler) {
         if (callback == null) throw new NullPointerException("callback");
-        synchronized (callbacks) { if (callbacks.contains(callback)) throw new IllegalArgumentException("NetworkCallback already registered"); callbacks.add(callback); }
-        Network network = getActiveNetwork();
-        if (network != null) {
-            callback.onAvailable(network);
-            callback.onCapabilitiesChanged(network, getNetworkCapabilities(network));
-            callback.onLinkPropertiesChanged(network, getLinkProperties(network));
+        final Object registration = new Object();
+        synchronized (callbacks) {
+            if (callbacks.containsKey(callback)) throw new IllegalArgumentException("NetworkCallback already registered");
+            callbacks.put(callback, registration);
+        }
+        Runnable initial = new Runnable() { public void run() {
+            synchronized (callbacks) { if (callbacks.get(callback) != registration) return; }
+            Network network = getActiveNetwork();
+            if (network != null) {
+                callback.onAvailable(network);
+                callback.onCapabilitiesChanged(network, getNetworkCapabilities(network));
+                callback.onLinkPropertiesChanged(network, getLinkProperties(network));
+            }
+        }};
+        if (handler == null) initial.run();
+        else if (!handler.post(initial)) {
+            synchronized (callbacks) { if (callbacks.get(callback) == registration) callbacks.remove(callback); }
+            throw new IllegalStateException("Network callback handler has stopped");
         }
     }
     public void unregisterNetworkCallback(NetworkCallback callback) {
-        synchronized (callbacks) { if (!callbacks.remove(callback)) throw new IllegalArgumentException("NetworkCallback was not registered"); }
+        synchronized (callbacks) { if (callbacks.remove(callback) == null) throw new IllegalArgumentException("NetworkCallback was not registered"); }
     }
 }

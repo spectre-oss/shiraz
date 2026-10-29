@@ -115,12 +115,22 @@
     handler-based `registerNetworkCallback` overload. Release retrieval remains
     unverified.
 
+16. Added handler-based network callback registration. Initial callbacks are
+    queued on the supplied handler; unregistering cancels pending delivery,
+    duplicate registrations fail, and a stopped handler does not retain a
+    registration. This remains a default-network snapshot adapter, not a
+    continuous network-change monitor. Repeating Add passes the previous
+    missing-method failure. Cronet then aborts loading `NetworkActiveNotifier`;
+    VM inspection confirms that the APK contains the class but its implemented
+    framework interface, `ConnectivityManager.OnNetworkActiveListener`, is
+    missing. No release retrieval completes.
+
 ## Current result and limits
 
 **Interactive settings and text entry; not a full compatibility pass.** The
 previous package-metadata failure sequence is passed. Adding an upstream URL
 now loads Cronet and reads network resolver metadata, but fails on the missing
-handler-based network callback registration. App
+network-active listener interface during Cronet class loading. App
 installation, updates, certificate verification, app-list persistence, and
 complete plugin behavior are not verified. Do not infer that every Flutter
 app works from this result.

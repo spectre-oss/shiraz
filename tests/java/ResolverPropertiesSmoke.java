@@ -17,6 +17,28 @@ public final class ResolverPropertiesSmoke {
   }
   check("last.invalid".equals(HostConnectivity.resolver("search first.invalid\ndomain last.invalid").getDomains()),"last domain directive");
   check(android.net.ConnectivityManager.shirazForHost().getLinkProperties(new android.net.Network(999))==null,"unknown network");
+  android.os.Looper.prepare();
+  final android.os.Looper loop=android.os.Looper.myLooper();
+  final android.net.ConnectivityManager manager=android.net.ConnectivityManager.shirazForHost();
+  final int[] calls={0};
+  android.net.ConnectivityManager.NetworkCallback callback=new android.net.ConnectivityManager.NetworkCallback(){
+   @Override public void onAvailable(android.net.Network network){check(loop.isCurrentThread(),"callback thread");calls[0]++;}
+  };
+  android.os.Handler handler=new android.os.Handler(loop);
+  android.net.NetworkRequest request=new android.net.NetworkRequest.Builder().build();
+  manager.registerNetworkCallback(request,callback,handler);
+  check(calls[0]==0,"handler callback must be queued");
+  manager.unregisterNetworkCallback(callback);
+  loop.shirazDispatchDue(100);
+  check(calls[0]==0,"cancel queued registration");
+  manager.registerDefaultNetworkCallback(callback,handler);
+  try{manager.registerNetworkCallback(request,callback,handler);throw new AssertionError("duplicate callback");}catch(IllegalArgumentException expected){}
+  loop.shirazDispatchDue(100);
+  check(calls[0]==(manager.getActiveNetwork()==null?0:1),"deliver initial snapshot");
+  manager.unregisterNetworkCallback(callback);
+  loop.quit();
+  try{manager.registerNetworkCallback(request,callback,handler);throw new AssertionError("stopped handler");}catch(IllegalStateException expected){}
+  try{manager.unregisterNetworkCallback(callback);throw new AssertionError("failed registration retained");}catch(IllegalArgumentException expected){}
   System.out.println("RESOLVER_LINK_PROPERTIES_OK");
  }
 }
