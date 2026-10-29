@@ -260,6 +260,9 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
     public android.content.Intent getParentActivityIntent() { return null; }
     public boolean shouldUpRecreateTask(android.content.Intent target) { return false; }
     public void finish() { finishing = true; }
+    // The host keeps no persistent Android recents entry. Finishing the root
+    // activity closes its host task through the normal runner lifecycle.
+    public void finishAndRemoveTask() { finish(); }
     public void finishAffinity() { finish(); }
     public void finishAfterTransition() { finish(); }
     public boolean isFinishing() { return finishing; }

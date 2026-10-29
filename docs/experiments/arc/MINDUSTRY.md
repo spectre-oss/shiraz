@@ -1,6 +1,6 @@
 # Mindustry — Arc
 
-Status: **Ground Zero renders; tutorial gameplay walkthrough in progress**.
+Status: **mining, drill construction and saved-world reload verified; tutorial continues**.
 
 ## Artifact
 
@@ -10,7 +10,7 @@ Status: **Ground Zero renders; tutorial gameplay walkthrough in progress**.
 - SHA-256: `64bf33842d8f5495656c44868ea3d11ca5998bf6e36bbb428064dcc58c2e9f44`.
 - Minimum SDK 21; target SDK 36. APK includes ARM32, ARM64, x86 and x86-64
   libraries. Tested x86-64 on the separate Linux VM with software graphics.
-- Shiraz baseline `ba6fa7a` plus the GLES3 VAO and Java framebuffer-routing fixes below. The APK is unchanged.
+- Shiraz baseline `ba6fa7a` plus the GLES3 VAO, Java framebuffer-routing and activity-exit fixes below. The APK is unchanged.
 
 ## Failure and fix
 
@@ -54,7 +54,27 @@ full VM check suite passes with the routing fix.
 
 Dragging toward the highlighted copper patch and tapping it starts a visible
 mining beam; the tutorial counter advances from `0/15` to `6/15`. This verifies
-resource collection through normal touch input, not completion of the tutorial.
-Building, combat, saves, multiplayer,
+resource collection through normal touch input. The collection objective then
+advances to building a Mechanical Drill. Researching it in the tech tree shows
+“New content unlocked”; selecting it, placing it on the marked ore and confirming
+the checkmark constructs the drill. The tutorial advances to transporting
+copper into the core using conveyors.
+
+An initial bounded run expired before Save & Quit was confirmed. The next
+launch retained research and earlier progress, but not that last construction;
+this was not treated as a verified save. In a longer run, rebuilding the drill,
+choosing Save & Quit, confirming OK and returning to the main menu completed.
+After a process restart, Campaign → Ground Zero → Go restores the built drill
+and conveyor objective. This verifies that specific saved world, not all save
+formats or later campaign progression.
+
+The main-menu Quit action exposed a missing `Activity.finishAndRemoveTask()`:
+the app returned exit status zero but still logged a lifecycle failure. The
+method now uses the normal host activity-finish lifecycle; Shiraz has no
+persistent Android recent-task entry to remove. After rebuilding and restarting
+the unchanged APK, tapping Quit exits with status zero and no missing-method
+or activity-lifecycle failure in the log. The full VM `make check` suite passes.
+
+Conveyor construction, tutorial completion, combat, multiplayer,
 audio and responsive portrait layout are not established. The app automatically
 fetched its public server list during startup; no multiplayer session was joined.
