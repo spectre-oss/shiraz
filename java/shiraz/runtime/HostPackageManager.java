@@ -40,7 +40,7 @@ public final class HostPackageManager extends PackageManager {
         if (value == null || value.isEmpty()) throw new IllegalArgumentException("Missing package metadata: " + key);
         return value;
     }
-    private static final int PACKAGE_QUERY_FLAGS=GET_SIGNATURES|GET_META_DATA|GET_PERMISSIONS|GET_DISABLED_COMPONENTS|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|0x1|0x2|0x4|0x8|0x10|0x20|0x2000|0x4000|0x8000;
+    private static final int PACKAGE_QUERY_FLAGS=GET_SIGNING_CERTIFICATES|GET_SIGNATURES|GET_META_DATA|GET_PERMISSIONS|GET_DISABLED_COMPONENTS|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|0x1|0x2|0x4|0x8|0x10|0x20|0x2000|0x4000|0x8000;
     private void query(String packageName, int flags) throws NameNotFoundException {
         if (!name.equals(packageName)) throw new NameNotFoundException(packageName);
         if ((flags&~PACKAGE_QUERY_FLAGS)!=0) throw new UnsupportedOperationException("Package query flags are not implemented: " + flags);
@@ -337,6 +337,7 @@ public final class HostPackageManager extends PackageManager {
             info.services=services.isEmpty()?null:services.toArray(new android.content.pm.ServiceInfo[services.size()]);
         }
         if ((flags&GET_SIGNATURES)!=0) info.signatures=ApkCertificates.read(required("sourceDir"));
+        if ((flags&GET_SIGNING_CERTIFICATES)!=0) info.signingInfo=new android.content.pm.SigningInfo(ApkCertificates.read(required("sourceDir")));
         return info;
     }
     @Override public ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException {

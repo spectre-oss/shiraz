@@ -6,7 +6,7 @@
 - Artifact: `app-x86_64-release.apk`, unchanged; version code 23611, min SDK 26.
 - SHA-256: `678bb84c6019775e1b318cdef18e5e13764379b431e45f25fa2ffde5650e5f8e`.
 - Framework evidence: APK contains `libflutter.so` and `libapp.so` for x86-64.
-- Test: 2026-10-28; x86-64 Linux VM, software graphics, standalone ART. Source
+- Test: 2026-10-28–29; x86-64 Linux VM, software graphics, standalone ART. Source
   baseline `0b59ef2` plus the fixes described below. No ARM translation used.
 
 ## Reproduce, fix, retest
@@ -33,9 +33,20 @@
 7. Resized that screen to landscape, inspected the relayout and retained text,
    tapped Back using the new dimensions, and returned the home screen to portrait.
 
+8. Added `GET_SIGNING_CERTIFICATES`, `PackageInfo.signingInfo`, and copied
+   signer/history queries backed by the existing bounded v2 certificate reader.
+   This matches Shiraz's API-27 profile; it does not implement v3 rotation
+   history or cryptographically verify APK authenticity. VM regression checks
+   cover package-query integration, requested/unrequested metadata, array
+   isolation, multi-signer history semantics, and malformed-block rejection.
+   The unchanged APK passes its previous unsupported-flags failure, then fails
+   on missing `PackageInfo.splitNames`. Added that field with null for the
+   currently supported monolithic APKs. Retesting passes it and next fails on
+   missing `PackageInfo.sharedUserId` during the background package inventory.
+
 ## Current result and limits
 
-**Interactive settings and text entry; not a full compatibility pass.** Background work reports unsupported
-package-query flags (`134217728`, GET_SIGNING_CERTIFICATES). App installation,
+**Interactive settings and text entry; not a full compatibility pass.** The signing-query flag failure is fixed, but background package inventory now
+fails on missing `PackageInfo.sharedUserId`. App installation,
 updates, certificate handling, app-list persistence, and complete plugin behavior
 are not verified. Do not infer that every Flutter app works from this result.

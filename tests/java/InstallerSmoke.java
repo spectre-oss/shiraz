@@ -25,6 +25,17 @@ public final class InstallerSmoke {
   File file=new File(root,"signer.apk");Files.write(file.toPath(),apk.array());
   java.lang.reflect.Method method=Class.forName("shiraz.runtime.ApkCertificates").getDeclaredMethod("read",String.class);method.setAccessible(true);
   android.content.pm.Signature[] result=(android.content.pm.Signature[])method.invoke(null,file.getPath());check(result.length==1&&java.util.Arrays.equals(result[0].toByteArray(),certificate),"signer metadata differs");
+  android.content.pm.SigningInfo info=new android.content.pm.SigningInfo(result);result[0]=null;
+  check(!info.hasMultipleSigners()&&!info.hasPastSigningCertificates()&&info.getSigningCertificateHistory().length==1,"API-27 signer history");
+  android.content.pm.Signature[] copy=info.getApkContentsSigners();copy[0]=null;check(info.getApkContentsSigners()[0]!=null,"signer snapshot isolation");
+  android.content.pm.Signature signer=info.getApkContentsSigners()[0];
+  android.content.pm.SigningInfo multiple=new android.content.pm.SigningInfo(new android.content.pm.Signature[]{signer,new android.content.pm.Signature(new byte[]{1})});
+  check(multiple.hasMultipleSigners()&&multiple.getSigningCertificateHistory()==null,"multiple signer history");
+  java.util.Properties facts=new java.util.Properties();facts.setProperty("package","test.signer");facts.setProperty("sourceDir",file.getPath());facts.setProperty("dataDir",root.getPath());
+  shiraz.runtime.HostPackageManager manager=new shiraz.runtime.HostPackageManager(facts,new ContextWrapper(null));
+  android.content.pm.PackageInfo metadata=manager.getPackageInfo("test.signer",android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
+  check(metadata.signatures==null&&metadata.signingInfo.getApkContentsSigners()[0].equals(signer),"modern query returns v2 metadata only when requested");
+  check(manager.getPackageInfo("test.signer",0).signingInfo==null,"unrequested signing metadata");
   apk.putLong(0,1);Files.write(file.toPath(),apk.array());try{method.invoke(null,file.getPath());throw new AssertionError("corrupt signing size accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof IllegalStateException,"wrong malformed signer failure");}file.delete();
  }
  static byte[] join(byte[] a,byte[] b){byte[] out=java.util.Arrays.copyOf(a,a.length+b.length);System.arraycopy(b,0,out,a.length,b.length);return out;}
@@ -35,6 +46,7 @@ public final class InstallerSmoke {
   android.text.style.URLSpan[] links=text.getSpans(0,text.length(),android.text.style.URLSpan.class);check(links.length==1&&links[0].getURL().equals("https://example.org/?a=1&b=2"),"link attribute decoding");
  }
  public static void main(String[] args)throws Exception {
+  if(args.length==2&&"--certificates".equals(args[1])){File root=Files.createTempDirectory(Paths.get(args[0]),"certificates-").toFile();try{certificates(root);}finally{root.delete();}System.out.println("SIGNING_METADATA_OK");return;}
   Looper.prepareMainLooper();File cache=Files.createTempDirectory(Paths.get(args[0]),"installer-smoke-").toFile();Owner owner=new Owner(cache);
   try{
    certificates(cache);html();
