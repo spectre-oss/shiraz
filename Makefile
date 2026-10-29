@@ -1313,7 +1313,7 @@ check: sensors-smoke
 uri-permission-smoke: framework
 	mkdir -p build/uri-permission-smoke
 	javac --release 8 -cp build/framework/classes -d build/uri-permission-smoke tests/java/UriPermissionSmoke.java
-	java -Djava.library.path=build -cp build/uri-permission-smoke:build/framework/classes UriPermissionSmoke
+	$(JAVA) -Djava.library.path=build -cp build/uri-permission-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar UriPermissionSmoke
 check: uri-permission-smoke
 
 .PHONY: configuration-diff-smoke
@@ -1478,3 +1478,10 @@ documents-provider-smoke: framework build/libshiraz-host.so
 	javac --release 8 -cp build/framework/classes -d build/documents-provider-smoke tests/java/DocumentsProviderCallSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/documents-provider-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar DocumentsProviderCallSmoke
 check: documents-provider-smoke
+
+.PHONY: host-documents-smoke
+host-documents-smoke: framework build/libshiraz-host.so
+	mkdir -p build/host-documents-smoke
+	javac --release 8 -cp build/framework/classes -d build/host-documents-smoke tests/java/HostDocumentsSmoke.java
+	$(JAVA) -Djava.library.path=build -cp build/host-documents-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar HostDocumentsSmoke
+check: host-documents-smoke

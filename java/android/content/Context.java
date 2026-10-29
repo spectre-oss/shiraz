@@ -20,6 +20,11 @@ public abstract class Context {
     public int checkSelfPermission(String permission){return checkPermission(permission,android.os.Process.myPid(),android.os.Process.myUid());}
     public int checkCallingPermission(String permission){if(permission==null)throw new IllegalArgumentException("permission");return PackageManager.PERMISSION_DENIED;}
     public int checkCallingOrSelfPermission(String permission){return checkSelfPermission(permission);}
+    public int checkUriPermission(android.net.Uri uri,int pid,int uid,int modeFlags){
+        if(pid!=android.os.Process.myPid()||uid!=android.os.Process.myUid())return PackageManager.PERMISSION_DENIED;
+        return shiraz.runtime.HostDocuments.forContext(this).permitted(uri,modeFlags)?PackageManager.PERMISSION_GRANTED:PackageManager.PERMISSION_DENIED;
+    }
+    public int checkCallingOrSelfUriPermission(android.net.Uri uri,int modeFlags){return checkUriPermission(uri,android.os.Process.myPid(),android.os.Process.myUid(),modeFlags);}
     public void enforcePermission(String permission,int pid,int uid,String message){if(checkPermission(permission,pid,uid)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException((message==null?"Permission denied":message)+": "+permission);}
     public void enforceCallingPermission(String permission,String message){if(checkCallingPermission(permission)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException((message==null?"Permission denied":message)+": "+permission);}
     public void enforceCallingOrSelfPermission(String permission,String message){if(checkCallingOrSelfPermission(permission)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException((message==null?"Permission denied":message)+": "+permission);}

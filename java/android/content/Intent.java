@@ -10,6 +10,7 @@ public class Intent implements Parcelable, Cloneable {
     public static final String ACTION_MAIN = "android.intent.action.MAIN", ACTION_VIEW = "android.intent.action.VIEW",
         ACTION_SEND = "android.intent.action.SEND", ACTION_GET_CONTENT = "android.intent.action.GET_CONTENT",
         ACTION_OPEN_DOCUMENT = "android.intent.action.OPEN_DOCUMENT", ACTION_PICK = "android.intent.action.PICK",
+        ACTION_OPEN_DOCUMENT_TREE = "android.intent.action.OPEN_DOCUMENT_TREE",
         ACTION_BATTERY_CHANGED = "android.intent.action.BATTERY_CHANGED",
         ACTION_SCREEN_ON = "android.intent.action.SCREEN_ON", ACTION_SCREEN_OFF = "android.intent.action.SCREEN_OFF",
         ACTION_LOCALE_CHANGED = "android.intent.action.LOCALE_CHANGED", ACTION_TIMEZONE_CHANGED = "android.intent.action.TIMEZONE_CHANGED",

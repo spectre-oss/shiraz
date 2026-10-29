@@ -210,6 +210,10 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
     public void startActivityForResult(android.content.Intent intent, int requestCode) { startActivityForResult(intent, requestCode, null); }
     public void startActivityForResult(android.content.Intent intent, int requestCode, Bundle options) {
         if (options != null && !options.isEmpty()) throw new UnsupportedOperationException("Activity launch options");
+        if(requestCode>=0&&shiraz.runtime.HostDocumentPicker.handles(intent)){
+            pendingRequestCode=requestCode;android.widget.PopupWindow.shirazClear();
+            shiraz.runtime.HostDocumentPicker.launch(this,new shiraz.runtime.HostDocumentPicker.Result(){public void complete(int code,android.content.Intent data){shirazDeliverResult(code,data);}});return;
+        }
         if(requestCode>=0&&shiraz.runtime.HostCameraCapture.handles(intent)){
             pendingRequestCode=requestCode;android.widget.PopupWindow.shirazClear();
             shiraz.runtime.HostCameraCapture.launch(this,intent,new shiraz.runtime.HostCameraCapture.Result(){public void complete(int code,android.content.Intent data){shirazDeliverResult(code,data);}});return;

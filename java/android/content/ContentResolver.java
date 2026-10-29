@@ -10,11 +10,10 @@ import java.util.List;
 public class ContentResolver {
  private final Context context;
  public ContentResolver(Context context){if(context==null)throw new NullPointerException("context");this.context=context;}
- // No host document picker currently issues persistable URI grants.
- public java.util.List<UriPermission> getPersistedUriPermissions(){return new java.util.ArrayList<UriPermission>();}
+ public java.util.List<UriPermission> getPersistedUriPermissions(){return shiraz.runtime.HostDocuments.forContext(context).persisted();}
  public java.util.List<UriPermission> getOutgoingPersistedUriPermissions(){return new java.util.ArrayList<UriPermission>();}
- public void takePersistableUriPermission(Uri uri,int modes){throw new SecurityException("No persistable URI grant is available");}
- public void releasePersistableUriPermission(Uri uri,int modes){throw new SecurityException("No persisted URI grant is available");}
+ public void takePersistableUriPermission(Uri uri,int modes){shiraz.runtime.HostDocuments.forContext(context).take(uri,modes);}
+ public void releasePersistableUriPermission(Uri uri,int modes){shiraz.runtime.HostDocuments.forContext(context).release(uri,modes);}
  public final android.os.Bundle call(Uri uri,String method,String arg,android.os.Bundle extras){
   if(uri==null)throw new NullPointerException("uri");
   if(!"content".equals(uri.getScheme()))throw new IllegalArgumentException("Provider calls require a content URI");
@@ -27,6 +26,7 @@ public class ContentResolver {
   return call(new Uri.Builder().scheme("content").authority(authority).build(),method,arg,extras);
  }
  private ContentProvider localProvider(Uri uri)throws FileNotFoundException{
+  if(shiraz.runtime.HostDocuments.AUTHORITY.equals(uri.getAuthority()))return shiraz.runtime.HostDocuments.forContext(context);
   String authority=uri.getAuthority();if("downloads".equals(authority)){android.app.DownloadManager manager=(android.app.DownloadManager)context.getSystemService(Context.DOWNLOAD_SERVICE);if(manager!=null)return manager.shirazProvider();}
   ContentProvider provider=ContentProvider.shirazLocal(authority);
   if(provider==null)throw new FileNotFoundException("No content provider for "+uri);return provider;
@@ -118,10 +118,12 @@ public class ContentResolver {
  }
  public final ContentProviderClient acquireContentProviderClient(Uri uri){
   if(uri==null)throw new NullPointerException("uri");
+  if("content".equals(uri.getScheme())&&shiraz.runtime.HostDocuments.AUTHORITY.equals(uri.getAuthority()))return new ContentProviderClient(shiraz.runtime.HostDocuments.forContext(context));
   ContentProvider provider="content".equals(uri.getScheme())?ContentProvider.shirazLocal(uri.getAuthority()):null;
   return provider==null?null:new ContentProviderClient(provider);
  }
  public final ContentProviderClient acquireContentProviderClient(String name){
+  if(shiraz.runtime.HostDocuments.AUTHORITY.equals(name))return new ContentProviderClient(shiraz.runtime.HostDocuments.forContext(context));
   ContentProvider provider=ContentProvider.shirazLocal(name);
   return provider==null?null:new ContentProviderClient(provider);
  }

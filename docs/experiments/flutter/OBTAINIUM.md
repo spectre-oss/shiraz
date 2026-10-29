@@ -256,16 +256,32 @@
     and deletes it. Unknown authorities and denied calls remain errors. This
     connects document operations to registered local providers; it does not
     supply a user-selected filesystem provider, grants, or picker UI. Obtainium
-    export remains unverified and blocked at selection.
+    export was still unverified and blocked at selection at this stage.
+
+30. Added an in-window folder picker and a filesystem-backed document provider
+    for Shiraz's app-scoped primary volume. Selected-tree permissions can be
+    persisted and released; provider operations check their tree scope. VM
+    fixtures on OpenJDK and ART verify actual I/O, grant reload/revocation,
+    traversal and escaping-symlink rejection, and protection of selected roots.
+    In the unchanged APK, Settings → Import/export → Pick export directory now
+    opens the picker. Selecting App storage enables export. Pressing **Obtainium
+    export** produces a valid 8,404-byte JSON file containing the saved app entry
+    and settings in that volume. After closing and restarting the app, the
+    selection remains checked and a second export creates another valid file
+    without selecting a folder again. Cancelling a subsequent picker preserves
+    the existing selection. Full VM checks pass. This verifies manual export
+    and persisted folder access, not import or every storage-provider feature.
+    The picker currently browses the app-scoped volume; external host directories,
+    remote providers and recursive directory deletion are not supported.
 
 ## Current result and limits
 
-**Release retrieval, Add, and app-list persistence verified; not a full
+**Release retrieval, Add, app-list persistence, and manual export verified; not a full
 compatibility pass.** Package metadata and icon-query missing-method failures
 are passed. The saved-entry landscape/portrait resize and navigation sequence
 now works after GL routing fixes. Adaptive icons render with the host circular mask.
-Release-asset download is blocked by an Android storage-path assumption;
-export-directory selection is blocked by the missing document-tree picker.
-Installation, updates, certificate
+Folder selection and repeated export across restart now work in the app-scoped
+volume. Release-asset download is still blocked by an Android storage-path assumption.
+Import, installation, updates, certificate
 verification, and complete plugin behavior are not verified. Do not infer that
 every Flutter app works from this result.

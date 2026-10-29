@@ -106,6 +106,13 @@ public final class DocumentsContract {
         return parts.size() >= 2 && "tree".equals(parts.get(0));
     }
 
+    public static boolean isDocumentUri(android.content.Context context, Uri uri) {
+        if(uri==null||!"content".equals(uri.getScheme())||!shiraz.runtime.HostDocuments.AUTHORITY.equals(uri.getAuthority()))return false;
+        List<String> parts=uri.getPathSegments();
+        return parts.size()==2&&"document".equals(parts.get(0))
+                ||parts.size()==4&&"tree".equals(parts.get(0))&&"document".equals(parts.get(2));
+    }
+
     public static String getTreeDocumentId(Uri uri) {
         List<String> parts = uri.getPathSegments();
         if (parts.size() >= 2 && "tree".equals(parts.get(0))) return parts.get(1);
