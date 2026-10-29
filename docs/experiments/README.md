@@ -7,7 +7,7 @@ No APKs, app data, raw logs, or private deployment details belong in this direct
 
 | Platform | Experiments |
 | --- | --- |
-| [Flutter](flutter/README.md) | Obtainium |
+| [Flutter](flutter/README.md) | Obtainium, Ember Quest |
 | [React Native](react-native/README.md) | Joplin, SEN-214 Calculator |
 | [Unity](unity/README.md) | 2048 and Lucas Doggiehood |
 | [libGDX](libgdx/README.md) | Unciv |

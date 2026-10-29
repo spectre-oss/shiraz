@@ -88,5 +88,8 @@ def main():
             temporary.write_bytes(data)
             temporary.replace(output)
 
+    # Native Android renderers use this family map rather than fontconfig.
+    (target / 'android-fonts.xml').write_bytes((ROOT / 'packaging/android-fonts.xml').read_bytes())
+
 if __name__ == '__main__':
     main()

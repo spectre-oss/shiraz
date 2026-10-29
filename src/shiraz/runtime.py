@@ -542,7 +542,10 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         # NDK libraries resolve platform symbols through the process-wide scope.
         # ART's JNI-local load of Resources alone does not expose AAssetManager_*
         # to native application libraries such as React Native and Flutter.
-        platform_libraries = (compat, ROOT / 'build/libandroid.so', ROOT / 'build/libshiraz-resources.so')
+        platform_libraries = (compat, ROOT / 'build/libandroid.so', ROOT / 'build/libshiraz-resources.so',
+                              ROOT / 'build/libshiraz-android-fonts.so')
+        # Match the AppImage launcher's process-scoped native Android font mapping.
+        env.setdefault('SHIRAZ_ANDROID_FONT_DIR', str(ROOT / '.local/share/shiraz/fonts'))
         env['LD_PRELOAD'] = ':'.join(map(str, platform_libraries)) + (':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
                    *(['-XX:NativeBridge=' + str(digitalis.resolve()), '-Xforce-nb-testing', '-Dshiraz.guestAbi=arm64-v8a'] if digitalis else []),

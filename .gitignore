@@ -25,6 +25,7 @@
 /docs/experiments/*/*
 !/docs/experiments/flutter/README.md
 !/docs/experiments/flutter/OBTAINIUM.md
+!/docs/experiments/flutter/EMBER_QUEST.md
 !/docs/experiments/react-native/README.md
 !/docs/experiments/react-native/JOPLIN.md
 !/docs/experiments/react-native/SEN_214_CALCULATOR.md
