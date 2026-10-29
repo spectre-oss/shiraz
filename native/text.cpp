@@ -249,9 +249,32 @@ struct Run {
     std::vector<Font*> faces;
     std::vector<unsigned char> levels;
     std::vector<std::shared_ptr<Font>> retained;
-    Run(Font& owner,const Text& text,float size,float spacing,jbyteArray resolved=nullptr) {
+    Run(Font& owner,const Text& text,float size,float spacing,jbyteArray resolved=nullptr,jstring featureSettings=nullptr) {
         if(!std::isfinite(spacing)||std::abs(spacing)>16)throw std::invalid_argument("Letter spacing bound");
         if(resolved&&text.env->GetArrayLength(resolved)!=text.length)throw std::invalid_argument("Resolved bidi level count");
+        std::vector<hb_feature_t> features;
+        if(std::abs(spacing)>.03f){
+            features.push_back({HB_TAG('l','i','g','a'),0,0,~0u});
+            features.push_back({HB_TAG('c','l','i','g'),0,0,~0u});
+        }
+        if(featureSettings){
+            if(text.env->GetStringLength(featureSettings)>4096)throw std::invalid_argument("Font feature settings bound");
+            Text settings(text.env,featureSettings);
+            if(!settings.chars)throw std::runtime_error("Cannot read font features");
+            std::string ascii;
+            for(int i=0;i<settings.length;i++){
+                if(settings.chars[i]>127)throw std::invalid_argument("Font feature syntax");
+                ascii.push_back(static_cast<char>(settings.chars[i]));
+            }
+            size_t start=0;unsigned count=0;
+            while(start<ascii.size()){
+                size_t end=ascii.find(',',start);if(end==std::string::npos)end=ascii.size();
+                hb_feature_t feature;
+                if(++count>64||!hb_feature_from_string(ascii.data()+start,end-start,&feature))
+                    throw std::invalid_argument("Font feature syntax or count");
+                features.push_back(feature);start=end+1;
+            }
+        }
         if(!text.length)return;
         UErrorCode status=U_ZERO_ERROR;
         std::unique_ptr<UBiDi,decltype(&ubidi_close)> bidi(ubidi_openSized(text.length,0,&status),ubidi_close);
@@ -298,8 +321,7 @@ struct Run {
                 hb_buffer_set_direction(buffer.get(),backwards?HB_DIRECTION_RTL:HB_DIRECTION_LTR);
                 hb_buffer_set_script(buffer.get(),segment.script==HB_SCRIPT_INVALID?HB_SCRIPT_COMMON:segment.script);
                 hb_buffer_guess_segment_properties(buffer.get());
-                hb_feature_t features[]={{HB_TAG('l','i','g','a'),0,0,~0u},{HB_TAG('c','l','i','g'),0,0,~0u}};
-                hb_shape(shapedFont,buffer.get(),features,std::abs(spacing)>.03f?2:0);
+                hb_shape(shapedFont,buffer.get(),features.data(),features.size());
                 unsigned count=0;auto* info=hb_buffer_get_glyph_infos(buffer.get(),&count);auto* pos=hb_buffer_get_glyph_positions(buffer.get(),nullptr);
                 if(!hb_buffer_allocation_successful(buffer.get())||glyphs.size()+count>65536)throw std::bad_alloc();
                 bool allowed=true;switch(segment.script){case HB_SCRIPT_ARABIC:case HB_SCRIPT_NKO:case HB_SCRIPT_PSALTER_PAHLAVI:case HB_SCRIPT_MANDAIC:case HB_SCRIPT_MONGOLIAN:case HB_SCRIPT_PHAGS_PA:case HB_SCRIPT_DEVANAGARI:case HB_SCRIPT_BENGALI:case HB_SCRIPT_GURMUKHI:case HB_SCRIPT_MODI:case HB_SCRIPT_SHARADA:case HB_SCRIPT_SYLOTI_NAGRI:case HB_SCRIPT_TIRHUTA:case HB_SCRIPT_OGHAM:allowed=false;break;default:break;}
@@ -339,13 +361,13 @@ extern "C" JNIEXPORT jint JNICALL Java_android_graphics_FontFamily_nativeRegiste
     } catch (const std::exception& issue) { error(env, "java/lang/IllegalArgumentException", issue.what()); }
     return 0;
 }
-extern "C" JNIEXPORT jfloat JNICALL Java_shiraz_runtime_NativeText_measureResolved(JNIEnv* env, jclass, jstring text, jfloat size, jstring family, jint style, jintArray tags,jfloatArray values,jfloat spacing,jbyteArray levels) {
+extern "C" JNIEXPORT jfloat JNICALL Java_shiraz_runtime_NativeText_measureResolved(JNIEnv* env, jclass, jstring text, jfloat size, jstring family, jint style, jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jbyteArray levels) {
     if (!text) { error(env, "java/lang/NullPointerException", "text"); return 0; }
     try {
         Text input(env, text); if (!input.chars) return 0;
         auto selected = font(env, family, style); if (!selected) return 0;
         auto& face = *selected; std::lock_guard<std::mutex> lock(shapingMutex); face.variations(env,tags,values); if(env->ExceptionCheck())return 0; if (!face.size(size)) return 0;
-        Run run(face,input,size,spacing,levels);
+        Run run(face,input,size,spacing,levels,featureSettings);
         unsigned count = run.glyphs.size(); auto positions = run.positions.data();
         int64_t advance = 0; for (unsigned i = 0; i < count; ++i) advance += positions[i].x_advance;
         return float(advance) / 64;
@@ -354,7 +376,7 @@ extern "C" JNIEXPORT jfloat JNICALL Java_shiraz_runtime_NativeText_measureResolv
       catch (const std::exception& ex) { error(env, "java/lang/IllegalStateException", ex.what()); }
     return 0;
 }
-extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeText_breakResolved(JNIEnv* env,jclass,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jboolean forwards,jfloat maxWidth,jfloatArray measured,jbyteArray levels) {
+extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeText_breakResolved(JNIEnv* env,jclass,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jboolean forwards,jfloat maxWidth,jfloatArray measured,jbyteArray levels) {
     if(!text){error(env,"java/lang/NullPointerException","text");return 0;}
     try {
         if(std::isnan(maxWidth)||(measured&&env->GetArrayLength(measured)<1))throw std::invalid_argument("Text break output or width");
@@ -365,7 +387,7 @@ extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeText_breakResolved(J
         if(maxWidth>=0){
             if(!face.size(size))accepted=input.length;
             else {
-                Run run(face,input,size,spacing,levels);unsigned count=run.glyphs.size();
+                Run run(face,input,size,spacing,levels,featureSettings);unsigned count=run.glyphs.size();
                 auto* info=run.glyphs.data();auto* positions=run.positions.data();
                 std::vector<int64_t> advances(input.length+1,0);std::vector<bool> boundary(input.length+1,false);boundary[0]=boundary[input.length]=true;
                 for(unsigned i=0;i<count;i++){unsigned cluster=info[i].cluster;if(cluster>=unsigned(input.length))throw std::runtime_error("Invalid shaping cluster");boundary[cluster]=true;advances[cluster]+=positions[i].x_advance;}
@@ -425,7 +447,7 @@ static void loadTextGlyph(Font& face,unsigned glyphId,float skew,float scaleX,in
                 FT_Outline_Transform(&face.face->glyph->outline,&transform);
             }
 }
-static void drawText(JNIEnv* env, jclass, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jobject pathMeasure,jfloatArray canvasMatrix,bool subpixel=false) {
+static void drawText(JNIEnv* env, jclass, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jobject pathMeasure,jfloatArray canvasMatrix,bool subpixel=false) {
     if(!std::isfinite(scaleX)||scaleX<0||scaleX>16){error(env,"java/lang/IllegalArgumentException","Invalid text scale");return;}
     if(hinting!=0&&hinting!=1){error(env,"java/lang/IllegalArgumentException","Invalid text hinting");return;}
     if (!text || !pixels) { error(env, "java/lang/NullPointerException", "Text or bitmap pixels"); return; }
@@ -469,7 +491,7 @@ static void drawText(JNIEnv* env, jclass, jintArray pixels, jint width, jint hei
             }
         } placement(env,pathMeasure,canvasMatrix);
         if(!placement.initialize())return;
-        Run run(face,input,size,spacing,levels);
+        Run run(face,input,size,spacing,levels,featureSettings);
         unsigned count = run.glyphs.size(); auto glyphs = run.glyphs.data();
         auto positions = run.positions.data();
         // Stage only touched rows, keeping failure-before-commit semantics without
@@ -622,7 +644,7 @@ extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeText_variationA
     }catch(const std::bad_alloc&){error(env,"java/lang/OutOfMemoryError","Font axes allocation");}catch(const std::exception& e){error(env,"java/lang/IllegalStateException",e.what());}return nullptr;
 }
 
-static jintArray textBounds(JNIEnv* env,jclass,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jboolean fakeBold,jfloat skew,jint hinting,jfloat scaleX,jbyteArray levels,bool subpixel=false) {
+static jintArray textBounds(JNIEnv* env,jclass,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jboolean fakeBold,jfloat skew,jint hinting,jfloat scaleX,jbyteArray levels,bool subpixel=false) {
     try {
         if(!text){error(env,"java/lang/NullPointerException","text");return nullptr;}
         if(!std::isfinite(skew)||std::abs(skew)>16||!std::isfinite(scaleX)||scaleX<0||scaleX>16||(hinting!=0&&hinting!=1))throw std::invalid_argument("Text bounds parameters");
@@ -631,7 +653,7 @@ static jintArray textBounds(JNIEnv* env,jclass,jstring text,jfloat size,jstring 
         auto& face=*selected;std::lock_guard<std::mutex> lock(shapingMutex);face.variations(env,tags,values);if(env->ExceptionCheck())return nullptr;
         jint bounds[4]={0,0,0,0};bool any=false;
         if(face.size(size)&&scaleX!=0){
-            Run run(face,input,size,spacing,levels);unsigned count=run.glyphs.size();auto glyphs=run.glyphs.data();auto positions=run.positions.data();
+            Run run(face,input,size,spacing,levels,featureSettings);unsigned count=run.glyphs.size();auto glyphs=run.glyphs.data();auto positions=run.positions.data();
             double penX=0,penY=0;
             for(unsigned i=0;i<count;i++){
                 Font& glyphFace=*run.faces[i];
@@ -668,14 +690,14 @@ static jintArray textBounds(JNIEnv* env,jclass,jstring text,jfloat size,jstring 
 }
 
 // Five floats per visual shaping cluster: logical start/end, left/right, RTL flag.
-extern "C" JNIEXPORT jfloatArray JNICALL Java_shiraz_runtime_NativeText_clustersResolved(JNIEnv* env,jclass,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jbyteArray levels) {
+extern "C" JNIEXPORT jfloatArray JNICALL Java_shiraz_runtime_NativeText_clustersResolved(JNIEnv* env,jclass,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jbyteArray levels) {
     if(!text){error(env,"java/lang/NullPointerException","text");return nullptr;}
     try {
         Text input(env,text);if(!input.chars)return nullptr;
         auto selected=font(env,family,style);if(!selected)return nullptr;
         std::lock_guard<std::mutex> lock(shapingMutex);selected->variations(env,tags,values);if(env->ExceptionCheck())return nullptr;
         bool nonzero=selected->size(size);if(!nonzero)selected->size(1);
-        Run run(*selected,input,nonzero?size:1,spacing,levels);
+        Run run(*selected,input,nonzero?size:1,spacing,levels,featureSettings);
         std::vector<unsigned> boundaries;for(auto& glyph:run.glyphs)boundaries.push_back(glyph.cluster);
         boundaries.push_back(input.length);std::sort(boundaries.begin(),boundaries.end());boundaries.erase(std::unique(boundaries.begin(),boundaries.end()),boundaries.end());
         std::vector<jfloat> result;int64_t pen=0;
@@ -693,12 +715,12 @@ extern "C" JNIEXPORT jfloatArray JNICALL Java_shiraz_runtime_NativeText_clusters
      catch(const std::exception& ex){error(env,"java/lang/IllegalStateException",ex.what());}return nullptr;
 }
 
-extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,nullptr);}
-extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawPathResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jobject measure,jfloatArray matrix) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,measure,matrix);}
-extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawAffineResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jfloatArray matrix) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,matrix);}
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,featureSettings,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,nullptr);}
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawPathResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jobject measure,jfloatArray matrix) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,featureSettings,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,measure,matrix);}
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawAffineResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jfloatArray matrix) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,featureSettings,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,matrix);}
 
-extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawSubpixelResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jboolean subpixel) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,nullptr,subpixel);}
-extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawPathSubpixelResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jobject measure,jfloatArray matrix,jboolean subpixel) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,measure,matrix,subpixel);}
-extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawAffineSubpixelResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jfloatArray matrix,jboolean subpixel) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,matrix,subpixel);}
-extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeText_boundsResolved(JNIEnv* env,jclass type,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jboolean fakeBold,jfloat skew,jint hinting,jfloat scaleX,jbyteArray levels) {return textBounds(env,type,text,size,family,style,tags,values,spacing,fakeBold,skew,hinting,scaleX,levels);}
-extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeText_boundsSubpixelResolved(JNIEnv* env,jclass type,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jboolean fakeBold,jfloat skew,jint hinting,jfloat scaleX,jbyteArray levels,jboolean subpixel) {return textBounds(env,type,text,size,family,style,tags,values,spacing,fakeBold,skew,hinting,scaleX,levels,subpixel);}
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawSubpixelResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jboolean subpixel) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,featureSettings,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,nullptr,subpixel);}
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawPathSubpixelResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jobject measure,jfloatArray matrix,jboolean subpixel) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,featureSettings,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,measure,matrix,subpixel);}
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeText_drawAffineSubpixelResolved(JNIEnv* env, jclass type, jintArray pixels, jint width, jint height, jstring text, jfloat x, jfloat y, jfloat size, jint color, jboolean aa, jstring family, jint style, jint cl, jint ct, jint cr, jint cb, jboolean fakeBold, jfloat skew,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jint paintStyle,jfloat strokeWidth,jint cap,jint join,jfloat miter,jint hinting,jfloat scaleX,jbyteArray levels,jfloatArray matrix,jboolean subpixel) {drawText(env,type,pixels,width,height,text,x,y,size,color,aa,family,style,cl,ct,cr,cb,fakeBold,skew,tags,values,spacing,featureSettings,paintStyle,strokeWidth,cap,join,miter,hinting,scaleX,levels,nullptr,matrix,subpixel);}
+extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeText_boundsResolved(JNIEnv* env,jclass type,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jboolean fakeBold,jfloat skew,jint hinting,jfloat scaleX,jbyteArray levels) {return textBounds(env,type,text,size,family,style,tags,values,spacing,featureSettings,fakeBold,skew,hinting,scaleX,levels);}
+extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeText_boundsSubpixelResolved(JNIEnv* env,jclass type,jstring text,jfloat size,jstring family,jint style,jintArray tags,jfloatArray values,jfloat spacing,jstring featureSettings,jboolean fakeBold,jfloat skew,jint hinting,jfloat scaleX,jbyteArray levels,jboolean subpixel) {return textBounds(env,type,text,size,family,style,tags,values,spacing,featureSettings,fakeBold,skew,hinting,scaleX,levels,subpixel);}

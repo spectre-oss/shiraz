@@ -1515,3 +1515,10 @@ media-file-smoke: framework build/libshiraz-playback.so audio-mpeg-smoke
 	mkdir -p build/media-file-smoke
 	javac --release 8 -cp build/framework/classes -d build/media-file-smoke tests/java/MediaFileDecodeSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/media-file-smoke:build/framework/classes MediaFileDecodeSmoke build/audio-mpeg-smoke
+
+.PHONY: font-features-smoke
+font-features-smoke: framework build/libshiraz-text.so build/libshiraz-bitmap.so build/libshiraz-path.so
+	mkdir -p build/font-features-smoke
+	javac --release 8 -cp build/framework/classes -d build/font-features-smoke tests/java/FontFeaturesSmoke.java
+	$(JAVA) -Xcheck:jni -Djava.library.path=build -cp build/font-features-smoke:build/framework/classes FontFeaturesSmoke
+check: font-features-smoke

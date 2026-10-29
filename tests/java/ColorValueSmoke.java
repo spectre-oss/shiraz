@@ -10,7 +10,7 @@ public class ColorValueSmoke {
   c.getComponents()[0]=1;if(c.red()!=0)throw new AssertionError("mutable color");
   try{c.getComponents(new float[3]);throw new AssertionError("short components");}catch(IllegalArgumentException expected){}
   Paint p=new Paint();p.setFontFeatureSettings(null);p.setFontFeatureSettings("");if(p.getFontFeatureSettings()!=null)throw new AssertionError("default features");
-  try{p.setFontFeatureSettings("'liga' 0");throw new AssertionError("unsupported features");}catch(UnsupportedOperationException expected){}
+  p.setFontFeatureSettings("'liga' 0");if(!"'liga' 0".equals(p.getFontFeatureSettings()))throw new AssertionError("feature settings");
   System.out.println("COLOR_VALUE_AND_DEFAULT_FEATURES_OK");
  }
 }

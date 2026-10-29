@@ -22,9 +22,11 @@ public class Paint {
     private float strokeWidth, strokeMiter = 4;
     private Typeface typeface;
     private String variationSettings;private int[] variationTags;private float[] variationValues;
-    public String getFontFeatureSettings(){return null;}
+    private String featureSettings;
+    public String getFontFeatureSettings(){return featureSettings;}
     public void setFontFeatureSettings(String settings){
-        if(settings!=null&&!settings.isEmpty())throw new UnsupportedOperationException("Explicit OpenType font features are not implemented");
+        if(settings!=null&&settings.length()>4096)throw new IllegalArgumentException("Font feature settings bound");
+        featureSettings=settings==null||settings.isEmpty()?null:settings;
     }
     private Shader shader;
     public Shader getShader(){return shader;}
@@ -56,7 +58,7 @@ public class Paint {
     public void set(Paint source) {
         textLocales=source.textLocales;
         if (source == null) throw new NullPointerException("paint");
-        shader=source.shader;underline=source.underline;strikeThru=source.strikeThru;shadowRadius=source.shadowRadius;shadowDx=source.shadowDx;shadowDy=source.shadowDy;shadowColor=source.shadowColor;variationSettings=source.variationSettings;variationTags=source.variationTags==null?null:source.variationTags.clone();variationValues=source.variationValues==null?null:source.variationValues.clone();xfermode=source.xfermode; pathEffect=source.pathEffect; typeface = source.typeface; colorFilter=source.colorFilter;
+        shader=source.shader;underline=source.underline;strikeThru=source.strikeThru;shadowRadius=source.shadowRadius;shadowDx=source.shadowDx;shadowDy=source.shadowDy;shadowColor=source.shadowColor;featureSettings=source.featureSettings;variationSettings=source.variationSettings;variationTags=source.variationTags==null?null:source.variationTags.clone();variationValues=source.variationValues==null?null:source.variationValues.clone();xfermode=source.xfermode; pathEffect=source.pathEffect; typeface = source.typeface; colorFilter=source.colorFilter;
         bidiLevels=source.bidiLevels==null?null:source.bidiLevels.clone();
         linearText=source.linearText;subpixelText=source.subpixelText;hinting=source.hinting;textScaleX=source.textScaleX;
         style = source.style; cap = source.cap; join = source.join;
@@ -93,7 +95,7 @@ public class Paint {
     public void getTextBounds(String text,int start,int end,Rect bounds){
         if(text==null||bounds==null)throw new NullPointerException();
         if(start<0||end<start||end>text.length())throw new IndexOutOfBoundsException();
-        int[] box=shiraz.runtime.NativeText.boundsSubpixelResolved(text.substring(start,end),textSize,shirazTypeface().shirazFamily(),shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,fakeBold,textSkewX,shirazTextHinting(),textScaleX,bidiLevels==null?null:java.util.Arrays.copyOfRange(bidiLevels,start,end),subpixelText);
+        int[] box=shiraz.runtime.NativeText.boundsSubpixelResolved(text.substring(start,end),textSize,shirazTypeface().shirazFamily(),shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,featureSettings,fakeBold,textSkewX,shirazTextHinting(),textScaleX,bidiLevels==null?null:java.util.Arrays.copyOfRange(bidiLevels,start,end),subpixelText);
         bounds.set(box[0],box[1],box[2],box[3]);
     }
     public void getTextBounds(char[] text,int index,int count,Rect bounds){
@@ -104,9 +106,9 @@ public class Paint {
     private byte[] bidiLevels;
     public void shirazSetBidiLevels(byte[] levels){bidiLevels=levels==null?null:levels.clone();}
     public byte[] shirazBidiLevels(){return bidiLevels==null?null:bidiLevels.clone();}
-    public float[] shirazTextClusters(String text){float[] result=shiraz.runtime.NativeText.clustersResolved(text,textSize,shirazTypeface().shirazFamily(),shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,bidiLevels);for(int i=0;i<result.length;i+=5){result[i+2]*=textScaleX;result[i+3]*=textScaleX;}return result;}
+    public float[] shirazTextClusters(String text){float[] result=shiraz.runtime.NativeText.clustersResolved(text,textSize,shirazTypeface().shirazFamily(),shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,featureSettings,bidiLevels);for(int i=0;i<result.length;i+=5){result[i+2]*=textScaleX;result[i+3]*=textScaleX;}return result;}
     public float measureText(CharSequence text,int start,int end){if(text==null)throw new IllegalArgumentException("text");if(start<0||end<start||end>text.length())throw new IndexOutOfBoundsException();return measureText(text.toString(),start,end);}
-    public float measureText(String text) { if (text == null) throw new IllegalArgumentException("text"); return shiraz.runtime.NativeText.measureResolved(text, textSize, shirazTypeface().shirazFamily(), shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,bidiLevels)*textScaleX; }
+    public float measureText(String text) { if (text == null) throw new IllegalArgumentException("text"); return shiraz.runtime.NativeText.measureResolved(text, textSize, shirazTypeface().shirazFamily(), shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,featureSettings,bidiLevels)*textScaleX; }
     public float measureText(String text, int start, int end) { if(bidiLevels==null)return measureText(text.substring(start,end));Paint copy=new Paint(this);copy.bidiLevels=java.util.Arrays.copyOfRange(bidiLevels,start,end);return copy.measureText(text.substring(start,end)); }
     public int breakText(String text,boolean forwards,float maxWidth,float[] measuredWidth) {
         if(text==null)throw new IllegalArgumentException("text");
@@ -114,7 +116,7 @@ public class Paint {
         if(Float.isNaN(maxWidth))throw new IllegalArgumentException("maxWidth");
         if(text.length()==0)return 0;
         float limit=maxWidth<0?maxWidth:textScaleX==0?Float.POSITIVE_INFINITY:maxWidth/textScaleX;
-        int count=shiraz.runtime.NativeText.breakResolved(text,textSize,shirazTypeface().shirazFamily(),shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,forwards,limit,measuredWidth,bidiLevels);
+        int count=shiraz.runtime.NativeText.breakResolved(text,textSize,shirazTypeface().shirazFamily(),shirazTypeface().getStyle(),variationTags,variationValues,letterSpacing,featureSettings,forwards,limit,measuredWidth,bidiLevels);
         if(measuredWidth!=null)measuredWidth[0]*=textScaleX;
         return count;
     }
