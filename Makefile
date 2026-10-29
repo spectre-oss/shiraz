@@ -1173,6 +1173,13 @@ bionic-dirent-smoke:
 	LD_LIBRARY_PATH="$(CURDIR)/.local/lib" build/test-bionic-dirent
 
 .PHONY: bionic-sigchain-smoke
+.PHONY: bionic-static-sync-smoke
+BIONIC_SYNC_RUNNER ?=
+BIONIC_SYNC_LIBRARY ?= $(CURDIR)/.local/lib/libpthread_bio.so.0
+bionic-static-sync-smoke:
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -pthread -rdynamic tests/bionic_static_sync.cpp -o build/test-bionic-static-sync -ldl
+	$(BIONIC_SYNC_RUNNER) build/test-bionic-static-sync "$(BIONIC_SYNC_LIBRARY)"
+
 BIONIC_SIGCHAIN_RUNNER ?=
 bionic-sigchain-smoke:
 	$(CXX) -std=c++17 -Wall -Wextra -Werror tests/bionic_sigchain.cpp -o build/test-bionic-sigchain -L.local/lib -lc_bio -ldl -Wl,-rpath-link,.local/lib -Wl,-rpath,'$$ORIGIN/../.local/lib'

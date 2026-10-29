@@ -35,6 +35,9 @@ PATCHES = {
         ('bionic-signal-mask.patch', {
             'libc/libc.c': '9e7df7f13f4f31d5ee3504b7ba81d48636f6a927d7a29120e6e7ff2ab6454d76',
         }),
+        ('bionic-static-sync-init.patch', {
+            'pthread_wrapper/libpthread.c': '1a7551b88a17680256f290b3d55ae3686cfb26a1aefe216b75b6b8b5a593433c',
+        }),
         ('bionic-xsi-strerror-r.patch', {
             'libc/libc-misc.c': '008af6c6f9250eb879a954193897f82a2f0b256d1a7d7e673bcf74bb09f71312',
         }),

@@ -159,6 +159,19 @@
     successful app retest; it does not yet establish that signal masks caused
     the intermittent startup stall.
 
+25. The native thread adapter also had unsynchronized first-use initialization:
+    concurrent callers could replace the same Android mutex with different host
+    mutexes. An ordinary stress run did not reproduce it on the VM; a regression
+    that delays the adapter's allocation to force a legal preemption point
+    reliably exposed overlapping critical sections with the old library. The
+    adapter now serializes the initialization slow path, constructs the host
+    object privately, and publishes its pointer atomically. The fixed library
+    passes 100 rounds of eight concurrent callers. Run this bounded regression
+    with `make bionic-static-sync-smoke` after building the native dependencies.
+    The unchanged game renders its saved neighborhood and opens the house panel
+    after deployment. This fixes a demonstrated synchronization defect, but its
+    relationship to the intermittent Unity startup stall remains unproven.
+
 **Interactive scene, camera drag, multitouch zoom, and repeated native resizing
 verified in successful runs; startup is intermittent.** Collider warnings still
 appear. Portrait Settings input now works, but parts of the UI are clipped.

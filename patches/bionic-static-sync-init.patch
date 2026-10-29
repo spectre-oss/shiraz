@@ -1,0 +1,28 @@
+--- a/pthread_wrapper/libpthread.c
++++ b/pthread_wrapper/libpthread.c
+@@ -134,10 +134,23 @@
+ 
+ // For checking, if our glibc version is mapped to memory.
+ // Used for sanity checking and static initialization below.
+-#define IS_MAPPED(x) is_mapped(x->glibc, sizeof(*x))
++#define IS_MAPPED(x) is_mapped(__atomic_load_n(&(x)->glibc, __ATOMIC_ACQUIRE), sizeof(*(x)))
+ 
+ // For handling static initialization.
+-#define INIT_IF_NOT_MAPPED(x, init) do { if (!IS_MAPPED(x)) init(x); } while(0)
++// Serialize only first-use initialization. Construct privately before publishing:
++// another thread must never observe a half-initialized host synchronization object.
++static pthread_mutex_t static_init_mutex = PTHREAD_MUTEX_INITIALIZER;
++#define INIT_IF_NOT_MAPPED(x, init) do { \
++    if (!IS_MAPPED(x)) { \
++        pthread_mutex_lock(&static_init_mutex); \
++        if (!IS_MAPPED(x)) { \
++            __typeof__(*(x)) pending = *(x); \
++            init(&pending); \
++            __atomic_store_n(&(x)->glibc, pending.glibc, __ATOMIC_RELEASE); \
++        } \
++        pthread_mutex_unlock(&static_init_mutex); \
++    } \
++} while (0)
+ 
+ static bool is_mapped(void *mem, const size_t sz)
+ {
