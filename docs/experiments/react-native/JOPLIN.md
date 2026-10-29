@@ -117,6 +117,14 @@
     editor next fails in TextView with “Line-height spans with transformed or
     ellipsized text.” No body-editing success is claimed.
 
+26. TextView rejected line-height spans whenever ellipsis was configured,
+    even though source line offsets remain available after glyph truncation.
+    Allowed that combination while retaining the explicit transformed-text
+    restriction. VM tests verify custom heights with and without overflow and
+    paint an ellipsized line. Retesting the unchanged APK passes the previous
+    layout failure and next requires `WebView.loadUrl(String, Map)`.
+    The note body is still blank; body editing remains unsupported.
+
 ## Acceptance still required
 
 Open the app, create and edit an offline note, navigate away and back, and verify

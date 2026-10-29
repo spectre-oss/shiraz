@@ -549,7 +549,8 @@ public class TextView extends View {
         if(!(text instanceof Spanned)||count==0)return;
         Spanned spans=(Spanned)text;
         if(spans.getSpans(0,text.length(),android.text.style.LineHeightSpan.class).length==0)return;
-        if(!rendered.equals(text.toString())||ellipsize!=null)throw new UnsupportedOperationException("Line-height spans with transformed or ellipsized text");
+        // Ellipsis changes painted glyphs, not the source line offsets used below.
+        if(!rendered.equals(text.toString()))throw new UnsupportedOperationException("Line-height spans with transformed text");
         layout.tops=new int[count+1];layout.baselines=new int[count];
         java.util.IdentityHashMap<android.text.style.LineHeightSpan,Integer> origins=new java.util.IdentityHashMap<android.text.style.LineHeightSpan,Integer>();
         for(int line=0;line<count;line++){

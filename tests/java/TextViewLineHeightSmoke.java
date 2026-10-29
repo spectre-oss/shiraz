@@ -17,6 +17,15 @@ public final class TextViewLineHeightSmoke {
   check(v.getOffsetForPosition(1,50)==2,"hit testing uses tall middle line");
   Bitmap pixels=Bitmap.createBitmap(120,100,Bitmap.Config.ARGB_8888);v.draw(new Canvas(pixels));boolean middleInk=false;for(int y=60;y<80;y++)for(int x=0;x<30;x++)middleInk|=(pixels.getPixel(x,y)>>>24)!=0;check(middleInk,"middle glyph uses custom baseline");for(int y=30;y<50;y++)for(int x=0;x<30;x++)check(pixels.getPixel(x,y)==0,"tall line spacing remains empty");pixels.recycle();
   Spannable live=(Spannable)v.getText();live.removeSpan(middle);middle.height=30;live.setSpan(middle,2,4,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);layout(v);check(v.getMeasuredHeight()==70&&v.getLayout().getLineTop(2)==50,"span mutation reflows");check(first.calls>0&&middle.calls>0&&last.calls>0,"density callbacks delivered");
+  v.setEllipsize(TextUtils.TruncateAt.END);layout(v);
+  check(v.getMeasuredHeight()==70&&v.getLayout().getLineTop(2)==50,"non-overflowing ellipsis keeps span heights");
+  SpannableString longText=new SpannableString("A long first line that needs truncation and more words");
+  Height tall=new Height(45);longText.setSpan(tall,0,longText.length(),Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+  v.setMaxLines(1);v.setText(longText,TextView.BufferType.SPANNABLE);layout(v);
+  check(v.getMeasuredHeight()==45&&v.getLayout().getLineCount()==1&&tall.calls>0,"ellipsized line uses source height span");
+  Bitmap clipped=Bitmap.createBitmap(120,45,Bitmap.Config.ARGB_8888);v.draw(new Canvas(clipped));
+  boolean ink=false;for(int y=0;y<45;y++)for(int x=0;x<120;x++)ink|=(clipped.getPixel(x,y)>>>24)!=0;
+  check(ink,"ellipsized custom-height text paints");clipped.recycle();
   System.out.println("TEXTVIEW_LINE_HEIGHT_PIXELS_HIT_OK");
  }
 }
