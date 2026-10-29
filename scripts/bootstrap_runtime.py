@@ -32,6 +32,9 @@ PATCHES = {
         ('bionic-art-sigchain.patch', {
             'libc/libc.c': 'df58c0aead9961d92549a2696fd9aec8f66f51e64bb203e8f6a90bf159a4cb15',
         }),
+        ('bionic-signal-mask.patch', {
+            'libc/libc.c': '9e7df7f13f4f31d5ee3504b7ba81d48636f6a927d7a29120e6e7ff2ab6454d76',
+        }),
         ('bionic-xsi-strerror-r.patch', {
             'libc/libc-misc.c': '008af6c6f9250eb879a954193897f82a2f0b256d1a7d7e673bcf74bb09f71312',
         }),

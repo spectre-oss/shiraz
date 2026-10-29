@@ -1,0 +1,22 @@
+--- a/libc/libc.c
++++ b/libc/libc.c
+@@ -303,7 +303,8 @@
+ 		// 34 (__SIGRTMIN + 2)        libcore
+ 		// 35 (__SIGRTMIN + 3)        debuggerd -b
+ 		assert(35 < SIGRTMAX);
+-		for (int signo = 35; signo < SIGRTMAX; ++signo) {
++		for (int signo = 1; signo <= SIGRTMAX && signo <= (int)(sizeof(bionic_sigset_t) * CHAR_BIT); ++signo) {
++			if (signo >= 32 && signo <= 34) continue;
+ 			if (bionic_sigismember(&act->sa_mask, signo))
+ 				sigaddset(&gact.sa_mask, signo);
+ 		}
+@@ -324,7 +325,8 @@
+ 		oact->sa_flags = goact.sa_flags;
+ 		oact->sa_restorer = goact.sa_restorer;
+ 
+-		for (int signo = SIGRTMIN + 3; signo < SIGRTMAX; ++signo) {
++		for (int signo = 1; signo <= SIGRTMAX && signo <= (int)(sizeof(bionic_sigset_t) * CHAR_BIT); ++signo) {
++			if (signo >= 32 && signo <= 34) continue;
+ 			if (sigismember(&goact.sa_mask, signo))
+ 				bionic_sigaddset(&oact->sa_mask, signo);
+ 		}

@@ -1173,9 +1173,10 @@ bionic-dirent-smoke:
 	LD_LIBRARY_PATH="$(CURDIR)/.local/lib" build/test-bionic-dirent
 
 .PHONY: bionic-sigchain-smoke
+BIONIC_SIGCHAIN_RUNNER ?=
 bionic-sigchain-smoke:
 	$(CXX) -std=c++17 -Wall -Wextra -Werror tests/bionic_sigchain.cpp -o build/test-bionic-sigchain -L.local/lib -lc_bio -ldl -Wl,-rpath-link,.local/lib -Wl,-rpath,'$$ORIGIN/../.local/lib'
-	LD_LIBRARY_PATH="$(CURDIR)/.local/lib:$(CURDIR)/context/art_standalone/out/host/linux-x86/lib64" build/test-bionic-sigchain "$(CURDIR)/context/art_standalone/out/host/linux-x86/lib64/libsigchain.so"
+	LD_LIBRARY_PATH="$(CURDIR)/.local/lib:$(CURDIR)/context/art_standalone/out/host/linux-x86/lib64" $(BIONIC_SIGCHAIN_RUNNER) build/test-bionic-sigchain "$(CURDIR)/context/art_standalone/out/host/linux-x86/lib64/libsigchain.so"
 
 .PHONY: shared-frame-smoke
 shared-frame-smoke:

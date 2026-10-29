@@ -148,6 +148,17 @@
     This verifies persistence of the accepted quest and its collected reward
     across restarts. It is not a full campaign/save-system pass.
 
+24. Investigating the intermittent loader wait exposed a separate native ABI
+    defect: the Bionic adapter discarded ordinary signal-handler mask bits and
+    the highest real-time signal bit on installation/query. A pinned dependency
+    patch now preserves supported nonreserved bits. The signal-chain regression
+    fails against the old adapter and passes with the patch, checking both mask
+    queries and blocked signals during handler execution before and after ART
+    chaining. Two unchanged game launches render the saved neighborhood; the
+    first also responds to Settings with the patched adapter. This proves the ABI correction and a
+    successful app retest; it does not yet establish that signal masks caused
+    the intermittent startup stall.
+
 **Interactive scene, camera drag, multitouch zoom, and repeated native resizing
 verified in successful runs; startup is intermittent.** Collider warnings still
 appear. Portrait Settings input now works, but parts of the UI are clipped.
