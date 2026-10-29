@@ -12,6 +12,7 @@ No APKs, app data, raw logs, or private deployment details belong in this direct
 | [Unity](unity/README.md) | 2048 and Lucas Doggiehood |
 | [libGDX](libgdx/README.md) | Unciv |
 | [Godot](godot/README.md) | Abra-Ca Bubble, Tiny Crate |
+| [Arc](arc/README.md) | Mindustry |
 | [SDL](sdl/README.md) | SuperTux |
 
 See [tested applications](../tested.md) for the cross-platform summary.

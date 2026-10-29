@@ -1529,3 +1529,10 @@ numeric-input-smoke: framework build/libshiraz-text.so build/libshiraz-resources
 	javac --release 8 -cp build/framework/classes -d build/numeric-input-smoke tests/java/NumericInputSmoke.java
 	$(JAVA) -Xcheck:jni -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -Djava.library.path=build -cp build/numeric-input-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar NumericInputSmoke
 check: numeric-input-smoke
+
+.PHONY: gles30-smoke
+gles30-smoke: framework build/libshiraz-gles2.so build/libshiraz-gles1.so build/libEGL.so.1
+	mkdir -p build/gles30-smoke
+	javac --release 8 -cp build/framework/classes -d build/gles30-smoke tests/java/GLES30Smoke.java
+	$(JAVA) -Xcheck:jni -Djava.library.path=build -cp build/gles30-smoke:build/framework/classes GLES30Smoke
+check: gles30-smoke

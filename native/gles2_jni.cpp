@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <jni.h>
-#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 #include <cstdint>
 #include <vector>
@@ -167,3 +167,8 @@ extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glUniformMatrix2fv(
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glUniformMatrix3fv(JNIEnv* e,jclass,jint location,jint count,jboolean transpose,jfloatArray values,jint offset){if(!range(e,values,offset,int64_t(count)*9))return;jfloat* data=e->GetFloatArrayElements(values,nullptr);if(!data)return;glUniformMatrix3fv(location,count,transpose,data+offset);e->ReleaseFloatArrayElements(values,data,JNI_ABORT);}
 extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES20_glUniformMatrix4fv(JNIEnv* e,jclass,jint location,jint count,jboolean transpose,jfloatArray values,jint offset){if(!range(e,values,offset,int64_t(count)*16))return;jfloat* data=e->GetFloatArrayElements(values,nullptr);if(!data)return;glUniformMatrix4fv(location,count,transpose,data+offset);e->ReleaseFloatArrayElements(values,data,JNI_ABORT);}
 extern "C" JNIEXPORT jstring JNICALL Java_android_opengl_GLES20_nActive(JNIEnv* e,jclass,jint program,jint index,jboolean uniform,jintArray size,jintArray type){if(!range(e,size,0,1)||!range(e,type,0,1))return nullptr;GLint length=0;glGetProgramiv(program,uniform?GL_ACTIVE_UNIFORM_MAX_LENGTH:GL_ACTIVE_ATTRIBUTE_MAX_LENGTH,&length);if(length<1)length=1;if(length>1048576){fail(e,"active GL name length");return nullptr;}std::vector<char> name(length);GLint count=0;GLenum kind=0;if(uniform)glGetActiveUniform(program,index,length,nullptr,&count,&kind,name.data());else glGetActiveAttrib(program,index,length,nullptr,&count,&kind,name.data());name.back()=0;jint k=kind;e->SetIntArrayRegion(size,0,1,&count);e->SetIntArrayRegion(type,0,1,&k);return e->NewStringUTF(name.data());}
+
+extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES30_glBindVertexArray(JNIEnv*,jclass,jint array){glBindVertexArray(array);}
+extern "C" JNIEXPORT jboolean JNICALL Java_android_opengl_GLES30_glIsVertexArray(JNIEnv*,jclass,jint array){return glIsVertexArray(array);}
+extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES30_glGenVertexArrays(JNIEnv* e,jclass,jint count,jintArray values,jint offset){if(!range(e,values,offset,count))return;jint* data=e->GetIntArrayElements(values,nullptr);if(!data)return;glGenVertexArrays(count,reinterpret_cast<GLuint*>(data+offset));e->ReleaseIntArrayElements(values,data,0);}
+extern "C" JNIEXPORT void JNICALL Java_android_opengl_GLES30_glDeleteVertexArrays(JNIEnv* e,jclass,jint count,jintArray values,jint offset){if(!range(e,values,offset,count))return;jint* data=e->GetIntArrayElements(values,nullptr);if(!data)return;glDeleteVertexArrays(count,reinterpret_cast<GLuint*>(data+offset));e->ReleaseIntArrayElements(values,data,JNI_ABORT);}

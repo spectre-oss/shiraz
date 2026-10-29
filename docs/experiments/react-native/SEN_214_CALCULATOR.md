@@ -59,7 +59,9 @@ input path, not fixture screenshots.
 At 360 × 800, the permutation dialog now opens with both numeric fields.
 Entering `5` and `2`, correcting an accidental extra digit with Backspace, and
 pressing Compute dismisses the dialog and displays `20` with the label
-“Permutations (nPr)”.
+“Permutations (nPr)”. The Mean dialog accepts comma-separated `2,4,6`
+and displays `4`. Submitting `abc` displays the app’s `Error` result; AC then
+restores ordinary numeric entry without a crash.
 
 A resize to 640 × 360 retains the expression/result but compresses the keypad
 until buttons overlap. The upstream button component imposes a 46-unit minimum

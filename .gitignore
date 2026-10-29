@@ -20,6 +20,7 @@
 !/docs/experiments/unity/
 !/docs/experiments/libgdx/
 !/docs/experiments/godot/
+!/docs/experiments/arc/
 !/docs/experiments/sdl/
 /docs/experiments/*/*
 !/docs/experiments/flutter/README.md
@@ -70,3 +71,6 @@ __pycache__/
 /credentials/
 /go-wasm/fonts/Manrope-wght.ttf
 /go-server/build/
+
+!/docs/experiments/arc/README.md
+!/docs/experiments/arc/MINDUSTRY.md
