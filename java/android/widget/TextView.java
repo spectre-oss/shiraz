@@ -392,7 +392,7 @@ public class TextView extends View {
     public void setBreakStrategy(int strategy){if(strategy<0||strategy>2)throw new IllegalArgumentException("break strategy");if(breakStrategy!=strategy){breakStrategy=strategy;changed();}}
     private int hyphenationFrequency;
     public int getHyphenationFrequency(){return hyphenationFrequency;}
-    public void setHyphenationFrequency(int frequency){if(frequency<0||frequency>2)throw new IllegalArgumentException("hyphenation frequency");hyphenationFrequency=frequency;}
+    public void setHyphenationFrequency(int frequency){if(frequency<0||frequency>4)throw new IllegalArgumentException("hyphenation frequency: "+frequency);hyphenationFrequency=frequency;}
     @Override public void setSelected(boolean selected){boolean old=isSelected();super.setSelected(selected);if(old!=selected&&ellipsize==TextUtils.TruncateAt.MARQUEE)changed();}
     public TextUtils.TruncateAt getEllipsize(){return ellipsize;}
     public void setEllipsize(TextUtils.TruncateAt where){ellipsize=where;changed();}
