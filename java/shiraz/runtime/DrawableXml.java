@@ -47,6 +47,20 @@ public final class DrawableXml {
     }
     private float decimal(BinaryXml.Node n,String key,float fallback){BinaryXml.Value v=resolve(n.android(key));if(v==null)return fallback;float value=v.type==4?Float.intBitsToFloat(v.data):v.type==6?TypedValue.complexToFloat(v.data):v.type>=16&&v.type<=31?v.data:Float.NaN;if(!Float.isFinite(value))throw new IllegalArgumentException("Drawable number "+key);return value;}
     private float dimension(BinaryXml.Node n,String key,float fallback){BinaryXml.Value v=resolve(n.android(key));if(v==null)return fallback;if(v.type!=5)throw new IllegalArgumentException("Drawable dimension "+key);float value=TypedValue.complexToDimension(v.data,resources.getDisplayMetrics());if(!Float.isFinite(value)||value<0||value>8192)throw new IllegalArgumentException("Shape dimension bound");return value;}
+    private float cornerDimension(BinaryXml.Node node,String key,float fallback,int[] pending,int index){
+        BinaryXml.Value value=node.android(key);if(value==null)return fallback;
+        for(int depth=0;depth<32&&(value.type==1||value.type==2);depth++){
+            if(value.type==1&&value.data==0)return fallback;
+            TypedValue resolved=new TypedValue();
+            if(value.type==2){if(theme==null||!theme.resolveAttribute(value.data,resolved,true)){pending[index]=value.data;return fallback;}}
+            else resources.getValue(value.data,resolved,true);
+            flags|=resolved.changingConfigurations;value=new BinaryXml.Value(resolved.type,resolved.data,null);
+        }
+        if(value.type==1||value.type==2)throw new IllegalArgumentException("Corner reference depth");
+        if(value.type==0)return fallback;if(value.type!=5)throw new IllegalArgumentException("Corner dimension "+key);
+        float pixels=TypedValue.complexToDimension(value.data,resources.getDisplayMetrics());
+        if(!Float.isFinite(pixels)||pixels<0||pixels>8192)throw new IllegalArgumentException("Corner dimension bound");return pixels;
+    }
     private android.graphics.PorterDuff.Mode tintMode(BinaryXml.Node node){switch(integer(node,"tintMode",5)){case 3:return android.graphics.PorterDuff.Mode.SRC_OVER;case 5:return android.graphics.PorterDuff.Mode.SRC_IN;case 9:return android.graphics.PorterDuff.Mode.SRC_ATOP;case 14:return android.graphics.PorterDuff.Mode.MULTIPLY;case 15:return android.graphics.PorterDuff.Mode.SCREEN;case 16:return android.graphics.PorterDuff.Mode.ADD;default:throw new IllegalArgumentException("Drawable tint mode");}}
     private Drawable shape(BinaryXml.Node n){
         // Android reads angle/type only from <gradient>; misplaced root attributes have no effect.
@@ -55,7 +69,7 @@ public final class DrawableXml {
             if(child.name.equals("solid")){attrs(child,"color");ColorStateList solid=optionalColors(child.android("color"));if(solid!=null)result.setColor(solid);}
             // Android GradientDrawableStroke reads width/color/dash only; radius here is ignored.
             else if(child.name.equals("stroke")){attrs(child,"width color dashWidth dashGap radius");result.setStroke(pixels(child,"width",0),optionalColors(child.android("color")),dimension(child,"dashWidth",0),dimension(child,"dashGap",0));}
-            else if(child.name.equals("corners")){attrs(child,"radius topLeftRadius topRightRadius bottomLeftRadius bottomRightRadius");float radius=dimension(child,"radius",0);boolean separate=child.android("topLeftRadius")!=null||child.android("topRightRadius")!=null||child.android("bottomLeftRadius")!=null||child.android("bottomRightRadius")!=null;if(separate){float tl=dimension(child,"topLeftRadius",radius),tr=dimension(child,"topRightRadius",radius),bl=dimension(child,"bottomLeftRadius",radius),br=dimension(child,"bottomRightRadius",radius);result.setCornerRadii(new float[]{tl,tl,tr,tr,br,br,bl,bl});}else result.setCornerRadius(radius);}
+            else if(child.name.equals("corners")){attrs(child,"radius topLeftRadius topRightRadius bottomLeftRadius bottomRightRadius");String[] keys={"radius","topLeftRadius","topRightRadius","bottomRightRadius","bottomLeftRadius"};int[] pending=new int[5];float[] values=new float[5];for(int i=0;i<5;i++)values[i]=cornerDimension(child,keys[i],i==0?0:-1,pending,i);result.shirazSetCornerTheme(values,pending);}
             else if(child.name.equals("size")){attrs(child,"width height");result.setSize(pixels(child,"width",-1),pixels(child,"height",-1));}
             else if(child.name.equals("padding")){attrs(child,"left top right bottom");result.shirazSetPadding(pixels(child,"left",0),pixels(child,"top",0),pixels(child,"right",0),pixels(child,"bottom",0));}
             else if(child.name.equals("gradient")){attrs(child,"startColor centerColor endColor type angle centerX centerY gradientRadius useLevel dither");int type=integer(child,"type",0);result.setGradientType(type);float cx=decimal(child,"centerX",.5f),cy=decimal(child,"centerY",.5f);result.setGradientCenter(cx,cy);result.setUseLevel(integer(child,"useLevel",0)!=0);int start=colors(child.android("startColor")).getDefaultColor(),end=colors(child.android("endColor")).getDefaultColor();if(child.android("centerColor")!=null)result.setColors(new int[]{start,colors(child.android("centerColor")).getDefaultColor(),end},new float[]{0,cx!=.5f?cx:cy,1});else result.setColors(new int[]{start,end});

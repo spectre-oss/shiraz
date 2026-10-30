@@ -1,0 +1,7 @@
+<resources>
+    <attr name="deferredRadius" format="dimension|integer" />
+    <attr name="deferredCorner" format="dimension" />
+    <style name="DeferredRadius" parent=""><item name="deferredRadius">6px</item></style>
+    <style name="DeferredCorner" parent=""><item name="deferredCorner">2px</item></style>
+    <style name="InvalidRadius" parent=""><item name="deferredRadius">42</item></style>
+</resources>

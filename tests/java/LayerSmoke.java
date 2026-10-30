@@ -5,6 +5,21 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.view.Gravity;
 public final class LayerSmoke {
+    private static void deferredCorners(Resources r){
+        int id=r.getIdentifier("deferred_corners","drawable","org.shiraz.fixture");
+        android.graphics.drawable.InsetDrawable wrapper=(android.graphics.drawable.InsetDrawable)r.getDrawable(id,r.newTheme());
+        android.graphics.drawable.GradientDrawable shape=(android.graphics.drawable.GradientDrawable)wrapper.getDrawable();
+        if(!wrapper.canApplyTheme()||shape.getCornerRadii()[0]!=3||shape.getCornerRadii()[4]!=0)throw new AssertionError("Deferred corner defaults and explicit value");
+        wrapper.applyTheme(r.newTheme());if(!wrapper.canApplyTheme())throw new AssertionError("Unresolved corners discarded");
+        Resources.Theme bad=r.newTheme();bad.applyStyle(r.getIdentifier("InvalidRadius","style","org.shiraz.fixture"),true);
+        try{wrapper.applyTheme(bad);throw new AssertionError("Non-dimension corner accepted");}catch(IllegalArgumentException expected){}
+        if(!wrapper.canApplyTheme()||shape.getCornerRadii()[2]!=0)throw new AssertionError("Rejected theme mutated corners");
+        Resources.Theme partial=r.newTheme();partial.applyStyle(r.getIdentifier("DeferredRadius","style","org.shiraz.fixture"),true);wrapper.applyTheme(partial);
+        float[] corners=shape.getCornerRadii();if(!wrapper.canApplyTheme()||corners[0]!=3||corners[2]!=6||corners[4]!=6)throw new AssertionError("Partial theme resolves radius and preserves explicit corner");
+        Resources.Theme rest=r.newTheme();rest.applyStyle(r.getIdentifier("DeferredCorner","style","org.shiraz.fixture"),true);wrapper.applyTheme(rest);
+        corners=shape.getCornerRadii();if(wrapper.canApplyTheme()||corners[0]!=3||corners[2]!=6||corners[4]!=2||corners[6]!=6)throw new AssertionError("Deferred corner resolution lost prior values");
+        Bitmap pixels=Bitmap.createBitmap(20,20,Bitmap.Config.ARGB_8888);wrapper.setBounds(0,0,20,20);wrapper.draw(new Canvas(pixels));if(pixels.getPixel(19,0)!=0||pixels.getPixel(10,10)!=Color.RED)throw new AssertionError("Resolved corners not rendered");pixels.recycle();
+    }
     private static void blendModes(){
         Paint paint=new Paint();if(paint.getBlendMode()!=null)throw new AssertionError("Default blend metadata");
         for(PorterDuff.Mode mode:PorterDuff.Mode.values()){
@@ -20,6 +35,7 @@ public final class LayerSmoke {
     public static void main(String[] args){blendModes();
         Resources r=Resources.shirazOpen(args[0],96,160);
         try {
+            deferredCorners(r);
             org.shiraz.fixture.LayerFixture.check(r);
             android.content.Context context=new android.content.ContextWrapper(null);
             FrameLayout parent=new FrameLayout(context),group=new FrameLayout(context);

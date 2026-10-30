@@ -16,6 +16,32 @@ public class GradientDrawable extends Drawable {
  private int innerRadius=-1,thickness=-1;private float innerRadiusRatio=3,thicknessRatio=9;private boolean useLevelForShape=true;
  private float[] radii,positions;private int[] colors;private boolean useLevel,dither;
  private final Rect padding=new Rect();private Bitmap cached;private int cachedW,cachedH;
+ private int[] cornerThemeAttrs;private float[] cornerThemeValues;
+ /** Retain unresolved XML corner attributes for a later theme application. */
+ public void shirazSetCornerTheme(float[] values,int[] attributes){
+  if(values==null||attributes==null||values.length!=5||attributes.length!=5)throw new IllegalArgumentException("Corner theme values");
+  for(int i=0;i<5;i++)if(i==0||values[i]!=-1)dimension(values[i]);
+  cornerThemeValues=values.clone();cornerThemeAttrs=attributes.clone();applyCornerValues();
+ }
+ private void applyCornerValues(){
+  float[] v=cornerThemeValues;boolean separate=false,pending=false;
+  for(int i=0;i<5;i++){pending|=cornerThemeAttrs[i]!=0;if(i>0)separate|=v[i]>=0;}
+  if(separate){float[] corners=new float[8];for(int i=1;i<5;i++)corners[2*i-2]=corners[2*i-1]=v[i]<0?v[0]:v[i];setCornerRadii(corners);}else setCornerRadius(v[0]);
+  if(!pending){cornerThemeAttrs=null;cornerThemeValues=null;}
+ }
+ @Override public boolean canApplyTheme(){return cornerThemeAttrs!=null;}
+ @Override public void applyTheme(android.content.res.Resources.Theme theme){
+  if(theme==null)throw new NullPointerException("theme");if(cornerThemeAttrs==null)return;
+  int[] attributes=cornerThemeAttrs.clone();float[] values=cornerThemeValues.clone();int configurations=getChangingConfigurations();
+  for(int i=0;i<5;i++)if(attributes[i]!=0){
+   android.util.TypedValue value=new android.util.TypedValue();
+   if(!theme.resolveAttribute(attributes[i],value,true)||value.type==android.util.TypedValue.TYPE_ATTRIBUTE)continue;
+   if(value.type!=android.util.TypedValue.TYPE_DIMENSION)throw new IllegalArgumentException("Corner theme dimension");
+   float pixels=android.util.TypedValue.complexToDimension(value.data,theme.getResources().getDisplayMetrics());dimension(pixels);
+   values[i]=pixels;attributes[i]=0;configurations|=value.changingConfigurations;
+  }
+  cornerThemeAttrs=attributes;cornerThemeValues=values;setChangingConfigurations(configurations);applyCornerValues();
+ }
  public GradientDrawable(){}
  public GradientDrawable(Orientation direction,int[] colors){setOrientation(direction);setColors(colors);}
  private static void dimension(float value){if(!Float.isFinite(value)||value<0||value>8192)throw new IllegalArgumentException("Shape dimension");}
