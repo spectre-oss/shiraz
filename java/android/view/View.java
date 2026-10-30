@@ -490,14 +490,18 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
             ViewGroup group=(ViewGroup)owner;
             if (group.getDescendantFocusability() == ViewGroup.FOCUS_BLOCK_DESCENDANTS || group.getVisibility() != VISIBLE) return false;
         }
+        focused=true;
         if (parent != null) parent.shirazRequestChildFocus(this);
-        focused=true; KeyboardClusters.remember(this);refreshDrawableState();onFocusChanged(true,direction,previous); return true;
+        if(!focused)return false;
+        KeyboardClusters.remember(this);refreshDrawableState();onFocusChanged(true,direction,previous); return focused;
     }
     public boolean requestFocus(int direction) { return requestFocus(direction,null); }
     public boolean hasFocus() { return focused; }
     public boolean isFocused() { return focused; }
     protected void onFocusChanged(boolean gainFocus,int direction,android.graphics.Rect previous){if(focusChangeListener!=null)focusChangeListener.onFocusChange(this,gainFocus);}
-    public void clearFocus() { boolean wasFocused=focused;focused = false; refreshDrawableState(); pressedKey = -1; keyState.reset(); setPressed(false);if(wasFocused)onFocusChanged(false,0,null); }
+    public void clearFocus() { clearOwnFocus(); }
+    void shirazClearFocusForTransfer(){clearOwnFocus();}
+    private void clearOwnFocus() { boolean wasFocused=focused;focused = false; refreshDrawableState(); pressedKey = -1; keyState.reset(); setPressed(false);if(wasFocused)onFocusChanged(false,0,null); }
     public KeyEvent.DispatcherState getKeyDispatcherState() { return keyState; }
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event == null) throw new NullPointerException("event");

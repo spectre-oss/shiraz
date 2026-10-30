@@ -422,10 +422,20 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
                 &&!(isFocused()&&descendantFocusability!=FOCUS_AFTER_DESCENDANTS))
             parent.focusableViewAvailable(view);
     }
-    final void shirazRequestChildFocus(View branch) { super.clearFocus(); for (View child:children) if (child != branch) child.clearFocus(); if (getParent() instanceof ViewGroup) ((ViewGroup)getParent()).shirazRequestChildFocus(this); }
+    private long focusTransferRevision;
+    final void shirazRequestChildFocus(View branch) {
+        long revision=++focusTransferRevision;super.shirazClearFocusForTransfer();
+        if(revision!=focusTransferRevision)return;
+        for(View child:new ArrayList<View>(children))if(child!=branch&&child.hasFocus()){
+            child.shirazClearFocusForTransfer();if(revision!=focusTransferRevision)return;
+        }
+        if(getParent() instanceof ViewGroup)((ViewGroup)getParent()).shirazRequestChildFocus(this);
+    }
     final boolean requestOwnFocus(int direction,android.graphics.Rect previous) {
         if (!super.requestFocus(direction,previous)) return false;
-        for (View child:children) child.clearFocus(); return true;
+        long revision=++focusTransferRevision;
+        for(View child:new ArrayList<View>(children))if(child.hasFocus()){child.shirazClearFocusForTransfer();if(revision!=focusTransferRevision)return isFocused();}
+        return isFocused();
     }
     @Override public boolean requestFocus() {return requestFocus(FOCUS_DOWN,null);}
     @Override public boolean requestFocus(int direction){return requestFocus(direction,null);}
@@ -435,7 +445,11 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
         if (descendantFocusability != FOCUS_BLOCK_DESCENDANTS) for (View child:children) if (child.requestFocus(direction,previous)) return true;
         return descendantFocusability == FOCUS_AFTER_DESCENDANTS && requestOwnFocus(direction,previous);
     }
-    @Override public void clearFocus() { super.clearFocus(); for (View child:children) child.clearFocus(); }
+    @Override void shirazClearFocusForTransfer(){
+        long revision=++focusTransferRevision;super.shirazClearFocusForTransfer();if(revision!=focusTransferRevision)return;
+        for(View child:new ArrayList<View>(children))if(child.hasFocus()){child.shirazClearFocusForTransfer();if(revision!=focusTransferRevision)return;}
+    }
+    @Override public void clearFocus() { View child=getFocusedChild();super.clearFocus();if(child!=null)child.clearFocus(); }
     public View getFocusedChild() { for (View child:children) if (child.hasFocus()) return child; return null; }
     @Override public boolean hasFocus() { return super.hasFocus() || getFocusedChild() != null; }
     @Override public View findFocus() { if (isFocused()) return this; View child=getFocusedChild(); return child == null ? null : child.findFocus(); }

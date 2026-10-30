@@ -31,6 +31,20 @@ public final class KeyboardSmoke {
             group.setTouchscreenBlocksFocus(false);check(child.requestFocus(),"disable blocking restores ordinary focus");
         }finally{shiraz.runtime.HostInput.updateTouchscreen(false);}
     }
+    private static void focusTransfer(ContextWrapper context){
+        final int[] clears={0};android.widget.FrameLayout root=new android.widget.FrameLayout(context);
+        android.widget.FrameLayout redirects=new android.widget.FrameLayout(context){@Override public void clearFocus(){clears[0]++;super.clearFocus();requestFocus();}};
+        View editor=new View(context),button=new View(context);editor.setFocusable(true);button.setFocusable(true);redirects.addView(editor);root.addView(redirects);root.addView(button);
+        check(editor.requestFocus()&&button.requestFocus(),"transfer focus from custom group");
+        check(clears[0]==0&&button.isFocused()&&!editor.hasFocus()&&!redirects.hasFocus(),"internal transfer does not invoke public clearFocus override");
+        check(editor.requestFocus(),"editor can regain focus");redirects.clearFocus();check(clears[0]==1&&editor.hasFocus(),"explicit clearFocus still invokes application behavior");
+        final View other=new View(context);other.setFocusable(true);root.addView(other);
+        editor.setOnFocusChangeListener(new View.OnFocusChangeListener(){public void onFocusChange(View v,boolean focused){if(!focused)other.requestFocus();}});
+        button.requestFocus();check(other.hasFocus()&&!button.hasFocus()&&!editor.hasFocus(),"reentrant loss callback leaves one focus owner");
+        editor.setOnFocusChangeListener(null);root.removeView(other);redirects.addView(other);editor.requestFocus();
+        editor.setOnFocusChangeListener(new View.OnFocusChangeListener(){public void onFocusChange(View v,boolean focused){if(!focused)other.requestFocus();}});
+        button.requestFocus();check(other.hasFocus()&&!button.hasFocus()&&!editor.hasFocus(),"redirection inside old branch survives recursive clearing");
+    }
     private static void tabNavigation(ContextWrapper context){
         Probe activity=new Probe();android.widget.FrameLayout root=new android.widget.FrameLayout(context),blocked=new android.widget.FrameLayout(context);
         View first=new View(context),hidden=new View(context),disabled=new View(context),last=new View(context),nested=new View(context);
@@ -135,7 +149,7 @@ public final class KeyboardSmoke {
         KeyEvent event=new KeyEvent(0,0,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_A,0,KeyEvent.META_SHIFT_ON);check(event.getUnicodeChar()=='A'&&event.getDisplayLabel()=='A'&&event.isPrintingKey(),"KeyEvent character-map delegation");
     }
     public static void main(String[] args) {android.os.Looper.prepareMainLooper();characterMap();
-        ContextWrapper context = new ContextWrapper(null); KeyboardFixture.stateChecks(context);clusters(context);tabNavigation(context);touchFocus();
+        ContextWrapper context = new ContextWrapper(null); KeyboardFixture.stateChecks(context);clusters(context);tabNavigation(context);focusTransfer(context);touchFocus();
         Probe activity = new Probe(); View content = new View(context); content.setFocusable(true); activity.setContentView(content);
         final int[] intercepted = {0};
         content.setOnKeyListener(new View.OnKeyListener() { public boolean onKey(View view, int code, KeyEvent event) { ++intercepted[0]; return true; } });
