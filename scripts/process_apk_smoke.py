@@ -15,7 +15,7 @@ work = ROOT / 'build/process-apk-smoke'
 classes = work / 'classes'
 classes.mkdir(parents=True, exist_ok=True)
 sdk = ROOT / '.deps/android-sdk'
-subprocess.run(['javac', '--release', '8', '-cp', str(sdk/'android.jar'), '-d', str(classes), str(ROOT/'tests/process-apk/ProcessActivity.java')], check=True)
+subprocess.run(['javac', '--release', '8', '-cp', str(sdk/'android.jar'), '-d', str(classes), *map(str, sorted((ROOT/'tests/process-apk').glob('*.java')))], check=True)
 dex = work/'classes.dex'
 subprocess.run([str(HOST/'bin/dx'), '--dex', '--min-sdk-version=27', '--output='+str(dex), str(classes)], env=environment(work), check=True)
 apk = work/'fixture.apk'
@@ -37,6 +37,7 @@ for failure in (False, True):
     assert result.returncode==(1 if failure else 0), result.stderr
     assert evidence['exit_status']==(10 if failure else 0) and evidence['apk_unchanged'], evidence
     assert 'PROCESS_WORKER_STARTED' in stdout and 'PROCESS_ACTIVITY_DESTROYED' in stdout
+    assert 'PROCESS_APPLICATION_IDENTITY_OK' in stdout
     assert 'PROCESS_APP_HANDLER_RETURNED' not in stderr
     assert ('SHIRAZ_RUNTIME_CLEANUP_COMPLETE' in stdout)==(not failure)
     if failure: assert 'SHIRAZ_RUNTIME_FATAL' in stderr and 'java.lang.IllegalStateException: PROCESS_CALLBACK_FAILURE' in stderr

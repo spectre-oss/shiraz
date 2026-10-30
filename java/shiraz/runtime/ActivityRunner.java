@@ -276,6 +276,7 @@ public final class ActivityRunner {
         android.os.Environment.shirazInitialize(storage);
         HostKeyStoreProvider.install(storage.files());
         android.os.Process.shirazSetDumpable("true".equals(metadata.getProperty("debuggable")));
+        android.app.ActivityThread.shirazPrepare(name, metadata);
         Application app = Class.forName(args[1]).asSubclass(Application.class).newInstance();
         HostContext context = new HostContext(name, new File(args[6]), storage, app, metadata, width, height, startupDensity);
         android.os.StrictMode.ThreadPolicy oldPolicy = android.os.StrictMode.getThreadPolicy();

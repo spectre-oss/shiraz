@@ -9,7 +9,7 @@ import java.util.Properties;
 import java.util.concurrent.*;
 /** Headless ART entry point for a manifest-declared service in its own process. */
 public final class ServiceRunner {
- public static void main(final String[] args){DedicatedProcess.run(new DedicatedProcess.Task(){public void run()throws Throwable{HostTlsProvider.install();Looper.prepareMainLooper();runService(args);}},new DedicatedProcess.Task(){public void run(){android.os.AsyncTask.shirazShutdown();android.database.sqlite.SQLiteDatabase.shirazShutdown();android.os.Environment.shirazShutdown();Looper.shirazShutdownMain();}});}
+ public static void main(final String[] args){DedicatedProcess.run(new DedicatedProcess.Task(){public void run()throws Throwable{HostTlsProvider.install();Looper.prepareMainLooper();runService(args);}},new DedicatedProcess.Task(){public void run(){ActivityThread.shirazClear();android.os.AsyncTask.shirazShutdown();android.database.sqlite.SQLiteDatabase.shirazShutdown();android.os.Environment.shirazShutdown();Looper.shirazShutdownMain();}});}
  private static void runService(String[] args)throws Exception{
   if(args.length!=9)throw new IllegalArgumentException("Service launch arguments");
   String pkg=args[0],process=args[7].startsWith(":")?args[0]+args[7]:args[7];Application.shirazSetProcessName(process);ServiceProcess.configure(args);
@@ -26,10 +26,12 @@ public final class ServiceRunner {
   if(width<1||height<1||width>8192||height>8192||density<1||density>4096)throw new IllegalArgumentException("Service display configuration");
   android.content.res.Resources.shirazSetSystemDisplay(width,height,density);
   HostStorage storage=new HostStorage(new File(args[6]),pkg);Environment.shirazInitialize(storage);
+  ActivityThread.shirazPrepare(pkg,metadata);
   Application app=Class.forName(args[1]).asSubclass(Application.class).newInstance();
   ActivityRunner.HostContext context=new ActivityRunner.HostContext(pkg,new File(args[6]),storage,app,metadata,width,height,density);
   Service service=null;BinderTransport transport=null;final Intent[] bound={null};
   try{
+   ActivityThread.shirazBind(app,pkg);
    ActivityRunner.attach(app,context);if(context.getApplicationInfo().theme!=0)context.setTheme(context.getApplicationInfo().theme);
    ProviderHost.attach(context,metadata);app.onCreate();
    service=Class.forName(args[2]).asSubclass(Service.class).newInstance();service.shirazAttach(context,app,context.services);service.onCreate();

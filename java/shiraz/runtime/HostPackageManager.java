@@ -357,6 +357,7 @@ public final class HostPackageManager extends PackageManager {
         if (low < 0 || low > 0xffffffffL || high < 0 || high > 0x7fffffffL) throw new IllegalArgumentException("APK version code range");
         info.setLongVersionCode((high << 32) | low);
         info.applicationInfo = getApplicationInfo(name, flags & GET_META_DATA);
+        info.splitNames = info.applicationInfo.splitNames == null ? null : info.applicationInfo.splitNames.clone();
         int componentFlags=flags&(GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE);
         if((flags&GET_ACTIVITIES)!=0)info.activities=packageActivities(false,componentFlags);
         if((flags&GET_RECEIVERS)!=0)info.receivers=packageActivities(true,componentFlags);
@@ -443,6 +444,19 @@ public final class HostPackageManager extends PackageManager {
         info.compatibleWidthLimitDp=integer("applicationInfo.compatibleWidthLimitDp",0);
         info.largestWidthLimitDp=integer("applicationInfo.largestWidthLimitDp",0);
         info.sourceDir = required("sourceDir"); info.publicSourceDir = info.sourceDir; info.dataDir = required("dataDir"); info.nativeLibraryDir = values.getProperty("nativeLibraryDir");
+        int splitCount=integer("split.count",0);
+        if(splitCount<0||splitCount>256)throw new IllegalArgumentException("Package split count");
+        if(splitCount>0){
+            info.splitNames=new String[splitCount];info.splitSourceDirs=new String[splitCount];
+            java.util.HashSet<String> names=new java.util.HashSet<String>();
+            for(int i=0;i<splitCount;i++){
+                String prefix="split."+i+".";
+                info.splitNames[i]=required(prefix+"name");
+                if(!names.add(info.splitNames[i]))throw new IllegalArgumentException("Duplicate package split");
+                info.splitSourceDirs[i]=required(prefix+"sourceDir");
+            }
+            info.splitPublicSourceDirs=info.splitSourceDirs.clone();
+        }
         // Device-protected Context currently uses the same app storage on Linux.
         info.deviceProtectedDataDir=info.dataDir;
         info.storageUuid=android.os.storage.StorageManager.UUID_DEFAULT;

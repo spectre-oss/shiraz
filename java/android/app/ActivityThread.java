@@ -6,10 +6,21 @@ public final class ActivityThread {
     private static volatile ActivityThread sCurrentActivityThread;
     private volatile Application mInitialApplication;
     private final String packageName;
+    private ContextImpl systemContext;
     private ActivityThread(Application app,String name){mInitialApplication=app;packageName=name;}
+    /** Publish process identity before application class initialization runs. */
+    public static void shirazPrepare(String packageName,java.util.Properties metadata){
+        if(packageName==null)throw new NullPointerException();
+        ActivityThread thread=new ActivityThread(null,packageName);
+        thread.systemContext=new ContextImpl(metadata);
+        sCurrentActivityThread=thread;
+    }
     public static void shirazBind(Application app,String packageName){
         if(app==null||packageName==null)throw new NullPointerException();
-        sCurrentActivityThread=new ActivityThread(app,packageName);
+        ActivityThread thread=sCurrentActivityThread;
+        if(thread==null||!packageName.equals(thread.packageName))
+            sCurrentActivityThread=new ActivityThread(app,packageName);
+        else thread.mInitialApplication=app;
     }
     public static void shirazClear(){sCurrentActivityThread=null;}
     public static ActivityThread currentActivityThread(){return sCurrentActivityThread;}
@@ -19,6 +30,10 @@ public final class ActivityThread {
     public static String currentProcessName(){return Application.getProcessName();}
     public static boolean isSystem(){return false;}
     public Application getApplication(){return mInitialApplication;}
+    public ContextImpl getSystemContext(){
+        if(systemContext==null)throw new IllegalStateException("Process context has not been prepared");
+        return systemContext;
+    }
     public String getProcessName(){return currentProcessName();}
     public android.os.Looper getLooper(){return android.os.Looper.getMainLooper();}
 }
