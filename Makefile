@@ -794,7 +794,7 @@ atomic-file-smoke: build framework
 .PHONY: runtime-network network-smoke
 runtime-network:
 	python3 scripts/bootstrap_runtime.py network
-build/runtime-network.stamp: scripts/bootstrap_runtime.py scripts/bootstrap_boot.py patches/art-host-trust-store.patch patches/art-tls-stream-lifetime.patch patches/art-tls-cache-lifetime.patch build/runtime-xml.stamp
+build/runtime-network.stamp: scripts/bootstrap_runtime.py scripts/bootstrap_boot.py patches/art-host-trust-store.patch patches/art-tls-stream-lifetime.patch patches/art-tls-cache-lifetime.patch patches/art-tls-alpn-api.patch build/runtime-xml.stamp
 	$(MAKE) runtime-network
 	touch $@
 build runtime-smoke runtime-aot-smoke runtime-jni-smoke: build/runtime-network.stamp

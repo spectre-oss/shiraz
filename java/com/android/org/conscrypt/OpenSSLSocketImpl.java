@@ -12,6 +12,9 @@ public final class OpenSSLSocketImpl extends SSLSocket {
     private final SSLSocket delegate;
     private String peerHost,endpointAlgorithm;
     private boolean verified;
+    private String[] applicationProtocols=new String[0];
+    private byte[] wireApplicationProtocols=new byte[0];
+    private String negotiatedApplicationProtocol;
     private IOException handshakeFailure;
     private final SSLSession failedSession=new FailedSession();
     private final List<HandshakeCompletedListener> listeners=new ArrayList<HandshakeCompletedListener>();
@@ -30,14 +33,35 @@ public final class OpenSSLSocketImpl extends SSLSocket {
     public void setAlpnProtocols(byte[] protocols){configuring();
         if(protocols==null)throw new NullPointerException("protocols");if(protocols.length>65535)throw new IllegalArgumentException("ALPN vector length");
         for(int i=0;i<protocols.length;){int count=protocols[i++]&255;if(count==0||count>protocols.length-i)throw new IllegalArgumentException("Malformed ALPN vector");i+=count;}
-        extension("setAlpnProtocols",byte[].class,protocols.clone());
+        ArrayList<String> names=new ArrayList<String>();
+        for(int i=0;i<protocols.length;){int count=protocols[i++]&255;names.add(new String(protocols,i,count,java.nio.charset.StandardCharsets.UTF_8));i+=count;}
+        wireApplicationProtocols=protocols.clone();
+        applicationProtocols=names.toArray(new String[names.size()]);
     }
     public byte[] getAlpnSelectedProtocol(){byte[] value=(byte[])extension("getAlpnSelectedProtocol",null,null);return value==null?null:value.clone();}
+    public String getApplicationProtocol(){
+        return negotiatedApplicationProtocol;
+    }
+    private static Object alpnParameters(SSLParameters parameters,String method,Class<?> type,Object value){
+        try{return type==null?SSLParameters.class.getMethod(method).invoke(parameters):SSLParameters.class.getMethod(method,type).invoke(parameters,value);}
+        catch(InvocationTargetException failure){Throwable cause=failure.getCause();if(cause instanceof RuntimeException)throw (RuntimeException)cause;throw new IllegalStateException("ALPN parameter access failed",cause);}
+        catch(ReflectiveOperationException failure){throw new UnsupportedOperationException("Modern TLS boot APIs are unavailable",failure);}
+    }
+    private static byte[] encodeApplicationProtocols(String[] protocols){
+        ByteArrayOutputStream output=new ByteArrayOutputStream();
+        for(String protocol:protocols){
+            byte[] value=protocol.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            if(value.length==0||value.length>255||output.size()+1+value.length>65535)throw new IllegalArgumentException("ALPN protocol length");
+            output.write(value.length);output.write(value,0,value.length);
+        }
+        return output.toByteArray();
+    }
     public synchronized void startHandshake()throws IOException{
         if(handshakeFailure!=null)throw handshakeFailure;
         if(delegate.isClosed())throw new SocketException("Socket is closed");
         if(verified)return;
         try{
+            if(wireApplicationProtocols.length>0)extension("setAlpnProtocols",byte[].class,wireApplicationProtocols.clone());
             delegate.startHandshake();
             if(endpointAlgorithm!=null&&!endpointAlgorithm.isEmpty()){
                 HostnameVerifier verifier;
@@ -45,6 +69,8 @@ public final class OpenSSLSocketImpl extends SSLSocket {
                 catch(ReflectiveOperationException failure){throw new SSLException("Pinned hostname verifier unavailable",failure);}
                 if(peerHost==null||!verifier.verify(peerHost,delegate.getSession()))throw new SSLHandshakeException("TLS endpoint hostname mismatch");
             }
+            byte[] selected=getAlpnSelectedProtocol();
+            negotiatedApplicationProtocol=selected==null?"":new String(selected,java.nio.charset.StandardCharsets.UTF_8);
             verified=true;
         }catch(IOException failure){handshakeFailure=failure;try{delegate.close();}catch(IOException close){failure.addSuppressed(close);}throw failure;}
         HandshakeCompletedEvent event=new HandshakeCompletedEvent(this,wrapSession(delegate.getSession()));
@@ -114,13 +140,21 @@ public final class OpenSSLSocketImpl extends SSLSocket {
             public void flush()throws IOException{startHandshake();out.flush();}
         };
     }
-    public SSLParameters getSSLParameters(){SSLParameters parameters=delegate.getSSLParameters();parameters.setEndpointIdentificationAlgorithm(endpointAlgorithm);return parameters;}
+    public SSLParameters getSSLParameters(){SSLParameters parameters=delegate.getSSLParameters();parameters.setEndpointIdentificationAlgorithm(endpointAlgorithm);alpnParameters(parameters,"setApplicationProtocols",String[].class,applicationProtocols.clone());return parameters;}
     public void setSSLParameters(SSLParameters parameters){configuring();
         String algorithm=parameters.getEndpointIdentificationAlgorithm();
         if(algorithm!=null&&!algorithm.isEmpty()&&!algorithm.equalsIgnoreCase("HTTPS"))throw new UnsupportedOperationException("Only HTTPS endpoint identification is implemented");
         if(verified)throw new IllegalStateException("Cannot change TLS policy after handshake");
         if(parameters.getServerNames()!=null||parameters.getSNIMatchers()!=null||parameters.getAlgorithmConstraints()!=null)throw new UnsupportedOperationException("Custom SNI/algorithm constraints are not implemented");
-        delegate.setSSLParameters(parameters);endpointAlgorithm=algorithm;
+        byte[] alpn=encodeApplicationProtocols((String[])alpnParameters(parameters,"getApplicationProtocols",null,null));
+        // Keep ALPN in one representation. The backend's byte and string APIs
+        // otherwise compete, and its byte setter cannot clear an existing offer.
+        SSLParameters transport=new SSLParameters();
+        transport.setCipherSuites(parameters.getCipherSuites());transport.setProtocols(parameters.getProtocols());
+        if(parameters.getNeedClientAuth())transport.setNeedClientAuth(true);else transport.setWantClientAuth(parameters.getWantClientAuth());
+        transport.setEndpointIdentificationAlgorithm(algorithm);transport.setUseCipherSuitesOrder(parameters.getUseCipherSuitesOrder());
+        delegate.setSSLParameters(transport);endpointAlgorithm=algorithm;
+        setAlpnProtocols(alpn);
     }
     public String[] getSupportedCipherSuites(){return delegate.getSupportedCipherSuites();}public String[] getEnabledCipherSuites(){return delegate.getEnabledCipherSuites();}public void setEnabledCipherSuites(String[] value){configuring();delegate.setEnabledCipherSuites(value);}
     public String[] getSupportedProtocols(){return delegate.getSupportedProtocols();}public String[] getEnabledProtocols(){return delegate.getEnabledProtocols();}public void setEnabledProtocols(String[] value){configuring();delegate.setEnabledProtocols(value);}

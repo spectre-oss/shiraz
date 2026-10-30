@@ -88,6 +88,10 @@ PATCHES = {
         ('art-host-trust-store.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLTrustManager.java': '962f58b73551dfa46f315958aeee457a5a4b39b3abab73b7a6608fac37f4185e',
         }),
+        ('art-tls-alpn-api.patch', {
+            'libcore/ojluni/src/main/java/javax/net/ssl/SSLParameters.java': '5805b2daa1cb91329268aca39b6c9666fcda73d475d9ffd7a470835a75a90410',
+            'libcore/ojluni/src/main/java/javax/net/ssl/SSLSocket.java': '18d505f4345953e2a66c964afd31338e515379a99613cdf095e6587848e2a0e6',
+        }),
         ('art-tls-cache-lifetime.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLAuthStore.java': 'c21a8c88b6a8d8af08d29f574fc80339581045089d0bf76a024cd706ef04efd2',
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLImplementSSLSession.java': 'ac4558a6df6c22bf909f9399660a6679b31889e434fe42d6279ce4f53d5a446b',
@@ -270,10 +274,10 @@ def main():
         run(['make', 'install'], cwd=build, env=env)
         return
     if args.stage == 'network':
-        from bootstrap_boot import desugar_boot, NETWORK_MODULES
+        from bootstrap_boot import desugar_boot, NETWORK_MODULES, MODULES
         build_wolfssl(env)
-        run(['make', '-j2', *NETWORK_MODULES, '____PREFIX=' + str(PREFIX), '____LIBDIR=lib'], cwd=ROOT / 'context/art_standalone', env=env)
-        desugar_boot(ROOT, NETWORK_MODULES)
+        run(['make', '-j2', *MODULES, *NETWORK_MODULES, '____PREFIX=' + str(PREFIX), '____LIBDIR=lib'], cwd=ROOT / 'context/art_standalone', env=env)
+        desugar_boot(ROOT, MODULES + NETWORK_MODULES)
         return
     if args.stage == 'xml':
         if not (ROOT / 'context/art_standalone/out/host/linux-x86/framework/core-libart-hostdex.jar').is_file():

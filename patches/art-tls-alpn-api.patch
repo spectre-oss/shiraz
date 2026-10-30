@@ -1,0 +1,40 @@
+--- a/libcore/ojluni/src/main/java/javax/net/ssl/SSLParameters.java
++++ b/libcore/ojluni/src/main/java/javax/net/ssl/SSLParameters.java
+@@ -464,4 +464,21 @@
+     public final boolean getUseCipherSuitesOrder() {
+         return preferLocalCipherSuites;
+     }
++    // Shiraz: modern ALPN value API, independent of the TLS provider.
++    private String[] applicationProtocols = new String[0];
++    public String[] getApplicationProtocols() {
++        return applicationProtocols.clone();
++    }
++    public void setApplicationProtocols(String[] protocols) {
++        if (protocols == null) throw new IllegalArgumentException("protocols is null");
++        String[] copy = protocols.clone();
++        for (String protocol : copy) {
++            if (protocol == null || protocol.isEmpty()) {
++                throw new IllegalArgumentException("Empty ALPN protocol");
++            }
++        }
++        applicationProtocols = copy;
++    }
++
++
+ }
+--- a/libcore/ojluni/src/main/java/javax/net/ssl/SSLSocket.java
++++ b/libcore/ojluni/src/main/java/javax/net/ssl/SSLSocket.java
+@@ -1406,4 +1406,13 @@
+     public String toString() {
+         return "SSL" + super.toString();
+     }
++    // Shiraz: providers must explicitly implement ALPN result access.
++    public String getApplicationProtocol() {
++        throw new UnsupportedOperationException("ALPN is unsupported by this provider");
++    }
++    public String getHandshakeApplicationProtocol() {
++        throw new UnsupportedOperationException("Handshake ALPN is unsupported by this provider");
++    }
++
++
+ }

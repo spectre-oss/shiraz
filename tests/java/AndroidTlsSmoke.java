@@ -7,6 +7,9 @@ import java.security.cert.CertificateFactory;
 import com.android.org.conscrypt.*;
 public final class AndroidTlsSmoke {
  static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
+ static void alpn(SSLParameters parameters,String[] protocols)throws Exception{SSLParameters.class.getMethod("setApplicationProtocols",String[].class).invoke(parameters,(Object)protocols);}
+ static String[] alpn(SSLParameters parameters)throws Exception{return (String[])SSLParameters.class.getMethod("getApplicationProtocols").invoke(parameters);}
+ static String selected(SSLSocket socket)throws Exception{return (String)SSLSocket.class.getMethod("getApplicationProtocol").invoke(socket);}
  static OpenSSLSocketImpl socket(SSLContext context,String host,int port)throws Exception{
   Socket plain=new Socket();plain.connect(new InetSocketAddress("127.0.0.1",port),3000);
   OpenSSLSocketImpl socket=(OpenSSLSocketImpl)context.getSocketFactory().createSocket(plain,host,port,true);socket.setSoTimeout(3000);
@@ -36,20 +39,33 @@ public final class AndroidTlsSmoke {
   try(InputStream input=new FileInputStream(args[1])){trust.setCertificateEntry("fixture",CertificateFactory.getInstance("X.509").generateCertificate(input));}
   TrustManagerFactory factory=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());factory.init(trust);
   SSLContext context=SSLContext.getInstance("TLS");TrustManager[] managers=factory.getTrustManagers();context.init(null,managers,null);
+  SSLContext foreignContext=SSLContext.getInstance("TLS","wolfJSSE");foreignContext.init(null,null,null);
+  try(SSLSocket foreign=(SSLSocket)foreignContext.getSocketFactory().createSocket()){
+   check(!android.net.ssl.SSLSockets.isSupportedSocket(foreign),"foreign provider not advertised as platform");
+   try{android.net.ssl.SSLSockets.setUseSessionTickets(foreign,true);throw new AssertionError("foreign socket accepted");}catch(IllegalArgumentException expected){}
+  }
+  SSLParameters values=new SSLParameters();check(alpn(values).length==0,"empty default ALPN");String[] names={"h2","http/1.1"};alpn(values,names);names[0]="changed";String[] copy=alpn(values);copy[0]="changed";check(alpn(values)[0].equals("h2"),"ALPN parameters defensive copies");
+  for(String[] invalid:new String[][]{null,new String[]{null},new String[]{""}}){try{alpn(values,invalid);throw new AssertionError("invalid ALPN parameter accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof IllegalArgumentException,"invalid ALPN exception");}check(alpn(values)[0].equals("h2"),"invalid ALPN preserves parameters");}
   java.lang.reflect.Field field=OpenSSLSocketFactoryImpl.class.getDeclaredField("sslParameters");field.setAccessible(true);
   Object parameters=field.get(context.getSocketFactory());java.lang.reflect.Field manager=SSLParametersImpl.class.getDeclaredField("x509TrustManager");manager.setAccessible(true);check(manager.get(parameters)==managers[0],"actual trust manager exposed");
   try(OpenSSLSocketImpl socket=socket(context,"localhost",port)){
-   socket.setAlpnProtocols(new byte[]{2,'h','2',8,'h','t','t','p','/','1','.','1'});socket.setUseSessionTickets(true);
+   check(android.net.ssl.SSLSockets.isSupportedSocket(socket),"platform socket recognized");
+   check(selected(socket)==null,"no ALPN result before handshake");
+   SSLParameters modern=socket.getSSLParameters();alpn(modern,new String[]{"h2","http/1.1"});socket.setSSLParameters(modern);android.net.ssl.SSLSockets.setUseSessionTickets(socket,true);
+   check(java.util.Arrays.equals(alpn(socket.getSSLParameters()),new String[]{"h2","http/1.1"}),"socket ALPN parameter round trip");
+   SSLParameters oversized=socket.getSSLParameters();alpn(oversized,new String[]{new String(new char[256]).replace('\0','a')});try{socket.setSSLParameters(oversized);throw new AssertionError("oversized ALPN accepted");}catch(IllegalArgumentException expected){}check(alpn(socket.getSSLParameters())[0].equals("h2"),"invalid ALPN preserves socket");
    socket.addHandshakeCompletedListener(new HandshakeCompletedListener(){public void handshakeCompleted(HandshakeCompletedEvent event){try{event.getSession().getSessionContext().setSessionCacheSize(1);throw new AssertionError("Handshake event exposed raw context");}catch(UnsupportedOperationException expected){}}});
    socket.startHandshake();try{socket.getSession().getSessionContext().setSessionCacheSize(1);throw new AssertionError("Socket session exposed raw context");}catch(UnsupportedOperationException expected){}
    check("http/1.1".equals(new String(socket.getAlpnSelectedProtocol(),"UTF-8")),"negotiated ALPN");
+   check("http/1.1".equals(selected(socket)),"modern ALPN result");
    socket.getOutputStream().write("GET /body HTTP/1.0\r\nHost: localhost\r\n\r\n".getBytes("UTF-8"));
    BufferedReader input=new BufferedReader(new InputStreamReader(socket.getInputStream(),"UTF-8"));
    check(input.readLine().contains("200"),"HTTP status");String line;int length=-1;while(!(line=input.readLine()).isEmpty())if(line.toLowerCase(java.util.Locale.ROOT).startsWith("content-length:"))length=Integer.parseInt(line.substring(15).trim());
    check(length==19,"bounded response length");char[] body=new char[length];int offset=0;while(offset<length){int n=input.read(body,offset,length-offset);check(n>0,"complete response");offset+=n;}check(new String(body).equals("shiraz-network-body"),"trusted response body");
    socket.close();try{socket.startHandshake();throw new AssertionError("Closed handshake accepted");}catch(SocketException expected){}
   }
-  try(OpenSSLSocketImpl socket=socket(context,"localhost",port)){socket.startHandshake();byte[] alpn=socket.getAlpnSelectedProtocol();check(alpn==null||alpn.length==0,"no protocol invented without ALPN");}
+  try(OpenSSLSocketImpl socket=socket(context,"localhost",port)){socket.setAlpnProtocols(new byte[]{2,'h','2'});SSLParameters cleared=socket.getSSLParameters();alpn(cleared,new String[0]);socket.setSSLParameters(cleared);socket.startHandshake();byte[] alpn=socket.getAlpnSelectedProtocol();check(alpn==null||alpn.length==0,"no protocol invented without ALPN");check("".equals(selected(socket)),"modern no-ALPN result");}
+  try(OpenSSLSocketImpl socket=socket(context,"localhost",port)){socket.setAlpnProtocols(new byte[]{8,'h','t','t','p','/','1','.','1'});socket.startHandshake();check("http/1.1".equals(selected(socket)),"legacy ALPN still works");socket.close();check("http/1.1".equals(selected(socket)),"ALPN result retained after close");}
   try(OpenSSLSocketImpl socket=socket(context,"wrong.example",port)){try{socket.startHandshake();throw new AssertionError("Wrong host accepted");}catch(SSLHandshakeException expected){check(socket.isClosed(),"failed endpoint closes transport");}}
   try(OpenSSLSocketImpl socket=socket(context,"wrong.example",port)){try{socket.getOutputStream().write("GET /forbidden HTTP/1.0\r\n\r\n".getBytes("UTF-8"));throw new AssertionError("Implicit wrong host write accepted");}catch(SSLHandshakeException expected){}}
   try(OpenSSLSocketImpl socket=socket(context,"wrong.example",port)){try{socket.getInputStream().read();throw new AssertionError("Implicit wrong host read accepted");}catch(SSLHandshakeException expected){}}
