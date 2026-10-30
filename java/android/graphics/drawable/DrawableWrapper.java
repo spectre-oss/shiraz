@@ -30,6 +30,7 @@ public abstract class DrawableWrapper extends Drawable implements Drawable.Callb
  public boolean onLayoutDirectionChanged(int direction){return child!=null&&child.setLayoutDirection(direction);}
  public boolean setVisible(boolean visible,boolean restart){boolean changed=super.setVisible(visible,restart);return (child!=null&&child.setVisible(visible,restart))|changed;}
  public int getIntrinsicWidth(){return child==null?-1:child.getIntrinsicWidth();}public int getIntrinsicHeight(){return child==null?-1:child.getIntrinsicHeight();}
+ @Override public Insets getOpticalInsets(){return child==null?Insets.NONE:child.getOpticalInsets();}
  public boolean getPadding(Rect out){return child==null?super.getPadding(out):child.getPadding(out);}
  public int getChangingConfigurations(){return super.getChangingConfigurations()|(child==null?0:child.getChangingConfigurations());}
  public void setHotspot(float x,float y){if(child!=null)child.setHotspot(x,y);}public void setHotspotBounds(int l,int t,int r,int b){if(child!=null)child.setHotspotBounds(l,t,r,b);}

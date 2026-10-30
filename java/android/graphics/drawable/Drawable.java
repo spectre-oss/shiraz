@@ -84,6 +84,8 @@ public abstract class Drawable {
     public int getIntrinsicHeight() { return -1; }
     public int getMinimumWidth() { return Math.max(0, getIntrinsicWidth()); }
     public int getMinimumHeight() { return Math.max(0, getIntrinsicHeight()); }
+    /** Optical alignment excludes no pixels unless a subclass supplies insets. */
+    public Insets getOpticalInsets() { return Insets.NONE; }
     public boolean getPadding(Rect out) { out.set(0,0,0,0); return false; }
     public Drawable getCurrent() { return this; }
     public Drawable mutate() { return this; }

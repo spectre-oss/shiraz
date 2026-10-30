@@ -47,6 +47,7 @@ public class DrawableContainer extends Drawable implements Drawable.Callback {
  private int size(int kind){int result=kind<2?-1:0;if(!constantSize)return current==null?result:dimension(current,kind);for(Drawable d:children)result=Math.max(result,dimension(d,kind));return result;}
  private static int dimension(Drawable d,int kind){switch(kind){case 0:return d.getIntrinsicWidth();case 1:return d.getIntrinsicHeight();case 2:return d.getMinimumWidth();default:return d.getMinimumHeight();}}
  public int getIntrinsicWidth(){return size(0);}public int getIntrinsicHeight(){return size(1);}public int getMinimumWidth(){return size(2);}public int getMinimumHeight(){return size(3);}
+ @Override public Insets getOpticalInsets(){return current==null?Insets.NONE:current.getOpticalInsets();}
  public boolean getPadding(Rect out){out.set(0,0,0,0);if(variablePadding)return current!=null&&current.getPadding(out);Rect p=new Rect();boolean found=false;for(Drawable d:children){found|=d.getPadding(p);out.left=Math.max(out.left,p.left);out.top=Math.max(out.top,p.top);out.right=Math.max(out.right,p.right);out.bottom=Math.max(out.bottom,p.bottom);}return found;}
  public int getOpacity(){if(current==null||!current.isVisible())return PixelFormat.TRANSPARENT;int result=children.get(0).getOpacity();for(int i=1;i<children.size();i++)result=resolveOpacity(result,children.get(i).getOpacity());return result;}
  public int getChangingConfigurations(){int flags=super.getChangingConfigurations();for(Drawable d:children)flags|=d.getChangingConfigurations();return flags;}

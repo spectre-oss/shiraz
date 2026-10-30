@@ -5,6 +5,25 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.view.Gravity;
 public final class LayerSmoke {
+    private static void opticalInsets(){
+        android.graphics.drawable.ColorDrawable leaf=new android.graphics.drawable.ColorDrawable(Color.RED);
+        if(leaf.getOpticalInsets()!=Insets.NONE)throw new AssertionError("Default optical alignment");
+        android.graphics.drawable.InsetDrawable inner=new android.graphics.drawable.InsetDrawable(leaf,1,2,3,4);
+        android.graphics.drawable.InsetDrawable outer=new android.graphics.drawable.InsetDrawable(inner,.1f,.2f,.3f,.4f);
+        outer.setBounds(0,0,100,50);
+        if(!outer.getOpticalInsets().equals(Insets.of(11,12,33,24)))throw new AssertionError("Nested optical geometry");
+        outer.setBounds(0,0,200,100);
+        if(!outer.getOpticalInsets().equals(Insets.of(21,22,63,44)))throw new AssertionError("Optical insets follow resize");
+        android.graphics.drawable.DrawableWrapper wrapper=new android.graphics.drawable.DrawableWrapper(outer){};
+        wrapper.setBounds(0,0,200,100);
+        if(!wrapper.getOpticalInsets().equals(outer.getOpticalInsets()))throw new AssertionError("Wrapper optical delegation");
+        wrapper.setDrawable(null);if(wrapper.getOpticalInsets()!=Insets.NONE)throw new AssertionError("Empty wrapper alignment");
+        android.graphics.drawable.StateListDrawable state=new android.graphics.drawable.StateListDrawable();
+        state.addState(new int[]{0x010100a7 /* state_pressed */},inner);state.addState(new int[0],leaf);
+        if(state.getOpticalInsets()!=Insets.NONE)throw new AssertionError("Default selected alignment");
+        state.setState(new int[]{0x010100a7 /* state_pressed */});
+        if(!state.getOpticalInsets().equals(Insets.of(1,2,3,4)))throw new AssertionError("State-selected optical alignment");
+    }
     private static void deferredCorners(Resources r){
         int id=r.getIdentifier("deferred_corners","drawable","org.shiraz.fixture");
         android.graphics.drawable.InsetDrawable wrapper=(android.graphics.drawable.InsetDrawable)r.getDrawable(id,r.newTheme());
@@ -32,7 +51,7 @@ public final class LayerSmoke {
         paint.setBlendMode(BlendMode.SRC_OVER);try{paint.setBlendMode(BlendMode.MULTIPLY);throw new AssertionError("Unsupported multiply accepted as modulation");}catch(UnsupportedOperationException expected){}if(paint.getBlendMode()!=BlendMode.SRC_OVER)throw new AssertionError("Failed blend changed state");
         paint.setBlendMode(null);if(paint.getBlendMode()!=null||paint.getXfermode()!=null)throw new AssertionError("Clear blend");pixels.eraseColor(Color.BLUE);new Canvas(pixels).drawRect(0,0,1,1,paint);if(pixels.getPixel(0,0)!=0xff80007f)throw new AssertionError("Cleared blend restores source-over");pixels.recycle();
     }
-    public static void main(String[] args){blendModes();
+    public static void main(String[] args){blendModes();opticalInsets();
         Resources r=Resources.shirazOpen(args[0],96,160);
         try {
             deferredCorners(r);
