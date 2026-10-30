@@ -126,6 +126,8 @@ public class NotificationManager {
     public void cancel(int id){cancel(null,id);}
     public synchronized void cancel(String tag,int id){live();Posted p=posted.remove(key(tag,id));if(p!=null)postedBytes-=p.bytes;if(p!=null&&p.desktopId!=0&&desktop!=null)try{desktop.cancel(p.desktopId);}catch(IllegalStateException unavailable){desktop.close();desktop=null;}}
     public synchronized void cancelAll(){live();for(Posted p:posted.values())if(p.desktopId!=0&&desktop!=null)try{desktop.cancel(p.desktopId);}catch(IllegalStateException unavailable){desktop.close();desktop=null;}posted.clear();postedBytes=0;}
+    /** Notifications belong to this session; no other package is a delegate. */
+    public synchronized String getNotificationDelegate() { live(); return null; }
     public synchronized boolean areNotificationsEnabled() {
         live();
         try { if (desktop == null) desktop = new DesktopNotifications(application); desktop.capabilities(); return true; }
