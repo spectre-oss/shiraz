@@ -38,6 +38,9 @@ public final class ActivityLifecycleSmoke {
   check(stack.current()==null&&stack.size()==0&&!stack.finishTop(),"empty stack");
   Intent launch=new Intent("map").putExtra("value",1);stack.launch(launch);launch.putExtra("value",2);LifecycleFixture.Sample map=made.get(0);map.value=73;check(map.getIntent().getIntExtra("value",0)==1,"launch intent snapshot");
   check(map.isTaskRoot(),"Initial activity is task root");
+  check(map.getActionBar()==null,"Window without native action-bar feature returns no bar");
+  try{map.requestWindowFeature(android.view.Window.FEATURE_ACTION_BAR);throw new AssertionError("Unsupported native action bar accepted");}catch(UnsupportedOperationException expected){}
+  check(map.getActionBar()==null&&!map.getWindow().hasFeature(android.view.Window.FEATURE_ACTION_BAR),"Rejected action-bar request preserves window state");
   LifecycleFixture.events.clear();stack.launch(new Intent("download").addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT));LifecycleFixture.Sample download=made.get(1);
   try{stack.launch(new Intent("other").addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT));throw new AssertionError("Unsupported result handoff accepted");}catch(UnsupportedOperationException expected){}
   check(stack.size()==2&&stack.current()==download,"Rejected forwarding preserves stack");
