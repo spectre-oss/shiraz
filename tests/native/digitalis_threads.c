@@ -23,6 +23,39 @@ extern int pipe(int*);
 extern long read(int,void*,unsigned long);
 extern long write(int,const void*,unsigned long);
 extern int close(int);
+extern int fork(void);
+extern int waitpid(int,int*,int);
+extern int kill(int,int);
+extern long ptrace(int,...);
+extern void _exit(int) __attribute__((noreturn));
+// Exercise a real traced exit and its kernel-provided event message. Android
+// ARM64 and the Linux x86_64 host share these ptrace constants and LP64 payload.
+static int ptrace_event_test(void) {
+  int child=fork();
+  if(child<0)return 0;
+  if(!child) {
+    if(ptrace(0,0,0,0))_exit(99); // PTRACE_TRACEME
+    kill(getpid(),19); // SIGSTOP
+    _exit(42);
+  }
+  int status=0,ok=0;
+  if(waitpid(child,&status,0)!=child || (status&255)!=127)goto cleanup;
+  if(ptrace(0x4200,child,0,(void*)64))goto cleanup; // TRACEEXIT
+  if(ptrace(7,child,0,0))goto cleanup; // CONT
+  if(waitpid(child,&status,0)!=child || (status>>16)!=6)goto cleanup;
+  struct { unsigned long value,guard; } message={~0UL,0x123456789abcdef0UL};
+  ok=ptrace(0x4201,child,0,&message.value)==0 && message.value==(42UL<<8)
+      && message.guard==0x123456789abcdef0UL;
+  // The bridge must preserve the kernel's rejection of an invalid output.
+  if(ptrace(0x4201,child,0,0)!=-1)ok=0;
+  if(ptrace(7,child,0,0))goto cleanup;
+  if(waitpid(child,&status,0)!=child || status!=(42<<8))return 0;
+  return ok;
+cleanup:
+  kill(child,9);
+  waitpid(child,&status,0);
+  return 0;
+}
 typedef struct { unsigned flags; void* base; unsigned long size,guard; int policy,priority; char reserved[16]; } GuestAttr;
 extern int pthread_attr_init(GuestAttr*);
 extern int pthread_attr_destroy(GuestAttr*);
@@ -176,6 +209,7 @@ static int vm_handoff_test(JNIEnv* env) {
 }
 int Java_shiraz_ThreadSmoke_run(JNIEnv* env,jclass klass) {
   (void)klass;
+  if(!ptrace_event_test())return -91;
   if(!vm_handoff_test(env))return -90;
   int jumps=jump_test();if(jumps!=1)return jumps;
   if(!naming_test()) return -7;

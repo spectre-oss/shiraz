@@ -17,6 +17,14 @@ def build(s):
   patched=W/'syscall_emulation.cc';patched.write_text(text);s=str(patched)
   localflags_extra=['-I'+str(p.parent)]
  else:localflags_extra=[]
+ if p.name=='sys_ptrace_emulation.cc':
+  text=p.read_text()
+  needle='    case PTRACE_POKEDATA:'
+  if text.count(needle)!=1:raise RuntimeError('Unexpected ptrace emulation source')
+  # Both supported architectures use an eight-byte unsigned long event message.
+  # Forward the actual kernel result, including invalid-address/tracee errors.
+  text=text.replace(needle,'    case PTRACE_GETEVENTMSG:\n      return ptrace(request, pid, 0, data);\n'+needle)
+  patched=W/'sys_ptrace_emulation.cc';patched.write_text(text);s=str(patched)
  if p.name=='frontend.cc' and p.parent.name=='arm64':
   # libstdc++ 12 lacks C++23 tuple assignment from std::array. Preserve both
   # generated registers through an ordinary tuple without changing the IR.
