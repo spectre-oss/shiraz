@@ -25,6 +25,41 @@ public final class NativeSqliteSmoke {
         try { return NativeSqlite.query(db, statement, args); } finally { NativeSqlite.finalizeStatement(statement); }
     }
     static long count(long db, String table) { return execute(db, "SELECT count(*) FROM " + table, NONE, 3); }
+    static final class PagedCursor extends android.database.AbstractWindowedCursor {
+        public int getCount(){return 5;}public String[] getColumnNames(){return new String[]{"id","label"};}
+        public boolean onMove(int oldPosition,int newPosition){
+            int start=newPosition/2*2;clearOrCreateWindow("paged");mWindow.setStartPosition(start);mWindow.setNumColumns(2);
+            for(int row=start;row<Math.min(start+2,getCount());row++){if(!mWindow.allocRow()||!mWindow.putLong(row,row,0)||!mWindow.putString("row-"+row,row,1))throw new AssertionError("Page fill");}return true;
+        }
+    }
+    static void cursorWindows() throws Exception {
+        android.database.CursorWindow window=new android.database.CursorWindow("typed",256);
+        try{
+            if(!window.setNumColumns(3)||!window.allocRow())throw new AssertionError("Window allocation");window.setStartPosition(10);
+            byte[] blob={1,2,3};if(!window.putBlob(blob,10,0)||!window.putLong(Long.MAX_VALUE,10,1)||!window.putString("café\u0000\ud83d\ude80",10,2))throw new AssertionError("Typed window fill");blob[0]=9;byte[] read=window.getBlob(10,0);read[0]=8;
+            if(window.getBlob(10,0)[0]!=1||window.getType(10,0)!=4||window.getLong(10,1)!=Long.MAX_VALUE||window.getType(10,2)!=3)throw new AssertionError("Window types or blob ownership");
+            android.database.CharArrayBuffer buffer=new android.database.CharArrayBuffer(1);window.copyStringToBuffer(10,2,buffer);if(!"café\u0000\ud83d\ude80".equals(new String(buffer.data,0,buffer.sizeCopied)))throw new AssertionError("Window text buffer");
+            if(window.putBlob(new byte[512],10,0)||window.getBlob(10,0)[0]!=1||window.putNull(9,0)||window.putNull(10,3)||window.setNumColumns(4))throw new AssertionError("Rejected window write changed state");
+            window.putString("  -12tail",10,2);if(window.getLong(10,2)!=-12)throw new AssertionError("Numeric text prefix");window.putString("1.25e2tail",10,2);if(window.getDouble(10,2)!=125)throw new AssertionError("Real text prefix");
+            window.putString("9223372036854775808",10,2);if(window.getLong(10,2)!=Long.MAX_VALUE)throw new AssertionError("Positive integer saturation");window.putString("-9223372036854775809",10,2);if(window.getLong(10,2)!=Long.MIN_VALUE)throw new AssertionError("Negative integer saturation");
+            window.putNull(10,0);if(!window.isNull(10,0)||window.getLong(10,0)!=0)throw new AssertionError("Null conversion");
+            window.freeLastRow();if(window.getNumRows()!=0||!window.allocRow())throw new AssertionError("Released row capacity");window.clear();if(window.getStartPosition()!=0||window.getNumRows()!=0||!window.setNumColumns(1))throw new AssertionError("Window clear reset");
+            window.acquireReference();window.close();if(!window.allocRow())throw new AssertionError("Owned reference lost on close");window.releaseReference();fails(IllegalStateException.class,new Task(){public void run(){window.getNumRows();}});
+        }finally{window.close();}
+        PagedCursor cursor=new PagedCursor();final int[] notices={0,0};cursor.registerDataSetObserver(new android.database.DataSetObserver(){public void onChanged(){notices[0]++;}public void onInvalidated(){notices[1]++;}});
+        try{
+            if(!cursor.isBeforeFirst()||!cursor.moveToPosition(3)||cursor.getInt(0)!=3||!"row-3".equals(cursor.getString(1))||cursor.getColumnIndex("t.LABEL")!=1)throw new AssertionError("Paged cursor positioning");
+            android.database.CursorWindow copy=new android.database.CursorWindow("copy",512);try{cursor.fillWindow(1,copy);if(cursor.getPosition()!=3||copy.getStartPosition()!=1||copy.getNumRows()!=4||copy.getLong(4,0)!=4)throw new AssertionError("Window fill snapshot and source restoration");}finally{copy.close();}
+            android.database.CursorWindow small=new android.database.CursorWindow("small",128);try{cursor.fillWindow(0,small);if(small.getNumRows()!=1||cursor.getPosition()!=3)throw new AssertionError("Bounded fill leaves complete rows and restores source");}finally{small.close();}
+            android.database.CursorWindow old=cursor.getWindow();cursor.setWindow(new android.database.CursorWindow("replacement"));fails(IllegalStateException.class,new Task(){public void run(){old.getNumRows();}});
+            cursor.deactivate();if(cursor.hasWindow()||notices[1]!=1||!cursor.requery()||notices[0]!=1||cursor.getPosition()!=-1)throw new AssertionError("Cursor deactivate/requery lifecycle");
+            if(!cursor.moveToLast()||cursor.getInt(0)!=4||cursor.moveToNext()||!cursor.isAfterLast())throw new AssertionError("After-last cursor boundary");fails(android.database.CursorIndexOutOfBoundsException.class,new Task(){public void run(){cursor.getString(1);}});
+        }finally{cursor.close();cursor.close();}
+        if(notices[1]!=2||!cursor.isClosed()||cursor.requery()||cursor.hasWindow())throw new AssertionError("Cursor close ownership and notification");
+        android.database.MatrixCursor broken=new android.database.MatrixCursor(new String[]{"a","b"}){public String getString(int column){if(column==1)throw new IllegalStateException("fixture read failure");return super.getString(column);}};
+        broken.addRow(new Object[]{"a","b"});android.database.CursorWindow partial=new android.database.CursorWindow("partial");
+        try{fails(IllegalStateException.class,new Task(){public void run(){android.database.DatabaseUtils.cursorFillWindow(broken,0,partial);}});if(partial.getNumRows()!=0||broken.getPosition()!=-1)throw new AssertionError("Failed fill retained partial row or moved source");}finally{partial.close();broken.close();}
+    }
     static void textHelpers(long db){
         String[] statements={" select 1","\ninsert into t values(1)","update t set x=1","replace into t values(1)","delete from t","attach 'x' as y","begin immediate","commit","end","rollback","pragma user_version","create table t(x)","drop table t","alter table t rename to x","analyze","detach y",""," x ","-- comment\nselect 1","with t as (select 1) select * from t"};
         int[] expected={1,2,2,2,2,3,4,5,5,6,7,8,8,8,9,9,99,99,99,99};
@@ -35,6 +70,7 @@ public final class NativeSqliteSmoke {
         }
     }
     public static void main(String[] args) throws Exception {
+        cursorWindows();
         Path root = Paths.get(args[0]); Files.createDirectories(root);
         Path file = root.resolve("values-café.db"); Files.deleteIfExists(file);
         long db = open(file.toString(), 0x10000000);
