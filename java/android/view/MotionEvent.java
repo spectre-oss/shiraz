@@ -63,8 +63,28 @@ public final class MotionEvent extends InputEvent {
     public float getAxisValue(int axis){return getAxisValue(axis,0);}
     public float getAxisValue(int axis,int pointer){index(pointer);return axis==0?coords[pointer].x:axis==1?coords[pointer].y:axis==9?coords[pointer].vscroll:axis==10?coords[pointer].hscroll:0;}
     public static MotionEvent shirazScroll(long time,float x,float y,float horizontal,float vertical){MotionEvent e=shirazObtain(time,time,ACTION_SCROLL,x,y,0x2002);e.buttons=0;e.coords[0].pressure=0;e.coords[0].hscroll=horizontal;e.coords[0].vscroll=vertical;return e;}
+    public static String actionToString(int action){
+        int kind=action&ACTION_MASK;
+        if(kind==ACTION_POINTER_DOWN||kind==ACTION_POINTER_UP)return (kind==ACTION_POINTER_DOWN?"ACTION_POINTER_DOWN(":"ACTION_POINTER_UP(")+((action&ACTION_POINTER_INDEX_MASK)>>>ACTION_POINTER_INDEX_SHIFT)+")";
+        String[] names={"ACTION_DOWN","ACTION_UP","ACTION_MOVE","ACTION_CANCEL","ACTION_OUTSIDE",null,null,"ACTION_HOVER_MOVE","ACTION_SCROLL","ACTION_HOVER_ENTER","ACTION_HOVER_EXIT","ACTION_BUTTON_PRESS","ACTION_BUTTON_RELEASE"};
+        return action>=0&&action<names.length&&names[action]!=null?names[action]:Integer.toString(action);
+    }
+    public static String toolTypeToString(int tool){String[] names={"TOOL_TYPE_UNKNOWN","TOOL_TYPE_FINGER","TOOL_TYPE_STYLUS","TOOL_TYPE_MOUSE","TOOL_TYPE_ERASER"};return tool>=0&&tool<names.length?names[tool]:Integer.toString(tool);}
+    public static String buttonStateToString(int state){
+        String[] names={"BUTTON_PRIMARY","BUTTON_SECONDARY","BUTTON_TERTIARY","BUTTON_BACK","BUTTON_FORWARD","BUTTON_STYLUS_PRIMARY","BUTTON_STYLUS_SECONDARY"};
+        if(state==0)return "0";StringBuilder out=new StringBuilder();
+        for(int bit=0;bit<32;bit++)if((state&(1<<bit))!=0){if(out.length()!=0)out.append('|');out.append(bit<names.length?names[bit]:String.format(java.util.Locale.ROOT,"0x%08x",1<<bit));}
+        return out.toString();
+    }
+    public int getActionButton(){live();return actionButton;}
+    public void setActionButton(int button){live();actionButton=button;}
+    @Override public String toString(){
+        live();StringBuilder out=new StringBuilder("MotionEvent { action=").append(actionToString(action)).append(", actionButton=").append(buttonStateToString(actionButton));
+        for(int i=0;i<coords.length;i++)out.append(", id[").append(i).append("]=").append(properties[i].id).append(", x[").append(i).append("]=").append(coords[i].x).append(", y[").append(i).append("]=").append(coords[i].y).append(", toolType[").append(i).append("]=").append(toolTypeToString(properties[i].toolType));
+        return out.append(", buttonState=").append(buttonStateToString(buttons)).append(", metaState=").append(KeyEvent.metaStateToString(meta)).append(", flags=0x").append(Integer.toHexString(flags)).append(", edgeFlags=0x").append(Integer.toHexString(edge)).append(", pointerCount=").append(coords.length).append(", historySize=").append(getHistorySize()).append(", eventTime=").append(time).append(", downTime=").append(down).append(", deviceId=").append(device).append(", source=0x").append(Integer.toHexString(source)).append(" }").toString();
+    }
     private long down, time;
-    private int action, meta, device, edge, source, buttons, flags;
+    private int action, meta, device, edge, source, buttons, flags, actionButton;
     private float precisionX, precisionY;
     private PointerProperties[] properties;
     private PointerCoords[] coords;
@@ -99,14 +119,14 @@ public final class MotionEvent extends InputEvent {
         for(int i=0;i<count;i++){PointerProperties prop=properties[i];PointerCoords coord=coords[i];if(prop==null||coord==null||prop.id<0||prop.id>31||(ids&(1<<prop.id))!=0||!Float.isFinite(coord.x)||!Float.isFinite(coord.y))throw new IllegalArgumentException("Invalid pointer identity/coordinate");ids|=1<<prop.id;event.properties[i]=new PointerProperties(prop);event.coords[i]=new PointerCoords(coord);event.rawX[i]=coord.x;event.rawY[i]=coord.y;}
         return event;
     }
-    public static MotionEvent obtain(MotionEvent source){source.live();MotionEvent event=obtain(source.down,source.time,source.action,source.coords.length,source.properties,source.coords,source.meta,source.buttons,source.precisionX,source.precisionY,source.device,source.edge,source.source,source.flags);event.rawX=source.rawX.clone();event.rawY=source.rawY.clone();return event;}
+    public static MotionEvent obtain(MotionEvent source){source.live();MotionEvent event=obtain(source.down,source.time,source.action,source.coords.length,source.properties,source.coords,source.meta,source.buttons,source.precisionX,source.precisionY,source.device,source.edge,source.source,source.flags);event.actionButton=source.actionButton;event.rawX=source.rawX.clone();event.rawY=source.rawY.clone();return event;}
     public int getPointerIdBits(){live();int bits=0;for(PointerProperties prop:properties)bits|=1<<prop.id;return bits;}
     public MotionEvent split(int bits){
         live();bits&=getPointerIdBits();int count=Integer.bitCount(bits);if(count==0)throw new IllegalArgumentException("Empty pointer subset");
         PointerProperties[] props=new PointerProperties[count];PointerCoords[] points=new PointerCoords[count];int at=0,changed=-1;float[] rx=new float[count],ry=new float[count];
         for(int i=0;i<coords.length;i++)if((bits&(1<<properties[i].id))!=0){if(i==getActionIndex())changed=at;props[at]=properties[i];points[at]=coords[i];rx[at]=rawX[i];ry[at]=rawY[i];at++;}
         int next=action,masked=getActionMasked();if(masked==ACTION_POINTER_DOWN||masked==ACTION_POINTER_UP)next=changed<0?ACTION_MOVE:count==1?(masked==ACTION_POINTER_DOWN?ACTION_DOWN:ACTION_UP):masked|(changed<<8);
-        MotionEvent result=obtain(down,time,next,count,props,points,meta,buttons,precisionX,precisionY,device,edge,source,0);result.rawX=rx;result.rawY=ry;return result;
+        MotionEvent result=obtain(down,time,next,count,props,points,meta,buttons,precisionX,precisionY,device,edge,source,flags);result.actionButton=actionButton;result.rawX=rx;result.rawY=ry;return result;
     }
     public void getPointerProperties(int index,PointerProperties out){index(index);out.copyFrom(properties[index]);}
     public void getPointerCoords(int index,PointerCoords out){index(index);out.copyFrom(coords[index]);}

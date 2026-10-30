@@ -5,6 +5,12 @@ import java.util.*;
 
 /** Key values and callback dispatch. Hardware character maps/parcel IPC are separate. */
 public class KeyEvent extends InputEvent implements Parcelable {
+    public static String metaStateToString(int state){
+        String[] names={"META_SHIFT_ON","META_ALT_ON","META_SYM_ON","META_FUNCTION_ON","META_ALT_LEFT_ON","META_ALT_RIGHT_ON","META_SHIFT_LEFT_ON","META_SHIFT_RIGHT_ON","META_CAP_LOCKED","META_ALT_LOCKED","META_SYM_LOCKED",null,"META_CTRL_ON","META_CTRL_LEFT_ON","META_CTRL_RIGHT_ON",null,"META_META_ON","META_META_LEFT_ON","META_META_RIGHT_ON",null,"META_CAPS_LOCK_ON","META_NUM_LOCK_ON","META_SCROLL_LOCK_ON"};
+        if(state==0)return "0";StringBuilder out=new StringBuilder();
+        for(int bit=0;bit<32;bit++)if((state&(1<<bit))!=0){if(out.length()!=0)out.append('|');out.append(bit<names.length&&names[bit]!=null?names[bit]:String.format(java.util.Locale.ROOT,"0x%08x",1<<bit));}
+        return out.toString();
+    }
     public static int getDeadChar(int accent,int character){return KeyCharacterMap.getDeadChar(accent,character);}
     // Public constant names/values follow the stock Android SDK 35 API metadata.
     public static final int ACTION_DOWN = 0, ACTION_MULTIPLE = 2, ACTION_UP = 1, FLAG_CANCELED = 32;

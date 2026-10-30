@@ -28,7 +28,7 @@ public final class MultiTouchFixture {
   expected(left,"0:0:1:3@20","5:1:2:3@20:9@120","6:0:2:3@20:9@120","1:0:1:9@120");check(right.events.isEmpty(),"Unsplit pointer changed child");
   left.events.clear();right.events.clear();root.setMotionEventSplittingEnabled(true);
   send(root,0,3);send(root,5|(1<<8),3,9);left.setVisibility(View.INVISIBLE);send(root,2,3,9);send(root,3,3,9);
-  expected(left,"0:0:1:3@20","2:0:1:3@20","2:0:1:3@20","3:0:1:3@20");expected(right,"0:0:1:9@20","2:0:1:9@20","3:0:1:9@20");
+  expected(left,"0:0:1:3@20","2:0:1:3@20","3:0:1:3@20");expected(right,"0:0:1:9@20","2:0:1:9@20","3:0:1:9@20"); // Hiding cancels immediately; subsequent moves belong only to the visible target.
   left.setVisibility(View.VISIBLE);left.events.clear();right.events.clear();send(root,0,3);send(root,5|(1<<8),3,9);root.intercept=true;send(root,2,3,9);check(root.own>0,"Intercept not delivered to parent");send(root,3,3,9);root.intercept=false;
   check(left.events.get(left.events.size()-1).startsWith("3:"),"Left not cancelled");check(right.events.get(right.events.size()-1).startsWith("3:"),"Right not cancelled");
   left.events.clear();right.events.clear();right.setVisibility(View.INVISIBLE);left.layout(0,0,200,100);send(root,0,3);send(root,5|(1<<8),3,9);send(root,6|(1<<8),3,9);send(root,1,3);expected(left,"0:0:1:3@20","5:1:2:3@20:9@120","6:1:2:3@20:9@120","1:0:1:3@20");check(right.events.isEmpty(),"Hidden target received pointers");

@@ -31,6 +31,22 @@ public final class KeyboardSmoke {
             group.setTouchscreenBlocksFocus(false);check(child.requestFocus(),"disable blocking restores ordinary focus");
         }finally{shiraz.runtime.HostInput.updateTouchscreen(false);}
     }
+    private static void tabNavigation(ContextWrapper context){
+        Probe activity=new Probe();android.widget.FrameLayout root=new android.widget.FrameLayout(context),blocked=new android.widget.FrameLayout(context);
+        View first=new View(context),hidden=new View(context),disabled=new View(context),last=new View(context),nested=new View(context);
+        for(View v:new View[]{first,hidden,disabled,last,nested})v.setFocusable(true);
+        root.addView(first);root.addView(hidden);root.addView(disabled);root.addView(blocked);blocked.addView(nested);root.addView(last);
+        hidden.setVisibility(View.GONE);disabled.setEnabled(false);blocked.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);activity.setContentView(root);
+        KeyEvent tab=new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_TAB),back=new KeyEvent(1,2,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_TAB,0,KeyEvent.META_SHIFT_ON);
+        first.requestFocus();check(activity.getWindow().shirazDispatchKeyEvent(tab)&&last.hasFocus(),"Tab skips hidden disabled and blocked descendants");
+        check(activity.getWindow().shirazDispatchKeyEvent(back)&&first.hasFocus(),"Shift Tab reverses traversal");
+        check(activity.getWindow().shirazDispatchKeyEvent(back)&&last.hasFocus(),"reverse traversal wraps");
+        check(activity.getWindow().shirazDispatchKeyEvent(tab)&&first.hasFocus(),"forward traversal wraps");
+        first.setOnKeyListener(new View.OnKeyListener(){public boolean onKey(View v,int code,KeyEvent e){return true;}});
+        check(activity.getWindow().shirazDispatchKeyEvent(tab)&&first.hasFocus(),"consumed Tab does not move focus");first.setOnKeyListener(null);
+        check(!activity.getWindow().shirazDispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_TAB))&&first.hasFocus(),"Tab release does not navigate");
+        check(!activity.getWindow().shirazDispatchKeyEvent(new KeyEvent(1,2,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_TAB,0,KeyEvent.META_CTRL_ON)),"Ctrl Tab remains app owned");
+    }
     private static void clusters(ContextWrapper context){
         Activity activity=new Activity(){public android.content.res.Resources.Theme getTheme(){return android.content.res.Resources.getSystem().newTheme();}};android.widget.FrameLayout root=new android.widget.FrameLayout(context),a=new android.widget.FrameLayout(context),b=new android.widget.FrameLayout(context),nested=new android.widget.FrameLayout(context);
         a.setKeyboardNavigationCluster(true);b.setKeyboardNavigationCluster(true);nested.setKeyboardNavigationCluster(true);a.setId(11);b.setId(12);a.layout(0,0,100,100);b.layout(100,0,200,100);
@@ -93,7 +109,7 @@ public final class KeyboardSmoke {
             public android.content.res.Resources.Theme getTheme(){return getResources().newTheme();}
         };
         android.app.Dialog dialog=new android.app.Dialog(dialogContext);
-        android.widget.EditText field=new android.widget.EditText(dialogContext);dialog.setContentView(field);dialog.show();field.requestFocus();shiraz.runtime.DialogOverlay.windowFocus(null,true);
+        android.widget.EditText field=new android.widget.EditText(dialogContext);dialog.setContentView(field);dialog.show();shiraz.runtime.DialogOverlay.prepare(360,640);field.requestFocus();shiraz.runtime.DialogOverlay.windowFocus(null,true);
         check(visible[0],"new focused editor dialog requests keyboard without explicit show");
         for(int i=0;i<3;i++){
             dialog.hide();imm.shirazCheckEditor();check(!visible[0],"hidden dialog releases keyboard");
@@ -103,7 +119,7 @@ public final class KeyboardSmoke {
         check(field.hasFocus()&&!visible[0],"always-hidden soft input policy respected on reshow");
         dialog.dismiss();imm.shirazCheckEditor();
         android.app.Dialog replacement=new android.app.Dialog(dialogContext);android.widget.EditText replacementField=new android.widget.EditText(dialogContext);
-        replacement.setContentView(replacementField);replacement.show();replacementField.requestFocus();shiraz.runtime.DialogOverlay.windowFocus(null,true);
+        replacement.setContentView(replacementField);replacement.show();shiraz.runtime.DialogOverlay.prepare(360,640);replacementField.requestFocus();shiraz.runtime.DialogOverlay.windowFocus(null,true);
         check(visible[0],"fresh dialog after dismissal requests keyboard");replacement.dismiss();imm.shirazCheckEditor();
 
 
@@ -119,7 +135,7 @@ public final class KeyboardSmoke {
         KeyEvent event=new KeyEvent(0,0,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_A,0,KeyEvent.META_SHIFT_ON);check(event.getUnicodeChar()=='A'&&event.getDisplayLabel()=='A'&&event.isPrintingKey(),"KeyEvent character-map delegation");
     }
     public static void main(String[] args) {android.os.Looper.prepareMainLooper();characterMap();
-        ContextWrapper context = new ContextWrapper(null); KeyboardFixture.stateChecks(context);clusters(context);touchFocus();
+        ContextWrapper context = new ContextWrapper(null); KeyboardFixture.stateChecks(context);clusters(context);tabNavigation(context);touchFocus();
         Probe activity = new Probe(); View content = new View(context); content.setFocusable(true); activity.setContentView(content);
         final int[] intercepted = {0};
         content.setOnKeyListener(new View.OnKeyListener() { public boolean onKey(View view, int code, KeyEvent event) { ++intercepted[0]; return true; } });

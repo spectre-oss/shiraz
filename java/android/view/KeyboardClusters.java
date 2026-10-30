@@ -28,5 +28,24 @@ final class KeyboardClusters {
   View preferred=defaultFocus(root,outside,0);if(preferred!=null&&preferred.requestFocus(direction))return true;return outside?outsideFocus(root,direction,0):root.requestFocus(direction);
  }
  private static boolean outsideFocus(View root,int direction,int depth){if(depth>64)throw new IllegalStateException("Keyboard focus hierarchy limit");if(!visible(root)||!root.isEnabled()||root.isKeyboardNavigationCluster())return false;ArrayList<View> list=children(root);if(!forward(direction))Collections.reverse(list);for(View child:list)if(outsideFocus(child,direction,depth+1))return true;return root.isFocusable()&&(root instanceof ViewGroup?((ViewGroup)root).requestOwnFocus(direction,null):root.requestFocus(direction));}
- static boolean key(View root,KeyEvent event){if(root==null||event.getAction()!=KeyEvent.ACTION_DOWN||event.getKeyCode()!=KeyEvent.KEYCODE_TAB)return false;int direction;if(event.hasModifiers(KeyEvent.META_META_ON))direction=View.FOCUS_FORWARD;else if(event.hasModifiers(KeyEvent.META_META_ON|KeyEvent.META_SHIFT_ON))direction=View.FOCUS_BACKWARD;else return false;View focus=root.findFocus();View target=search(focus==null?root:focus,null,direction);if(target==null)return false;if(target!=root)return restore(target,direction,false);if(restore(root,direction,true))return true;target=search(root,null,direction);return target!=null&&target!=root&&restore(target,direction,false);}
+ private static void tabStops(View view,List<View> values,int depth){
+  if(depth>64||values.size()>=4096)throw new IllegalStateException("Keyboard focus hierarchy limit");
+  if(!visible(view))return;
+  ViewGroup group=view instanceof ViewGroup?(ViewGroup)view:null;
+  int policy=group==null?ViewGroup.FOCUS_BEFORE_DESCENDANTS:group.getDescendantFocusability();
+  boolean own=view.isFocusable()&&view.isEnabled()&&touchEligible(view);
+  if(own&&policy!=ViewGroup.FOCUS_AFTER_DESCENDANTS)values.add(view);
+  int before=values.size();
+  if(policy!=ViewGroup.FOCUS_BLOCK_DESCENDANTS)for(View child:children(view))tabStops(child,values,depth+1);
+  if(own&&policy==ViewGroup.FOCUS_AFTER_DESCENDANTS&&values.size()==before)values.add(view);
+ }
+ private static boolean tab(View root,boolean forward){
+  ArrayList<View> values=new ArrayList<View>();tabStops(root,values,0);
+  if(values.isEmpty())return false;
+  View current=root.findFocus();int index=values.indexOf(current),step=forward?1:-1;
+  if(index<0)index=forward?-1:values.size();
+  for(int i=0;i<values.size();i++){index=(index+step+values.size())%values.size();View target=values.get(index);if(target!=current&&target.requestFocus(forward?View.FOCUS_FORWARD:View.FOCUS_BACKWARD))return true;}
+  return false;
+ }
+ static boolean key(View root,KeyEvent event){if(root==null||event.getAction()!=KeyEvent.ACTION_DOWN||event.getKeyCode()!=KeyEvent.KEYCODE_TAB)return false;if(event.hasNoModifiers())return tab(root,true);if(event.hasModifiers(KeyEvent.META_SHIFT_ON))return tab(root,false);int direction;if(event.hasModifiers(KeyEvent.META_META_ON))direction=View.FOCUS_FORWARD;else if(event.hasModifiers(KeyEvent.META_META_ON|KeyEvent.META_SHIFT_ON))direction=View.FOCUS_BACKWARD;else return false;View focus=root.findFocus();View target=search(focus==null?root:focus,null,direction);if(target==null)return false;if(target!=root)return restore(target,direction,false);if(restore(root,direction,true))return true;target=search(root,null,direction);return target!=null&&target!=root&&restore(target,direction,false);}
 }

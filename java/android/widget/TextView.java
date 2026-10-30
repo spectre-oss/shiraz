@@ -119,6 +119,8 @@ public class TextView extends View {
     private final ArrayList<Integer> lineStarts=new ArrayList<Integer>();
     private int renderOffset;
     private boolean cursorVisible=true;
+    private Drawable cursorDrawable=new android.graphics.drawable.ColorDrawable(0xff000000);
+    private boolean defaultCursorDrawable=true;
     private int inputType=this instanceof EditText?InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE:InputType.TYPE_NULL;
     private android.text.method.KeyListener keyListener=this instanceof EditText?new shiraz.runtime.TextKeyListener(inputType):null;
     public final android.text.method.KeyListener getKeyListener(){return keyListener;}
@@ -151,9 +153,9 @@ public class TextView extends View {
     public void setInputType(int value){
         int kind=value&InputType.TYPE_MASK_CLASS,variation=value&InputType.TYPE_MASK_VARIATION;
         boolean numeric=kind==InputType.TYPE_CLASS_NUMBER;
-        if(value!=0&&!numeric&&(kind!=InputType.TYPE_CLASS_TEXT||(variation&15)!=0||variation>0xe0||(value&~0xff0ff)!=0))throw new UnsupportedOperationException("Input type requires an unsupported key listener");
+        if(value!=0&&!numeric&&((kind!=InputType.TYPE_CLASS_TEXT&&kind!=0)||(variation&15)!=0||variation>0xe0||(value&~0xff0ff)!=0))throw new UnsupportedOperationException("Input type requires an unsupported key listener");
         boolean masksText=numeric ? variation==InputType.TYPE_NUMBER_VARIATION_PASSWORD
-                : (variation==InputType.TYPE_TEXT_VARIATION_PASSWORD||variation==InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
+                : kind==InputType.TYPE_CLASS_TEXT&&(variation==InputType.TYPE_TEXT_VARIATION_PASSWORD||variation==InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
         inputType=value;keyListener=value==0?null:numeric?android.text.method.DigitsKeyListener.getInstance((value&InputType.TYPE_NUMBER_FLAG_SIGNED)!=0,(value&InputType.TYPE_NUMBER_FLAG_DECIMAL)!=0):new shiraz.runtime.TextKeyListener(value);if(text instanceof Editable)configureFilters((Editable)text);
         if(value!=0){if(!(text instanceof Editable))setText(text,BufferType.EDITABLE);setSingleLine(numeric||(value&InputType.TYPE_TEXT_FLAG_MULTI_LINE)==0);}
         if(masksText)setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());else if(transformation instanceof android.text.method.PasswordTransformationMethod)setTransformationMethod(null);
@@ -451,9 +453,9 @@ public class TextView extends View {
     public int getTotalPaddingBottom(){return getCompoundPaddingBottom();}
     public int getTotalPaddingStart(){return getCompoundPaddingStart();}
     public int getTotalPaddingEnd(){return getCompoundPaddingEnd();}
-    @Override protected boolean verifyDrawable(Drawable d){return super.verifyDrawable(d)||d!=null&&(d==compoundLeft||d==compoundRight||d==compoundTop||d==compoundBottom||d==compoundStart||d==compoundEnd);}
-    @Override protected void onVisibilityChanged(View changed,int visibility){super.onVisibilityChanged(changed,visibility);for(Drawable d:getCompoundDrawables())if(d!=null)d.setVisible(isShown(),false);}
-    @Override public void jumpDrawablesToCurrentState(){super.jumpDrawablesToCurrentState();for(Drawable d:getCompoundDrawables())if(d!=null)d.jumpToCurrentState();}
+    @Override protected boolean verifyDrawable(Drawable d){return super.verifyDrawable(d)||d!=null&&(d==cursorDrawable||d==compoundLeft||d==compoundRight||d==compoundTop||d==compoundBottom||d==compoundStart||d==compoundEnd);}
+    @Override protected void onVisibilityChanged(View changed,int visibility){super.onVisibilityChanged(changed,visibility);if(cursorDrawable!=null)cursorDrawable.setVisible(isShown()&&cursorVisible,false);for(Drawable d:getCompoundDrawables())if(d!=null)d.setVisible(isShown(),false);}
+    @Override public void jumpDrawablesToCurrentState(){super.jumpDrawablesToCurrentState();if(cursorDrawable!=null)cursorDrawable.jumpToCurrentState();for(Drawable d:getCompoundDrawables())if(d!=null)d.jumpToCurrentState();}
     private void drawCompound(Canvas canvas,Drawable d,int x,int y){if(d==null)return;int save=canvas.save();try{d.setLayoutDirection(getLayoutDirection());canvas.translate(x+getScrollX(),y+getScrollY());d.draw(canvas);}finally{canvas.restoreToCount(save);}}
     private void drawCompounds(Canvas canvas){int l=getCompoundPaddingLeft(),r=getWidth()-getCompoundPaddingRight(),t=getCompoundPaddingTop(),b=getHeight()-getCompoundPaddingBottom();Drawable left=leftDrawable(),right=rightDrawable();drawCompound(canvas,left,getPaddingLeft(),t+(b-t-dh(left))/2);drawCompound(canvas,right,getWidth()-getPaddingRight()-dw(right),t+(b-t-dh(right))/2);drawCompound(canvas,compoundTop,l+(r-l-dw(compoundTop))/2,getPaddingTop());drawCompound(canvas,compoundBottom,l+(r-l-dw(compoundBottom))/2,getHeight()-getPaddingBottom()-dh(compoundBottom));}
     private int available(int width){return dimension((long)width-getCompoundPaddingLeft()-getCompoundPaddingRight());}
@@ -591,8 +593,16 @@ public class TextView extends View {
     public int getLineCount(){return lines.size();}
     public int getLineHeight(){if(hasMetrics()){ensure(available(getWidth()));return lineStep;}Paint.FontMetricsInt m=paint.getFontMetricsInt();return Math.max(0,Math.round((m.descent-m.ascent)*spacingMult+spacingAdd));}
     @Override public int getBaseline(){ensure(available(getMeasuredWidth()));return getCompoundPaddingTop()+verticalOffset(getMeasuredHeight())+firstBaseline;}
-    @Override protected void drawableStateChanged(){super.drawableStateChanged();for(Drawable d:getCompoundDrawables())if(d!=null&&d.isStateful())d.setState(getDrawableState());applyCompoundTint();invalidate();}
-    public void setCursorVisible(boolean visible){cursorVisible=visible;invalidate();}
+    @Override protected void drawableStateChanged(){super.drawableStateChanged();if(cursorDrawable!=null&&cursorDrawable.isStateful())cursorDrawable.setState(getDrawableState());for(Drawable d:getCompoundDrawables())if(d!=null&&d.isStateful())d.setState(getDrawableState());applyCompoundTint();invalidate();}
+    public Drawable getTextCursorDrawable(){if(cursorDrawable!=null)cursorDrawable.setCallback(this);return cursorDrawable;}
+    public void setTextCursorDrawable(int resource){setTextCursorDrawable(resource==0?null:getResources().getDrawable(resource,getContext().getTheme()));}
+    public void setTextCursorDrawable(Drawable drawable){
+        Drawable old=cursorDrawable;cursorDrawable=drawable;defaultCursorDrawable=false;
+        if(old!=null&&old!=drawable&&!verifyDrawable(old)){old.setCallback(null);unscheduleDrawable(old);}
+        if(drawable!=null){drawable.setCallback(this);drawable.setState(getDrawableState());drawable.setVisible(getVisibility()==VISIBLE,false);}
+        invalidate();
+    }
+    public void setCursorVisible(boolean visible){cursorVisible=visible;if(cursorDrawable!=null)cursorDrawable.setVisible(isShown()&&visible,false);invalidate();}
     public boolean isCursorVisible(){return cursorVisible;}
     private float lineX(int line){int alignment=Gravity.getAbsoluteGravity(gravity,getLayoutDirection())&Gravity.HORIZONTAL_GRAVITY_MASK;float x=getCompoundPaddingLeft();if(alignment==Gravity.RIGHT)x+=layoutWidth-advances.get(line);else if(alignment==Gravity.CENTER_HORIZONTAL)x+=(layoutWidth-advances.get(line))/2;return x;}
     public int getOffsetForPosition(float x,float y){
@@ -608,7 +618,7 @@ public class TextView extends View {
         if(!(text instanceof Editable)||!isFocused())return;int a=getSelectionStart(),b=getSelectionEnd();if(a<0||b<0)return;
         String value=lines.get(line);int start=lineStarts.get(line),end=start+value.length();Paint marker=new Paint();Paint.FontMetricsInt metrics=(uniformMetrics()?linePaint(line):paint).getFontMetricsInt();
         if(a!=b){int left=Math.max(start,Math.min(a,b)),right=Math.min(end,Math.max(a,b));if(left<right){marker.setColor(highlightColor);if(!hasMetrics()||uniformMetrics()){float[] ranges=new shiraz.runtime.TextGeometry(value,linePaint(line),lineBaseLevels.get(line)).ranges(left-start,right-start);for(int i=0;i<ranges.length;i+=2)canvas.drawRect(x+ranges[i],baseline+metrics.ascent,x+ranges[i+1],baseline+metrics.descent,marker);}else canvas.drawRect(x+advance(value,0,left-start,start),baseline+metrics.ascent,x+advance(value,0,right-start,start),baseline+metrics.descent,marker);}}
-        else if(cursorVisible&&a>=start&&a<=end&&(a!=end||line+1==lines.size()||lineStarts.get(line+1)>end)){float at=x+(hasMetrics()&&!uniformMetrics()?advance(value,0,a-start,start):new shiraz.runtime.TextGeometry(value,linePaint(line),lineBaseLevels.get(line)).caret(a-start));marker.setColor(getCurrentTextColor());canvas.drawRect(at,baseline+metrics.ascent,at+1,baseline+metrics.descent,marker);}
+        else if(cursorVisible&&a>=start&&a<=end&&(a!=end||line+1==lines.size()||lineStarts.get(line+1)>end)){float at=x+(hasMetrics()&&!uniformMetrics()?advance(value,0,a-start,start):new shiraz.runtime.TextGeometry(value,linePaint(line),lineBaseLevels.get(line)).caret(a-start));if(cursorDrawable!=null){if(defaultCursorDrawable)((android.graphics.drawable.ColorDrawable)cursorDrawable).setColor(getCurrentTextColor());cursorDrawable.setCallback(this);int width=Math.max(1,cursorDrawable.getIntrinsicWidth());int left=Math.round(at);cursorDrawable.setBounds(left,Math.round(baseline+metrics.ascent),left+width,Math.round(baseline+metrics.descent));cursorDrawable.draw(canvas);}}
     }
     private CharSequence ellipsizedSpans(String original,int origin,String result,int left,int right){
         if(!displayed().equals(text.toString())||!(text instanceof Spanned))return result;
