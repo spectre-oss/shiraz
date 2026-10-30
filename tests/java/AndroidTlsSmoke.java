@@ -38,7 +38,24 @@ public final class AndroidTlsSmoke {
   KeyStore trust=KeyStore.getInstance("BKS");trust.load(null,null);
   try(InputStream input=new FileInputStream(args[1])){trust.setCertificateEntry("fixture",CertificateFactory.getInstance("X.509").generateCertificate(input));}
   TrustManagerFactory factory=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());factory.init(trust);
-  SSLContext context=SSLContext.getInstance("TLS");TrustManager[] managers=factory.getTrustManagers();context.init(null,managers,null);
+  final X509TrustManager actual=(X509TrustManager)factory.getTrustManagers()[0];
+  final int[] trustCallbacks={0};
+  TrustManager[] managers={new X509TrustManager(){
+   public java.security.cert.X509Certificate[] getAcceptedIssuers(){return actual.getAcceptedIssuers();}
+   public void checkClientTrusted(java.security.cert.X509Certificate[] chain,String auth)throws java.security.cert.CertificateException{actual.checkClientTrusted(chain,auth);}
+   public void checkServerTrusted(java.security.cert.X509Certificate[] chain,String auth)throws java.security.cert.CertificateException{
+    if(chain.length!=2||chain[0].getBasicConstraints()!=-1||chain[1].getBasicConstraints()<0)throw new java.security.cert.CertificateException("Expected leaf then intermediate");
+    actual.checkServerTrusted(chain,auth);trustCallbacks[0]++;
+   }
+  }};
+  SSLContext context=SSLContext.getInstance("TLS");context.init(null,managers,null);
+  final boolean[] rejected={false};SSLContext rejecting=SSLContext.getInstance("TLS");
+  rejecting.init(null,new TrustManager[]{new X509TrustManager(){
+   public java.security.cert.X509Certificate[] getAcceptedIssuers(){return actual.getAcceptedIssuers();}
+   public void checkClientTrusted(java.security.cert.X509Certificate[] chain,String auth)throws java.security.cert.CertificateException{throw new java.security.cert.CertificateException("fixture rejection");}
+   public void checkServerTrusted(java.security.cert.X509Certificate[] chain,String auth)throws java.security.cert.CertificateException{rejected[0]=true;throw new java.security.cert.CertificateException("fixture rejection");}
+  }},null);
+  try(OpenSSLSocketImpl socket=socket(rejecting,"localhost",port)){try{socket.startHandshake();throw new AssertionError("Custom trust rejection ignored");}catch(SSLException expected){check(rejected[0],"custom rejection callback ran");}}
   SSLContext foreignContext=SSLContext.getInstance("TLS","wolfJSSE");foreignContext.init(null,null,null);
   try(SSLSocket foreign=(SSLSocket)foreignContext.getSocketFactory().createSocket()){
    check(!android.net.ssl.SSLSockets.isSupportedSocket(foreign),"foreign provider not advertised as platform");
@@ -82,6 +99,7 @@ public final class AndroidTlsSmoke {
    System.out.println("EXACT_APK_TLS_VERIFIED");
   }
   check(!context.getClientSessionContext().getIds().hasMoreElements(),"no client session is cached after mixed ALPN connections");
+  check(trustCallbacks[0]>=7,"custom trust manager was invoked for real handshakes");
   try{context.getClientSessionContext().setSessionCacheSize(1);throw new AssertionError("Unsafe resumption reenabled");}catch(UnsupportedOperationException expected){}
   System.out.println("ANDROID_TLS_BRIDGE_VERIFIED");
  }

@@ -92,6 +92,9 @@ PATCHES = {
             'libcore/ojluni/src/main/java/javax/net/ssl/SSLParameters.java': '5805b2daa1cb91329268aca39b6c9666fcda73d475d9ffd7a470835a75a90410',
             'libcore/ojluni/src/main/java/javax/net/ssl/SSLSocket.java': '18d505f4345953e2a66c964afd31338e515379a99613cdf095e6587848e2a0e6',
         }),
+        ('art-tls-peer-chain-order.patch', {
+            'external/wolfssljni/src/java/com/wolfssl/WolfSSLX509StoreCtx.java': 'df67d2ba23f85e35ffd144369f6219ff8061776380de53fa8b8a09149499c7a2',
+        }),
         ('art-tls-cache-lifetime.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLAuthStore.java': 'c21a8c88b6a8d8af08d29f574fc80339581045089d0bf76a024cd706ef04efd2',
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLImplementSSLSession.java': 'ac4558a6df6c22bf909f9399660a6679b31889e434fe42d6279ce4f53d5a446b',

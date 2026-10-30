@@ -50,8 +50,32 @@ if not vm.is_file():
     vm = HOST / 'bin/dalvikvm'
 temporary = tempfile.TemporaryDirectory(dir=work)
 tls_dir = Path(temporary.name)
-key, cert = tls_dir/'key.pem', tls_dir/'cert.pem'
-subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(key),'-out',str(cert),'-days','1','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+key, cert = tls_dir/'leaf.key', tls_dir/'root.pem'
+def openssl(*arguments):
+    subprocess.run(['openssl', *map(str, arguments)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# A root -> intermediate -> leaf chain exercises the Java trust callback;
+# a self-signed fixture alone cannot catch reversed native chain ordering.
+openssl('req','-x509','-newkey','rsa:2048','-nodes','-keyout',tls_dir/'root.key',
+        '-out',cert,'-days','1','-subj','/CN=Shiraz TLS fixture root',
+        '-addext','basicConstraints=critical,CA:TRUE,pathlen:1',
+        '-addext','keyUsage=critical,keyCertSign,cRLSign')
+for name, issuer, subject, extensions in (
+    ('intermediate', 'root', '/CN=Shiraz TLS fixture intermediate',
+     'basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n'),
+    ('leaf', 'intermediate', '/CN=localhost',
+     'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n'),
+):
+    openssl('req','-new','-newkey','rsa:2048','-nodes','-keyout',tls_dir/(name+'.key'),
+            '-out',tls_dir/(name+'.csr'),'-subj',subject)
+    extension_file=tls_dir/(name+'.ext')
+    extension_file.write_text(extensions)
+    openssl('x509','-req','-in',tls_dir/(name+'.csr'),'-CA',tls_dir/(issuer+'.pem'),
+            '-CAkey',tls_dir/(issuer+'.key'),'-CAcreateserial','-days','1',
+            '-out',tls_dir/(name+'.pem'),'-extfile',extension_file)
+chain=tls_dir/'chain.pem'
+chain.write_bytes((tls_dir/'leaf.pem').read_bytes()+(tls_dir/'intermediate.pem').read_bytes())
 class TlsServer(http.server.ThreadingHTTPServer):
     handshake_errors=[]
     def get_request(self):
@@ -62,7 +86,7 @@ class TlsServer(http.server.ThreadingHTTPServer):
 
 tls_server = TlsServer(('127.0.0.1',0),Handler)
 ssl_context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ssl_context.load_cert_chain(cert,key)
+ssl_context.load_cert_chain(chain,key)
 ssl_context.set_alpn_protocols(['http/1.1'])
 sni_names=[]
 ssl_context.set_servername_callback(lambda sock,name,ctx: sni_names.append(name))
