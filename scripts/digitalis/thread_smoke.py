@@ -24,7 +24,8 @@ def main():
     classes.mkdir(parents=True, exist_ok=True)
     (work/'android-data').mkdir(exist_ok=True)
     library = work/'libthread-fixture.so'
-    subprocess.run([args.cc, '--target=aarch64-linux-android28', '-fno-emulated-tls',
+    subprocess.run([args.cc, '--target=aarch64-linux-android28', '-fno-emulated-tls', '-ffreestanding',
+                    '-I'+str(ROOT/'context/art_standalone/libnativehelper/include/nativehelper'),
                     '-fPIC', '-shared', '-nostdlib', '-fuse-ld=lld', '-Wl,--no-undefined',
                     str(ROOT/'tests/native/digitalis_threads.c'), '-L'+str(args.guest_libraries),
                     '-lc', '-o', str(library)], check=True)

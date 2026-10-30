@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include <jni.h>
+extern void* malloc(unsigned long);
+extern void free(void*);
 typedef unsigned long pthread_t;
 extern int pthread_create(pthread_t*,const void*,void*(*)(void*),void*);
 extern int pthread_join(pthread_t,void**);
@@ -109,8 +112,71 @@ static int naming_test(void) {
   close(ready[0]);close(ready[1]);close(proceed[0]);close(proceed[1]);
   return ok;
 }
-int Java_shiraz_ThreadSmoke_run(void* env,void* klass) {
-  (void)env;(void)klass;
+struct SharedVmWork {
+  unsigned references;
+  int proceed;
+  JavaVM* vm;
+  unsigned long marker;
+  int* destroyed;
+};
+static void release_vm_work(struct SharedVmWork* work) {
+  if(__atomic_sub_fetch(&work->references,1,__ATOMIC_ACQ_REL)==0) {
+    ++*work->destroyed;
+    free(work);
+  }
+}
+static void* vm_worker(void* argument) {
+  struct SharedVmWork* work=argument;
+  char signal;
+  int ok=read(work->proceed,&signal,1)==1 && work->marker==0x123456789abcdef0UL;
+  JNIEnv* env=0;
+  JavaVM* vm=work->vm;
+  JavaVMAttachArgs args={JNI_VERSION_1_2,"guest-vm-worker",0};
+  if(ok && (*vm)->AttachCurrentThread(vm,&env,&args)==JNI_OK) {
+    JNIEnv* same=0;
+    JavaVM* returned=0;
+    ok=(*vm)->GetEnv(vm,(void**)&same,JNI_VERSION_1_2)==JNI_OK && same==env &&
+        (*env)->GetJavaVM(env,&returned)==JNI_OK && returned==vm;
+    jstring value=(*env)->NewStringUTF(env,"thread handoff");
+    ok=ok && value && (*env)->GetStringUTFLength(env,value)==14;
+    if(value)(*env)->DeleteLocalRef(env,value);
+    ok=(*vm)->DetachCurrentThread(vm)==JNI_OK && ok;
+  } else ok=0;
+  release_vm_work(work);
+  return (void*)(unsigned long)(ok?42:1);
+}
+// Keep the worker's ownership alive while the parent releases its reference
+// and churns allocations. Exercise the real JavaVM bridge from a guest thread.
+static int vm_handoff_test(JNIEnv* env) {
+  JavaVM* vm=0;
+  if((*env)->GetJavaVM(env,&vm)!=JNI_OK || !vm)return 0;
+  for(int iteration=0;iteration<8;++iteration) {
+    int fds[2],destroyed=0;
+    if(pipe(fds))return 0;
+    struct SharedVmWork* work=malloc(sizeof(*work));
+    if(!work){close(fds[0]);close(fds[1]);return 0;}
+    *work=(struct SharedVmWork){2,fds[0],vm,0x123456789abcdef0UL,&destroyed};
+    pthread_t thread;
+    if(pthread_create(&thread,0,vm_worker,work)) {
+      free(work);close(fds[0]);close(fds[1]);return 0;
+    }
+    release_vm_work(work);
+    for(int i=0;i<32;++i) {
+      struct SharedVmWork* other=malloc(sizeof(*other));
+      if(other){other->marker=0;free(other);}
+    }
+    int ok=write(fds[1],"x",1)==1;
+    close(fds[1]);
+    void* result=0;
+    ok=pthread_join(thread,&result)==0 && ok;
+    close(fds[0]);
+    if(!ok || result!=(void*)42 || destroyed!=1)return 0;
+  }
+  return 1;
+}
+int Java_shiraz_ThreadSmoke_run(JNIEnv* env,jclass klass) {
+  (void)klass;
+  if(!vm_handoff_test(env))return -90;
   int jumps=jump_test();if(jumps!=1)return jumps;
   if(!naming_test()) return -7;
   struct Work work[4]={0}; pthread_t threads[4];
