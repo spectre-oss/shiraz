@@ -155,23 +155,38 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
     public void onConfigurationChanged(android.content.res.Configuration configuration) {if(fragments!=null)fragments.configuration(configuration); }
     public void onLowMemory() {if(fragments!=null)fragments.lowMemory(); }
     public void onTrimMemory(int level) {if(fragments!=null)fragments.trimMemory(level); }
-    protected void onCreate(Bundle savedInstanceState) { }
+    private final Application.LifecycleCallbacks lifecycleCallbacks=new Application.LifecycleCallbacks();
+    public void registerActivityLifecycleCallbacks(Application.ActivityLifecycleCallbacks callback){lifecycleCallbacks.add(callback);}
+    public void unregisterActivityLifecycleCallbacks(Application.ActivityLifecycleCallbacks callback){lifecycleCallbacks.remove(callback);}
+    public final void shirazDispatchLifecycle(int kind,int phase,Bundle state){
+        android.content.Context root=this;
+        while(root instanceof android.content.ContextWrapper&&!(root instanceof Application)){root=((android.content.ContextWrapper)root).getBaseContext();if(root==null)break;}
+        android.content.Context context=root==null?null:getApplicationContext();
+        Application app=context instanceof Application?(Application)context:null;
+        boolean appFirst=phase==0||(phase==1&&kind<3);
+        if(appFirst&&app!=null)app.shirazDispatchLifecycle(kind,phase,this,state);
+        lifecycleCallbacks.dispatch(kind,phase,this,state,kind>=3);
+        if(!appFirst&&app!=null)app.shirazDispatchLifecycle(kind,phase,this,state);
+    }
+    protected void onCreate(Bundle savedInstanceState) {shirazDispatchLifecycle(0,1,savedInstanceState);}
+
     protected void onSaveInstanceState(Bundle state) {
         if(state==null)throw new NullPointerException("state");
         if(content!=null){Bundle hierarchy=new Bundle();android.util.SparseArray<android.os.Parcelable> views=new android.util.SparseArray<android.os.Parcelable>();content.saveHierarchyState(views);hierarchy.putSparseParcelableArray("android:views",views);View focused=content.findFocus();if(focused!=null&&focused.getId()!=View.NO_ID)hierarchy.putInt("android:focusedViewId",focused.getId());state.putBundle("android:viewHierarchyState",hierarchy);}
+        shirazDispatchLifecycle(5,1,state);
     }
     protected void onRestoreInstanceState(Bundle state) {
         if(state==null)throw new NullPointerException("state");Bundle hierarchy=state.getBundle("android:viewHierarchyState");
         if(content!=null&&hierarchy!=null){android.util.SparseArray<android.os.Parcelable> views=hierarchy.getSparseParcelableArray("android:views");if(views!=null)content.restoreHierarchyState(views);int focused=hierarchy.getInt("android:focusedViewId",View.NO_ID);View view=focused==View.NO_ID?null:content.findViewById(focused);if(view!=null)view.requestFocus();}
     }
-    protected void onStart() { }
+    protected void onStart() {shirazDispatchLifecycle(1,1,null);}
     protected void onRestart() { }
-    protected void onResume() { }
+    protected void onResume() {shirazDispatchLifecycle(2,1,null);}
     protected void onPostCreate(Bundle state) { }
     protected void onPostResume() { }
-    protected void onPause() { }
-    protected void onStop() { }
-    protected void onDestroy() { }
+    protected void onPause() {shirazDispatchLifecycle(3,1,null);}
+    protected void onStop() {shirazDispatchLifecycle(4,1,null);}
+    protected void onDestroy() {shirazDispatchLifecycle(6,1,null);}
     @Override public Object getSystemService(String name){Object value=super.getSystemService(name);if(LAYOUT_INFLATER_SERVICE.equals(name))((android.view.LayoutInflater)value).setPrivateFactory(this);return value;}
     public View onCreateView(String name,android.content.Context context,android.util.AttributeSet attrs){if("fragment".equals(name))throw new UnsupportedOperationException("Platform fragment inflation is not implemented");return null;}
     public View onCreateView(View parent,String name,android.content.Context context,android.util.AttributeSet attrs){return onCreateView(name,context,attrs);}
@@ -209,6 +224,8 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
     public final void setResult(int code, android.content.Intent data) { resultCode = code; resultData = data; }
     public void startActivityForResult(android.content.Intent intent, int requestCode) { startActivityForResult(intent, requestCode, null); }
     public void startActivityForResult(android.content.Intent intent, int requestCode, Bundle options) {
+        if(intent!=null&&requestCode>=0&&(intent.getFlags()&android.content.Intent.FLAG_ACTIVITY_FORWARD_RESULT)!=0)
+            throw new android.util.AndroidRuntimeException("FORWARD_RESULT cannot be combined with a result request");
         if (options != null && !options.isEmpty()) throw new UnsupportedOperationException("Activity launch options");
         if(requestCode>=0&&shiraz.runtime.HostDocumentPicker.handles(intent)
                 &&(!shiraz.runtime.HostContentPicker.handles(intent)||!shiraz.runtime.HostContentPicker.hasConfiguredFile())){

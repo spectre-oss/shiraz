@@ -27,6 +27,10 @@ public final class ActivityStack implements AutoCloseable {
    if(mode!=0&&intent.getComponent()==null)throw new IllegalArgumentException("Retained launch requires a resolved component");
    // Snapshot before any lifecycle callback; failed copying leaves the old activity untouched.
    Intent snapshot=intent.shirazBroadcastCopy();
+   // The standalone task root has no external result recipient to transfer.
+   // Reject non-root forwarding until result ownership is tracked per launch.
+   if((snapshot.getFlags()&Intent.FLAG_ACTIVITY_FORWARD_RESULT)!=0&&entries.size()>1)
+    throw new UnsupportedOperationException("Forwarding a non-root activity result is not implemented");
    boolean reorder=(snapshot.getFlags()&Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)!=0&&mode!=2;
    if(reorder&&snapshot.getComponent()==null)throw new IllegalArgumentException("Reordering requires a resolved component");
    boolean clearTop=(snapshot.getFlags()&Intent.FLAG_ACTIVITY_CLEAR_TOP)!=0&&!reorder&&snapshot.getComponent()!=null;

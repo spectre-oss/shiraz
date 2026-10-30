@@ -41,7 +41,22 @@ public class ProviderMetadataSmoke {
         if(!attached.grantUriPermissions || attached.applicationInfo.targetSdkVersion!=target)throw new AssertionError("provider facts");
         if(attached.metaData==null || attached.metaData.getInt("fixture.paths")!=2131951616)throw new AssertionError("provider metadata");
     }
+    static void activityBootMatching() throws Exception {
+        Properties facts=new Properties();facts.setProperty("package","org.shiraz.bootfixture");
+        facts.setProperty("sourceDir","/unused/fixture.apk");facts.setProperty("dataDir","/unused/data");
+        facts.setProperty("activity.count","1");facts.setProperty("activity.0.name","org.shiraz.bootfixture.Screen");
+        facts.setProperty("activity.0.directBootAware","true");
+        PackageManager pm=new HostPackageManager(facts,new ContextWrapper(null));
+        ComponentName name=new ComponentName("org.shiraz.bootfixture","org.shiraz.bootfixture.Screen");
+        int auto=PackageManager.MATCH_DIRECT_BOOT_AUTO;
+        if(!pm.getActivityInfo(name,auto).directBootAware || !pm.getActivityInfo(name,auto|PackageManager.MATCH_DIRECT_BOOT_AWARE|PackageManager.MATCH_DIRECT_BOOT_UNAWARE).directBootAware)throw new AssertionError("automatic boot matching");
+        try{pm.getActivityInfo(name,auto|PackageManager.MATCH_DIRECT_BOOT_UNAWARE);throw new AssertionError("explicit boot filter ignored");}catch(PackageManager.NameNotFoundException expected){}
+        facts.setProperty("activity.0.enabled","false");
+        pm=new HostPackageManager(facts,new ContextWrapper(null));
+        try{pm.getActivityInfo(name,auto);throw new AssertionError("disabled activity matched");}catch(PackageManager.NameNotFoundException expected){}
+    }
     public static void main(String[] args)throws Exception {
+        activityBootMatching();
         check(36,null,false);check(16,null,true);check(16,"false",false);check(36,"true",true);
         System.out.println("PROVIDER_METADATA_OK");
     }

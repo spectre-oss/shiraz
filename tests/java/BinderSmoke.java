@@ -89,6 +89,19 @@ public final class BinderSmoke {
   check(dispatch.transact(16,null,null,IBinder.FLAG_ONEWAY)&&calls[0]==1&&!dispatch.transact(15,null,null,0),"Synchronous local dispatch and result");try{dispatch.transact(17,null,null,0);throw new AssertionError("Exception swallowed");}catch(RemoteException expected){check(expected.getMessage().equals("local failure"),"Exception identity");}
   final int[] deaths={0};IBinder.DeathRecipient recipient=new IBinder.DeathRecipient(){public void binderDied(){deaths[0]++;}};binder.linkToDeath(recipient,0);check(binder.unlinkToDeath(recipient,0)&&deaths[0]==0,"No synthetic local death");
   binder.attachInterface(null,null);check(binder.queryLocalInterface("test.local")==null,"Interface replacement");check(!binder.transact(42,null,null,0),"Unknown transaction rejected");
+  Parcel emptyRequest=Parcel.obtain(),emptyReply=Parcel.obtain();
+  try{
+   check(!binder.transact(42,emptyRequest,emptyReply,0),"Unknown transaction stays unhandled");
+   check(emptyReply.dataSize()==0&&emptyReply.readExceptionCode()==0,"Empty exception header");
+   emptyReply.readException();check(emptyReply.dataPosition()==0,"Empty reply cursor unchanged");
+   for(int size=1;size<4;size++){
+    emptyReply.unmarshall(new byte[]{1,2,3},0,size);
+    check(emptyReply.readExceptionCode()==0&&emptyReply.dataPosition()==0,"Partial exception header");
+   }
+   emptyReply.setDataSize(0);emptyReply.writeException(new SecurityException("denied"));emptyReply.setDataPosition(0);
+   try{emptyReply.readException();throw new AssertionError("Security exception swallowed");}
+   catch(SecurityException expected){check("denied".equals(expected.getMessage()),"Preserve remote failure");}
+  }finally{emptyRequest.recycle();emptyReply.recycle();}
   parcelTransactions();
   BinderTransportSmoke.run();
   if(args.length==1)BinderTransportSmoke.crossProcess(args[0]);

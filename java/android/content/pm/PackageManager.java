@@ -28,6 +28,8 @@ public abstract class PackageManager {
     public static final int GET_ACTIVITIES = 1, GET_RECEIVERS = 2, GET_SERVICES = 4, GET_PROVIDERS = 8, GET_INSTRUMENTATION = 0x10, GET_CONFIGURATIONS = 0x4000, GET_GIDS = 0x100;
     public static final int GET_SIGNING_CERTIFICATES = 0x08000000;
     public static final int GET_SIGNATURES = 0x40, GET_META_DATA = 0x80, GET_PERMISSIONS = 0x1000;
+    /** Sentinel selecting the existing user-state matching policy (API 29). */
+    public static final int MATCH_DIRECT_BOOT_AUTO=0x10000000;
     public static final int GET_DISABLED_COMPONENTS=0x200,MATCH_DISABLED_COMPONENTS=0x200,MATCH_DIRECT_BOOT_UNAWARE=0x40000,MATCH_DIRECT_BOOT_AWARE=0x80000;
     public ActivityInfo getReceiverInfo(android.content.ComponentName component,int flags) throws NameNotFoundException {throw new NameNotFoundException(String.valueOf(component));}
     public java.util.List<ResolveInfo> queryIntentContentProviders(android.content.Intent intent,int flags){throw new UnsupportedOperationException("Provider intent resolution");}

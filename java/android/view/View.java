@@ -671,6 +671,8 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public Object getTag(int key){return keyedTags==null?null:keyedTags.get(key);}
     public void setTag(Object value){tag=value;}public Object getTag(){return tag;}
     public void setContentDescription(CharSequence value){description=value;}public CharSequence getContentDescription(){return description;}
+    /** API 29 layout-inspector hook. View-attribute debugging is disabled in this runtime. */
+    public final void saveAttributeDataForStyleable(android.content.Context context,int[] styleable,android.util.AttributeSet attrs,android.content.res.TypedArray values,int defStyleAttr,int defStyleRes) { }
     public Context getContext() { return context; }
     private boolean saveEnabled=true,saveFromParentEnabled=true,stateSuperCalled;
     public void setSaveEnabled(boolean enabled){saveEnabled=enabled;}

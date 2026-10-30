@@ -6,6 +6,14 @@ import org.shiraz.fixture.InsetsFixture;
 public final class InsetsSmoke {
  static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
  public static void main(String[] args) throws Exception {
+  android.os.Looper.prepareMainLooper();
+  WindowManager.LayoutParams attributes=new WindowManager.LayoutParams();
+  check(attributes.layoutInDisplayCutoutMode==WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT,"default cutout policy");
+  attributes.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+  WindowManager.LayoutParams copied=new WindowManager.LayoutParams(attributes);
+  check(copied.layoutInDisplayCutoutMode==attributes.layoutInDisplayCutoutMode&&copied.copyFrom(attributes)==0,"copy cutout policy");
+  attributes.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER;
+  check(copied.copyFrom(attributes)!=0&&copied.layoutInDisplayCutoutMode==attributes.layoutInDisplayCutoutMode,"update cutout policy");
   android.content.Context context=new android.content.ContextWrapper(null);
   WindowInsets empty=new WindowInsets(new Rect());InsetsFixture.checkValues(context,empty);
   check(!empty.isConsumed()&&empty.consumeSystemWindowInsets().isConsumed(),"empty differs from consumed");

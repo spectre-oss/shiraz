@@ -21,7 +21,7 @@ public final class ActivityLaunchResolver {
   Intent snapshot=intent.shirazBroadcastCopy();
   int singleTop=Intent.FLAG_ACTIVITY_SINGLE_TOP;
   int ignored=Intent.FLAG_ACTIVITY_NEW_TASK|0x80000|Intent.FLAG_ACTIVITY_NO_ANIMATION|Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION;
-  int unsupported=snapshot.getFlags()&~(singleTop|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_CLEAR_TOP|ignored);
+  int unsupported=snapshot.getFlags()&~(singleTop|Intent.FLAG_ACTIVITY_FORWARD_RESULT|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_CLEAR_TOP|ignored);
   if(unsupported!=0)throw new UnsupportedOperationException("Activity task flags are not implemented: 0x"+Integer.toHexString(unsupported));
   ComponentName component=snapshot.getComponent();
   if(snapshot.getPackage()!=null&&!packageName.equals(snapshot.getPackage())||component!=null&&!packageName.equals(component.getPackageName()))throw new ActivityNotFoundException("No external activity registry");

@@ -181,7 +181,10 @@ public final class Parcel {
   if(code==0)throw new RuntimeException(exception);
   writeInt(code);writeString(exception.getMessage());
  }
- public final int readExceptionCode(){return readInt();}
+ // Android's native exception-header read returns zero on an incomplete int
+ // without advancing the cursor. An unhandled Binder transaction still returns
+ // false; inspecting its empty reply must not invent a remote exception.
+ public final int readExceptionCode(){live();return dataAvail()<4?0:readInt();}
  public final void readException(){int code=readExceptionCode();if(code!=0)readException(code,readString());}
  public final void readException(int code,String message){
   switch(code){case 0:return;case -1:throw new SecurityException(message);case -3:throw new IllegalArgumentException(message);

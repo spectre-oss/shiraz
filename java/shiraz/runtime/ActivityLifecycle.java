@@ -25,9 +25,9 @@ public final class ActivityLifecycle implements AutoCloseable {
   catch(ReflectiveOperationException error){throw new IllegalStateException("Activity callback unavailable: "+name,error);}
   finally{timing(name,begin);}
  }
- private void dispatch(int kind,Bundle bundle){android.content.Context root=activity;while(root instanceof android.content.ContextWrapper){root=((android.content.ContextWrapper)root).getBaseContext();if(root==null)return;}android.content.Context context=activity.getApplicationContext();if(context instanceof android.app.Application)((android.app.Application)context).shirazDispatchLifecycle(kind,activity,bundle);}
- private void call(String name){invoke(activity,name,new Class<?>[0]);}
- private void state(String name,Bundle bundle){invoke(activity,name,new Class<?>[]{Bundle.class},bundle);if(name.equals("onSaveInstanceState")){activity.shirazSaveFragments(bundle);dispatch(5,bundle);}}
+ private void dispatch(int kind,Bundle bundle){activity.shirazDispatchLifecycle(kind,2,bundle);}
+ private void call(String name){int kind=name.equals("onStart")?1:name.equals("onResume")?2:-1;if(kind>=0)activity.shirazDispatchLifecycle(kind,0,null);invoke(activity,name,new Class<?>[0]);}
+ private void state(String name,Bundle bundle){int kind=name.equals("onCreate")?0:name.equals("onSaveInstanceState")?5:-1;if(kind>=0)activity.shirazDispatchLifecycle(kind,0,bundle);invoke(activity,name,new Class<?>[]{Bundle.class},bundle);if(kind==5){activity.shirazSaveFragments(bundle);dispatch(5,bundle);}}
  public Activity current(){thread();if(activity==null)throw new IllegalStateException("No live activity");return activity;}
  private void launch(Bundle state,Object retained,android.content.Intent intent,PermissionRequests permissions){
   long begin=TRACE?System.nanoTime():0;
@@ -37,13 +37,13 @@ public final class ActivityLifecycle implements AutoCloseable {
   if(state!=null)activity.setIntent(intent);
   activity.shirazSetLifecycleState(false,false,retained);
   activity.shirazRestorePermissionRequests(permissions);
-  activity.shirazPrepareFragments(state);state("onCreate",state);created=true;dispatch(0,state);activity.shirazMoveFragments(2);
+  activity.shirazPrepareFragments(state);state("onCreate",state);created=true;activity.shirazMoveFragments(2);dispatch(0,state);
   if(activity.isFinishing())return;
-  call("onStart");started=true;dispatch(1,null);activity.shirazMoveFragments(3);
+  call("onStart");started=true;activity.shirazMoveFragments(3);dispatch(1,null);
   if(state!=null)state("onRestoreInstanceState",state);
   state("onPostCreate",state);
   if(activity.isFinishing())return;
-  call("onResume");resumed=true;dispatch(2,null);activity.shirazMoveFragments(4);call("onPostResume");
+  call("onResume");resumed=true;activity.shirazMoveFragments(4);call("onPostResume");dispatch(2,null);
  }
  public void start(){enter();try{if(activity!=null)throw new IllegalStateException("Activity already started");launch(null,null,null,null);}finally{transition=false;}}
  /** Pause before launching a covering activity; a failed launch can resume this instance. */
@@ -54,8 +54,8 @@ public final class ActivityLifecycle implements AutoCloseable {
  public void resumeFromBackStack(){
   enter();try{
    requireCreated();if(activity.isFinishing())throw new IllegalStateException("Cannot resume a finishing activity");
-   if(!started){call("onRestart");call("onStart");started=true;dispatch(1,null);activity.shirazMoveFragments(3);}
-   if(!resumed){call("onResume");resumed=true;dispatch(2,null);activity.shirazMoveFragments(4);call("onPostResume");windowVisibility(android.view.View.VISIBLE);}
+   if(!started){call("onRestart");call("onStart");started=true;activity.shirazMoveFragments(3);dispatch(1,null);}
+   if(!resumed){call("onResume");resumed=true;activity.shirazMoveFragments(4);call("onPostResume");dispatch(2,null);windowVisibility(android.view.View.VISIBLE);}
   }finally{transition=false;}
  }
  /** Deliver a new launch to a retained instance. Android leaves getIntent unchanged. */
@@ -63,12 +63,12 @@ public final class ActivityLifecycle implements AutoCloseable {
   if(intent==null)throw new NullPointerException("intent");enter();try{requireCreated();if(resumed)throw new IllegalStateException("Pause activity before delivering a new intent");invoke(activity,"onNewIntent",new Class<?>[]{android.content.Intent.class},intent);}finally{transition=false;}
  }
  private void requireCreated(){if(activity==null||!created)throw new IllegalStateException("Activity not created");}
- private void pause(){if(resumed){resumed=false;try{activity.shirazMoveFragments(3);}finally{call("onPause");dispatch(3,null);}}}
+ private void pause(){if(resumed){resumed=false;activity.shirazDispatchLifecycle(3,0,null);try{activity.shirazMoveFragments(3);}finally{call("onPause");dispatch(3,null);}}}
  private void windowVisibility(int visibility){android.view.View root=activity.shirazContentView();if(root!=null)root.shirazSetWindowVisibility(visibility);}
- private void stop(){if(started){started=false;try{try{activity.shirazMoveFragments(2);}finally{call("onStop");dispatch(4,null);}}finally{windowVisibility(android.view.View.GONE);}}}
+ private void stop(){if(started){started=false;activity.shirazDispatchLifecycle(4,0,null);try{try{activity.shirazMoveFragments(2);}finally{call("onStop");dispatch(4,null);}}finally{windowVisibility(android.view.View.GONE);}}}
  private void destroy(){
   Activity old=activity;if(old==null)return;
-  try{try{old.shirazDestroyFragments();}finally{if(created){created=false;old.shirazSetDestroyed();call("onDestroy");dispatch(6,null);}}}finally{old.shirazSetDestroyed();try{old.shirazReleaseServiceBindings();}finally{try{old.shirazReleaseWindow();}finally{activity=null;cleanup.detached(old);}}}
+  try{try{if(created)old.shirazDispatchLifecycle(6,0,null);old.shirazDestroyFragments();}finally{if(created){created=false;old.shirazSetDestroyed();call("onDestroy");dispatch(6,null);}}}finally{old.shirazSetDestroyed();try{old.shirazReleaseServiceBindings();}finally{try{old.shirazReleaseWindow();}finally{activity=null;cleanup.detached(old);}}}
  }
  public boolean reconfigure(Configuration configuration,int changes,Runnable apply){return reconfigure(configuration,changes,changes,apply);}
  public boolean reconfigure(Configuration before,Configuration configuration,int changes,Runnable apply){return reconfigure(configuration,changes,policy.significantChanges(before,configuration,changes),apply);}

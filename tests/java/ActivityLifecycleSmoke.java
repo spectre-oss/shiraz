@@ -38,7 +38,10 @@ public final class ActivityLifecycleSmoke {
   check(stack.current()==null&&stack.size()==0&&!stack.finishTop(),"empty stack");
   Intent launch=new Intent("map").putExtra("value",1);stack.launch(launch);launch.putExtra("value",2);LifecycleFixture.Sample map=made.get(0);map.value=73;check(map.getIntent().getIntExtra("value",0)==1,"launch intent snapshot");
   check(map.isTaskRoot(),"Initial activity is task root");
-  LifecycleFixture.events.clear();stack.launch(new Intent("download"));LifecycleFixture.Sample download=made.get(1);
+  LifecycleFixture.events.clear();stack.launch(new Intent("download").addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT));LifecycleFixture.Sample download=made.get(1);
+  try{stack.launch(new Intent("other").addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT));throw new AssertionError("Unsupported result handoff accepted");}catch(UnsupportedOperationException expected){}
+  check(stack.size()==2&&stack.current()==download,"Rejected forwarding preserves stack");
+  try{download.startActivityForResult(new Intent("other").addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT),1);throw new AssertionError("Conflicting result request accepted");}catch(android.util.AndroidRuntimeException expected){}
   check(LifecycleFixture.events.toString().equals("[pause:false, create, start, postCreate, resume, postResume, stop]"),"new screen resumes before covered screen stops");
   check(map.isTaskRoot()&&!download.isTaskRoot(),"Root status distinguishes covered root and child");
   check(stack.current()==download&&stack.size()==2&&!map.isDestroyed()&&detached[0]==0,"push retains old activity");
@@ -71,7 +74,62 @@ public final class ActivityLifecycleSmoke {
   try{stack.launch(map,3);throw new AssertionError("unsupported separate task accepted");}catch(UnsupportedOperationException expected){}check(stack.size()==3,"unsupported launch preserves stack");
   android.app.Activity newMap=stack.current();stack.launch(new Intent(download).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));check(stack.size()==3&&stack.current().getClass()==DownloadScreen.class&&created[0]==4&&detached[0]==1,"reorder retains intermediate activities");stack.current().finish();stack.finishTop();check(stack.current()==newMap&&stack.size()==2&&detached[0]==2,"Back after reorder restores previous top");stack.close();check(detached[0]==4,"retained task cleanup");
  }
+ private static class RecordingCallbacks implements android.app.Application.ActivityLifecycleCallbacks {
+  final String label;final java.util.List<String> events;
+  RecordingCallbacks(String label,java.util.List<String> events){this.label=label;this.events=events;}
+  void record(String event){events.add(label+":"+event);}
+  public void onActivityPreCreated(android.app.Activity activity,android.os.Bundle state){record("PreCreated");}
+  public void onActivityPreStarted(android.app.Activity activity){record("PreStarted");}
+  public void onActivityPreResumed(android.app.Activity activity){record("PreResumed");}
+  public void onActivityPrePaused(android.app.Activity activity){record("PrePaused");}
+  public void onActivityPreStopped(android.app.Activity activity){record("PreStopped");}
+  public void onActivityPreSaveInstanceState(android.app.Activity activity,android.os.Bundle state){record("PreSaveInstanceState");}
+  public void onActivityPreDestroyed(android.app.Activity activity){record("PreDestroyed");}
+  public void onActivityCreated(android.app.Activity activity,android.os.Bundle state){record("Created");}
+  public void onActivityStarted(android.app.Activity activity){record("Started");}
+  public void onActivityResumed(android.app.Activity activity){record("Resumed");}
+  public void onActivityPaused(android.app.Activity activity){record("Paused");}
+  public void onActivityStopped(android.app.Activity activity){record("Stopped");}
+  public void onActivitySaveInstanceState(android.app.Activity activity,android.os.Bundle state){record("SaveInstanceState");}
+  public void onActivityDestroyed(android.app.Activity activity){record("Destroyed");}
+  public void onActivityPostCreated(android.app.Activity activity,android.os.Bundle state){record("PostCreated");}
+  public void onActivityPostStarted(android.app.Activity activity){record("PostStarted");}
+  public void onActivityPostResumed(android.app.Activity activity){record("PostResumed");}
+  public void onActivityPostPaused(android.app.Activity activity){record("PostPaused");}
+  public void onActivityPostStopped(android.app.Activity activity){record("PostStopped");}
+  public void onActivityPostSaveInstanceState(android.app.Activity activity,android.os.Bundle state){record("PostSaveInstanceState");}
+  public void onActivityPostDestroyed(android.app.Activity activity){record("PostDestroyed");}
+ }
+ private static void scopedCallbacks(){
+  final java.util.List<String> events=new java.util.ArrayList<String>();
+  final android.app.Application app=new android.app.Application();
+  app.registerActivityLifecycleCallbacks(new RecordingCallbacks("G",events));
+  Properties metadata=new Properties();metadata.setProperty("activity.count","1");metadata.setProperty("activity.0.name","sample.Main");
+  ActivityLifecycle life=new ActivityLifecycle(new ActivityLifecycle.Factory(){public android.app.Activity create(){
+   return new android.app.Activity(){
+    {attachBaseContext(app);registerActivityLifecycleCallbacks(new RecordingCallbacks("A",events));registerActivityLifecycleCallbacks(new RecordingCallbacks("B",events));}
+    protected void onCreate(android.os.Bundle state){
+     events.add("body:before");super.onCreate(state);events.add("body:after");
+     registerActivityLifecycleCallbacks(new RecordingCallbacks("L",events){public void onActivityPostCreated(android.app.Activity activity,android.os.Bundle saved){super.onActivityPostCreated(activity,saved);activity.unregisterActivityLifecycleCallbacks(this);}});
+    }
+   };
+  }},new ActivityLifecycle.Cleanup(){public void detached(android.app.Activity activity){}},new ActivityConfigurationPolicy(metadata,"sample.Main",29),29);
+  life.start();life.close();
+  java.util.List<String> expected=new java.util.ArrayList<String>();
+  java.util.Collections.addAll(expected,"G:PreCreated","A:PreCreated","B:PreCreated","body:before","G:Created","A:Created","B:Created","body:after","A:PostCreated","B:PostCreated","L:PostCreated","G:PostCreated");
+  for(String event:new String[]{"Started","Resumed","Paused","Stopped","Destroyed"}){
+   boolean reverse=event.equals("Paused")||event.equals("Stopped")||event.equals("Destroyed");
+   String first=reverse?"B:":"A:",second=reverse?"A:":"B:";
+   java.util.Collections.addAll(expected,"G:Pre"+event,first+"Pre"+event,second+"Pre"+event);
+   if(!reverse)expected.add("G:"+event);
+   java.util.Collections.addAll(expected,first+event,second+event);
+   if(reverse)expected.add("G:"+event);
+   java.util.Collections.addAll(expected,first+"Post"+event,second+"Post"+event,"G:Post"+event);
+  }
+  if(!events.equals(expected))throw new AssertionError("Lifecycle callback order: "+events+" expected "+expected);
+ }
  public static void main(String[] args)throws Exception {
+  scopedCallbacks();
   final Context context=new ContextWrapper(null);
   Properties metadata=new Properties();metadata.setProperty("activity.count","1");metadata.setProperty("activity.0.name","sample.Main");metadata.setProperty("activity.0.config_changes","512");
   for(int sdk:new int[]{27,35}){
