@@ -25,11 +25,21 @@ public final class NativeSqliteSmoke {
         try { return NativeSqlite.query(db, statement, args); } finally { NativeSqlite.finalizeStatement(statement); }
     }
     static long count(long db, String table) { return execute(db, "SELECT count(*) FROM " + table, NONE, 3); }
+    static void textHelpers(long db){
+        String[] statements={" select 1","\ninsert into t values(1)","update t set x=1","replace into t values(1)","delete from t","attach 'x' as y","begin immediate","commit","end","rollback","pragma user_version","create table t(x)","drop table t","alter table t rename to x","analyze","detach y",""," x ","-- comment\nselect 1","with t as (select 1) select * from t"};
+        int[] expected={1,2,2,2,2,3,4,5,5,6,7,8,8,8,9,9,99,99,99,99};
+        java.util.Locale previous=java.util.Locale.getDefault();try{java.util.Locale.setDefault(new java.util.Locale("tr"));for(int i=0;i<statements.length;i++)if(android.database.DatabaseUtils.getSqlStatementType(statements[i])!=expected[i])throw new AssertionError("SQL prefix classification "+i);}finally{java.util.Locale.setDefault(previous);}
+        for(String value:new String[]{"","'","a''b","café \\ \ud83d\ude80","'); DROP TABLE values_test; --"}){
+            StringBuilder sql=new StringBuilder("SELECT ");android.database.DatabaseUtils.appendEscapedSQLString(sql,value);
+            if(!sql.toString().equals("SELECT "+android.database.DatabaseUtils.sqlEscapeString(value))||!value.equals(query(db,sql.toString(),NONE).rows[0][0]))throw new AssertionError("Escaped SQL literal round trip");
+        }
+    }
     public static void main(String[] args) throws Exception {
         Path root = Paths.get(args[0]); Files.createDirectories(root);
         Path file = root.resolve("values-café.db"); Files.deleteIfExists(file);
         long db = open(file.toString(), 0x10000000);
         try {
+            textHelpers(db);
             if (!Files.getPosixFilePermissions(file).equals(PosixFilePermissions.fromString("rw-------"))) throw new AssertionError("Database file privacy");
             sql(db, "CREATE TABLE values_test(id INTEGER PRIMARY KEY, value TEXT UNIQUE, wide INTEGER, real_value REAL, blob_value BLOB, absent)");
             long insert = NativeSqlite.prepare(db, "INSERT INTO values_test(value,wide,real_value,blob_value,absent) VALUES(?,?,?,?,?)");
