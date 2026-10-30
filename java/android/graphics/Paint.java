@@ -171,6 +171,8 @@ public class Paint {
     public void setShadowLayer(float radius,float dx,float dy,int color){if(!Float.isFinite(radius)||radius<0||radius>256||!Float.isFinite(dx)||!Float.isFinite(dy)||Math.abs(dx)>8192||Math.abs(dy)>8192)throw new IllegalArgumentException("Shadow geometry bounds");shadowRadius=radius;shadowDx=dx;shadowDy=dy;shadowColor=color;}
     public void clearShadowLayer(){setShadowLayer(0,0,0,0);}public boolean hasShadowLayer(){return shadowRadius>0;}
     public float getShadowLayerRadius(){return shadowRadius;}public float getShadowLayerDx(){return shadowDx;}public float getShadowLayerDy(){return shadowDy;}public int getShadowLayerColor(){return shadowColor;}
+    public BlendMode getBlendMode(){return xfermode==null?null:BlendMode.fromLegacy(((PorterDuffXfermode)xfermode).mode);}
+    public void setBlendMode(BlendMode mode){setXfermode(mode==null?null:new PorterDuffXfermode(mode.legacy()));}
     public Xfermode getXfermode(){return xfermode;}
     public Xfermode setXfermode(Xfermode value){if(value!=null&&!(value instanceof PorterDuffXfermode))throw new UnsupportedOperationException("Custom Xfermode");xfermode=value;return value;}
     public ColorFilter getColorFilter() { return colorFilter; }

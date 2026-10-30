@@ -5,7 +5,19 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.view.Gravity;
 public final class LayerSmoke {
-    public static void main(String[] args){
+    private static void blendModes(){
+        Paint paint=new Paint();if(paint.getBlendMode()!=null)throw new AssertionError("Default blend metadata");
+        for(PorterDuff.Mode mode:PorterDuff.Mode.values()){
+            paint.setColor(0x80904020);paint.setXfermode(new PorterDuffXfermode(mode));BlendMode modern=paint.getBlendMode();Bitmap sample=Bitmap.createBitmap(1,1,Bitmap.Config.ARGB_8888);sample.eraseColor(0x606020a0);new Canvas(sample).drawRect(0,0,1,1,paint);int expected=sample.getPixel(0,0);
+            paint.setBlendMode(modern);sample.eraseColor(0x606020a0);new Canvas(sample).drawRect(0,0,1,1,paint);
+            if(sample.getPixel(0,0)!=expected||new Paint(paint).getBlendMode()!=modern)throw new AssertionError("Legacy blend pixel round trip and copy");sample.recycle();
+        }
+        paint.setBlendMode(BlendMode.MODULATE);paint.setColor(0x80ff0000);Bitmap pixels=Bitmap.createBitmap(1,1,Bitmap.Config.ARGB_8888);pixels.eraseColor(0x800000ff);new Canvas(pixels).drawRect(0,0,1,1,paint);
+        if(pixels.getPixel(0,0)!=0x40000000)throw new AssertionError("Premultiplied modulation pixels");
+        paint.setBlendMode(BlendMode.SRC_OVER);try{paint.setBlendMode(BlendMode.MULTIPLY);throw new AssertionError("Unsupported multiply accepted as modulation");}catch(UnsupportedOperationException expected){}if(paint.getBlendMode()!=BlendMode.SRC_OVER)throw new AssertionError("Failed blend changed state");
+        paint.setBlendMode(null);if(paint.getBlendMode()!=null||paint.getXfermode()!=null)throw new AssertionError("Clear blend");pixels.eraseColor(Color.BLUE);new Canvas(pixels).drawRect(0,0,1,1,paint);if(pixels.getPixel(0,0)!=0xff80007f)throw new AssertionError("Cleared blend restores source-over");pixels.recycle();
+    }
+    public static void main(String[] args){blendModes();
         Resources r=Resources.shirazOpen(args[0],96,160);
         try {
             org.shiraz.fixture.LayerFixture.check(r);
