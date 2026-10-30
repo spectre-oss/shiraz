@@ -11,7 +11,13 @@ public class Dialog implements DialogInterface,KeyEvent.Callback,Window.Callback
  private OnCancelListener cancelListener;private OnDismissListener dismissListener;private OnShowListener showListener;private OnKeyListener keyListener;
  private final KeyEvent.DispatcherState keyState=new KeyEvent.DispatcherState();
  public Dialog(Context context){this(context,0);}
- public Dialog(Context context,int theme){if(context==null)throw new NullPointerException("context");DialogOverlay.requireMain();this.context=theme==0?context:new ContextThemeWrapper(context,theme);handler=new Handler(Looper.getMainLooper());window=new Window(this.context){
+ static int defaultTheme(Context context,int theme,int attribute){
+  if(context==null)throw new NullPointerException("context");
+  if(theme!=0)return theme;
+  android.util.TypedValue value=new android.util.TypedValue();
+  return context.getTheme().resolveAttribute(attribute,value,true)?value.resourceId:0;
+ }
+ public Dialog(Context context,int theme){if(context==null)throw new NullPointerException("context");DialogOverlay.requireMain();this.context=new ContextThemeWrapper(context,defaultTheme(context,theme,0x01010308));handler=new Handler(Looper.getMainLooper());window=new Window(this.context){
   @Override public void setContentView(View view,ViewGroup.LayoutParams layout){
    DialogOverlay.requireMain();if(view==null||layout==null)throw new NullPointerException("content/params");if(started)throw new UnsupportedOperationException("Replacing a shown dialog content tree is not implemented");if(view.getParent()!=null||view.isAttachedToWindow())throw new IllegalStateException("Dialog content already attached");if(layout.width<-2||layout.height<-2||layout.width>8192||layout.height>8192)throw new IllegalArgumentException("Dialog dimensions");
    content=getDecorView();params=new ViewGroup.LayoutParams(layout);super.setContentView(view,layout);

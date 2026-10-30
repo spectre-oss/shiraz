@@ -6,6 +6,19 @@ import android.os.Looper;
 import shiraz.runtime.DialogOverlay;
 public final class AlertDialogBuilderSmoke {
  static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
+ static void themes(Context base){
+  Context parent=new android.view.ContextThemeWrapper(base,base.getResources().getIdentifier("Theme.Material.Light","style","android"));
+  android.util.TypedValue ordinary=new android.util.TypedValue(),alert=new android.util.TypedValue();
+  check(parent.getTheme().resolveAttribute(0x01010308,ordinary,true)&&ordinary.resourceId!=0,"default dialog theme fixture");
+  check(parent.getTheme().resolveAttribute(0x01010309,alert,true)&&alert.resourceId!=0,"default alert theme fixture");
+  check(((android.view.ContextThemeWrapper)new Dialog(parent).getContext()).getThemeResId()==ordinary.resourceId,"dialog theme selection");
+  check(((android.view.ContextThemeWrapper)new AlertDialog(parent).getContext()).getThemeResId()==alert.resourceId,"alert theme selection");
+  AlertDialog.Builder defaults=new AlertDialog.Builder(parent);
+  check(((android.view.ContextThemeWrapper)defaults.getContext()).getThemeResId()==alert.resourceId&&((android.view.ContextThemeWrapper)defaults.create().getContext()).getThemeResId()==alert.resourceId,"builder theme retained by created dialog");
+  int explicit=base.getResources().getIdentifier("Theme.Holo.Light.Dialog","style","android");
+  check(((android.view.ContextThemeWrapper)new Dialog(parent,explicit).getContext()).getThemeResId()==explicit&&((android.view.ContextThemeWrapper)new AlertDialog.Builder(parent,explicit).create().getContext()).getThemeResId()==explicit,"explicit dialog theme wins");
+  check(((android.view.ContextThemeWrapper)parent).getThemeResId()==base.getResources().getIdentifier("Theme.Material.Light","style","android"),"dialog wrapping preserves caller theme");
+ }
  static android.widget.TextView findText(android.view.View view,String text){
   if(view instanceof android.widget.TextView&&text.contentEquals(((android.widget.TextView)view).getText()))return (android.widget.TextView)view;
   if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++){android.widget.TextView found=findText(group.getChildAt(i),text);if(found!=null)return found;}}
@@ -16,12 +29,13 @@ public final class AlertDialogBuilderSmoke {
   try {
    Context context=new ContextWrapper(null){private final Resources.Theme theme=Resources.getSystem().newTheme();public Resources getResources(){return Resources.getSystem();}public Resources.Theme getTheme(){return theme;}};
    Resources.shirazSetSystemDisplay(720,1280);
+   themes(context);
    final int[] clicks={0},cancels={0},dismisses={0};
    AlertDialog.Builder builder=new AlertDialog.Builder(context).setTitle("Graphics unavailable").setMessage("This renderer is unsupported.").setCancelable(false)
     .setPositiveButton("OK",new DialogInterface.OnClickListener(){public void onClick(DialogInterface dialog,int which){check(which==-1&&((Dialog)dialog).isShowing(),"callback identity and ordering");clicks[0]++;}})
     .setOnCancelListener(new DialogInterface.OnCancelListener(){public void onCancel(DialogInterface dialog){cancels[0]++;}})
     .setOnDismissListener(new DialogInterface.OnDismissListener(){public void onDismiss(DialogInterface dialog){dismisses[0]++;}});
-   AlertDialog first=builder.create();check(!first.isShowing()&&builder.getContext()==context,"create does not show");
+   AlertDialog first=builder.create();check(!first.isShowing()&&builder.getContext()!=context&&((ContextWrapper)builder.getContext()).getBaseContext()==context,"create does not show");
    builder.setPositiveButton("Changed",null).setCancelable(true);
    first.show();check(DialogOverlay.prepare(720,1280),"modal layout");
    check("OK".contentEquals(first.getButton(-1).getText()),"created dialog retains configuration");

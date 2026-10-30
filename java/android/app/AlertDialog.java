@@ -6,14 +6,16 @@ import android.view.*;
 import android.widget.*;
 /** Platform title/message/button dialogs backed by the session's modal view tree. */
 public class AlertDialog extends Dialog {
+ private static int alertTheme(Context context,int theme){return defaultTheme(context,theme,0x01010309);}
  public static class Builder {
   private final Context context;
+  private final int theme;
   private CharSequence title,message;private boolean cancelable=true;
   private OnCancelListener cancelListener;private OnDismissListener dismissListener;private OnKeyListener keyListener;
   private final CharSequence[] labels=new CharSequence[3];
   private final OnClickListener[] listeners=new OnClickListener[3];
   public Builder(Context context){this(context,0);}
-  public Builder(Context context,int theme){if(context==null)throw new NullPointerException("context");this.context=theme==0?context:new ContextThemeWrapper(context,theme);}
+  public Builder(Context context,int theme){this.theme=alertTheme(context,theme);this.context=new ContextThemeWrapper(context,this.theme);}
   public Context getContext(){return context;}
   public Builder setTitle(CharSequence value){title=value;return this;}
   public Builder setTitle(int resource){return setTitle(context.getText(resource));}
@@ -31,7 +33,7 @@ public class AlertDialog extends Dialog {
   public Builder setOnDismissListener(OnDismissListener value){dismissListener=value;return this;}
   public Builder setOnKeyListener(OnKeyListener value){keyListener=value;return this;}
   public AlertDialog create(){
-   AlertDialog dialog=new AlertDialog(context);dialog.setTitle(title);dialog.setMessage(message);
+   AlertDialog dialog=new AlertDialog(context,theme);dialog.setTitle(title);dialog.setMessage(message);
    dialog.setCancelable(cancelable);dialog.setCanceledOnTouchOutside(cancelable);
    dialog.setOnCancelListener(cancelListener);dialog.setOnDismissListener(dismissListener);dialog.setOnKeyListener(keyListener);
    for(int i=0;i<3;++i)dialog.setButton(-i-1,labels[i],listeners[i]);
@@ -41,7 +43,7 @@ public class AlertDialog extends Dialog {
  }
  private CharSequence title,message;private TextView titleView,messageView;
  private final CharSequence[] labels=new CharSequence[3];private final DialogInterface.OnClickListener[] listeners=new DialogInterface.OnClickListener[3];private final Message[] messages=new Message[3];private final Button[] buttons=new Button[3];
- public AlertDialog(Context context){super(context);}public AlertDialog(Context context,int theme){super(context,theme);}protected AlertDialog(Context context,boolean cancelable,OnCancelListener listener){super(context,cancelable,listener);}
+ public AlertDialog(Context context){this(context,0);}public AlertDialog(Context context,int theme){super(context,alertTheme(context,theme));}protected AlertDialog(Context context,boolean cancelable,OnCancelListener listener){this(context);setCancelable(cancelable);setOnCancelListener(listener);}
  protected final int dp(int value){return Math.max(1,Math.round(value*getContext().getResources().getDisplayMetrics().density));}
  private static int index(int which){if(which>BUTTON_POSITIVE||which<BUTTON_NEUTRAL)throw new IllegalArgumentException("Dialog button");return -which-1;}
  @Override public void setTitle(CharSequence value){super.setTitle(value);title=value;if(titleView!=null){titleView.setText(value);titleView.setVisibility(value==null||value.length()==0?View.GONE:View.VISIBLE);}}

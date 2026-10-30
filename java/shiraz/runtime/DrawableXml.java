@@ -19,7 +19,7 @@ public final class DrawableXml {
         if(v==null)return null;
         for(int n=0;n<32&&(v.type==1||v.type==2);n++){
             if(v.type==1&&v.data==0)return new BinaryXml.Value(0,0,null);
-            TypedValue out=new TypedValue();if(v.type==2){if(theme==null||!theme.resolveAttribute(v.data,out,true))throw new Resources.NotFoundException("Drawable theme attribute");}else resources.getValue(v.data,out,true);
+            TypedValue out=new TypedValue();if(v.type==2){if(theme==null||!theme.resolveAttribute(v.data,out,true))throw new Resources.NotFoundException("Drawable theme attribute 0x"+Integer.toHexString(v.data));}else resources.getValue(v.data,out,true);
             flags|=out.changingConfigurations;v=new BinaryXml.Value(out.type,out.data,out.string==null?null:out.string.toString());
         }
         if(v.type==1||v.type==2)throw new IllegalArgumentException("Drawable reference depth");return v;
@@ -30,7 +30,7 @@ public final class DrawableXml {
     private Drawable reference(BinaryXml.Value v){
         if(v==null)throw new IllegalArgumentException("Drawable reference required");
         if(v.type==1&&v.data!=0)return resources.getDrawable(v.data,theme);
-        if(v.type==2){TypedValue out=new TypedValue();if(theme==null||!theme.resolveAttribute(v.data,out,true))throw new Resources.NotFoundException("Drawable theme reference");flags|=out.changingConfigurations;if(out.type==3&&out.resourceId!=0)return resources.getDrawable(out.resourceId,theme);v=new BinaryXml.Value(out.type,out.data,null);}
+        if(v.type==2){TypedValue out=new TypedValue();if(theme==null||!theme.resolveAttribute(v.data,out,true))throw new Resources.NotFoundException("Drawable theme reference 0x"+Integer.toHexString(v.data));flags|=out.changingConfigurations;if(out.type==3&&out.resourceId!=0)return resources.getDrawable(out.resourceId,theme);v=new BinaryXml.Value(out.type,out.data,null);}
         if(v.type>=28&&v.type<=31)return new ColorDrawable(v.data);
         throw new UnsupportedOperationException("Drawable reference type");
     }
@@ -40,7 +40,7 @@ public final class DrawableXml {
     private ColorStateList optionalColors(BinaryXml.Value value){
         if(value==null||value.type==0||(value.type==1&&value.data==0))return null;
         if(value.type==1&&value.data!=0)return resources.getColorStateList(value.data,theme);
-        if(value.type==2){TypedValue out=new TypedValue();if(theme==null||!theme.resolveAttribute(value.data,out,true))throw new Resources.NotFoundException("Drawable theme color");flags|=out.changingConfigurations;if(out.type==3&&out.resourceId!=0)return resources.getColorStateList(out.resourceId,theme);value=new BinaryXml.Value(out.type,out.data,null);}
+        if(value.type==2){TypedValue out=new TypedValue();if(theme==null||!theme.resolveAttribute(value.data,out,true))throw new Resources.NotFoundException("Drawable theme color 0x"+Integer.toHexString(value.data));flags|=out.changingConfigurations;if(out.type==3&&out.resourceId!=0)return resources.getColorStateList(out.resourceId,theme);value=new BinaryXml.Value(out.type,out.data,null);}
         if(value.type==0||(value.type==1&&value.data==0))return null;
         if(value.type>=28&&value.type<=31)return ColorStateList.valueOf(value.data);
         throw new IllegalArgumentException("Drawable color type");
