@@ -36,6 +36,8 @@ public final class DialogSmoke {
   popup.dismiss();check(!popup.isShowing(),"application dismisses its own popup");anchor.shirazDetachTree();
  }
  private static void constructorContracts(Context c){
+  Window directionWindow=new Window(c);View directionContent=new View(c);directionWindow.setContentView(directionContent);
+  check(directionWindow.getDecorView().isLayoutDirectionResolved()&&directionContent.isLayoutDirectionResolved()&&directionContent.getLayoutDirection()==android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault()),"window resolves inherited content direction from host locale");
   popupOwnership(c);
   indicators(c);
   nestedScrolling(c);

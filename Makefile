@@ -1351,7 +1351,7 @@ check: configuration-diff-smoke
 window-focus-callback-smoke: framework
 	mkdir -p build/window-focus-callback-smoke
 	javac --release 8 -cp build/framework/classes -d build/window-focus-callback-smoke tests/java/WindowFocusCallbackSmoke.java
-	java -Djava.library.path=build -cp build/window-focus-callback-smoke:build/framework/classes WindowFocusCallbackSmoke
+	java -Djava.library.path=build -cp build/window-focus-callback-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar WindowFocusCallbackSmoke
 check: window-focus-callback-smoke
 
 .PHONY: icon-value-smoke

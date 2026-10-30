@@ -121,7 +121,7 @@ public class Window {
  public void setNavigationBarContrastEnforced(boolean value){}
  public void setStatusBarContrastEnforced(boolean value){}
  public View getDecorView(){
-  if(decor==null){decor=new FrameLayout(context){@Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(callback!=null&&!destroyed)callback.onWindowFocusChanged(focused);}};content=new FrameLayout(context);content.setId(16908290);decor.addView(content,new FrameLayout.LayoutParams(-1,-1));if(background==null)background=themeBackground();if(background!=null)decor.setBackground(background);if(rootListener!=null)rootListener.run();}return decor;
+  if(decor==null){decor=new FrameLayout(context){@Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(callback!=null&&!destroyed)callback.onWindowFocusChanged(focused);}};decor.setLayoutDirection(View.LAYOUT_DIRECTION_LOCALE);content=new FrameLayout(context);content.setId(16908290);decor.addView(content,new FrameLayout.LayoutParams(-1,-1));if(background==null)background=themeBackground();if(background!=null)decor.setBackground(background);if(rootListener!=null)rootListener.run();}return decor;
  }
  public View peekDecorView(){return decor;}
  public LayoutInflater getLayoutInflater(){return LayoutInflater.from(context);}

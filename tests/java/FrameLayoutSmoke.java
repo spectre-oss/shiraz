@@ -3,6 +3,18 @@ public final class FrameLayoutSmoke {
     public static void main(String[] args) {
         android.os.Looper.prepareMainLooper();
         android.content.Context context=new android.content.ContextWrapper(null);
+        android.widget.FrameLayout directionRoot=new android.widget.FrameLayout(context);
+        android.view.View directionChild=new android.view.View(context);
+        directionRoot.addView(directionChild);directionChild.setPaddingRelative(3,0,7,0);
+        if(directionChild.isLayoutDirectionResolved())throw new AssertionError("Unresolved ancestor claimed a direction");
+        directionRoot.setLayoutDirection(android.view.View.LAYOUT_DIRECTION_RTL);
+        if(!directionChild.isLayoutDirectionResolved()||directionChild.getLayoutDirection()!=1||directionChild.getPaddingLeft()!=7)throw new AssertionError("Inherited RTL resolution");
+        directionRoot.setLayoutDirection(android.view.View.LAYOUT_DIRECTION_LTR);
+        if(!directionChild.isLayoutDirectionResolved()||directionChild.getPaddingLeft()!=3)throw new AssertionError("Inherited direction update");
+        directionRoot.removeView(directionChild);
+        if(directionChild.isLayoutDirectionResolved())throw new AssertionError("Detached inherited direction remained resolved");
+        directionChild.setLayoutDirection(android.view.View.LAYOUT_DIRECTION_RTL);
+        if(!directionChild.isLayoutDirectionResolved())throw new AssertionError("Explicit direction unresolved");
         org.shiraz.fixture.FrameLayoutFixture.check(context);
         final StringBuilder hierarchy=new StringBuilder();
         android.widget.FrameLayout watched=new android.widget.FrameLayout(context);

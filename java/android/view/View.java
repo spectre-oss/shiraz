@@ -317,6 +317,8 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     // TextView currently positions text through its gravity; report that mode to widgets.
     public int getTextAlignment() { return 1; } // TEXT_ALIGNMENT_GRAVITY
     public int getLayoutDirection() { if(layoutDirection==LAYOUT_DIRECTION_LOCALE)return android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault());return layoutDirection == LAYOUT_DIRECTION_INHERIT ? parent == null ? LAYOUT_DIRECTION_LTR : parent.getLayoutDirection() : layoutDirection; }
+    /** Direction is evaluated eagerly; inherited values need a resolved ancestor. */
+    public boolean isLayoutDirectionResolved(){return layoutDirection!=LAYOUT_DIRECTION_INHERIT||(parent!=null&&parent.isLayoutDirectionResolved());}
     public void setLayoutDirection(int value) {
         if (value != LAYOUT_DIRECTION_LTR && value != LAYOUT_DIRECTION_RTL && value != LAYOUT_DIRECTION_INHERIT && value != LAYOUT_DIRECTION_LOCALE) throw new IllegalArgumentException("layout direction");
         layoutDirection=value; onRtlPropertiesChanged(getLayoutDirection()); requestLayout();
