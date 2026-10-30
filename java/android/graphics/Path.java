@@ -126,6 +126,10 @@ public class Path {
         if(other==null)throw new NullPointerException("path");
         Path translated=new Path();other.offset(dx,dy,translated);addPath(translated);
     }
+    public void addPath(Path other,Matrix matrix) {
+        if(other==null)throw new NullPointerException("path");
+        Path transformed=new Path();other.transform(matrix,transformed);addPath(transformed);
+    }
     public void addPath(Path other) {
         if(other==null)throw new NullPointerException("path"); float[] values=other.commands(); if(values.length==0)return;
         if(size+values.length>65536)throw new IllegalStateException("Path exceeds 65536 command values");

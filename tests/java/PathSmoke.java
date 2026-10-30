@@ -6,6 +6,14 @@ public final class PathSmoke {
     private static void check(boolean value,String message) { if (!value) throw new AssertionError(message); }
     private static RectF sampleBounds(Path path){RectF out=new RectF(Float.POSITIVE_INFINITY,Float.POSITIVE_INFINITY,Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY);double[] points=path.shirazAnimationPoints();for(int i=0;i<points.length;i+=3){out.left=Math.min(out.left,(float)points[i+1]);out.right=Math.max(out.right,(float)points[i+1]);out.top=Math.min(out.top,(float)points[i+2]);out.bottom=Math.max(out.bottom,(float)points[i+2]);}return out;}
     private static Bitmap draw(String source) { Bitmap bitmap=Bitmap.createBitmap(24,24,Bitmap.Config.ARGB_8888); Paint paint=new Paint(); paint.setColor(Color.RED); new Canvas(bitmap).drawPath(PathData.parse(source),paint); return bitmap; }
+    private static void transformedAppend(){
+        Path source=new Path();source.addRect(1,1,4,4,Path.Direction.CW);source.setFillType(Path.FillType.EVEN_ODD);
+        Path destination=new Path();destination.addRect(1,11,4,14,Path.Direction.CW);Matrix matrix=new Matrix();matrix.setTranslate(10,0);destination.addPath(source,matrix);
+        RectF bounds=new RectF();source.computeBounds(bounds,true);check(bounds.left==1&&bounds.right==4&&bounds.bottom==4,"transformed append preserves source");destination.computeBounds(bounds,true);check(bounds.left==1&&bounds.top==1&&bounds.right==14&&bounds.bottom==14&&destination.getFillType()==Path.FillType.WINDING,"append geometry and destination fill");
+        Bitmap bitmap=Bitmap.createBitmap(16,16,Bitmap.Config.ARGB_8888);Paint paint=new Paint();paint.setColor(Color.RED);new Canvas(bitmap).drawPath(destination,paint);check(bitmap.getPixel(12,2)==Color.RED&&bitmap.getPixel(2,12)==Color.RED&&bitmap.getPixel(2,2)==0,"transformed append raster pixels");bitmap.recycle();
+        Path self=new Path(source);matrix.setTranslate(0,10);self.addPath(self,matrix);self.computeBounds(bounds,true);check(bounds.top==1&&bounds.bottom==14&&self.getFillType()==Path.FillType.EVEN_ODD,"self append uses original snapshot");
+        double[] before=destination.shirazAnimationPoints();matrix.setValues(new float[]{1,0,0,0,1,0,.1f,0,1});try{destination.addPath(source,matrix);throw new AssertionError("Perspective append accepted");}catch(UnsupportedOperationException expected){}check(java.util.Arrays.equals(before,destination.shirazAnimationPoints()),"rejected append is atomic");
+    }
     private static void shaders(){
         Bitmap texture=Bitmap.createBitmap(2,1,Bitmap.Config.ARGB_8888);texture.setPixel(0,0,Color.RED);texture.setPixel(1,0,Color.BLUE);
         BitmapShader shader=new BitmapShader(texture,Shader.TileMode.REPEAT,Shader.TileMode.CLAMP);Paint p=new Paint();check(p.setShader(shader)==shader,"shader setter result");
@@ -87,7 +95,7 @@ public final class PathSmoke {
         result.set(probe);Path invalid=new Path();invalid.moveTo(Float.NaN,0);
         check(!result.op(invalid,box,Path.Op.UNION),"invalid operation rejected");result.computeBounds(bounds,true);check(bounds.left==350.125f,"failed operation preserves result");
     }
-    public static void main(String[] args) {
+    public static void main(String[] args) {transformedAppend();
         Bitmap arcs=Bitmap.createBitmap(32,32,Bitmap.Config.ARGB_8888);Canvas arcCanvas=new Canvas(arcs);Paint arcPaint=new Paint();arcPaint.setColor(Color.RED);
         arcCanvas.drawArc(new RectF(4,4,28,28),0,90,true,arcPaint);check(arcs.getPixel(18,18)==Color.RED&&arcs.getPixel(10,10)==0,"Arc wedge quadrant");
         arcs.eraseColor(0);arcCanvas.drawArc(4,4,28,28,0,90,false,arcPaint);check(arcs.getPixel(18,18)==0&&arcs.getPixel(23,23)==Color.RED,"Arc chord excludes center");
