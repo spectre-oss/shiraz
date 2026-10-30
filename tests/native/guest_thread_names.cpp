@@ -9,6 +9,10 @@
 #include <cstdint>
 namespace berberis {
 void* ShirazGuestPthread();
+void* ShirazRetainCreatedGuestThread();
+pthread_t ShirazCompleteGuestThreadCreation(void*,bool);
+int ShirazGuestJoinThread(pthread_t,void**);
+void ShirazRefreshGuestThreadIdentity();
 int ShirazGuestSetThreadName(pthread_t,const char*);
 int ShirazGuestGetThreadName(pthread_t,char*,size_t);
 int ShirazGuestSetSchedParam(pthread_t,int,const int32_t*);
@@ -16,21 +20,23 @@ int ShirazGuestGetSchedParam(pthread_t,int*,int32_t*);
 int ShirazGuestSetSchedPriority(pthread_t,int);
 }
 using namespace berberis;
-struct Work { int ready,proceed; pthread_t guest; };
+struct Work { int ready,proceed; pthread_t guest; void* cookie; };
 static void* worker(void* p){
  auto* w=static_cast<Work*>(p);
+ w->cookie=ShirazRetainCreatedGuestThread();
  w->guest=reinterpret_cast<pthread_t>(ShirazGuestPthread());
  assert(ShirazGuestSetThreadName(w->guest,"guest-worker")==0);
  assert(write(w->ready,"x",1)==1);
  char byte; assert(read(w->proceed,&byte,1)==1);
- return nullptr;
+ return reinterpret_cast<void*>(w->guest);
 }
 int main(){
  auto self=reinterpret_cast<pthread_t>(ShirazGuestPthread());
  int ready[2],proceed[2]; assert(pipe(ready)==0&&pipe(proceed)==0);
- Work work{ready[1],proceed[0],0}; pthread_t thread;
+ Work work{ready[1],proceed[0],0,nullptr}; pthread_t thread;
  assert(pthread_create(&thread,nullptr,worker,&work)==0);
  char byte,name[16]; assert(read(ready[0],&byte,1)==1);
+ assert(ShirazCompleteGuestThreadCreation(work.cookie,false)==work.guest);
  assert(ShirazGuestGetThreadName(thread,name,sizeof name)==0&&!strcmp(name,"guest-worker"));
  assert(ShirazGuestSetThreadName(work.guest,"parent-name")==0);
  assert(ShirazGuestGetThreadName(thread,name,sizeof name)==0&&!strcmp(name,"parent-name"));
@@ -48,6 +54,7 @@ int main(){
  assert(ShirazGuestSetSchedParam(0,SCHED_OTHER,&normal)==ESRCH);
  pid_t child=fork(); assert(child>=0);
  if(!child){
+  ShirazRefreshGuestThreadIdentity();
   bool ok=ShirazGuestGetThreadName(work.guest,name,sizeof name)==ESRCH &&
       ShirazGuestSetThreadName(self,"fork-child")==0 &&
       ShirazGuestGetSchedParam(work.guest,&policy,&priority)==ESRCH &&
@@ -55,7 +62,8 @@ int main(){
   _exit(ok?0:1);
  }
  int status; assert(waitpid(child,&status,0)==child&&WIFEXITED(status)&&WEXITSTATUS(status)==0);
- assert(write(proceed[1],"x",1)==1); assert(pthread_join(thread,nullptr)==0);
+ assert(write(proceed[1],"x",1)==1); void* result=nullptr;
+ assert(ShirazGuestJoinThread(work.guest,&result)==0 && result==reinterpret_cast<void*>(work.guest));
  assert(ShirazGuestGetThreadName(work.guest,name,sizeof name)==ESRCH);
  assert(ShirazGuestGetThreadName(0,name,sizeof name)==ESRCH);
  assert(ShirazGuestGetSchedParam(work.guest,&policy,&priority)==ESRCH);

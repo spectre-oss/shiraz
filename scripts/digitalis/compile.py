@@ -67,6 +67,27 @@ void RunGuestJNIOnLoad(GuestAddr pc, GuestArgumentBuffer* buf) {""")
   text=text.replace('namespace berberis {','namespace berberis {\nvoid* ShirazGuestPthread();',1).replace('  extern void* ShirazGuestPthread();\n','')
   patched=W/'guest_loader.cc';patched.write_text(text);s=str(patched)
   localflags += ['-I'+str(p.parent)]
+ if p.name in ('guest_thread_pthread_create.cc','guest_thread_pthread_create_arch.cc'):
+  # Share the retained identity record through the existing semaphore. Host
+  # and guest TLS addresses can be recycled before a detached creator wakes.
+  header=W/(p.stem+'_create_info.h')
+  text=(p.parent/'guest_thread_pthread_create.h').read_text()
+  needle='  sem_t sem;'
+  if text.count(needle)!=1:raise RuntimeError('Unexpected guest thread creation header')
+  header.write_text(text.replace(needle,'  void* guest_record;\n'+needle))
+  text=p.read_text().replace('"guest_thread_pthread_create.h"','"'+str(header)+'"')
+  if p.name=='guest_thread_pthread_create_arch.cc':
+   text=text.replace('namespace berberis {','namespace berberis {\nvoid* ShirazRetainCreatedGuestThread();',1)
+   needle='  CHECK_EQ(0, sem_post(&info->sem));'
+   if text.count(needle)!=1:raise RuntimeError('Unexpected guest thread startup source')
+   text=text.replace(needle,'  info->guest_record=ShirazRetainCreatedGuestThread();\n'+needle)
+  else:
+   text=text.replace('namespace berberis {','namespace berberis {\npthread_t ShirazCompleteGuestThreadCreation(void*,bool);',1)
+   needle='      CHECK_EQ(0, sem_wait(&info.sem));  // Wait with blocked signals to avoid EINTR.'
+   if text.count(needle)!=1:raise RuntimeError('Unexpected guest thread creation source')
+   text=text.replace(needle,needle+'\n      int detached=PTHREAD_CREATE_JOINABLE;\n      if(attr)pthread_attr_getdetachstate(attr,&detached);\n      *thread_id=ShirazCompleteGuestThreadCreation(info.guest_record,detached==PTHREAD_CREATE_DETACHED);')
+  patched=W/p.name;patched.write_text(text);s=str(patched)
+  localflags += ['-I'+str(p.parent)]
  if p.name=='guest_thread_manager.cc':
   text=p.read_text().replace('namespace berberis {','namespace berberis {\nunsigned long ShirazAttachedGuestStack(unsigned long, size_t);',1)
   text=text.replace('  InsertCurrentThread(thread, register_dtor);', '  auto& cpu = GetCPUState(*thread->state());\n  SetStackRegister(cpu, ShirazAttachedGuestStack(GetStackRegister(cpu), stack_size));\n  InsertCurrentThread(thread, register_dtor);',1)

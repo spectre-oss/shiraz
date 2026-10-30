@@ -10,10 +10,17 @@
 #include <pthread.h>
 #include <cerrno>
 namespace berberis {
-struct GuestBionicThreadStorage;
+struct GuestThreadRecord {
+ void* pthread_record;
+ pthread_t host_thread;
+ GuestThreadRecord* next;
+ bool managed=false, detached=false, exited=false, creation_pending=false;
+};
+static void RemoveThreadLocked(GuestThreadRecord*);
 static pthread_mutex_t thread_registry_lock=PTHREAD_MUTEX_INITIALIZER;
-static GuestBionicThreadStorage* thread_registry=nullptr;
-static thread_local GuestBionicThreadStorage* current_storage=nullptr;
+static GuestThreadRecord* thread_registry=nullptr;
+static GuestThreadRecord* fork_orphans=nullptr;
+static thread_local GuestThreadRecord* current_storage=nullptr;
 static pthread_once_t fork_handlers=PTHREAD_ONCE_INIT;
 static void PrepareThreadRegistryFork(){pthread_mutex_lock(&thread_registry_lock);}
 static void ParentThreadRegistryFork(){pthread_mutex_unlock(&thread_registry_lock);}
@@ -22,8 +29,7 @@ static void InstallThreadRegistryFork(){pthread_atfork(PrepareThreadRegistryFork
 struct GuestBionicThreadStorage {
  alignas(16) unsigned char pthread_record[4096]{};
  alignas(16) unsigned char tls_record[32768]{};
- pthread_t host_thread{};
- GuestBionicThreadStorage* next=nullptr;
+ GuestThreadRecord* record=nullptr;
  GuestBionicThreadStorage() {
   const int tid=static_cast<int>(syscall(SYS_gettid));
   const int pid=getpid();
@@ -32,34 +38,103 @@ struct GuestBionicThreadStorage {
   void* ptr=tls_record;
   // bionic_tls member offset verified from the pinned linker's init routine.
   std::memcpy(pthread_record+760,&ptr,sizeof(ptr));
-  host_thread=pthread_self();
+  record=new GuestThreadRecord{pthread_record,pthread_self(),nullptr};
   pthread_once(&fork_handlers,InstallThreadRegistryFork);
   pthread_mutex_lock(&thread_registry_lock);
-  next=thread_registry; thread_registry=this; current_storage=this;
+  record->next=thread_registry; thread_registry=record; current_storage=record;
   pthread_mutex_unlock(&thread_registry_lock);
  }
  ~GuestBionicThreadStorage() {
   pthread_mutex_lock(&thread_registry_lock);
-  for(auto** item=&thread_registry;*item;item=&(*item)->next) {
-   if(*item==this){*item=next;break;}
-  }
+  record->exited=true;
   current_storage=nullptr;
+  if(!record->managed || (record->detached && !record->creation_pending))RemoveThreadLocked(record);
   pthread_mutex_unlock(&thread_registry_lock);
  }
 };
+// Only the small identity mapping is retained until join. Bionic's TLS records
+// remain in host TLS so pthread-key destructors can still use them during exit.
+static void RemoveThreadLocked(GuestThreadRecord* record) {
+ for(auto** item=&thread_registry;*item;item=&(*item)->next) {
+  if(*item==record){*item=record->next;delete record;return;}
+ }
+}
+static thread_local GuestBionicThreadStorage storage;
 static void ChildThreadRegistryFork(){
+ // Defer freeing other threads' inherited records until outside the atfork hook.
+ auto* item=thread_registry;
+ while(item){
+  auto* next=item->next;
+  if(item!=current_storage){item->next=fork_orphans;fork_orphans=item;}
+  item=next;
+ }
  thread_registry=current_storage;
  if(current_storage){current_storage->next=nullptr;current_storage->host_thread=pthread_self();}
  pthread_mutex_unlock(&thread_registry_lock);
 }
-thread_local GuestBionicThreadStorage storage;
-// Handles returned by pthread_create and guest pthread_self have different
-// representations. Resolve only live registrations, without dereferencing input.
+// Called before the creation semaphore is posted, so even a thread that exits
+// before pthread_create returns retains its handle until join or detach.
+void* ShirazRetainCreatedGuestThread(){
+ (void)storage;
+ pthread_mutex_lock(&thread_registry_lock);
+ storage.record->managed=true;
+ storage.record->creation_pending=true;
+ pthread_mutex_unlock(&thread_registry_lock);
+ return storage.record;
+}
+pthread_t ShirazCompleteGuestThreadCreation(void* cookie,bool detached){
+ pthread_mutex_lock(&thread_registry_lock);
+ pthread_t result=0;
+ for(auto* item=thread_registry;item;item=item->next){
+  if(item==cookie && item->managed && item->creation_pending){
+   result=reinterpret_cast<pthread_t>(item->pthread_record);
+   item->creation_pending=false;
+   item->detached=item->detached || detached;
+   if(item->exited && item->detached)RemoveThreadLocked(item);
+   break;
+  }
+ }
+ pthread_mutex_unlock(&thread_registry_lock);
+ return result;
+}
+int ShirazGuestJoinThread(pthread_t handle,void** value){
+ pthread_mutex_lock(&thread_registry_lock);
+ GuestThreadRecord* found=nullptr;
+ for(auto* item=thread_registry;item;item=item->next)
+  if(handle==reinterpret_cast<pthread_t>(item->pthread_record)){found=item;break;}
+ if(!found || found->detached || !found->managed){
+  int result=found?EINVAL:ESRCH;
+  pthread_mutex_unlock(&thread_registry_lock);return result;
+ }
+ pthread_t host=found->host_thread;
+ pthread_mutex_unlock(&thread_registry_lock);
+ // Never hold the registry mutex while waiting for the thread's TLS destructors.
+ int result=pthread_join(host,value);
+ if(!result){
+  pthread_mutex_lock(&thread_registry_lock);
+  RemoveThreadLocked(found);
+  pthread_mutex_unlock(&thread_registry_lock);
+ }
+ return result;
+}
+int ShirazGuestDetachThread(pthread_t handle){
+ pthread_mutex_lock(&thread_registry_lock);
+ int result=ESRCH;
+ for(auto* item=thread_registry;item;item=item->next){
+  if(handle!=reinterpret_cast<pthread_t>(item->pthread_record))continue;
+  result=item->detached?EINVAL:pthread_detach(item->host_thread);
+  if(!result){item->detached=true;if(item->exited && !item->creation_pending)RemoveThreadLocked(item);}
+  break;
+ }
+ pthread_mutex_unlock(&thread_registry_lock);
+ return result;
+}
+// Resolve only live registrations without dereferencing arbitrary guest handles.
 template<class F> static int WithGuestThread(pthread_t handle,F operation){
  pthread_mutex_lock(&thread_registry_lock);
  int result=ESRCH;
  for(auto* item=thread_registry;item;item=item->next){
-  if(handle==reinterpret_cast<pthread_t>(item->pthread_record)||handle==item->host_thread){
+  if(!item->exited && (handle==reinterpret_cast<pthread_t>(item->pthread_record) || handle==item->host_thread)){
    result=operation(item->host_thread);break;
   }
  }
@@ -82,6 +157,7 @@ int ShirazGuestGetSchedParam(pthread_t handle,int* policy,int32_t* priority){
 int ShirazGuestSetSchedPriority(pthread_t handle,int priority){return WithGuestThread(handle,[&](pthread_t host){return pthread_setschedprio(host,priority);});}
 
 void ShirazRefreshGuestThreadIdentity() {
+ while(fork_orphans){auto* item=fork_orphans;fork_orphans=item->next;delete item;}
  const int tid=static_cast<int>(syscall(SYS_gettid));
  const int pid=getpid();
  std::memcpy(storage.pthread_record+16,&tid,sizeof(tid));

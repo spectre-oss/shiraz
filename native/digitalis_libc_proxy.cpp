@@ -104,6 +104,8 @@ static uint32_t PropertyAreaSerial() { return 0; }
 // Follows AOSP native_bridge_support proxy/unistd_thunks.cc: retain the
 // guest thread across host fork, then discard inherited thread-map entries.
 void ShirazRefreshGuestThreadIdentity();
+int ShirazGuestJoinThread(pthread_t,void**);
+int ShirazGuestDetachThread(pthread_t);
 int ShirazGuestSetThreadName(pthread_t,const char*);
 int ShirazGuestGetThreadName(pthread_t,char*,size_t);
 int ShirazGuestSetSchedParam(pthread_t,int,const int32_t*);
@@ -134,7 +136,7 @@ static void ThreadJoin(HostCode, ThreadState* state) {
  auto [thread, value] = GuestParamsValues<decltype(pthread_join)>(state);
  auto&& [result] = GuestReturnReference<decltype(pthread_join)>(state);
  ScopedPendingSignalsDisabler pending(state->thread);
- result=pthread_join(thread,value);
+ result=ShirazGuestJoinThread(thread,value);
 }
 static void KeyCreate(HostCode, ThreadState* state) {
  auto [key, destructor] = GuestParamsValues<int(pthread_key_t*, void(*)(void*))>(state);
@@ -226,7 +228,7 @@ static const KnownTrampoline functions[] = {
 {"pthread_attr_setstack", GetTrampolineFunc<decltype(shiraz_guest_attr::setstack)>(), reinterpret_cast<void*>(shiraz_guest_attr::setstack)},
 {"pthread_attr_setstacksize", GetTrampolineFunc<decltype(shiraz_guest_attr::setstacksize)>(), reinterpret_cast<void*>(shiraz_guest_attr::setstacksize)},
 {"pthread_create", ThreadCreate, nullptr},
-{"pthread_detach", GetTrampolineFunc<int(pthread_t)>(), reinterpret_cast<void*>(pthread_detach)},
+{"pthread_detach", GetTrampolineFunc<int(pthread_t)>(), reinterpret_cast<void*>(ShirazGuestDetachThread)},
 {"pthread_exit", Unsupported, const_cast<char*>("pthread_exit")},
 {"pthread_getattr_np", Unsupported, const_cast<char*>("pthread_getattr_np")},
 {"pthread_getcpuclockid", Unsupported, const_cast<char*>("pthread_getcpuclockid")},

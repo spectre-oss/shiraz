@@ -67,7 +67,7 @@ extern int pthread_attr_setinheritsched(GuestAttr*,int);
 extern int pthread_attr_getinheritsched(const GuestAttr*,int*);
 static int key;
 static _Thread_local int local;
-struct Work { int parent; int result; int destroyed; int notify; };
+struct Work { int parent; int result; int destroyed; int notify; int self_detach; };
 static void destroy(void* value) {
   struct Work* work=value; work->destroyed=1;
   if(work->notify>=0) { char done=42; write(work->notify,&done,1); }
@@ -78,6 +78,7 @@ static void* worker(void* argument) {
   __asm__("mrs %0, tpidr_el0" : "=r"(tls));
   int* record=(int*)tls[1];
   if(local || gettid()==work->parent || record[4]!=gettid() || record[5]!=getpid()) return (void*)1;
+  if(work->self_detach && pthread_detach(pthread_self()))return (void*)3;
   local=42;
   if(pthread_setspecific(key,work) || pthread_getspecific(key)!=work) return (void*)2;
   work->result=local;
@@ -115,8 +116,10 @@ struct Naming { int ready,proceed; pthread_t guest; int ok; };
 static void* naming_worker(void* argument) {
   struct Naming* n=argument; char buffer[16],signal=1;
   n->guest=pthread_self();
+  void** tls;
+  __asm__("mrs %0, tpidr_el0" : "=r"(tls));
   int policy=-1,priority=-1,normal=0;
-  n->ok=!pthread_setname_np(n->guest,"guest-name") &&
+  n->ok=n->guest==(pthread_t)tls[1] && !pthread_setname_np(n->guest,"guest-name") &&
       !pthread_getname_np(n->guest,buffer,sizeof buffer) && !strcmp(buffer,"guest-name") &&
       pthread_setname_np(n->guest,"this-name-is-far-too-long")==34 &&
       !pthread_setschedparam(n->guest,0,&normal) &&
@@ -133,6 +136,8 @@ static int naming_test(void) {
   int ok=pthread_create(&thread,0,naming_worker,&n)==0;
   if(ok){
     ok=read(ready[0],&signal,1)==1;
+    // A pthread identifier must agree across create, self, and TLS consumers.
+    ok=ok && thread==n.guest;
     ok=ok && !pthread_getname_np(thread,buffer,sizeof buffer) && !strcmp(buffer,"guest-name");
     ok=ok && !pthread_setname_np(n.guest,"parent-name");
     int policy=-1,priority=-1;
@@ -233,16 +238,16 @@ int Java_shiraz_ThreadSmoke_run(JNIEnv* env,jclass klass) {
     void* result=0;
     if(pthread_join(threads[i],&result) || result!=&work[i] || work[i].result!=42 || !work[i].destroyed) ok=0;
   }
-  for(int mode=0;mode<2 && ok;++mode) {
+  for(int mode=0;mode<3 && ok;++mode) {
   int fds[2];
   if(ok && pipe(fds)==0) {
-    struct Work detached={gettid(),0,0,fds[1]}; pthread_t thread;
-    if(pthread_attr_setdetachstate(&attr,mode) || pthread_attr_getdetachstate(&attr,&flag) || flag!=mode) ok=0;
+    struct Work detached={gettid(),0,0,fds[1],mode==2}; pthread_t thread;
+    if(pthread_attr_setdetachstate(&attr,mode==1) || pthread_attr_getdetachstate(&attr,&flag) || flag!=(mode==1)) ok=0;
     if(!ok || pthread_create(&thread,&attr,worker,&detached)) ok=0;
     else {
       if(!mode && pthread_detach(thread)) { pthread_join(thread,0); ok=0; }
       char done=0;
-      if(read(fds[0],&done,1)!=1 || done!=42) ok=0;
+      if(read(fds[0],&done,1)!=1 || done!=42 || detached.result!=42) ok=0;
     }
     close(fds[0]);close(fds[1]);
   } else ok=0;
