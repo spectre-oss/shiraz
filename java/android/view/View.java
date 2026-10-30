@@ -541,7 +541,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         else if (handler == null) handler = new android.os.Handler(android.os.Looper.getMainLooper());
         return handler;
     }
-    private static final String[] CONSTRUCTOR_ATTRIBUTES={"accessibilityLiveRegion","alpha","autofillHints","background","backgroundTint","backgroundTintMode","clickable","clipToOutline","contentDescription","defaultFocusHighlightEnabled","duplicateParentState","elevation","enabled","fadingEdge","fitsSystemWindows","focusable","focusableInTouchMode","focusedByDefault","foreground","foregroundGravity","foregroundInsidePadding","foregroundTint","foregroundTintMode","id","importantForAccessibility","importantForAutofill","isScrollContainer","keepScreenOn","keyboardNavigationCluster","layoutDirection","longClickable","minHeight","minWidth","nextClusterForward","onClick","outlineProvider","overScrollMode","padding","paddingBottom","paddingEnd","paddingLeft","paddingRight","paddingStart","paddingTop","requiresFadingEdge","rotation","rotationX","rotationY","saveEnabled","scaleX","scaleY","scrollX","scrollY","scrollbars","stateListAnimator","tag","tooltipText","transitionName","translationX","translationY","translationZ","visibility"};
+    private static final String[] CONSTRUCTOR_ATTRIBUTES={"accessibilityLiveRegion","alpha","autofillHints","background","backgroundTint","backgroundTintMode","clickable","clipToOutline","contentDescription","defaultFocusHighlightEnabled","duplicateParentState","elevation","enabled","fadingEdge","fitsSystemWindows","focusable","focusableInTouchMode","focusedByDefault","foreground","foregroundGravity","foregroundInsidePadding","foregroundTint","foregroundTintMode","hapticFeedbackEnabled","id","importantForAccessibility","importantForAutofill","isScrollContainer","keepScreenOn","keyboardNavigationCluster","layoutDirection","longClickable","minHeight","minWidth","nextClusterForward","onClick","outlineProvider","overScrollMode","padding","paddingBottom","paddingEnd","paddingLeft","paddingRight","paddingStart","paddingTop","requiresFadingEdge","rotation","rotationX","rotationY","saveEnabled","scaleX","scaleY","scrollX","scrollY","scrollbars","soundEffectsEnabled","stateListAnimator","tag","tooltipText","transitionName","translationX","translationY","translationZ","visibility"};
     public View(Context context) {
         if (context == null) throw new NullPointerException("context");
         this.context = context;
@@ -597,6 +597,8 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
             visibility=shirazVisibilityFromXml(a.integer("visibility",0));enabled=a.bool("enabled",true);clickable=a.bool("clickable",false);setLongClickable(a.bool("longClickable",false));if(a.has("tooltipText"))setTooltipText(a.text("tooltipText"));
             if(a.has("focusable")){shiraz.runtime.BinaryXml.Value v=a.raw("focusable");focusability=v.type==18?(v.data!=0?FOCUSABLE:NOT_FOCUSABLE):a.integer("focusable",0);if(focusability!=0&&focusability!=1&&focusability!=16)throw new IllegalArgumentException("focusable");}
             setDefaultFocusHighlightEnabled(a.bool("defaultFocusHighlightEnabled",true));
+            setHapticFeedbackEnabled(a.bool("hapticFeedbackEnabled",true));
+            setSoundEffectsEnabled(a.bool("soundEffectsEnabled",true));
             keyboardNavigationCluster=a.bool("keyboardNavigationCluster",false);focusedByDefault=a.bool("focusedByDefault",false);nextClusterForwardId=a.reference("nextClusterForward",NO_ID);
             keepScreenOn=a.bool("keepScreenOn",false);
             focusableInTouchMode=a.bool("focusableInTouchMode",false);if(focusableInTouchMode)focusability=FOCUSABLE;
@@ -1180,8 +1182,13 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         if(genericMotionListener!=null&&isEnabled()&&genericMotionListener.onGenericMotion(this,event))return true;
         return onGenericMotionEvent(event);
     }
+    private boolean hapticFeedbackEnabled=true,soundEffectsEnabled=true;
+    public void setHapticFeedbackEnabled(boolean enabled){hapticFeedbackEnabled=enabled;}
+    public boolean isHapticFeedbackEnabled(){return hapticFeedbackEnabled;}
     public boolean performHapticFeedback(int feedbackConstant){return false;}
     public boolean performHapticFeedback(int feedbackConstant,int flags){return false;}
+    public void setSoundEffectsEnabled(boolean enabled){soundEffectsEnabled=enabled;}
+    public boolean isSoundEffectsEnabled(){return soundEffectsEnabled;}
     public void playSoundEffect(int soundConstant){}
     public boolean isOpaque(){return false;}
     public boolean isInLayout(){return false;}
