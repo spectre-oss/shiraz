@@ -17,8 +17,7 @@ struct ColorEntry { uint32_t color; std::vector<int32_t> states; uint32_t colorA
 struct ColorValue { Res_value value{}; ApkAssetsCookie cookie = -1; };
 struct ColorReader {
     AssetManager* manager;
-    const ApkAssets* app;
-    const ApkAssets* framework;
+    const std::vector<const ApkAssets*>& packages;
     const Theme* theme;
     std::set<std::pair<ApkAssetsCookie, std::string>> active;
 
@@ -83,7 +82,7 @@ struct ColorReader {
             throw std::runtime_error("Invalid color resource archive path");
         auto key = std::make_pair(result.cookie, filename);
         if (!active.insert(key).second) throw std::runtime_error("Cyclic color selector");
-        const ApkAssets* owner = result.cookie == 0 && framework ? framework : result.cookie == (framework ? 1 : 0) ? app : nullptr;
+        const ApkAssets* owner = result.cookie >= 0 && static_cast<size_t>(result.cookie) < packages.size() ? packages[result.cookie] : nullptr;
         if (!owner) throw std::runtime_error("Unknown color asset cookie");
         // A temporary one-package manager opens the exact cookie's file, even when an
         // app and framework APK contain the same res/... path. No extraction occurs.

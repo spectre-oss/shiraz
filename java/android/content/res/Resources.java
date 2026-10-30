@@ -8,6 +8,7 @@ public class Resources {
     static { System.loadLibrary("shiraz-resources"); }
     private volatile long handle;
     private final String apkPath;
+    private final String[] splitPaths;
     private Resources parent;
     private Configuration override, parentConfiguration;
     private int depth;
@@ -37,8 +38,28 @@ public class Resources {
         this(apk,width,height,locale,processSystem,160);
     }
     private Resources(String apk,int width,int height,Locale locale,boolean processSystem,int density) {
+        this(apk,new String[0],width,height,locale,processSystem,density);
+    }
+    private Resources(String apk,String[] splits,int width,int height,Locale locale,boolean processSystem,int density) {
         if(density<1||density>1280)throw new IllegalArgumentException("Display density");
         this.processSystem=processSystem; this.apkPath=apk;
+        if(splits==null)throw new NullPointerException("split paths");
+        if(splits.length>256)throw new IllegalArgumentException("Split resource limit");
+        this.splitPaths=splits.clone();
+        java.util.HashSet<String> paths=new java.util.HashSet<String>();
+        byte[][] encodedSplits=new byte[splits.length][];
+        byte[] encodedBase;
+        try {
+            validateArchivePath(apk,paths);
+            encodedBase=encodeArchivePath(apk);
+            int total=encodedBase.length;
+            for(int i=0;i<splitPaths.length;i++) {
+                validateArchivePath(splitPaths[i],paths);
+                encodedSplits[i]=encodeArchivePath(splitPaths[i]);
+                total+=encodedSplits[i].length;
+                if(total>16*1048576)throw new IllegalArgumentException("Resource path size limit");
+            }
+        } catch(java.io.IOException failure) {throw new IllegalArgumentException("Invalid resource archive path",failure);}
         this.width = width; this.height = height;
         configuration = new Configuration(); configuration.fontScale=1; configuration.setLocale(locale);
         configuration.densityDpi = density; configuration.screenWidthDp = Math.max(1,Math.round(width*160f/density)); configuration.screenHeightDp = Math.max(1,Math.round(height*160f/density));
@@ -50,12 +71,26 @@ public class Resources {
         metrics.densityDpi=density;metrics.density=metrics.scaledDensity=density/160f;metrics.xdpi=metrics.ydpi=density;
         baseMetrics = new android.util.DisplayMetrics(); baseMetrics.setTo(metrics);
         String framework = System.getProperty("shiraz.frameworkResources");
-        handle = processSystem ? nativeOpenSystem(apk.getBytes(StandardCharsets.UTF_8),locale.toLanguageTag(),width,height) : nativeOpen(apk.getBytes(StandardCharsets.UTF_8), framework == null ? null : framework.getBytes(StandardCharsets.UTF_8), locale.toLanguageTag(), width, height);
+        handle = processSystem ? nativeOpenSystem(encodedBase,locale.toLanguageTag(),width,height) : nativeOpen(encodedBase, encodedSplits, framework == null ? null : framework.getBytes(StandardCharsets.UTF_8), locale.toLanguageTag(), width, height);
         if (handle == 0) throw new IllegalStateException("Cannot open APK resource manager");
         try { configure(configuration, metrics); } catch (Throwable error) { nativeClose(handle); handle = 0; throw error; }
     }
     public static Resources shirazOpen(String apk,int width,int height,int density) {
         return new Resources(apk,width,height,Locale.getDefault(),false,density);
+    }
+    /** Open an already validated installed package's base and ordered resource splits. */
+    public static Resources shirazOpen(String apk,String[] splits,int width,int height,int density) {
+        return new Resources(apk,splits==null?new String[0]:splits,width,height,Locale.getDefault(),false,density);
+    }
+    private static void validateArchivePath(String path,java.util.Set<String> paths)throws java.io.IOException {
+        if(path==null||path.isEmpty()||path.length()>1048576||path.indexOf('\0')>=0)
+            throw new IllegalArgumentException("Invalid resource archive path");
+        if(!paths.add(new java.io.File(path).getCanonicalPath()))throw new IllegalArgumentException("Duplicate resource archive");
+    }
+    private static byte[] encodeArchivePath(String path) {
+        byte[] value=path.getBytes(StandardCharsets.UTF_8);
+        if(value.length>1048576)throw new IllegalArgumentException("Resource path size limit");
+        return value;
     }
     public static Resources shirazOpen(String apk, int width, int height) {
         return new Resources(apk, width, height, Locale.getDefault(),false);
@@ -68,7 +103,7 @@ public class Resources {
         if(familySize.incrementAndGet()>128){familySize.decrementAndGet();throw new IllegalStateException("Configuration resource limit");}
         Resources child=null;
         try {
-            child=new Resources(apkPath,width,height,configuration.locale,processSystem);
+            child=new Resources(apkPath,splitPaths,width,height,configuration.locale,processSystem,160);
             child.updateConfiguration(configuration,metrics);
             child.updateConfiguration(new Configuration(changes),null);
             child.override=new Configuration(changes);child.parentConfiguration=new Configuration(configuration);
@@ -99,7 +134,10 @@ public class Resources {
         return result;
     }
     public synchronized AssetManager getAssets() { requireOpen(); if (assets == null) assets = new AssetManager(this); return assets; }
-    synchronized String shirazAssetArchive(){requireOpen();return apkPath;}
+    synchronized String[] shirazAssetArchives(){
+        requireOpen();String[] paths=new String[splitPaths.length+1];paths[0]=apkPath;
+        System.arraycopy(splitPaths,0,paths,1,splitPaths.length);return paths;
+    }
     synchronized long[] shirazOpenAssetStream(String name) throws java.io.IOException {
         requireOpen(); return nativeAssetStream(handle, ("assets/" + name).getBytes(StandardCharsets.UTF_8));
     }
@@ -535,7 +573,7 @@ public class Resources {
         }
         public void setTo(Theme other) {
             if (other == null) throw new NullPointerException("theme");
-            if (!apkPath.equals(other.getResources().apkPath) || processSystem!=other.getResources().processSystem)
+            if (!apkPath.equals(other.getResources().apkPath) || !java.util.Arrays.equals(splitPaths,other.getResources().splitPaths) || processSystem!=other.getResources().processSystem)
                 throw new UnsupportedOperationException("Theme copying between different APKs is not implemented");
             int[] copied;
             synchronized(other.getResources()){other.getResources().requireOpen();copied=other.sequence();}
@@ -607,7 +645,7 @@ public class Resources {
     }
     private static native int[] nativeSizeConfigurations(long handle);
     private static native long nativeOpenSystem(byte[] path,String locale,int width,int height);
-    private static native long nativeOpen(byte[] path, byte[] framework, String locale, int width, int height);
+    private static native long nativeOpen(byte[] path, byte[][] splits, byte[] framework, String locale, int width, int height);
     private static native void nativeClose(long handle);
     private static native byte[] nativeResourceFile(long handle,int cookie,byte[] path);
     private static native void nativeValue(long handle,int id,int density,boolean resolveRefs,boolean allowBag,int[] fields,String[] text);

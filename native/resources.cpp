@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <sstream>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include "resource_colors.hpp"
@@ -20,13 +21,14 @@
 
 namespace {
 using OwnedTheme = std::unique_ptr<Theme, decltype(&Theme_delete)>;
+using OwnedApk = std::unique_ptr<const ApkAssets, decltype(&ApkAssets_delete)>;
 struct ThemeSnapshot {
     std::vector<jint> styles;
     OwnedTheme theme;
 };
 struct Resources {
-    const ApkAssets* assets = nullptr;
-    const ApkAssets* framework = nullptr;
+    std::vector<OwnedApk> archives;
+    std::vector<const ApkAssets*> packages, appPackages;
     AssetManager* manager = nullptr;
     std::mutex mutex;
     // Immutable applied-style snapshots, owned by this manager and guarded by mutex.
@@ -34,7 +36,10 @@ struct Resources {
     // APK packages are immutable for this owner. IDs are configuration-independent;
     // values still resolve against the current configuration on every read.
     std::unordered_map<std::string, jint> identifiers;
-    ~Resources() { themes.clear(); if (manager) AssetManager_delete(manager); if (assets) ApkAssets_delete(assets); if (framework) ApkAssets_delete(framework); }
+    ~Resources() { themes.clear(); if (manager) AssetManager_delete(manager); }
+    const ApkAssets* owner(jint cookie) const {
+        return cookie > 0 && static_cast<size_t>(cookie) <= packages.size() ? packages[cookie-1] : nullptr;
+    }
 };
 std::mutex registry_mutex;
 std::unordered_map<jlong, std::shared_ptr<Resources>> registry;
@@ -128,7 +133,7 @@ AppAsset openAsset(JNIEnv* env, Resources& resources, jbyteArray path) {
         throw std::invalid_argument("Invalid asset path");
     AppAsset result; result.manager.reset(AssetManager_new());
     if (!result.manager) throw std::bad_alloc();
-    if (!AssetManager_setApkAssets(result.manager.get(), &resources.assets, 1, true, false)) throw std::runtime_error("Cannot open app assets");
+    if (!AssetManager_setApkAssets(result.manager.get(), resources.appPackages.data(), resources.appPackages.size(), true, false)) throw std::runtime_error("Cannot open app assets");
     result.asset.reset(AssetManager_openNonAsset(result.manager.get(), name.c_str(), ACCESS_STREAMING));
     return result;
 }
@@ -147,34 +152,48 @@ std::shared_ptr<AssetStream> streamFor(jlong id){
 }
 
 }
-static jlong openResources(JNIEnv* env,jbyteArray path,jbyteArray framework,jstring locale,jint width,jint height,bool systemOnly) {
+static jlong openResources(JNIEnv* env,jbyteArray path,jobjectArray splits,jbyteArray framework,jstring locale,jint width,jint height,bool systemOnly) {
     try {
         if (!path || !locale) { error(env, "java/lang/NullPointerException", "Resource path/locale"); return 0; }
-        jsize length = env->GetArrayLength(path);
-        if (length < 1 || length > 1048576 || width < 1 || height < 1 || width > 8192 || height > 8192)
+        jsize splitCount = splits ? env->GetArrayLength(splits) : 0;
+        if (splitCount > 256 || width < 1 || height < 1 || width > 8192 || height > 8192)
             throw std::invalid_argument("Invalid resource path or configuration");
-        std::string filename(static_cast<size_t>(length), '\0');
-        env->GetByteArrayRegion(path, 0, length, reinterpret_cast<jbyte*>(&filename[0]));
-        if (env->ExceptionCheck()) return 0;
-        if (filename.find('\0') != std::string::npos) throw std::invalid_argument("NUL in APK path");
         auto resources = std::make_shared<Resources>();
-        resources->assets = ApkAssets_load(filename.c_str(), systemOnly);
-        if (!resources->assets) { error(env, "android/content/res/Resources$NotFoundException", "Cannot load APK resources"); return 0; }
         resources->manager = AssetManager_new();
         if (!resources->manager) throw std::bad_alloc();
-        const ApkAssets* packages[2] = {resources->assets, nullptr}; size_t package_count = 1;
-        if (framework) {
-            jsize count = env->GetArrayLength(framework);
-            if (count < 1 || count > 1048576) throw std::invalid_argument("Invalid framework resource path");
+        size_t pathBytes = 0;
+        std::set<std::string> filenames;
+        auto add = [&](jbyteArray encoded, bool system, bool app) {
+            if (!encoded) throw std::invalid_argument("Null resource path");
+            jsize count = env->GetArrayLength(encoded);
+            if (count < 1 || count > 1048576 || (pathBytes += count) > 16*1048576)
+                throw std::invalid_argument("Invalid resource path length");
             std::string file(static_cast<size_t>(count), '\0');
-            env->GetByteArrayRegion(framework, 0, count, reinterpret_cast<jbyte*>(&file[0]));
+            env->GetByteArrayRegion(encoded, 0, count, reinterpret_cast<jbyte*>(&file[0]));
+            if (env->ExceptionCheck()) return false;
+            if (file.find('\0') != std::string::npos || !filenames.insert(file).second)
+                throw std::invalid_argument("Invalid or duplicate resource path");
+            OwnedApk archive(ApkAssets_load(file.c_str(), system), ApkAssets_delete);
+            if (!archive) { error(env, "android/content/res/Resources$NotFoundException", "Cannot load APK resources"); return false; }
+            const ApkAssets* raw = archive.get();
+            resources->archives.push_back(std::move(archive));
+            resources->packages.push_back(raw);
+            if (app) resources->appPackages.push_back(raw);
+            return true;
+        };
+        if (framework && !add(framework, true, false)) return 0;
+        if (!add(path, systemOnly, true)) return 0;
+        for (jsize i = 0; i < splitCount; ++i) {
+            auto split = static_cast<jbyteArray>(env->GetObjectArrayElement(splits, i));
             if (env->ExceptionCheck()) return 0;
-            if (file.find('\0') != std::string::npos) throw std::invalid_argument("NUL in framework path");
-            resources->framework = ApkAssets_load(file.c_str(), true);
-            if (!resources->framework) { error(env, "android/content/res/Resources$NotFoundException", "Cannot load framework resources"); return 0; }
-            packages[0] = resources->framework; packages[1] = resources->assets; package_count = 2;
+            // Release the local reference even when path validation fails.
+            bool added;
+            try { added = add(split, false, true); }
+            catch (...) { if (split) env->DeleteLocalRef(split); throw; }
+            if (split) env->DeleteLocalRef(split);
+            if (!added) return 0;
         }
-        if (!AssetManager_setApkAssets(resources->manager, packages, package_count, true, false))
+        if (!AssetManager_setApkAssets(resources->manager, resources->packages.data(), resources->packages.size(), true, false))
             throw std::runtime_error("Cannot install APK resources");
         ResTable_config config{};
         config.size = sizeof(config); config.sdkVersion = 27; config.density = 160;
@@ -196,8 +215,8 @@ static jlong openResources(JNIEnv* env,jbyteArray path,jbyteArray framework,jstr
       catch (const std::exception&) { error(env, "java/lang/IllegalStateException", "Cannot initialize APK resource manager"); }
     return 0;
 }
-extern "C" JNIEXPORT jlong JNICALL Java_android_content_res_Resources_nativeOpen(JNIEnv* env,jclass,jbyteArray path,jbyteArray framework,jstring locale,jint width,jint height) {return openResources(env,path,framework,locale,width,height,false);}
-extern "C" JNIEXPORT jlong JNICALL Java_android_content_res_Resources_nativeOpenSystem(JNIEnv* env,jclass,jbyteArray path,jstring locale,jint width,jint height) {return openResources(env,path,nullptr,locale,width,height,true);}
+extern "C" JNIEXPORT jlong JNICALL Java_android_content_res_Resources_nativeOpen(JNIEnv* env,jclass,jbyteArray path,jobjectArray splits,jbyteArray framework,jstring locale,jint width,jint height) {return openResources(env,path,splits,framework,locale,width,height,false);}
+extern "C" JNIEXPORT jlong JNICALL Java_android_content_res_Resources_nativeOpenSystem(JNIEnv* env,jclass,jbyteArray path,jstring locale,jint width,jint height) {return openResources(env,path,nullptr,nullptr,locale,width,height,true);}
 
 extern "C" JNIEXPORT void JNICALL Java_android_content_res_Resources_nativeClose(JNIEnv*, jclass, jlong id) {
     std::lock_guard<std::mutex> lock(registry_mutex);
@@ -413,7 +432,7 @@ extern "C" JNIEXPORT jintArray JNICALL Java_android_content_res_Resources_native
         std::lock_guard<std::mutex> lock(resources->mutex);
         Theme* theme = styles ? themeFor(env, *resources, sequence) : nullptr;
         if (styles && !theme) return nullptr;
-        shiraz::resources::ColorReader reader{resources->manager, resources->assets, resources->framework, theme, {}};
+        shiraz::resources::ColorReader reader{resources->manager, resources->packages, theme, {}};
         auto entries = reader.colors(reader.resource(static_cast<uint32_t>(resource_id)), 0, integers == JNI_TRUE);
         std::vector<jint> packed; packed.push_back(static_cast<jint>(entries.size()));
         for (const auto& entry : entries) {
@@ -502,7 +521,7 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_android_content_res_Resources_nativ
         if (!shiraz::validArchiveFilePath(name))
             throw std::invalid_argument("Invalid resource file path");
         std::lock_guard<std::mutex> lock(resources->mutex);
-        const ApkAssets* owner=javaCookie == 1 && resources->framework ? resources->framework : javaCookie == (resources->framework ? 2 : 1) ? resources->assets : nullptr;
+        const ApkAssets* owner=resources->owner(javaCookie);
         if (!owner && javaCookie != 0) throw std::invalid_argument("Unknown resource asset cookie");
         std::unique_ptr<AssetManager,decltype(&AssetManager_delete)> files(AssetManager_new(),AssetManager_delete); if (!files) throw std::bad_alloc();
         if (owner && !AssetManager_setApkAssets(files.get(),&owner,1,true,false)) throw std::runtime_error("Cannot open resource file owner");
@@ -526,7 +545,7 @@ extern "C" JNIEXPORT jlongArray JNICALL Java_android_content_res_Resources_nativ
         if (!shiraz::validArchiveFilePath(name))
             throw std::invalid_argument("Invalid resource file path");
         std::lock_guard<std::mutex> lock(resources->mutex);
-        const ApkAssets* owner=javaCookie == 1 && resources->framework ? resources->framework : javaCookie == (resources->framework ? 2 : 1) ? resources->assets : nullptr;
+        const ApkAssets* owner=resources->owner(javaCookie);
         if (!owner) throw std::invalid_argument("Unknown resource asset cookie");
         std::unique_ptr<AssetManager,decltype(&AssetManager_delete)> files(AssetManager_new(),AssetManager_delete); if (!files) throw std::bad_alloc();
         if (!AssetManager_setApkAssets(files.get(),&owner,1,true,false)) throw std::runtime_error("Cannot open resource file owner");

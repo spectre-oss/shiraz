@@ -164,7 +164,7 @@ public final class ActivityRunner {
         }
         @Override public synchronized android.content.res.Resources getResources() {
             if (resources == null) {
-                resources = android.content.res.Resources.shirazOpen(getPackageCodePath(), width, height, densityDpi);
+                resources = android.content.res.Resources.shirazOpen(getPackageCodePath(), getApplicationInfo().splitSourceDirs, width, height, densityDpi);
                 // The desktop endpoint supplies keyboard and text events through SDL.
                 android.content.res.Configuration input=new android.content.res.Configuration();
                 input.keyboard=android.content.res.Configuration.KEYBOARD_QWERTY;

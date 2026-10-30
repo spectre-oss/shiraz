@@ -17,7 +17,7 @@ public final class AssetManager implements AutoCloseable {
             throw new IllegalArgumentException("Invalid asset name");
         for (String part : name.split("/", -1)) if (part.isEmpty() || part.equals(".") || part.equals("..")) throw new IllegalArgumentException("Invalid asset path component");
     }
-    /** Immediate app-APK asset children, including directories inferred from ZIP paths. */
+    /** Immediate base/split asset children, including directories inferred from ZIP paths. */
     public synchronized String[] list(String path) throws IOException {
         if(closed)throw new IllegalStateException("Asset manager is closed");
         if(path==null)throw new NullPointerException("Asset directory");
@@ -30,8 +30,10 @@ public final class AssetManager implements AutoCloseable {
         java.util.TreeSet<String> children=new java.util.TreeSet<String>(new java.util.Comparator<String>(){
             public int compare(String a,String b){byte[] x=a.getBytes(java.nio.charset.StandardCharsets.UTF_8),y=b.getBytes(java.nio.charset.StandardCharsets.UTF_8);for(int i=0;i<Math.min(x.length,y.length);i++){int difference=(x[i]&255)-(y[i]&255);if(difference!=0)return difference;}return Integer.compare(x.length,y.length);}
         });
-        try(java.util.zip.ZipFile archive=new java.util.zip.ZipFile(resources.shirazAssetArchive())){
-            java.util.Enumeration<? extends java.util.zip.ZipEntry> entries=archive.entries();int count=0;
+        int count=0;
+        for(String archivePath:resources.shirazAssetArchives())
+        try(java.util.zip.ZipFile archive=new java.util.zip.ZipFile(archivePath)){
+            java.util.Enumeration<? extends java.util.zip.ZipEntry> entries=archive.entries();
             while(entries.hasMoreElements()){
                 if(++count>1000000)throw new IOException("Asset ZIP entry limit");
                 String name=entries.nextElement().getName();if(!name.startsWith(prefix))continue;

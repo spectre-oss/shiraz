@@ -1557,3 +1557,8 @@ file-observer-smoke: framework build/libshiraz-host.so
 	javac --release 8 -cp build/framework/classes -d build/file-observer-smoke tests/java/FileObserverSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/file-observer-smoke:build/framework/classes FileObserverSmoke
 check: file-observer-smoke
+
+.PHONY: split-resources-smoke
+split-resources-smoke: framework apk-fixture framework-resources build/libshiraz-resources.so build/libshiraz-host.so
+	SHIRAZ_TEST_JAVA="$(JAVA)" python3 scripts/split_resources_smoke.py
+check: split-resources-smoke
