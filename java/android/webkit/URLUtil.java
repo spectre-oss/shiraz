@@ -16,8 +16,47 @@
 
 package android.webkit;
 
+import android.net.WebAddress;
+import android.net.ParseException;
+
 /** Android URL classification; these predicates do not authorize network or file access. */
 public final class URLUtil {
+    // Adapted from AOSP frameworks/base android-8.1.0_r1 (debug logging omitted).
+    public static String guessUrl(String inUrl) {
+
+        String retVal = inUrl;
+        WebAddress webAddress;
+
+
+        if (inUrl.length() == 0) return inUrl;
+        if (inUrl.startsWith("about:")) return inUrl;
+        // Do not try to interpret data scheme URLs
+        if (inUrl.startsWith("data:")) return inUrl;
+        // Do not try to interpret file scheme URLs
+        if (inUrl.startsWith("file:")) return inUrl;
+        // Do not try to interpret javascript scheme URLs
+        if (inUrl.startsWith("javascript:")) return inUrl;
+
+        // bug 762454: strip period off end of url
+        if (inUrl.endsWith(".") == true) {
+            inUrl = inUrl.substring(0, inUrl.length() - 1);
+        }
+
+        try {
+            webAddress = new WebAddress(inUrl);
+        } catch (ParseException ex) {
+
+            return retVal;
+        }
+
+        // Check host
+        if (webAddress.getHost().indexOf('.') == -1) {
+            // no dot: user probably entered a bare domain.  try .com
+            webAddress.setHost("www." + webAddress.getHost() + ".com");
+        }
+        return webAddress.toString();
+    }
+
     static final String ASSET_BASE="file:///android_asset/";
     static final String RESOURCE_BASE="file:///android_res/";
     static final String FILE_BASE="file://";

@@ -31,6 +31,20 @@ public final class CoreAbiFixture {
   check(android.webkit.URLUtil.isJavaScriptUrl("javascript:1")&&!android.webkit.URLUtil.isJavaScriptUrl("JavaScript:1"),"Javascript prefix case");
   check(android.webkit.URLUtil.isDataUrl("data:text/plain,a")&&!android.webkit.URLUtil.isValidUrl("data:text/plain,a")&&!android.webkit.URLUtil.isValidUrl("ftp://example.com"),"Android valid URL predicate is scheme classification");
   check(android.webkit.URLUtil.stripAnchor("https://example.com/#a#b").equals("https://example.com/"),"First fragment separator");
+  String[][] guesses={
+   {"", ""}, {"example", "http://www.example.com/"},
+   {"example.org.", "http://example.org/"},
+   {"HTTPS://example.org:443/a?q=one#fragment", "https://example.org/a?q=one"},
+   {"example.org:443", "https://example.org/"},
+   {"https://example.org:8443/path", "https://example.org:8443/path"},
+   {"user:pass@example.org/a", "http://user:pass@example.org/a"},
+   {"example.org:999999999999/", "example.org:999999999999/"},
+   {"about:blank", "about:blank"}, {"data:text/plain,a.", "data:text/plain,a."},
+   {"file:///tmp/a.", "file:///tmp/a."}, {"javascript:1", "javascript:1"},
+   {"https://bücher.example/a", "https://bücher.example/a"}
+  };
+  for(String[] guess:guesses)check(android.webkit.URLUtil.guessUrl(guess[0]).equals(guess[1]),"URL guess: "+guess[0]);
+  try{android.webkit.URLUtil.guessUrl(null);throw new AssertionError("Null URL guess accepted");}catch(NullPointerException expected){}
   check(Build.UNKNOWN.equals(Build.class.getField("SOC_MANUFACTURER").get(null))&&Build.UNKNOWN.equals(Build.class.getField("SOC_MODEL").get(null)),"Unavailable Android SoC properties");
   java.util.Locale previous=java.util.Locale.getDefault();try{
    java.util.Locale.setDefault(new java.util.Locale("tr","TR"));

@@ -21,6 +21,9 @@ import java.util.regex.Pattern;
 /** Android email heuristic; this is deliberately not an RFC mailbox validator. */
 public final class Patterns {
     private Patterns(){}
+    // AOSP android-8.1.0_r1 IRI character class used by WebAddress.
+    public static final String GOOD_IRI_CHAR =
+        "a-zA-Z0-9\u00A0-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF";
     private static final String IP_ADDRESS_STRING =
             "((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[1-9])\\.(25[0-5]|2[0-4]"
             + "[0-9]|[0-1][0-9]{2}|[1-9][0-9]|[1-9]|0)\\.(25[0-5]|2[0-4][0-9]|[0-1]"

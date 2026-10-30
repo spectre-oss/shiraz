@@ -332,4 +332,9 @@ and core/java/android/text/TextUtils.java at android-8.1.0_r81 commit
 URLUtil URL classification and stripAnchor methods in java/android/webkit/URLUtil.java
 are adapted from AOSP frameworks/base/core/java/android/webkit/URLUtil.java
 (Copyright 2006 The Android Open Source Project), Apache License 2.0.
-Other URL guessing/filename helpers are not included.
+Filename helpers are not included.
+
+URLUtil.guessUrl, WebAddress, ParseException and Patterns.GOOD_IRI_CHAR are
+adapted from frameworks/base/core/java/android/{webkit,net,util},
+android-8.1.0_r1 (Apache-2.0). Debug logging and SystemApi annotations are omitted;
+original copyright and license headers are retained.
