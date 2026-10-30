@@ -26,6 +26,7 @@ public final class ProcessApplication extends android.app.Application {
     }
     @Override public void onCreate() {
         super.onCreate();
+        if (android.os.Debug.isDebuggerConnected()) throw new AssertionError("Unexpected debugger in fixture process");
         if (query("currentActivityThread") != thread || query("currentApplication") != this)
             throw new AssertionError("Application binding replaced process identity");
         System.out.println("PROCESS_APPLICATION_IDENTITY_OK");

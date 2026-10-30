@@ -8,6 +8,7 @@ import java.util.Map;
 public final class Debug {
  static {System.loadLibrary("shiraz-host");}
  private Debug(){}
+ public static boolean isDebuggerConnected(){return dalvik.system.VMDebug.isDebuggerConnected();}
  public static native long getNativeHeapAllocatedSize();
  public static native long getNativeHeapSize();
  public static native long getNativeHeapFreeSize();

@@ -47,6 +47,35 @@ public final class ParcelFileDescriptor implements Closeable, Parcelable {
         synchronized (fd) { getFd(); int raw = NativeFd.detach(fd); guard.close(); return raw; }
     }
     public long getStatSize() throws IOException { synchronized (fd) { return NativeFd.size(fd); } }
+    /** Closing the stream also releases the descriptor's ownership guard. */
+    public static class AutoCloseInputStream extends FileInputStream {
+        private final ParcelFileDescriptor owner;
+        private boolean closed;
+        public AutoCloseInputStream(ParcelFileDescriptor owner) {
+            super(owner.getFileDescriptor()); this.owner=owner;
+        }
+        @Override public void close() throws IOException {
+            synchronized(owner.fd) {
+                if(closed)return;
+                closed=true;
+                try { super.close(); } finally { owner.close(); }
+            }
+        }
+    }
+    public static class AutoCloseOutputStream extends FileOutputStream {
+        private final ParcelFileDescriptor owner;
+        private boolean closed;
+        public AutoCloseOutputStream(ParcelFileDescriptor owner) {
+            super(owner.getFileDescriptor()); this.owner=owner;
+        }
+        @Override public void close() throws IOException {
+            synchronized(owner.fd) {
+                if(closed)return;
+                closed=true;
+                try { super.close(); } finally { owner.close(); }
+            }
+        }
+    }
     @Override public void close() throws IOException {
         synchronized (fd) { try { NativeFd.close(fd); } finally { if (guard != null) guard.close(); } }
     }

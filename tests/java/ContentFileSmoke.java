@@ -49,6 +49,21 @@ public class ContentFileSmoke {
    provider.start=0;provider.length=AssetFileDescriptor.UNKNOWN_LENGTH;
    try(OutputStream whole=resolver.openOutputStream(content,"rw")){whole.write(new byte[]{30,31,32,33,34,35,36,37});}
    if(file.length()!=8||!provider.closed)throw new AssertionError("Unbounded output or close");
+   ParcelFileDescriptor outputOwner=ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_WRITE_ONLY|ParcelFileDescriptor.MODE_TRUNCATE);
+   ParcelFileDescriptor.AutoCloseOutputStream ownedOutput=new ParcelFileDescriptor.AutoCloseOutputStream(outputOwner);
+   ownedOutput.write(new byte[]{41,42});ownedOutput.close();ownedOutput.close();
+   if(outputOwner.getFileDescriptor().valid())throw new AssertionError("Output stream retained descriptor");
+   ParcelFileDescriptor inputOwner=ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY);
+   ParcelFileDescriptor duplicate=inputOwner.dup();
+   ParcelFileDescriptor.AutoCloseInputStream ownedInput=new ParcelFileDescriptor.AutoCloseInputStream(inputOwner);
+   if(ownedInput.read()!=41)throw new AssertionError("Owned stream read");
+   ownedInput.close();ownedInput.close();
+   if(inputOwner.getFileDescriptor().valid()||!duplicate.getFileDescriptor().valid())throw new AssertionError("Input stream descriptor ownership");
+   try(InputStream remaining=new ParcelFileDescriptor.AutoCloseInputStream(duplicate)){
+    if(remaining.read()!=42||remaining.read()!=-1)throw new AssertionError("Duplicate retains shared offset");
+   }
+   try{ownedInput.read();throw new AssertionError("Closed input readable");}catch(IOException expected){}
+   try{ownedOutput.write(43);throw new AssertionError("Closed output writable");}catch(IOException expected){}
    System.out.println("CONTENT_FILE_URI_IO_OK");
   }finally{file.delete();}
  }
