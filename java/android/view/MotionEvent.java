@@ -146,6 +146,11 @@ public final class MotionEvent extends InputEvent {
     public float getPressure(int index) { index(index); return coords[index].pressure; }
     public float getSize() { live(); return coords[0].size; }
     public float getSize(int index) { index(index); return coords[index].size; }
+    public float getTouchMajor() { return getTouchMajor(0); }
+    public float getTouchMinor() { return getTouchMinor(0); }
+    public float getToolMajor() { return getToolMajor(0); }
+    public float getToolMinor() { return getToolMinor(0); }
+    public float getOrientation() { return getOrientation(0); }
     public float getTouchMajor(int index) { index(index); return coords[index].touchMajor; }
     public float getTouchMinor(int index) { index(index); return coords[index].touchMinor; }
     public float getToolMajor(int index) { index(index); return coords[index].toolMajor; }

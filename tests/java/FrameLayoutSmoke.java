@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 public final class FrameLayoutSmoke {
     public static void main(String[] args) {
+        android.os.Looper.prepareMainLooper();
         android.content.Context context=new android.content.ContextWrapper(null);
         org.shiraz.fixture.FrameLayoutFixture.check(context);
         final StringBuilder hierarchy=new StringBuilder();

@@ -47,6 +47,12 @@ public final class FrameLayoutFixture {
         int id=context.getResources().getIdentifier("foreground_frame","layout",context.getPackageName());FrameLayout root=(FrameLayout)LayoutInflater.from(context).inflate(id,null,false);layout(root,8,8);
         Bitmap pixels=Bitmap.createBitmap(8,8,Bitmap.Config.ARGB_8888);root.draw(new Canvas(pixels));
         check(pixels.getPixel(0,0)==Color.BLUE&&pixels.getPixel(2,2)==Color.BLUE&&pixels.getPixel(5,5)==Color.BLUE&&pixels.getPixel(6,6)==Color.BLUE,"XML fill foreground overlays padding and child");pixels.recycle();
+        check(root.getForegroundTintList().getDefaultColor()==Color.BLUE&&root.getForegroundTintMode()==android.graphics.PorterDuff.Mode.SRC_IN,"foreground XML tint retained");
+        Bitmap tintPixels=Bitmap.createBitmap(8,8,Bitmap.Config.ARGB_8888);
+        root.setForegroundTintList(new android.content.res.ColorStateList(new int[][]{{16842919 /* state_pressed */},{}},new int[]{Color.RED,Color.BLUE}));
+        root.setPressed(true);root.draw(new Canvas(tintPixels));check(tintPixels.getPixel(0,0)==Color.RED,"foreground stateful tint");
+        root.setForeground(new android.graphics.drawable.ColorDrawable(Color.GREEN));root.draw(new Canvas(tintPixels));check(tintPixels.getPixel(0,0)==Color.RED,"replacement retains foreground tint");
+        root.setForegroundTintList(null);root.draw(new Canvas(tintPixels));check(tintPixels.getPixel(0,0)==Color.GREEN,"foreground tint clear");tintPixels.recycle();
         final boolean[] stale={false};android.graphics.drawable.Drawable old=root.getForeground();old.scheduleSelf(new Runnable(){public void run(){stale[0]=true;}},0);root.setForeground(null);
         check(old.getCallback()==null,"XML foreground detached");new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable(){public void run(){check(!stale[0],"old foreground scheduled callback survived replacement");System.out.println("SHIRAZ_FOREGROUND_QUEUE_OK");}});
         int theme=context.getResources().getIdentifier("ForegroundEmpty","style",context.getPackageName());Context themed=new android.view.ContextThemeWrapper(context,theme);

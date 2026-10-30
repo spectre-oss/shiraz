@@ -548,7 +548,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public View(Context context, android.util.AttributeSet attrs, int style, int resource) {
         this(context);
         if(attrs!=null||style!=0||resource!=0){shiraz.runtime.XmlAttributes a=new shiraz.runtime.XmlAttributes(context,attrs,style,resource);a.prefetch(CONSTRUCTOR_ATTRIBUTES);
-            a.reject("rotationX rotationY foregroundTint foregroundTintMode");if(a.has("rotation"))setRotation(a.number("rotation",0));
+            a.reject("rotationX rotationY");if(a.has("rotation"))setRotation(a.number("rotation",0));
             if(a.has("onClick")){
              String click=a.text("onClick");
              if(click!=null){
@@ -583,6 +583,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
             if(a.has("outlineProvider")){int provider=a.integer("outlineProvider",0);switch(provider){case 0:setOutlineProvider(ViewOutlineProvider.BACKGROUND);break;case 1:setOutlineProvider(null);break;case 2:setOutlineProvider(ViewOutlineProvider.BOUNDS);break;case 3:setOutlineProvider(ViewOutlineProvider.PADDED_BOUNDS);break;default:throw new IllegalArgumentException("Unknown outlineProvider");}}
             if(a.has("id"))id=a.reference("id",NO_ID);if(a.has("background"))setBackground(a.drawable("background"));
             if(a.has("backgroundTint")||a.has("backgroundTintMode")){android.content.res.TypedArray tint=context.obtainStyledAttributes(attrs,new int[]{0x0101046b,0x0101046c},style,resource);try{if(a.has("backgroundTint"))setBackgroundTintList(tint.getColorStateList(0));if(a.has("backgroundTintMode")){android.graphics.PorterDuff.Mode mode;switch(tint.getInt(1,-1)){case -1:mode=null;break;case 3:mode=android.graphics.PorterDuff.Mode.SRC_OVER;break;case 5:mode=android.graphics.PorterDuff.Mode.SRC_IN;break;case 9:mode=android.graphics.PorterDuff.Mode.SRC_ATOP;break;case 14:mode=android.graphics.PorterDuff.Mode.MULTIPLY;break;case 15:mode=android.graphics.PorterDuff.Mode.SCREEN;break;case 16:mode=android.graphics.PorterDuff.Mode.ADD;break;default:throw new IllegalArgumentException("Background tint mode");}setBackgroundTintMode(mode);}}finally{tint.recycle();}}
+            if(a.has("foregroundTint")||a.has("foregroundTintMode")){android.content.res.TypedArray tint=context.obtainStyledAttributes(attrs,new int[]{0x0101046d,0x0101046e},style,resource);try{if(a.has("foregroundTint"))setForegroundTintList(tint.getColorStateList(0));if(a.has("foregroundTintMode")){android.graphics.PorterDuff.Mode mode;switch(tint.getInt(1,-1)){case -1:mode=null;break;case 3:mode=android.graphics.PorterDuff.Mode.SRC_OVER;break;case 5:mode=android.graphics.PorterDuff.Mode.SRC_IN;break;case 9:mode=android.graphics.PorterDuff.Mode.SRC_ATOP;break;case 14:mode=android.graphics.PorterDuff.Mode.MULTIPLY;break;case 15:mode=android.graphics.PorterDuff.Mode.SCREEN;break;case 16:mode=android.graphics.PorterDuff.Mode.ADD;break;default:throw new IllegalArgumentException("Foreground tint mode");}setForegroundTintMode(mode);}}finally{tint.recycle();}}
             setAccessibilityLiveRegion(a.integer("accessibilityLiveRegion",ACCESSIBILITY_LIVE_REGION_NONE));setImportantForAccessibility(a.integer("importantForAccessibility",IMPORTANT_FOR_ACCESSIBILITY_AUTO));fitsSystemWindows=a.bool("fitsSystemWindows",false);foregroundInsidePadding=a.bool("foregroundInsidePadding",true);setForegroundGravity(a.integer("foregroundGravity",Gravity.FILL));if(a.has("foreground"))setForeground(a.drawable("foreground"));
             int padding=a.dimension("padding",-1,false);setPadding(a.dimension("paddingLeft",padding>=0?padding:paddingLeft,false),a.dimension("paddingTop",padding>=0?padding:paddingTop,false),a.dimension("paddingRight",padding>=0?padding:paddingRight,false),a.dimension("paddingBottom",padding>=0?padding:paddingBottom,false));
             if(a.has("paddingStart")&&a.raw("paddingStart").type!=0)paddingStart=a.dimension("paddingStart",0,false);if(a.has("paddingEnd")&&a.raw("paddingEnd").type!=0)paddingEnd=a.dimension("paddingEnd",0,false);
@@ -731,6 +732,14 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         requestLayout();
     }
     private android.graphics.drawable.Drawable foregroundDrawable;
+    private android.content.res.ColorStateList foregroundTint;
+    private android.graphics.PorterDuff.Mode foregroundTintMode;
+    private boolean hasForegroundTint,hasForegroundTintMode;
+    public void setForegroundTintList(android.content.res.ColorStateList tint){foregroundTint=tint;hasForegroundTint=true;applyForegroundTint();}
+    public android.content.res.ColorStateList getForegroundTintList(){return foregroundTint;}
+    public void setForegroundTintMode(android.graphics.PorterDuff.Mode mode){foregroundTintMode=mode;hasForegroundTintMode=true;applyForegroundTint();}
+    public android.graphics.PorterDuff.Mode getForegroundTintMode(){return foregroundTintMode;}
+    private void applyForegroundTint(){if(foregroundDrawable==null||!hasForegroundTint&&!hasForegroundTintMode)return;foregroundDrawable=foregroundDrawable.mutate();if(hasForegroundTint)foregroundDrawable.setTintList(foregroundTint);if(hasForegroundTintMode)foregroundDrawable.setTintMode(foregroundTintMode);if(foregroundDrawable.isStateful())foregroundDrawable.setState(getDrawableState());invalidate();}
     private int foregroundGravity=Gravity.FILL;private boolean foregroundInsidePadding=true;
     public android.graphics.drawable.Drawable getForeground(){return foregroundDrawable;}
     public boolean isForegroundInsidePadding(){return foregroundInsidePadding;}
@@ -744,7 +753,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         if(drawable==foregroundDrawable)return;
         if(foregroundDrawable!=null&&foregroundDrawable!=backgroundDrawable){foregroundDrawable.setCallback(null);unscheduleDrawable(foregroundDrawable);}
         foregroundDrawable=drawable;
-        if(drawable!=null){drawable.setCallback(this);drawable.setLayoutDirection(getLayoutDirection());drawable.setVisible(visibility==VISIBLE,false);drawable.setState(getDrawableState());}
+        if(drawable!=null){drawable.setCallback(this);drawable.setLayoutDirection(getLayoutDirection());drawable.setVisible(visibility==VISIBLE,false);drawable.setState(getDrawableState());applyForegroundTint();}
         requestLayout();invalidate();
     }
     public static final int SCROLL_INDICATOR_TOP=1,SCROLL_INDICATOR_BOTTOM=2,SCROLL_INDICATOR_LEFT=4,SCROLL_INDICATOR_RIGHT=8,SCROLL_INDICATOR_START=16,SCROLL_INDICATOR_END=32;
@@ -805,6 +814,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         if (visibility != VISIBLE && visibility != INVISIBLE && visibility != GONE) throw new IllegalArgumentException("visibility");
         boolean changed=this.visibility != visibility;
         if(changed&&parent!=null)parent.shirazVisibilityChange(this,this.visibility,visibility);
+        if(changed&&visibility!=VISIBLE&&parent!=null)parent.shirazChildHidden(this);
         this.visibility = visibility;
         if (backgroundDrawable != null) backgroundDrawable.setVisible(visibility == VISIBLE, false);
         if(foregroundDrawable!=null)foregroundDrawable.setVisible(visibility==VISIBLE,false);

@@ -391,7 +391,7 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
                     if(existing!=null){existing.bits|=bits;delivered=existing;break;}
                     if(childEvent(child,event,bits,false)){
                         handled=true;sent=true;
-                        if(child.getParent()==this){delivered=new TouchTarget(child,bits);touchTargets.add(0,delivered);}
+                        if(child.getParent()==this&&getVisibility()==VISIBLE&&child.getVisibility()==VISIBLE){delivered=new TouchTarget(child,bits);touchTargets.add(0,delivered);}
                         else{
                          if("1".equals(System.getenv("SHIRAZ_TRACE_INPUT")))System.err.println("SHIRAZ_TOUCH_DETACH_CANCEL child="+child.getClass().getName()+" id="+Integer.toHexString(child.getId())+" parentOk="+(child.getParent()==this)+" groupVis="+getVisibility()+" childVis="+child.getVisibility());
                          childEvent(child,event,bits,true);
