@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import android.view.*;
 import android.graphics.Rect;
+import android.graphics.Insets;
 import android.widget.FrameLayout;
 import org.shiraz.fixture.InsetsFixture;
 public final class InsetsSmoke {
@@ -14,10 +15,28 @@ public final class InsetsSmoke {
   check(copied.layoutInDisplayCutoutMode==attributes.layoutInDisplayCutoutMode&&copied.copyFrom(attributes)==0,"copy cutout policy");
   attributes.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER;
   check(copied.copyFrom(attributes)!=0&&copied.layoutInDisplayCutoutMode==attributes.layoutInDisplayCutoutMode,"update cutout policy");
+  Insets distances=Insets.of(1,2,3,4);Rect mutable=distances.toRect();mutable.left=99;
+  check(distances.left==1&&Insets.of(new Rect()).equals(Insets.NONE),"immutable inset distances");
+  android.os.Parcel parcel=android.os.Parcel.obtain();try{distances.writeToParcel(parcel,0);parcel.setDataPosition(0);check(Insets.CREATOR.createFromParcel(parcel).equals(distances),"insets parcel round trip");}finally{parcel.recycle();}
+  WindowInsets.Builder builder=new WindowInsets.Builder();check(builder.build().isConsumed(),"builder starts consumed");
+  WindowInsets built=builder.setSystemWindowInsets(distances).setStableInsets(Insets.of(5,6,7,8)).setSystemGestureInsets(Insets.of(3,4,5,6)).setMandatorySystemGestureInsets(Insets.of(1,1,1,1)).setTappableElementInsets(Insets.of(2,2,2,2)).build();
+  builder.setSystemWindowInsets(Insets.NONE);check(built.getSystemWindowInsets().equals(distances)&&!built.isConsumed(),"builder snapshot isolation");
+  check(built.equals(new WindowInsets.Builder(built).build())&&built.hashCode()==new WindowInsets(built).hashCode(),"copy equality");
+  WindowInsets reduced=built.inset(1,3,2,8);
+  check(reduced.getSystemWindowInsets().equals(Insets.of(0,0,1,0))&&reduced.getStableInsets().equals(Insets.of(4,3,5,0))&&reduced.getSystemGestureInsets().equals(Insets.of(2,1,3,0)),"inset subtraction and clamp");
+  check(built.consumeSystemWindowInsets().getSystemGestureInsets().equals(Insets.NONE)&&built.consumeSystemWindowInsets().getStableInsets().equals(Insets.of(5,6,7,8)),"consume system and gesture values only");
+  check(built.consumeSystemWindowInsets().consumeStableInsets().isConsumed(),"builder consumption");
+  try{built.inset(-1,0,0,0);throw new AssertionError("negative inset accepted");}catch(IllegalArgumentException expected){}
+  Rect topCutout=new Rect(10,0,20,6);DisplayCutout cutout=new DisplayCutout(Insets.of(0,6,0,0),null,topCutout,null,null);topCutout.bottom=99;
+  WindowInsets withCutout=new WindowInsets.Builder().setDisplayCutout(cutout).build();
+  check(withCutout.hasInsets()&&!withCutout.isConsumed()&&withCutout.getDisplayCutout().getBoundingRectTop().bottom==6,"cutout snapshot");
+  Rect exposed=cutout.getBoundingRectTop();exposed.bottom=42;check(cutout.getBoundingRectTop().bottom==6,"cutout getter isolation");
+  check(withCutout.inset(1,2,0,0).getDisplayCutout().getSafeInsetTop()==4&&withCutout.consumeDisplayCutout().isConsumed(),"cutout inset and consumption");
   android.content.Context context=new android.content.ContextWrapper(null);
   WindowInsets empty=new WindowInsets(new Rect());InsetsFixture.checkValues(context,empty);
   check(!empty.isConsumed()&&empty.consumeSystemWindowInsets().isConsumed(),"empty differs from consumed");
-  check(WindowInsets.CONSUMED.replaceSystemWindowInsets(1,2,3,4).isConsumed(),"API27 replacement retains consumed flags");
+  WindowInsets replacedConsumed=WindowInsets.CONSUMED.replaceSystemWindowInsets(1,2,3,4);
+  check(replacedConsumed.isConsumed()&&replacedConsumed.getSystemWindowInsetLeft()==(android.os.Build.VERSION.SDK_INT>=29?0:1),"consumed replacement follows platform API");
   WindowInsets stable=new WindowInsets(new Rect(1,2,3,4),null,new Rect(5,6,7,8),true,true);
   check(stable.hasStableInsets()&&stable.isRound()&&stable.shouldAlwaysConsumeNavBar()&&stable.getStableInsetBottom()==8,"stable values");
   check(!stable.consumeSystemWindowInsets().isConsumed()&&stable.consumeSystemWindowInsets().consumeStableInsets().isConsumed(),"independent consumption");

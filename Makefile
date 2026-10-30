@@ -1562,3 +1562,10 @@ check: file-observer-smoke
 split-resources-smoke: framework apk-fixture framework-resources build/libshiraz-resources.so build/libshiraz-host.so
 	SHIRAZ_TEST_JAVA="$(JAVA)" python3 scripts/split_resources_smoke.py
 check: split-resources-smoke
+
+.PHONY: modern-font-smoke
+modern-font-smoke: framework build/libshiraz-text.so build/libshiraz-host.so
+	mkdir -p build/modern-font-smoke
+	javac --release 8 -cp build/framework/classes -d build/modern-font-smoke tests/java/ModernFontSmoke.java
+	$(JAVA) -Djava.library.path=build -cp build/modern-font-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ModernFontSmoke .local/share/shiraz/fonts/NotoSerif-Regular.ttf
+check: modern-font-smoke

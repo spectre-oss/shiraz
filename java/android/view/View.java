@@ -43,7 +43,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         finally{applyingInsets=previous;}
     }
     public WindowInsets onApplyWindowInsets(WindowInsets insets){
-        boolean consumed=fittingInsets?fitInsets(insets.getSystemWindowInsets()):fitSystemWindows(insets.getSystemWindowInsets());
+        boolean consumed=fittingInsets?fitInsets(insets.getSystemWindowInsets().toRect()):fitSystemWindows(insets.getSystemWindowInsets().toRect());
         return consumed?insets.consumeSystemWindowInsets():insets;
     }
     protected boolean fitSystemWindows(android.graphics.Rect insets){
@@ -60,7 +60,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         if(optionalInsets()){local.setEmpty();return false;}local.set(inout);inout.setEmpty();return true;
     }
     public WindowInsets computeSystemWindowInsets(WindowInsets insets,android.graphics.Rect local){
-        if(!optionalInsets()){local.set(insets.getSystemWindowInsets());return insets.consumeSystemWindowInsets();}local.setEmpty();return insets;
+        if(!optionalInsets()){local.set(insets.getSystemWindowInsets().toRect());return insets.consumeSystemWindowInsets();}local.setEmpty();return insets;
     }
     public final void shirazApplyWindowInsets(int width,int height){
         View root=getRootView();if(root!=this){root.shirazApplyWindowInsets(width,height);return;}

@@ -57,6 +57,24 @@ public class Typeface {
         if (!family.addFontFromAssetManager(assets, path, 0, asset, 0, 400, 0, null) || !family.freeze()) throw new RuntimeException("Font not found");
         return createFromFamiliesWithDefault(new FontFamily[]{family}, 400, 0);
     }
+    public static final class CustomFallbackBuilder {
+        private final java.util.ArrayList<android.graphics.fonts.FontFamily> families=new java.util.ArrayList<android.graphics.fonts.FontFamily>();
+        private android.graphics.fonts.FontStyle style=new android.graphics.fonts.FontStyle();
+        private String fallback="sans-serif";
+        public CustomFallbackBuilder(android.graphics.fonts.FontFamily family){addCustomFallback(family);}
+        public static int getMaxCustomFallbackCount(){return 64;}
+        public CustomFallbackBuilder addCustomFallback(android.graphics.fonts.FontFamily family){if(family==null)throw new NullPointerException("family");if(families.size()>=getMaxCustomFallbackCount())throw new IllegalArgumentException("Fallback family limit");families.add(family);return this;}
+        public CustomFallbackBuilder setStyle(android.graphics.fonts.FontStyle value){style=Objects.requireNonNull(value);return this;}
+        public CustomFallbackBuilder setSystemFallback(String name){if(name==null)throw new NullPointerException("fallback");create(name,NORMAL);fallback=name;return this;}
+        public Typeface build(){
+            // The current text engine accepts one custom face plus its system fallback.
+            if(families.size()!=1||!fallback.equals("sans-serif"))throw new UnsupportedOperationException("Multiple or named custom fallback families are not implemented");
+            android.graphics.fonts.FontFamily family=families.get(0);android.graphics.fonts.Font selected=null;int score=Integer.MAX_VALUE;
+            for(int i=0;i<family.getSize();i++){android.graphics.fonts.Font font=family.getFont(i);int candidate=style.getMatchScore(font.getStyle());if(candidate<score){selected=font;score=candidate;}}
+            int bits=(style.getWeight()>=700?BOLD:0)|(style.getSlant()==1?ITALIC:0);
+            return selected==null?create(fallback,bits):create(selected.shirazTypeface(),bits);
+        }
+    }
     @Override public boolean equals(Object other) {
         if (!(other instanceof Typeface)) return false;
         Typeface face = (Typeface)other; return style == face.style && family.equals(face.family);

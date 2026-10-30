@@ -68,6 +68,8 @@ public class ViewConfiguration {
  public static float getScrollFriction(){return 0.015f;}
  public long getDeviceGlobalActionKeyTimeout(){return 500;}
  public long getAccessibilityShortcutKeyTimeout(){return 3000;}
+ /** Android baseline policy; no device overlay requests shortcut labels. */
+ public boolean shouldShowMenuShortcutsWhenKeyboardPresent(){return false;}
  public boolean hasPermanentMenuKey(){return false;}
  public boolean isFadingMarqueeEnabled(){return false;}
 }
