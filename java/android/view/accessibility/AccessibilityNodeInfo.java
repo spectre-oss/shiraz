@@ -64,6 +64,12 @@ public class AccessibilityNodeInfo implements Parcelable {
   public static final AccessibilityAction ACTION_CONTEXT_CLICK=new AccessibilityAction(0x0102003c,null);
   public static final AccessibilityAction ACTION_SET_PROGRESS=new AccessibilityAction(0x0102003d,null);
   public static final AccessibilityAction ACTION_MOVE_WINDOW=new AccessibilityAction(0x01020042,null);
+  public static final AccessibilityAction ACTION_SHOW_TOOLTIP=new AccessibilityAction(16908356,null);
+  public static final AccessibilityAction ACTION_HIDE_TOOLTIP=new AccessibilityAction(16908357,null);
+  public static final AccessibilityAction ACTION_PAGE_UP=new AccessibilityAction(16908358,null);
+  public static final AccessibilityAction ACTION_PAGE_DOWN=new AccessibilityAction(16908359,null);
+  public static final AccessibilityAction ACTION_PAGE_LEFT=new AccessibilityAction(16908360,null);
+  public static final AccessibilityAction ACTION_PAGE_RIGHT=new AccessibilityAction(16908361,null);
   private final int id;private final CharSequence label;
   public AccessibilityAction(int id,CharSequence label){if(id==0)throw new IllegalArgumentException("Action ID");this.id=id;this.label=label==null?null:label.toString();}
   public int getId(){return id;}public CharSequence getLabel(){return label;}
