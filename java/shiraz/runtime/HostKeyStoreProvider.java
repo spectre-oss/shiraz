@@ -16,7 +16,7 @@ import android.security.keystore.KeyGenParameterSpec;
 public final class HostKeyStoreProvider extends Provider {
     private static Path file;
     private static final Properties keys=new Properties();
-    private HostKeyStoreProvider(){super("AndroidKeyStore",1.0,"Shiraz app-private software key storage");put("KeyStore.AndroidKeyStore",Store.class.getName());put("KeyGenerator.AES",AES.class.getName());}
+    private HostKeyStoreProvider(){super("AndroidKeyStore",1.0,"Shiraz app-private software key storage");put("KeyStore.AndroidKeyStore",Store.class.getName());put("KeyGenerator.AES",AES.class.getName());put("KeyPairGenerator.RSA",HostRsaKeyPairGenerator.class.getName());}
     public static synchronized void install(File directory)throws IOException {
         Path next=new File(directory,"shiraz-keystore.properties").toPath();
         if(next.equals(file))return;
@@ -31,21 +31,45 @@ public final class HostKeyStoreProvider extends Provider {
     private static String alias(String name){if(name==null)throw new NullPointerException("alias");return Base64.getEncoder().encodeToString(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
     private static synchronized void save(String name,Key key)throws KeyStoreException {
         if(!(key instanceof SecretKey)||key.getEncoded()==null)throw new KeyStoreException("Only encodable software secret keys are supported");
-        String id=alias(name),old=keys.getProperty(id),date=keys.getProperty(id+".date");
-        keys.setProperty(id,key.getAlgorithm()+":"+Base64.getEncoder().encodeToString(key.getEncoded()));keys.setProperty(id+".date",Long.toString(System.currentTimeMillis()));
-        try{persist();}catch(IOException e){if(old==null)keys.remove(id);else keys.setProperty(id,old);if(date==null)keys.remove(id+".date");else keys.setProperty(id+".date",date);throw new KeyStoreException("Cannot persist key",e);}
+        saveRecord(name,key.getAlgorithm()+":"+Base64.getEncoder().encodeToString(key.getEncoded()),null);
+    }
+    static synchronized void savePair(String name,PrivateKey key,Certificate certificate)throws KeyStoreException {
+        try{saveRecord(name,"PRIVATE/"+key.getAlgorithm()+":"+Base64.getEncoder().encodeToString(key.getEncoded()),
+            Base64.getEncoder().encodeToString(certificate.getEncoded()));}
+        catch(java.security.cert.CertificateEncodingException e){throw new KeyStoreException(e);}
+    }
+    private static void saveRecord(String name,String value,String certificate)throws KeyStoreException {
+        String id=alias(name);Properties previous=new Properties();previous.putAll(keys);
+        keys.setProperty(id,value);keys.setProperty(id+".date",Long.toString(System.currentTimeMillis()));
+        if(certificate==null)keys.remove(id+".cert");else keys.setProperty(id+".cert",certificate);
+        try{persist();}catch(IOException e){keys.clear();keys.putAll(previous);throw new KeyStoreException("Cannot persist key",e);}
     }
     public static final class Store extends KeyStoreSpi {
-        public Key engineGetKey(String name,char[] password)throws UnrecoverableKeyException {synchronized(HostKeyStoreProvider.class){String value=keys.getProperty(alias(name));if(value==null)return null;int split=value.indexOf(':');try{return new SecretKeySpec(Base64.getDecoder().decode(value.substring(split+1)),value.substring(0,split));}catch(RuntimeException e){throw new UnrecoverableKeyException("Invalid software key record");}}}
-        public Certificate[] engineGetCertificateChain(String name){return null;}public Certificate engineGetCertificate(String name){return null;}
+        public KeyStore.Entry engineGetEntry(String name,KeyStore.ProtectionParameter protection)throws KeyStoreException,NoSuchAlgorithmException,UnrecoverableEntryException {
+            if(protection!=null)throw new KeyStoreException("Software app key store does not support entry protection parameters");
+            synchronized(HostKeyStoreProvider.class){Key key=engineGetKey(name,null);if(key==null)return null;
+                if(key instanceof PrivateKey)return new KeyStore.PrivateKeyEntry((PrivateKey)key,engineGetCertificateChain(name));
+                return new KeyStore.SecretKeyEntry((SecretKey)key);}
+        }
+        public Key engineGetKey(String name,char[] password)throws UnrecoverableKeyException {
+            synchronized(HostKeyStoreProvider.class){String value=keys.getProperty(alias(name));if(value==null)return null;
+                try{int split=value.indexOf(':');String algorithm=value.substring(0,split);byte[] encoded=Base64.getDecoder().decode(value.substring(split+1));
+                    if(algorithm.startsWith("PRIVATE/"))return KeyFactory.getInstance(algorithm.substring(8)).generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(encoded));
+                    return new SecretKeySpec(encoded,algorithm);
+                }catch(GeneralSecurityException|RuntimeException e){UnrecoverableKeyException failure=new UnrecoverableKeyException("Invalid software key record");failure.initCause(e);throw failure;}}
+        }
+        public Certificate[] engineGetCertificateChain(String name){Certificate cert=engineGetCertificate(name);return cert==null?null:new Certificate[]{cert};}
+        public Certificate engineGetCertificate(String name){synchronized(HostKeyStoreProvider.class){String value=keys.getProperty(alias(name)+".cert");if(value==null)return null;
+            try{return java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(Base64.getDecoder().decode(value)));}
+            catch(GeneralSecurityException|RuntimeException e){throw new ProviderException("Invalid software certificate record",e);}}}
         public Date engineGetCreationDate(String name){synchronized(HostKeyStoreProvider.class){String date=keys.getProperty(alias(name)+".date");return date==null?null:new Date(Long.parseLong(date));}}
         public void engineSetKeyEntry(String name,Key key,char[] password,Certificate[] chain)throws KeyStoreException {if(chain!=null&&chain.length!=0)throw new KeyStoreException("Certificate chains unsupported");save(name,key);}
         public void engineSetKeyEntry(String name,byte[] key,Certificate[] chain)throws KeyStoreException {throw new KeyStoreException("Encoded protected key import unsupported");}
         public void engineSetCertificateEntry(String name,Certificate cert)throws KeyStoreException {throw new KeyStoreException("Certificate storage unsupported");}
-        public void engineDeleteEntry(String name)throws KeyStoreException {synchronized(HostKeyStoreProvider.class){String id=alias(name);Object old=keys.remove(id),date=keys.remove(id+".date");try{persist();}catch(IOException e){if(old!=null)keys.put(id,old);if(date!=null)keys.put(id+".date",date);throw new KeyStoreException(e);}}}
-        public Enumeration<String> engineAliases(){synchronized(HostKeyStoreProvider.class){ArrayList<String> names=new ArrayList<String>();for(String id:keys.stringPropertyNames())if(!id.endsWith(".date"))names.add(new String(Base64.getDecoder().decode(id),java.nio.charset.StandardCharsets.UTF_8));return Collections.enumeration(names);}}
+        public void engineDeleteEntry(String name)throws KeyStoreException {synchronized(HostKeyStoreProvider.class){String id=alias(name);Properties previous=new Properties();previous.putAll(keys);keys.remove(id);keys.remove(id+".date");keys.remove(id+".cert");try{persist();}catch(IOException e){keys.clear();keys.putAll(previous);throw new KeyStoreException(e);}}}
+        public Enumeration<String> engineAliases(){synchronized(HostKeyStoreProvider.class){ArrayList<String> names=new ArrayList<String>();for(String id:keys.stringPropertyNames())if(id.indexOf('.')<0)names.add(new String(Base64.getDecoder().decode(id),java.nio.charset.StandardCharsets.UTF_8));return Collections.enumeration(names);}}
         public boolean engineContainsAlias(String name){synchronized(HostKeyStoreProvider.class){return keys.containsKey(alias(name));}}
-        public int engineSize(){return Collections.list(engineAliases()).size();}public boolean engineIsKeyEntry(String name){return engineContainsAlias(name);}public boolean engineIsCertificateEntry(String name){return false;}public String engineGetCertificateAlias(Certificate cert){return null;}
+        public int engineSize(){return Collections.list(engineAliases()).size();}public boolean engineIsKeyEntry(String name){return engineContainsAlias(name);}public boolean engineIsCertificateEntry(String name){return false;}public String engineGetCertificateAlias(Certificate cert){if(cert==null)return null;Enumeration<String> names=engineAliases();while(names.hasMoreElements()){String name=names.nextElement();if(cert.equals(engineGetCertificate(name)))return name;}return null;}
         public void engineStore(OutputStream out,char[] password)throws IOException {throw new IOException("App key store cannot be exported");}
         public void engineLoad(InputStream in,char[] password)throws IOException {if(in!=null||password!=null)throw new IOException("App key store requires null stream and password");if(file==null)throw new IOException("No application key store");}
     }

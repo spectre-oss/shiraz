@@ -6,10 +6,27 @@ import unittest
 from unittest.mock import patch
 
 from shiraz.apk import FormatError
-from shiraz.runtime import ROOT, selected_device_profile, validate_device_profile
+from shiraz.runtime import ROOT, native_build_environment, selected_device_profile, validate_device_profile
 
 
 class DeviceProfileTests(unittest.TestCase):
+    def test_default_native_identity_is_complete_and_honest(self):
+        env = native_build_environment({})
+        self.assertEqual(env['SHIRAZ_ANDROID_MANUFACTURER'], 'Shiraz')
+        self.assertEqual(env['SHIRAZ_ANDROID_MODEL'], 'Shiraz Linux')
+        self.assertEqual(env['SHIRAZ_ANDROID_SERIAL'], 'unknown')
+        version = (ROOT / 'VERSION').read_text().strip()
+        self.assertEqual(env['SHIRAZ_ANDROID_FINGERPRINT'],
+                         'Shiraz/shiraz/linux:8.1/shiraz/' + version + ':host/unsigned')
+
+    def test_explicit_native_identity_overrides_defaults(self):
+        profile = validate_device_profile(ROOT / 'config/app.properties')
+        env = native_build_environment(profile)
+        self.assertEqual(env['SHIRAZ_ANDROID_MANUFACTURER'], profile['build.manufacturer'])
+        self.assertEqual(env['SHIRAZ_ANDROID_SECURITY_PATCH'], profile['build.securityPatch'])
+        self.assertEqual(env['SHIRAZ_ANDROID_DISPLAY_ID'], profile['build.display'])
+        self.assertEqual(env['SHIRAZ_ANDROID_HARDWARE'], profile['build.hardware'])
+
     def test_selected_profile_is_consistent(self):
         validate_device_profile(ROOT / 'config/app.properties')
 

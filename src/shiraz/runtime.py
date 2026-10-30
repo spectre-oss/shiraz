@@ -19,6 +19,26 @@ from .apk import FormatError
 from .native_payload import extract_native
 
 
+def native_build_environment(profile_values):
+    """Publish the same honest default build identity as android.os.Build."""
+    version = (ROOT / 'VERSION').read_text(encoding='ascii').strip()
+    defaults = dict(model='Shiraz Linux', manufacturer='Shiraz', brand='Shiraz',
+                    device='linux', product='shiraz', board='linux',
+                    hardware=os.uname().machine, bootloader='unknown', serial='unknown',
+                    host='shiraz', user='shiraz', id='shiraz', type='host', tags='unsigned',
+                    incremental=version, securityPatch='unknown', release='8.1',
+                    display='Shiraz ' + version)
+    values = {key: profile_values.get('build.' + key, value) for key, value in defaults.items()}
+    variables = {'display': 'DISPLAY_ID', 'securityPatch': 'SECURITY_PATCH'}
+    env = {'SHIRAZ_ANDROID_' + variables.get(key, key.upper()): value
+           for key, value in values.items()}
+    env['SHIRAZ_ANDROID_FINGERPRINT'] = (
+        '/'.join(values[k] for k in ('brand', 'product', 'device')) + ':' + values['release']
+        + '/' + values['id'] + '/' + values['incremental'] + ':' + values['type']
+        + '/' + values['tags'])
+    return env
+
+
 def run_with_live_logs(command, cwd, env, work, timeout):
     """Keep the diagnostic files and forward ART output to the parent process."""
     with (work / 'stdout.log').open('wb') as stdout_log, (work / 'stderr.log').open('wb') as stderr_log:
@@ -520,24 +540,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
             # when constructing the guest's initial environment.
             env['BERBERIS_GUEST_LD_LIBRARY_PATH'] = str(app_lib)
         profile_values = validate_device_profile(device_profile) if device_profile else {}
-        env['SHIRAZ_ANDROID_DISPLAY_ID'] = profile_values.get('build.display', 'Shiraz ' + (ROOT / 'VERSION').read_text(encoding='ascii').strip())
-        env['SHIRAZ_ANDROID_RELEASE'] = profile_values.get('build.release', '8.1')
-        # Keep native property reads consistent with the explicitly selected profile.
-        for field in ('model', 'manufacturer', 'brand', 'device', 'product', 'board',
-                      'hardware', 'bootloader', 'serial', 'host', 'user', 'id', 'type',
-                      'tags', 'incremental', 'securityPatch'):
-            variable = 'SHIRAZ_ANDROID_' + ('SECURITY_PATCH' if field == 'securityPatch' else field.upper())
-            env.pop(variable, None)
-            if 'build.' + field in profile_values:
-                env[variable] = profile_values['build.' + field]
-        env.pop('SHIRAZ_ANDROID_FINGERPRINT', None)
-        if profile_values:
-            env['SHIRAZ_ANDROID_FINGERPRINT'] = (
-                '/'.join(profile_values['build.' + k] for k in ('brand', 'product', 'device'))
-                + ':' + profile_values['build.release'] + '/' + profile_values['build.id']
-                + '/' + profile_values['build.incremental'] + ':' + profile_values['build.type']
-                + '/' + profile_values['build.tags']
-            )
+        env.update(native_build_environment(profile_values))
         compat = ROOT / 'build/libshiraz-android-process.so'
         # NDK libraries resolve platform symbols through the process-wide scope.
         # ART's JNI-local load of Resources alone does not expose AAssetManager_*

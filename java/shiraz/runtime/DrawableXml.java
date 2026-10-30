@@ -188,7 +188,8 @@ public final class DrawableXml {
         if(!ripple&&!transition&&!n.name.equals("layer-list"))throw new UnsupportedOperationException("Drawable XML element "+n.name);
         attrs(n,ripple?"paddingMode color radius":"paddingMode");if(n.children.size()>256)throw new IllegalArgumentException("Layer count");Drawable[] children=new Drawable[n.children.size()];
         for(int i=0;i<children.length;i++){
-            BinaryXml.Node item=n.children.get(i);if(!item.name.equals("item")||!item.namespace.isEmpty())throw new IllegalArgumentException("Layer item");attrs(item,"id drawable left top right bottom start end width height gravity scaleType");
+            BinaryXml.Node item=n.children.get(i);if(!item.name.equals("item")||!item.namespace.isEmpty())throw new IllegalArgumentException("Layer item");// Layer items read layout/drawable attributes only; selector state flags are ignored by Android.
+            attrs(item,"id drawable left top right bottom start end width height gravity scaleType state_enabled state_pressed state_checked state_focused state_selected state_activated state_window_focused state_checkable state_hovered state_drag_can_accept state_drag_hovered");
             BinaryXml.Value ref=item.android("drawable");if(ref!=null){if(!item.children.isEmpty())throw new IllegalArgumentException("Duplicate layer drawable");children[i]=reference(ref);}else{if(item.children.size()!=1)throw new IllegalArgumentException("Layer requires one drawable");children[i]=node(item.children.get(0),depth+1);}
         }
         LayerDrawable result=ripple?RippleDrawable.shirazCreate(colors(n.android("color")),children):transition?new TransitionDrawable(children):new LayerDrawable(children);result.setPaddingMode(integer(n,"paddingMode",ripple?1:0));if(ripple)((RippleDrawable)result).setRadius(pixels(n,"radius",-1));
