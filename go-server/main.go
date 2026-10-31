@@ -34,6 +34,7 @@ type event struct {
 }
 type server struct {
 	root             string
+	attach           string
 	ctx              context.Context
 	runs             sync.WaitGroup
 	mu               sync.Mutex
@@ -99,6 +100,8 @@ func (s *server) sendInput(cmd command) error {
 			return errors.New("invalid touch coordinates")
 		}
 		line = fmt.Sprintf("%s 0 %.6f %.6f 1\n", cmd.Action, cmd.X, cmd.Y)
+	case "tab":
+		line = "keydown \"Tab\"\nkeyup \"Tab\"\n"
 	case "back":
 		line = "keydown \"Escape\"\nkeyup \"Escape\"\n"
 	case "text":
@@ -125,13 +128,13 @@ func (s *server) sendInput(cmd command) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.running || s.input == "" {
+	if !s.running || s.input == "" || (s.attach != "" && !attachedAlive(s.attach, time.Now())) {
 		return errors.New("no running app")
 	}
 	if s.commands >= 90000 {
 		return errors.New("input command limit reached")
 	}
-	file, err := os.OpenFile(s.input, os.O_APPEND|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(s.input, os.O_APPEND|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
 	if err != nil {
 		return err
 	}
@@ -139,6 +142,9 @@ func (s *server) sendInput(cmd command) error {
 	info, err := file.Stat()
 	if err != nil {
 		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("input must be a regular file")
 	}
 	if info.Size()+int64(len(line)) > 7*1024*1024 {
 		return errors.New("input file limit reached")
@@ -177,6 +183,11 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
+	if s.attach != "" {
+		s.mu.Unlock()
+		http.Error(w, "uploads are disabled for an externally managed session", http.StatusConflict)
+		return
+	}
 	if s.running || s.stopping {
 		s.mu.Unlock()
 		http.Error(w, "an APK is already running", http.StatusConflict)
@@ -377,6 +388,7 @@ func (s *server) run(dir, path string) {
 func main() {
 	listen := flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
 	root := flag.String("root", "..", "Shiraz repository root")
+	attach := flag.String("attach-session", "", "observe an externally managed session directory (disables uploads)")
 	flag.Parse()
 	abs, err := filepath.Abs(*root)
 	if err != nil {
@@ -391,6 +403,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	s := &server{root: abs, ctx: ctx, clients: make(map[*webrtc.DataChannel]struct{})}
+	if *attach != "" {
+		if err := s.attachSession(*attach); err != nil {
+			log.Fatal(err)
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {

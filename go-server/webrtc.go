@@ -209,7 +209,12 @@ func (s *server) webrtcAnswer(w http.ResponseWriter, r *http.Request) {
 			s.clients[ch] = struct{}{}
 			running := s.running
 			appName := s.appName
+			attached := s.attach != ""
 			s.mu.Unlock()
+			if attached {
+				data, _ := json.Marshal(event{"mode", "attached"})
+				ch.SendText(string(data))
+			}
 			message := "Ready"
 			if running {
 				message = "Running"

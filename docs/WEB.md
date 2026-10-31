@@ -63,3 +63,28 @@ do not expose it to other machines without adding authentication and transport
 security. The selected APK executes code on the server through Shiraz's native
 runtime, so only use APKs you trust. Shiraz supports selected Android apps,
 not every APK. Runtime errors appear in the page's log.
+
+## Attach an externally managed session
+
+For compatibility experiments, the viewer can attach to a runtime launched by
+an external supervisor:
+
+```sh
+shiraz-web -root /path/to/shiraz -attach-session /path/to/session
+```
+
+The directory contains `input.txt` (the existing live-input command stream),
+`frame.ppm` (the 360 × 640 app-surface capture), and an `active` heartbeat file.
+The supervisor creates the input file before launch, sets `SHIRAZ_LIVE_INPUT`
+and `SHIRAZ_PRESENT_SNAPSHOT` to these paths, and updates `active` every five
+seconds while its runtime child is alive. Remove `active` on exit. Before a new
+run, remove it and allow the viewer to observe the inactive state before clearing
+input. A heartbeat older than 15 seconds disables input and clears the stream.
+Give the web service read access to the frame/heartbeat and append access to input.
+Keep APKs, app data, and private runtime logs outside this shared directory.
+
+In this mode uploads are disabled. The supervisor owns launch, isolation,
+restart, and timeout; stopping the web service does not stop that runtime.
+The page's Stop control still sends the normal close event. Next field (Tab),
+Enter, and keyboard input work without relying on touch support. Attaching a
+session does not change its compatibility profile or make unsupported APIs work.
