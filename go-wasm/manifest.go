@@ -412,8 +412,13 @@ func props(m map[string]string) string {
 	return b.String()
 }
 
-func inspectAPK(apk []byte, version string) (metadata, error) {
+func inspectAPK(apk []byte, version string, architecture string) (metadata, error) {
 	var result metadata
+	abi, _, err := targetABI(architecture)
+	if err != nil {
+		return result, err
+	}
+	result.Architecture = architecture
 	if !versionName.MatchString(version) {
 		return result, errors.New("invalid Shiraz version")
 	}
@@ -425,7 +430,7 @@ func inspectAPK(apk []byte, version string) (metadata, error) {
 	hasDex := false
 	seenEntries := map[string]bool{}
 	hasNative := false
-	hasX8664 := false
+	hasTargetABI := false
 	var total uint64
 	if len(archive.File) > 100000 {
 		return result, errors.New("APK has too many entries")
@@ -442,8 +447,8 @@ func inspectAPK(apk []byte, version string) (metadata, error) {
 		}
 		if strings.HasPrefix(name, "lib/") && strings.HasSuffix(name, ".so") {
 			hasNative = true
-			if strings.HasPrefix(name, "lib/x86_64/") {
-				hasX8664 = true
+			if strings.HasPrefix(name, "lib/"+abi+"/") {
+				hasTargetABI = true
 			}
 		}
 		if file.Name == "AndroidManifest.xml" {
@@ -453,8 +458,8 @@ func inspectAPK(apk []byte, version string) (metadata, error) {
 			hasDex = true
 		}
 	}
-	if hasNative && !hasX8664 {
-		return result, errors.New("APK has no x86_64 native library candidate")
+	if hasNative && !hasTargetABI {
+		return result, fmt.Errorf("APK has no %s native library candidate", abi)
 	}
 	if manifest == nil || !hasDex {
 		return result, errors.New("APK needs AndroidManifest.xml and classes.dex")

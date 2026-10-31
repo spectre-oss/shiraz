@@ -19,6 +19,7 @@ import (
 )
 
 type metadata struct {
+	Architecture          string `json:"architecture"`
 	Package               string `json:"package"`
 	Application           string `json:"application"`
 	Activity              string `json:"activity"`
@@ -30,6 +31,30 @@ var nativeName = regexp.MustCompile(`^lib[A-Za-z0-9_+.-]+\.so$`)
 var javaName = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$`)
 var versionName = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 var reserved = map[string]bool{"libc.so": true, "libdl.so": true, "libm.so": true, "liblog.so": true, "libandroid.so": true, "libjnigraphics.so": true, "libEGL.so": true, "libGLESv2.so": true, "libGLESv3.so": true, "libstdc++.so": true}
+
+func targetABI(architecture string) (string, byte, error) {
+	switch architecture {
+	case "", "x86_64":
+		return "x86_64", 62, nil
+	case "aarch64":
+		return "arm64-v8a", 183, nil
+	default:
+		return "", 0, errors.New("unsupported target architecture")
+	}
+}
+func baseArchitecture(base []byte) (string, error) {
+	if len(base) < 20 || string(base[:6]) != "\x7fELF\x02\x01" || base[19] != 0 {
+		return "", errors.New("base must be a 64-bit little-endian ELF AppImage")
+	}
+	switch base[18] {
+	case 62:
+		return "x86_64", nil
+	case 183:
+		return "aarch64", nil
+	default:
+		return "", errors.New("unsupported base architecture")
+	}
+}
 
 func property(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "\n", "\\n")
@@ -50,12 +75,20 @@ func assemble(template, apk, raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	abi, machine, err := targetABI(meta.Architecture)
+	if err != nil {
+		return nil, err
+	}
 	var nativeFiles []*zip.File
 	seen := map[string]bool{}
 	var nativeBytes uint64
+	hasNative := false
 	for _, file := range apkZip.File {
-		if strings.HasPrefix(file.Name, "lib/x86_64/") && !file.FileInfo().IsDir() {
-			name := strings.TrimPrefix(file.Name, "lib/x86_64/")
+		if strings.HasPrefix(file.Name, "lib/") && strings.HasSuffix(file.Name, ".so") {
+			hasNative = true
+		}
+		if strings.HasPrefix(file.Name, "lib/"+abi+"/") && !file.FileInfo().IsDir() {
+			name := strings.TrimPrefix(file.Name, "lib/"+abi+"/")
 			if !nativeName.MatchString(name) || reserved[name] || seen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 128<<20 {
 				return nil, errors.New("unsupported native library")
 			}
@@ -66,6 +99,9 @@ func assemble(template, apk, raw []byte) ([]byte, error) {
 			}
 			nativeFiles = append(nativeFiles, file)
 		}
+	}
+	if hasNative && len(nativeFiles) == 0 {
+		return nil, fmt.Errorf("APK has no %s native library candidate", abi)
 	}
 	sum := sha256.Sum256(apk)
 	launch := fmt.Sprintf("activity=%s\naot=false\napplication=%s\nnative=%t\npackage=%s\nsha256=%x\nversion=%s\n", property(meta.Activity), property(meta.Application), len(nativeFiles) > 0, property(meta.Package), sum, property(meta.Version))
@@ -129,8 +165,8 @@ func assemble(template, apk, raw []byte) ([]byte, error) {
 		if len(data) > 128<<20 {
 			return nil, errors.New("native library exceeds size limit")
 		}
-		if len(data) < 20 || string(data[:6]) != "\x7fELF\x02\x01" || data[16] != 3 || data[17] != 0 || data[18] != 62 || data[19] != 0 {
-			return nil, errors.New("native library is not x86_64 ELF shared object")
+		if len(data) < 20 || string(data[:6]) != "\x7fELF\x02\x01" || data[16] != 3 || data[17] != 0 || data[18] != machine || data[19] != 0 {
+			return nil, errors.New("native library architecture does not match the base")
 		}
 		name := "usr/android-lib/" + path.Base(file.Name)
 		if err := writer.WriteHeader(&tar.Header{Name: name, Mode: 0644, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
@@ -181,6 +217,23 @@ func jsBuildStandalone(this js.Value, args []js.Value) any {
 	if len(args) != 3 {
 		return map[string]any{"error": "expected base AppImage, APK, and metadata JSON"}
 	}
+	base := bytesFromJS(args[0])
+	architecture, err := baseArchitecture(base)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	var meta metadata
+	if err := json.Unmarshal([]byte(args[2].String()), &meta); err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	if meta.Architecture != "" && meta.Architecture != architecture {
+		return map[string]any{"error": "metadata/base architecture mismatch"}
+	}
+	meta.Architecture = architecture
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
 	var empty bytes.Buffer
 	gz := gzip.NewWriter(&empty)
 	tw := tar.NewWriter(gz)
@@ -190,11 +243,10 @@ func jsBuildStandalone(this js.Value, args []js.Value) any {
 	if err := gz.Close(); err != nil {
 		return map[string]any{"error": err.Error()}
 	}
-	overlay, err := assemble(empty.Bytes(), bytesFromJS(args[1]), []byte(args[2].String()))
+	overlay, err := assemble(empty.Bytes(), bytesFromJS(args[1]), raw)
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}
-	base := bytesFromJS(args[0])
 	if len(base) < 4 || string(base[:4]) != "\x7fELF" {
 		return map[string]any{"error": "base is not an ELF AppImage"}
 	}
@@ -219,8 +271,13 @@ func jsBuildFromApk(this js.Value, args []js.Value) any {
 	if len(args) != 3 {
 		return map[string]any{"error": "expected base AppImage, APK, and Shiraz version"}
 	}
+	base := bytesFromJS(args[0])
+	architecture, err := baseArchitecture(base)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
 	apk := bytesFromJS(args[1])
-	meta, err := inspectAPK(apk, args[2].String())
+	meta, err := inspectAPK(apk, args[2].String(), architecture)
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}
@@ -243,7 +300,6 @@ func jsBuildFromApk(this js.Value, args []js.Value) any {
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}
-	base := bytesFromJS(args[0])
 	if len(base) < 4 || string(base[:4]) != "\x7fELF" {
 		return map[string]any{"error": "base is not an ELF AppImage"}
 	}
@@ -262,13 +318,17 @@ func jsBuildFromApk(this js.Value, args []js.Value) any {
 	array := js.Global().Get("Uint8Array").New(len(result))
 	js.CopyBytesToJS(array, result)
 	hash := sha256.Sum256(result)
-	return map[string]any{"bytes": array, "sha256": hex.EncodeToString(hash[:]), "package": meta.Package}
+	return map[string]any{"bytes": array, "sha256": hex.EncodeToString(hash[:]), "package": meta.Package, "architecture": meta.Architecture}
 }
 func jsInspectApk(this js.Value, args []js.Value) any {
-	if len(args) != 2 {
-		return map[string]any{"error": "expected APK and Shiraz version"}
+	if len(args) != 2 && len(args) != 3 {
+		return map[string]any{"error": "expected APK, Shiraz version, and optional architecture"}
 	}
-	meta, err := inspectAPK(bytesFromJS(args[0]), args[1].String())
+	architecture := "x86_64"
+	if len(args) == 3 {
+		architecture = args[2].String()
+	}
+	meta, err := inspectAPK(bytesFromJS(args[0]), args[1].String(), architecture)
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}

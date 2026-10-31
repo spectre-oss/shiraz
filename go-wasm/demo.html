@@ -37,11 +37,12 @@ summary { width: fit-content; color: #a8a8a8; cursor: pointer; font-size: 12px; 
 details .file-field { margin: 15px 0 0; }
 .file-field { display: block; margin: 0 0 23px; }
 .file-field > span { display: block; margin-bottom: 10px; color: #cfcfcf; font-size: 13px; font-weight: 650; }
+select { width: 100%; padding: 12px; border: 1px solid #343434; border-radius: 8px; color: #ddd; background: #0a0a0a; font: inherit; }
 input[type=file] { width: 100%; padding: 12px; border: 1px solid #343434; border-radius: 8px; color: #bcbcbc; background: #0a0a0a; font: 13px Manrope, system-ui, sans-serif; cursor: pointer; }
 input[type=file]::file-selector-button { margin-right: 16px; padding: 10px 14px; border: 1px solid #4b4b4b; border-radius: 5px; color: #f2f2f2; background: #202020; font: 650 12px Manrope, system-ui, sans-serif; cursor: pointer; }
 input[type=file]:hover { border-color: #777; }
 input[type=file]::file-selector-button:hover { background: #303030; }
-input[type=file]:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+select:focus-visible, input[type=file]:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .actions { margin-top: 30px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 button { min-height: 48px; padding: 0 22px; border: 1px solid #fff; border-radius: 6px; background: #f1f1f1; color: #090909; font: 750 13px Manrope, system-ui, sans-serif; cursor: pointer; transition: background .2s, transform .2s; }
 button:hover { background: #d7d7d7; transform: translateY(-1px); }
@@ -63,7 +64,10 @@ footer a { text-decoration-color: #555; text-underline-offset: 3px; }
   <h1>Build an AppImage from an APK.</h1>
   <p class="lead">Select your APK. Your browser packages it with the Shiraz runtime and libraries into one AppImage you can download and run on your Linux desktop. Your APK stays on your device.</p>
   <section class="panel" aria-labelledby="panel-title">
-    <div class="panel-heading"><h2 id="panel-title">Base AppImage</h2><span class="arch">Runs on Linux desktop<small>x86_64</small></span></div>
+    <div class="panel-heading"><h2 id="panel-title">Base AppImage</h2><span class="arch">Runs on Linux<small>Desktop / phone</small></span></div>
+    <label class="file-field" for="architecture"><span>Linux device architecture</span>
+      <select id="architecture"><option value="x86_64">x86_64 — Intel / AMD</option><option value="aarch64">ARM64 — Linux phones / ARM computers (experimental)</option></select>
+    </label>
     <div class="base-info">
       <div class="base-top"><div><span class="base-title">Current prerelease</span><strong class="base-version" id="release-version">Checking GitHub Releases…</strong></div><a class="base-link" id="release-link" hidden>View release ↗</a></div>
       <p class="base-detail" id="release-detail">The matching Shiraz base will load when you build.</p>
@@ -91,13 +95,17 @@ const releaseVersion = document.getElementById('release-version');
 const releaseDetail = document.getElementById('release-detail');
 const releaseLink = document.getElementById('release-link');
 const manualBase = document.getElementById('manual-base');
+const architectureSelect = document.getElementById('architecture');
 let ready;
 async function loadRelease() {
+  const architecture = architectureSelect.value;
   let manifest;
   try {
     const response = await fetch('release.json', {cache: 'no-store'});
     if (response.ok) manifest = await response.json();
   } catch (_) { /* Local demo can use a selected base file. */ }
+  if (manifest?.architectures) manifest = {...manifest, ...manifest.architectures[architecture]};
+  else if (architecture !== 'x86_64') manifest = null;
   let latest;
   try {
     const response = await fetch('https://api.github.com/repos/spectre-oss/shiraz/releases?per_page=20', {cache: 'no-store'});
@@ -106,7 +114,7 @@ async function loadRelease() {
       latest = releases.filter(release => {
         const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(release.tag_name);
         return !release.draft && release.prerelease && match &&
-          release.assets.some(asset => asset.name === `Shiraz-Browser-Base-${match[1]}.${match[2]}.${match[3]}-x86_64.AppImage`);
+          release.assets.some(asset => asset.name === `Shiraz-Browser-Base-${match[1]}.${match[2]}.${match[3]}-${architecture}.AppImage`);
       }).sort((a, b) => {
         const left = a.tag_name.slice(1).split('.').map(Number);
         const right = b.tag_name.slice(1).split('.').map(Number);
@@ -114,6 +122,7 @@ async function loadRelease() {
       })[0];
     }
   } catch (_) { /* The site bundle remains usable when the API is unavailable. */ }
+  if (architecture !== architectureSelect.value) return null;
   if (latest) {
     releaseVersion.textContent = latest.tag_name;
     releaseLink.href = `https://github.com/spectre-oss/shiraz/releases/tag/${latest.tag_name}`;
@@ -124,7 +133,7 @@ async function loadRelease() {
     releaseLink.hidden = false;
   }
   if (!manifest || !/^\d+\.\d+\.\d+$/.test(manifest.version) ||
-      manifest.base_file !== `base/Shiraz-Browser-Base-${manifest.version}-x86_64.AppImage` ||
+      manifest.base_file !== `base/Shiraz-Browser-Base-${manifest.version}-${architecture}.AppImage` ||
       !/^[0-9a-f]{64}$/.test(manifest.base_sha256) || !Number.isSafeInteger(manifest.base_size) || manifest.base_size < 1) {
     if (!latest) releaseVersion.textContent = 'Local base required';
     releaseDetail.textContent = 'Select a base AppImage below to build locally.';
@@ -136,10 +145,11 @@ async function loadRelease() {
     manualBase.open = true;
     return null;
   }
-  releaseDetail.textContent = `x86_64 base · ${(manifest.base_size / 1048576).toFixed(0)} MiB · loaded when you build`;
+  releaseDetail.textContent = `${architecture} base · ${(manifest.base_size / 1048576).toFixed(0)} MiB · loaded when you build`;
   return manifest;
 }
-const releaseReady = loadRelease();
+let releaseReady = loadRelease();
+architectureSelect.onchange = () => { releaseReady = loadRelease(); };
 async function load() {
   const go = new Go();
   const response = await fetch('shiraz-assemble.wasm', {cache: 'no-store'});
@@ -150,6 +160,8 @@ async function load() {
 ready = load();
 button.onclick = async () => {
   button.disabled = true;
+  architectureSelect.disabled = true;
+  const architecture = architectureSelect.value;
   status.dataset.state = '';
   try {
     status.textContent = 'Preparing builder…';
@@ -159,7 +171,9 @@ button.onclick = async () => {
     const baseFile = document.getElementById('base').files[0];
     let version, base;
     if (baseFile) {
-      version = baseFile.name.match(/^Shiraz-Browser-Base-([0-9]+\.[0-9]+\.[0-9]+)-x86_64\.AppImage$/)?.[1];
+      const match = baseFile.name.match(/^Shiraz-Browser-Base-([0-9]+\.[0-9]+\.[0-9]+)-(x86_64|aarch64)\.AppImage$/);
+      version = match?.[1];
+      if (match && match[2] !== architecture) throw new Error('Local base does not match the selected architecture.');
       if (!version) throw new Error('Select a versioned Shiraz browser base AppImage.');
       status.textContent = 'Reading base AppImage…';
       base = await baseFile.arrayBuffer();
@@ -185,16 +199,17 @@ button.onclick = async () => {
     status.textContent = 'Assembling…';
     const result = shirazBuildFromApk(new Uint8Array(base), new Uint8Array(apk), version);
     if (result.error) throw new Error(`${apkFile.name}: ${result.error}`);
+    if (result.architecture !== architecture) throw new Error('Base architecture does not match the selected device.');
     const url = URL.createObjectURL(new Blob([result.bytes], {type:'application/octet-stream'}));
     const link = document.createElement('a');
-    link.href = url; link.download = `${result.package}-Shiraz-${version}-x86_64.AppImage`; link.click();
+    link.href = url; link.download = `${result.package}-Shiraz-${version}-${architecture}.AppImage`; link.click();
     status.dataset.state = 'success';
     status.textContent = `AppImage ready. SHA-256: ${result.sha256}. On Linux, make it executable with chmod +x before running.`;
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (error) {
     status.dataset.state = 'error';
     status.textContent = String(error);
-  } finally { button.disabled = false; }
+  } finally { button.disabled = false; architectureSelect.disabled = false; }
 };
 </script>
 </body>

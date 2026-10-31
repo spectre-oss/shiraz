@@ -12,12 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     version = (ROOT / 'VERSION').read_text().strip()
-    base_name = f'Shiraz-Browser-Base-{version}-x86_64.AppImage'
-    base = ROOT / 'dist' / base_name
-    checksum = base.with_suffix('.AppImage.sha256')
-    digest, named = checksum.read_text().strip().split(None, 1)
-    if named != base_name or hashlib.sha256(base.read_bytes()).hexdigest() != digest:
-        raise RuntimeError('browser base checksum mismatch')
     web = ROOT / 'go-wasm'
     sources = {
         'index.html': web / 'demo.html',
@@ -36,14 +30,22 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     (site / '.nojekyll').touch()
-    base_location = 'base/' + base_name
     (site / 'base').mkdir()
-    shutil.copy2(base, site / base_location)
+    bases = {}
+    for architecture in ('x86_64', 'aarch64'):
+        name = f'Shiraz-Browser-Base-{version}-{architecture}.AppImage'
+        base = ROOT / 'dist' / name
+        digest, named = base.with_suffix('.AppImage.sha256').read_text().strip().split(None, 1)
+        if named != name or hashlib.sha256(base.read_bytes()).hexdigest() != digest:
+            raise RuntimeError('browser base checksum mismatch: ' + architecture)
+        from build_appimage import require_architecture
+        require_architecture(base, architecture)
+        location = 'base/' + name
+        shutil.copy2(base, site / location)
+        bases[architecture] = dict(base_file=location, base_sha256=digest, base_size=base.stat().st_size)
     manifest = {
-        'version': version,
-        'base_file': base_location,
-        'base_sha256': digest,
-        'base_size': base.stat().st_size,
+        'version': version, 'architectures': bases,
+        **bases['x86_64'],
         'release_url': f'https://github.com/spectre-oss/shiraz/releases/tag/v{version}',
     }
     (site / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')

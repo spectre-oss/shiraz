@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -199,7 +200,13 @@ func run() error {
 	if err = overlay(dir, data); err != nil {
 		return err
 	}
-	loader := filepath.Join(dir, "usr/lib/ld-linux-x86-64.so.2")
+	loaderName := "ld-linux-x86-64.so.2"
+	if runtime.GOARCH == "arm64" {
+		loaderName = "ld-linux-aarch64.so.1"
+	} else if runtime.GOARCH != "amd64" {
+		return errors.New("unsupported launcher architecture")
+	}
+	loader := filepath.Join(dir, "usr/lib", loaderName)
 	lib := filepath.Join(dir, "usr/lib")
 	binary := filepath.Join(dir, "usr/bin/shiraz-app")
 	args := append([]string{"--library-path", lib, binary}, os.Args[1:]...)

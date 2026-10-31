@@ -30,11 +30,25 @@ jobs:
 
   build:
     needs: version
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            deb_arch: amd64
+            loader: ld-linux-x86-64.so.2
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            deb_arch: arm64
+            loader: ld-linux-aarch64.so.1
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     permissions:
       contents: write
     env:
+      SHIRAZ_ARCH: ${{ matrix.arch }}
+      JAVA_DEB_ARCH: ${{ matrix.deb_arch }}
       SHIRAZ_BUILD_JOBS: '4'
       TMPDIR: /home/runner/shiraz-tmp
     steps:
@@ -70,7 +84,7 @@ jobs:
         run: |
           nix develop -c bash -euo pipefail -c '
             # ART links against Ubuntu libraries; use Ubuntu Java for JNI.
-            export PATH="/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH"
+            export PATH="/usr/lib/jvm/java-17-openjdk-${JAVA_DEB_ARCH}/bin:$PATH"
             make deps
             make runtime-art
             make build
@@ -104,7 +118,7 @@ jobs:
           export LIBGL_ALWAYS_SOFTWARE=1
           export LIBGL_DRIVERS_PATH="$appdir/usr/lib"
           export __EGL_VENDOR_LIBRARY_FILENAMES="$appdir/usr/share/glvnd/egl_vendor.d/50_mesa.json"
-          timeout 30s "$appdir/usr/lib/ld-linux-x86-64.so.2" \
+          timeout 30s "$appdir/usr/lib/${{ matrix.loader }}" \
             --library-path "$appdir/usr/lib" "$TMPDIR/packaged-wayland"
       - name: Build generic base and WebAssembly assembler
         run: |
@@ -115,26 +129,25 @@ jobs:
             version=$(cat VERSION)
             python3 scripts/make_browser_base.py \
               build/runtime-template.tar.gz build/shiraz-payload-launcher \
-              "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
-            (cd go-wasm && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
+              "dist/Shiraz-Browser-Base-${version}-${SHIRAZ_ARCH}.AppImage"
+            (cd go-wasm && GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./... && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
             python3 go-wasm/bootstrap_font.py
             cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" go-wasm/wasm_exec.js
-            python3 scripts/package_browser_site.py
           '
       - name: Verify browser kit
         run: |
           version=$(cat VERSION)
           test "$version" = "${{ needs.version.outputs.version }}"
-          test -s "dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
-          test -s "dist/Shiraz-Browser-Builder-${version}.zip"
+          test -s "dist/Shiraz-Browser-Base-${version}-${SHIRAZ_ARCH}.AppImage"
           test -s go-wasm/shiraz-assemble.wasm
-          (cd dist && sha256sum -c "Shiraz-Browser-Base-${version}-x86_64.AppImage.sha256")
+          (cd dist && sha256sum -c "Shiraz-Browser-Base-${version}-${SHIRAZ_ARCH}.AppImage.sha256")
           nix develop -c node --max-old-space-size=4096 go-wasm/verify_kit.cjs
       - uses: actions/setup-go@v6
         with:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
       - name: Build Debian web package
+        if: matrix.arch == 'x86_64'
         run: |
           (cd go-server && go test ./... && CGO_ENABLED=0 go build -o ../build/shiraz-web .)
           python3 packaging/prepare_deb_python.py \
@@ -145,6 +158,7 @@ jobs:
             --system-ffmpeg --output "dist/shiraz-web_${version}-1_amd64.deb"
           (cd dist && sha256sum "shiraz-web_${version}-1_amd64.deb" > "shiraz-web_${version}-1_amd64.deb.sha256")
       - name: Verify Debian package on Debian 12 and 13
+        if: matrix.arch == 'x86_64'
         run: |
           version=$(cat VERSION)
           deb="dist/shiraz-web_${version}-1_amd64.deb"
@@ -173,15 +187,33 @@ jobs:
       - name: Upload run artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shiraz-browser-kit-${{ needs.version.outputs.version }}-x86_64
+          name: shiraz-browser-kit-${{ needs.version.outputs.version }}-${{ matrix.arch }}
           if-no-files-found: error
           compression-level: 0
           path: |
-            dist/Shiraz-Browser-Base-*-x86_64.AppImage
-            dist/Shiraz-Browser-Base-*-x86_64.AppImage.sha256
-            dist/Shiraz-Browser-Builder-*.zip
+            dist/Shiraz-Browser-Base-*-${{ matrix.arch }}.AppImage
+            dist/Shiraz-Browser-Base-*-${{ matrix.arch }}.AppImage.sha256
             dist/shiraz-web_*_amd64.deb
             dist/shiraz-web_*_amd64.deb.sha256
+            go-wasm/shiraz-assemble.wasm
+            go-wasm/wasm_exec.js
+            go-wasm/fonts/Manrope-wght.ttf
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: shiraz-browser-kit-${{ needs.version.outputs.version }}-*
+          merge-multiple: true
+      - name: Package both architectures for Pages and releases
+        run: python3 scripts/package_browser_site.py
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -189,17 +221,14 @@ jobs:
         run: |
           version=$(cat VERSION)
           tag="v${version}"
-          base="dist/Shiraz-Browser-Base-${version}-x86_64.AppImage"
-          checksum="${base}.sha256"
-          builder="dist/Shiraz-Browser-Builder-${version}.zip"
-          deb="dist/shiraz-web_${version}-1_amd64.deb"
-          deb_checksum="${deb}.sha256"
+          assets=(dist/Shiraz-Browser-Base-${version}-*.AppImage dist/Shiraz-Browser-Base-${version}-*.AppImage.sha256
+                  "dist/Shiraz-Browser-Builder-${version}.zip" dist/shiraz-web_*_amd64.deb dist/shiraz-web_*_amd64.deb.sha256)
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$base" "$checksum" "$builder" "$deb" "$deb_checksum" --clobber
+            gh release upload "$tag" "${assets[@]}" --clobber
           else
-            gh release create "$tag" "$base" "$checksum" "$builder" "$deb" "$deb_checksum" \
+            gh release create "$tag" "${assets[@]}" \
               --target "$RELEASE_SHA" --title "Shiraz ${version}" --prerelease \
-              --notes "Prebuilt x86_64 Shiraz base AppImage, browser WASM assembler, and amd64 Debian 12/13 web package. App compatibility is experimental."
+              --notes "Native x86_64 and ARM64 Shiraz base AppImages, browser WASM assembler, and amd64 Debian web package. App and Linux phone compatibility remain experimental."
           fi
       - name: Upload Pages site
         uses: actions/upload-pages-artifact@v4
@@ -207,7 +236,7 @@ jobs:
           path: build/pages-site
 
   deploy:
-    needs: build
+    needs: publish
     runs-on: ubuntu-24.04
     permissions:
       pages: write
