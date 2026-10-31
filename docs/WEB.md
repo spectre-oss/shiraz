@@ -48,9 +48,11 @@ go run . -root ..
 
 Open <http://127.0.0.1:8080>. Select an APK and choose **Upload and run**.
 The phone screen appears after Shiraz starts rendering. Click or drag within
-the screen to interact. While the pointer is over the phone screen, key presses
-and releases go to the app. The **Stop** button ends the current run. WebRTC
-video requires FFmpeg with the `libvpx` encoder. Shiraz uses its local
+the screen to interact. Click the phone screen to give it keyboard focus.
+Key presses and releases then go to the app even when the pointer moves away. Clicking another page
+control or switching windows releases held keys. Next field and Enter return
+keyboard focus to the phone after sending their command. The **Stop** button
+ends the current run. WebRTC video requires FFmpeg with the `libvpx` encoder. Shiraz uses its local
 `.local/system-codecs/usr/bin/ffmpeg` when available, or `ffmpeg` from `PATH`;
 set `SHIRAZ_FFMPEG` to override the executable path.
 
