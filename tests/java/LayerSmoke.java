@@ -5,6 +5,29 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.view.Gravity;
 public final class LayerSmoke {
+    private static void customDrawableTint(){
+        final int[] filters={0};
+        android.graphics.drawable.Drawable custom=new android.graphics.drawable.Drawable(){
+            public void draw(Canvas canvas){}public void setAlpha(int alpha){}
+            public void setColorFilter(ColorFilter filter){filters[0]++;}
+            public int getOpacity(){return PixelFormat.TRANSLUCENT;}
+        };
+        custom.setTint(Color.RED);
+        custom.setTintList(new android.content.res.ColorStateList(new int[][]{new int[]{0x010100a7 /* state_pressed */},new int[0]},new int[]{Color.RED,Color.BLUE}));
+        custom.setTintMode(PorterDuff.Mode.SRC_IN);custom.setTintList(null);
+        if(filters[0]!=0)throw new AssertionError("Base tint must not invent color-filter support");
+    }
+    private static void largeClippedShape(){
+        Bitmap image=Bitmap.createBitmap(32,32,Bitmap.Config.ARGB_8888);
+        try{
+            Canvas canvas=new Canvas(image);canvas.clipRect(4,4,28,28);
+            android.graphics.drawable.GradientDrawable shape=new android.graphics.drawable.GradientDrawable();
+            shape.setColor(Color.RED);shape.setBounds(-10000,-10000,10000,10000);shape.draw(canvas);
+            if(image.getPixel(16,16)!=Color.RED||image.getPixel(0,0)!=0)throw new AssertionError("Large solid shape uses destination clip");
+            shape.setColors(new int[]{Color.RED,Color.BLUE});
+            try{shape.draw(canvas);throw new AssertionError("Oversized gradient bitmap accepted");}catch(IllegalArgumentException expected){}
+        }finally{image.recycle();}
+    }
     private static void opticalInsets(){
         android.graphics.drawable.ColorDrawable leaf=new android.graphics.drawable.ColorDrawable(Color.RED);
         if(leaf.getOpticalInsets()!=Insets.NONE)throw new AssertionError("Default optical alignment");
@@ -51,7 +74,7 @@ public final class LayerSmoke {
         paint.setBlendMode(BlendMode.SRC_OVER);try{paint.setBlendMode(BlendMode.MULTIPLY);throw new AssertionError("Unsupported multiply accepted as modulation");}catch(UnsupportedOperationException expected){}if(paint.getBlendMode()!=BlendMode.SRC_OVER)throw new AssertionError("Failed blend changed state");
         paint.setBlendMode(null);if(paint.getBlendMode()!=null||paint.getXfermode()!=null)throw new AssertionError("Clear blend");pixels.eraseColor(Color.BLUE);new Canvas(pixels).drawRect(0,0,1,1,paint);if(pixels.getPixel(0,0)!=0xff80007f)throw new AssertionError("Cleared blend restores source-over");pixels.recycle();
     }
-    public static void main(String[] args){blendModes();opticalInsets();
+    public static void main(String[] args){blendModes();opticalInsets();customDrawableTint();largeClippedShape();
         Resources r=Resources.shirazOpen(args[0],96,160);
         try {
             deferredCorners(r);

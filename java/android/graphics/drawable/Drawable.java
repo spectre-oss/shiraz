@@ -35,12 +35,13 @@ public abstract class Drawable {
     public void setAutoMirrored(boolean value) { if (value) throw new UnsupportedOperationException("Drawable mirroring is not implemented"); }
     public boolean isAutoMirrored() { return false; }
     public void setTint(int color) { setTintList(android.content.res.ColorStateList.valueOf(color)); }
-    public void setTintList(android.content.res.ColorStateList colors) { throw new UnsupportedOperationException("Drawable state tinting is not implemented"); }
+    // Android leaves tint support to subclasses; custom drawables may ignore it.
+    public void setTintList(android.content.res.ColorStateList colors) { }
     protected final void refreshTintOwner() {
         // A tint changes pixels, not the owner's pressed/checked state.
         invalidateSelf();
     }
-    public void setTintMode(PorterDuff.Mode mode) { throw new UnsupportedOperationException("Drawable tint mode is not implemented"); }
+    public void setTintMode(PorterDuff.Mode mode) { }
     public void getOutline(Outline outline) { outline.setRect(getBounds()); outline.setAlpha(0); }
     public abstract void draw(Canvas canvas);
     public abstract void setAlpha(int alpha);
