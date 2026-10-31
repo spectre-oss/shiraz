@@ -332,7 +332,8 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
         int mode=MeasureSpec.getMode(parentSpec), available=(int)Math.max(0L,Math.min(0x3fffffffL,(long)MeasureSpec.getSize(parentSpec)-padding));
         if (dimension >= 0) return MeasureSpec.makeMeasureSpec(dimension,MeasureSpec.EXACTLY);
         if (dimension != LayoutParams.MATCH_PARENT && dimension != LayoutParams.WRAP_CONTENT) throw new IllegalArgumentException("Child dimension");
-        if (mode == MeasureSpec.UNSPECIFIED) return MeasureSpec.makeMeasureSpec(0,MeasureSpec.UNSPECIFIED);
+        // An unconstrained dimension still carries the available viewport hint.
+        if (mode == MeasureSpec.UNSPECIFIED) return MeasureSpec.makeMeasureSpec(available,MeasureSpec.UNSPECIFIED);
         return MeasureSpec.makeMeasureSpec(available,dimension == LayoutParams.MATCH_PARENT && mode == MeasureSpec.EXACTLY ? MeasureSpec.EXACTLY : MeasureSpec.AT_MOST);
     }
     protected static int extent(long value) { if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) throw new IllegalArgumentException("Layout arithmetic overflow"); return (int)value; }
