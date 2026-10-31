@@ -375,6 +375,7 @@ public final class ActivityRunner {
                             private void attach(View view){if(attachedRoot[0]!=view){if(attachedRoot[0]!=null)attachedRoot[0].shirazDetachTree();if(view!=null){view.shirazAttachTree(windowObserver[0]);view.shirazSetWindowVisibility(hostVisible?View.VISIBLE:View.GONE);}attachedRoot[0]=view;((HostWindowManager)context.getSystemService(android.content.Context.WINDOW_SERVICE)).shirazSetRoot(view);}}
                             private void finishNavigation(){if(navigation.isRunning()){navigation.close();View root=activity.shirazContentView();if(root!=null)root.invalidate();}}
                             private long downTime;
+                            private final KeyboardPointer keyboardPointer="1".equals(System.getenv("SHIRAZ_KEYBOARD_POINTER"))?new KeyboardPointer():null;
                             private long overlayRevision = -1, dialogRevision = -1;
                             private boolean applicationPointer, modalFocus, dumpAfterLayout;private View priorFocus;private android.view.MotionEvent lastApplicationEvent;
                             private void cancelApplicationPointer(long time){if(applicationPointer){applicationPointer=false;android.view.MotionEvent event=lastApplicationEvent==null?android.view.MotionEvent.shirazObtain(downTime,time,android.view.MotionEvent.ACTION_CANCEL,0,0,0x1002):android.view.MotionEvent.obtain(lastApplicationEvent);event.setAction(android.view.MotionEvent.ACTION_CANCEL);try{activity.getWindow().shirazDispatchTouchEvent(event);}finally{event.recycle();}}}
@@ -453,7 +454,8 @@ public final class ActivityRunner {
                                 if (action == android.view.MotionEvent.ACTION_DOWN) {ViewDiagnostics.inputTree(view);downTime = now;applicationPointer=true;}
                                 if(action==android.view.MotionEvent.ACTION_UP||action==android.view.MotionEvent.ACTION_CANCEL)applicationPointer=false;
                                 if(lastApplicationEvent!=null)lastApplicationEvent.recycle();lastApplicationEvent=android.view.MotionEvent.obtain(event);
-                                activity.getWindow().shirazDispatchTouchEvent(event);
+                                if(keyboardPointer!=null){touchMode(false);keyboardPointer.dispatch(activity.getWindow(),view,event);}
+                                else activity.getWindow().shirazDispatchTouchEvent(event);
                                 modalInput(now);
                             }
                             private boolean keepFrame;

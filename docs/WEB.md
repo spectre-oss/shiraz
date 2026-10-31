@@ -58,6 +58,20 @@ The server accepts one run at a time, limits uploads to 256 MiB, and ends a run
 after 30 minutes. Temporary APK uploads are removed when a run ends. Shiraz's
 normal per-app data under `data/apps/` persists across runs.
 
+### Keyboard-assisted clicking
+
+For apps with keyboard-accessible controls that do not accept virtual touch,
+set `SHIRAZ_KEYBOARD_POINTER=1` in the **app runtime's** environment before
+launching it. In attached mode, configure the external launcher, not the viewer.
+This opt-in mode maps a stationary click to keyboard focus and normal Enter
+key events. Clicking a text editor only focuses it, so typing remains explicit.
+It does not modify the APK or emulate physical touch hardware.
+
+This is an alternative navigation mode, not native touch compatibility. Dragging,
+multitouch, long presses, and controls without keyboard focus are not supported
+by this mode. Leave it unset for ordinary touch dispatch. Dialogs and popup
+windows retain their existing input handling.
+
 The default listener is localhost. The upload endpoint has no authentication;
 do not expose it to other machines without adding authentication and transport
 security. The selected APK executes code on the server through Shiraz's native

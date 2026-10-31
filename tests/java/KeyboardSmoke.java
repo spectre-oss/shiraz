@@ -9,6 +9,8 @@ public final class KeyboardSmoke {
     private static final class Probe extends Activity {
         @Override public android.content.res.Resources.Theme getTheme(){return android.content.res.Resources.getSystem().newTheme();}
         int fallback,interactions;
+        boolean blockKeys;
+        @Override public boolean dispatchKeyEvent(KeyEvent event){return blockKeys||super.dispatchKeyEvent(event);}
         @Override public void onUserInteraction(){interactions++;}
         @Override public boolean onKeyDown(int code, KeyEvent event) { if (code == KeyEvent.KEYCODE_A) { ++fallback; return true; } return super.onKeyDown(code,event); }
     }
@@ -148,7 +150,29 @@ public final class KeyboardSmoke {
         KeyCharacterMap.KeyData data=new KeyCharacterMap.KeyData();check(map.getKeyData(KeyEvent.KEYCODE_A,data)&&data.displayLabel=='A'&&data.meta[0]=='a'&&data.meta[1]=='A',"key data");
         KeyEvent event=new KeyEvent(0,0,KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_A,0,KeyEvent.META_SHIFT_ON);check(event.getUnicodeChar()=='A'&&event.getDisplayLabel()=='A'&&event.isPrintingKey(),"KeyEvent character-map delegation");
     }
-    public static void main(String[] args) {android.os.Looper.prepareMainLooper();characterMap();
+    private static void keyboardPointer(){
+        try{
+            ContextWrapper context=new ContextWrapper(null){public android.content.res.Resources getResources(){return android.content.res.Resources.getSystem();}public android.content.res.Resources.Theme getTheme(){return getResources().newTheme();}};Probe activity=new Probe();
+            android.widget.FrameLayout root=new android.widget.FrameLayout(context);
+            View button=new View(context);final int[] clicks={0};button.setOnClickListener(new View.OnClickListener(){public void onClick(View v){clicks[0]++;}});
+            root.addView(button);activity.setContentView(root);root.layout(0,0,200,200);button.layout(20,30,120,90);
+            ViewTreeObserver observer=ViewTreeObserver.shirazCreateWindowObserver();root.shirazAttachTree(observer);
+            Class<?> type=Class.forName("shiraz.runtime.KeyboardPointer");java.lang.reflect.Constructor<?> constructor=type.getDeclaredConstructor();constructor.setAccessible(true);Object pointer=constructor.newInstance();
+            java.lang.reflect.Method dispatch=type.getDeclaredMethod("dispatch",Window.class,View.class,MotionEvent.class);dispatch.setAccessible(true);
+            java.util.function.BiConsumer<Integer,Float> send=new java.util.function.BiConsumer<Integer,Float>(){public void accept(Integer action,Float x){try{dispatch.invoke(pointer,activity.getWindow(),root,MotionEvent.shirazObtain(10,20,action,x,50,0x1002));}catch(Exception e){throw new AssertionError(e);}}};
+            send.accept(0,50f);send.accept(1,50f);check(clicks[0]==1&&button.isFocused(),"pointer selects control and keyboard activates once");
+            activity.blockKeys=true;send.accept(0,50f);send.accept(1,50f);check(clicks[0]==1,"app key handler can decline activation");activity.blockKeys=false;
+            send.accept(0,50f);send.accept(2,80f);send.accept(1,50f);check(clicks[0]==1,"drag does not activate");
+            send.accept(0,50f);send.accept(3,50f);send.accept(1,50f);check(clicks[0]==1,"cancel does not activate");
+            button.setEnabled(false);send.accept(0,50f);send.accept(1,50f);check(clicks[0]==1,"disabled control cannot activate");button.setEnabled(true);
+            View cover=new View(context);root.addView(cover);cover.layout(0,0,200,200);send.accept(0,50f);send.accept(1,50f);check(clicks[0]==1,"cover blocks click-through");root.removeView(cover);
+            button.setTranslationX(30);check(root.shirazKeyboardPointerTarget(25,50)==null&&root.shirazKeyboardPointerTarget(70,50)==button,"translated target geometry");
+            root.removeView(button);android.widget.EditText editor=new android.widget.EditText(context);root.addView(editor);editor.layout(0,0,150,100);final int[] editorClicks={0};editor.setOnClickListener(new View.OnClickListener(){public void onClick(View v){editorClicks[0]++;}});
+            send.accept(0,50f);send.accept(1,50f);check(editor.isFocused()&&editorClicks[0]==0&&editor.length()==0,"editor click only focuses without activation or text");
+            root.shirazDetachTree();observer.shirazKill();
+        }catch(Exception error){throw new AssertionError(error);}
+    }
+    public static void main(String[] args) {android.os.Looper.prepareMainLooper();characterMap();keyboardPointer();
         ContextWrapper context = new ContextWrapper(null); KeyboardFixture.stateChecks(context);clusters(context);tabNavigation(context);focusTransfer(context);touchFocus();
         Probe activity = new Probe(); View content = new View(context); content.setFocusable(true); activity.setContentView(content);
         final int[] intercepted = {0};

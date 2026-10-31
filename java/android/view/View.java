@@ -520,6 +520,10 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     /** Host runtime views are not layout-editor previews. */
     public boolean isInEditMode(){return false;}
     public boolean onCheckIsTextEditor(){return false;}
+    /** Target for explicitly enabled host keyboard pointer navigation. */
+    public View shirazKeyboardPointerTarget(float x,float y){
+        return getVisibility()==VISIBLE&&isEnabled()&&isFocusable()&&(isClickable()||onCheckIsTextEditor())&&x>=0&&y>=0&&x<getWidth()&&y<getHeight()?this:null;
+    }
     public boolean requestRectangleOnScreen(android.graphics.Rect rectangle){return requestRectangleOnScreen(rectangle,false);}
     public boolean requestRectangleOnScreen(android.graphics.Rect rectangle,boolean immediate){
         android.graphics.Rect requested=new android.graphics.Rect(rectangle);View child=this;ViewParent owner=getParent();boolean scrolled=false;

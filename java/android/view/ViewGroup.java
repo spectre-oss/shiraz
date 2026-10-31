@@ -269,6 +269,20 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
         ArrayList<View> order=orderedChildren();for(int i=order.size()-1;i>=0;i--){View child=order.get(i);float cx=child.shirazLocalX(x+getScrollX()-child.getX(),y+getScrollY()-child.getY()),cy=child.shirazLocalY(x+getScrollX()-child.getX(),y+getScrollY()-child.getY());if(child.getParent()==this&&child.getVisibility()==VISIBLE&&cx>=0&&cy>=0&&cx<child.getWidth()&&cy<child.getHeight()){PointerIcon icon=child.shirazPointerIcon(cx,cy);if(icon!=null)return icon;}}
         return super.shirazPointerIcon(x,y);
     }
+    @Override public View shirazKeyboardPointerTarget(float x,float y){
+        if(getVisibility()!=VISIBLE||!isEnabled()||!(x>=0&&y>=0&&x<getWidth()&&y<getHeight()))return null;
+        ArrayList<View> order=orderedChildren();
+        for(int i=order.size()-1;i>=0;i--){
+            View child=order.get(i);
+            float cx=child.shirazLocalX(x+getScrollX()-child.getX(),y+getScrollY()-child.getY());
+            float cy=child.shirazLocalY(x+getScrollX()-child.getX(),y+getScrollY()-child.getY());
+            if(child.getParent()==this&&child.getVisibility()==VISIBLE&&cx>=0&&cy>=0&&cx<child.getWidth()&&cy<child.getHeight()){
+                View target=child.shirazKeyboardPointerTarget(cx,cy);
+                return target!=null?target:super.shirazKeyboardPointerTarget(x,y);
+            }
+        }
+        return super.shirazKeyboardPointerTarget(x,y);
+    }
     private boolean childrenDrawingOrderEnabled,transitionGroup;
     protected boolean isChildrenDrawingOrderEnabled(){return childrenDrawingOrderEnabled;}
     protected void setChildrenDrawingOrderEnabled(boolean enabled){childrenDrawingOrderEnabled=enabled;invalidate();}
