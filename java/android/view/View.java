@@ -650,7 +650,22 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     private java.util.LinkedHashMap<Long,Long> measureCache;
     private boolean measureBeforeLayout;
     public void forceLayout(){if(measureCache!=null)measureCache.clear();layoutRequested=true;invalidated=true;}
+    private static final boolean SCROLL_MEASURE_HINT="1".equals(System.getenv("SHIRAZ_SCROLL_MEASURE_HINT"));
     public final void measure(int widthSpec,int heightSpec) {
+        // Optional host hint: preserve an unconstrained mode while avoiding an
+        // accidental infinite-list pass inside an already sized scroll viewport.
+        if(SCROLL_MEASURE_HINT&&heightSpec==0){
+            ViewParent ancestor=getParent();
+            for(int depth=0;ancestor instanceof View&&depth<64;depth++){
+                View view=(View)ancestor;
+                if(view instanceof android.widget.ScrollView){
+                    int viewport=Math.max(view.getMeasuredHeight(),view.getHeight())-view.getPaddingTop()-view.getPaddingBottom();
+                    if(viewport>0)heightSpec=MeasureSpec.makeMeasureSpec(viewport,MeasureSpec.UNSPECIFIED);
+                    break;
+                }
+                ancestor=view.getParent();
+            }
+        }
         long key=((long)widthSpec<<32)|(heightSpec&0xffffffffL);
         boolean exact=MeasureSpec.getMode(widthSpec)==MeasureSpec.EXACTLY&&MeasureSpec.getMode(heightSpec)==MeasureSpec.EXACTLY;
         boolean sameSize=getMeasuredWidth()==MeasureSpec.getSize(widthSpec)&&getMeasuredHeight()==MeasureSpec.getSize(heightSpec);

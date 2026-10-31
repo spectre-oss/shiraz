@@ -104,3 +104,13 @@ restart, and timeout; stopping the web service does not stop that runtime.
 The page's Stop control still sends the normal close event. Next field (Tab),
 Enter, and keyboard input work without relying on touch support. Attaching a
 session does not change its compatibility profile or make unsupported APIs work.
+
+### Large lists in scroll containers
+
+For apps that stall while measuring a large list inside a `ScrollView`, the runtime
+can opt into `SHIRAZ_SCROLL_MEASURE_HINT=1`. This carries the existing scroll
+viewport height into zero-size, unconstrained measurement requests from descendants.
+The measurement remains unconstrained: this does not truncate adapter data or impose
+a maximum content height. It changes a layout hint and may change how nested lists
+measure their content, so it is disabled by default. Set it on the app runtime, not
+just the web viewer.
