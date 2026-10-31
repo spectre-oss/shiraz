@@ -644,18 +644,32 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public int getMinimumHeight() { return minimumHeight; }
     protected int getSuggestedMinimumWidth() { return Math.max(minimumWidth,backgroundDrawable == null ? 0 : backgroundDrawable.getMinimumWidth()); }
     protected int getSuggestedMinimumHeight() { return Math.max(minimumHeight,backgroundDrawable == null ? 0 : backgroundDrawable.getMinimumHeight()); }
-    public void requestLayout() { shiraz.runtime.ViewDiagnostics.layoutRequest(this);layoutRequested=true; invalidated=true; if (parent != null) parent.requestLayout(); }
+    public void requestLayout() { if(measureCache!=null)measureCache.clear();shiraz.runtime.ViewDiagnostics.layoutRequest(this);layoutRequested=true; invalidated=true; if (parent != null) parent.requestLayout(); }
     public boolean isLayoutRequested() { return layoutRequested; }
     private int previousWidthSpec,previousHeightSpec;
-    public void forceLayout(){layoutRequested=true;invalidated=true;}
+    private java.util.LinkedHashMap<Long,Long> measureCache;
+    private boolean measureBeforeLayout;
+    public void forceLayout(){if(measureCache!=null)measureCache.clear();layoutRequested=true;invalidated=true;}
     public final void measure(int widthSpec,int heightSpec) {
-        if(measured&&!layoutRequested&&widthSpec==previousWidthSpec&&heightSpec==previousHeightSpec)return;
-        if(this instanceof ViewGroup){ViewGroup group=(ViewGroup)this;for(int i=0;i<group.getChildCount();i++){View child=group.getChildAt(i);ViewGroup.LayoutParams params=child.getLayoutParams();if(params!=null)params.resolveLayoutDirection(child.getLayoutDirection());}}
-        measured=false; onMeasure(widthSpec,heightSpec);
-        if (!measured) throw new IllegalStateException("onMeasure did not set measured dimensions");
+        long key=((long)widthSpec<<32)|(heightSpec&0xffffffffL);
+        boolean exact=MeasureSpec.getMode(widthSpec)==MeasureSpec.EXACTLY&&MeasureSpec.getMode(heightSpec)==MeasureSpec.EXACTLY;
+        boolean sameSize=getMeasuredWidth()==MeasureSpec.getSize(widthSpec)&&getMeasuredHeight()==MeasureSpec.getSize(heightSpec);
+        boolean changed=widthSpec!=previousWidthSpec||heightSpec!=previousHeightSpec;
+        if(!measured||layoutRequested||(changed&&(!exact||!sameSize))){
+            if(this instanceof ViewGroup){ViewGroup group=(ViewGroup)this;for(int i=0;i<group.getChildCount();i++){View child=group.getChildAt(i);ViewGroup.LayoutParams params=child.getLayoutParams();if(params!=null)params.resolveLayoutDirection(child.getLayoutDirection());}}
+            Long cached=layoutRequested||measureCache==null?null:measureCache.get(key);
+            measured=false;
+            if(cached==null){onMeasure(widthSpec,heightSpec);measureBeforeLayout=false;}
+            else{setMeasuredDimension((int)(cached>>>32),(int)(long)cached);measureBeforeLayout=true;}
+            if(!measured)throw new IllegalStateException("onMeasure did not set measured dimensions");
+            layoutRequired=true;
+        }
         previousWidthSpec=widthSpec;previousHeightSpec=heightSpec;
-        layoutRequired=true;
+        if(measureCache==null)measureCache=new java.util.LinkedHashMap<Long,Long>();
+        measureCache.put(key,((long)measuredWidth<<32)|(measuredHeight&0xffffffffL));
+        if(measureCache.size()>16)measureCache.remove(measureCache.keySet().iterator().next());
     }
+
     protected void onMeasure(int widthSpec,int heightSpec) { setMeasuredDimension(getDefaultSize(getSuggestedMinimumWidth(),widthSpec),getDefaultSize(getSuggestedMinimumHeight(),heightSpec)); }
     protected final void setMeasuredDimension(int width,int height) { measuredWidth=width; measuredHeight=height; measured=true; }
     public final int getMeasuredWidth() { return measuredWidth & MEASURED_SIZE_MASK; }
@@ -865,6 +879,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void layout(int left, int top, int right, int bottom) {
         // Validate before clearing pending layout state, including failed calls.
         if((long)right-left<0||(long)bottom-top<0||(long)right-left>Integer.MAX_VALUE||(long)bottom-top>Integer.MAX_VALUE)throw new IllegalArgumentException("View layout dimensions");
+        if(measureBeforeLayout){onMeasure(previousWidthSpec,previousHeightSpec);measureBeforeLayout=false;}
         int oldLeft=this.left,oldTop=this.top,oldRight=this.right,oldBottom=this.bottom;
         boolean required=layoutRequired;
         layoutRequested=false;layoutRequired=false;

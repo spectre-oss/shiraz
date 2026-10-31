@@ -259,14 +259,16 @@ public class Resources {
     }
     private final java.util.LinkedHashMap<Integer,shiraz.runtime.CompiledXmlParser> xmlCache=new java.util.LinkedHashMap<Integer,shiraz.runtime.CompiledXmlParser>(16,.75f,true);
     private int xmlBytes;
-    private void clearXmlCache(){xmlCache.clear();xmlBytes=0;}
+    private void clearXmlCache(){xmlCache.clear();xmlBytes=0;fontCache.clear();}
     public synchronized XmlResourceParser getXml(int id) {
         requireOpen();shiraz.runtime.CompiledXmlParser parsed=xmlCache.get(id);if(parsed!=null)return parsed.shirazFork();
         byte[] bytes=shirazReadResourceFile(id,new android.util.TypedValue());
         try{parsed=new shiraz.runtime.CompiledXmlParser(bytes,id);if(bytes.length<=65536){xmlCache.put(id,parsed);xmlBytes+=bytes.length;while(xmlCache.size()>32||xmlBytes>262144){Integer oldest=xmlCache.keySet().iterator().next();xmlBytes-=xmlCache.remove(oldest).shirazEncodedSize();}}return parsed.shirazFork();}
         catch(RuntimeException failure){throw new NotFoundException("Cannot parse XML resource #"+Integer.toHexString(id),failure);}
     }
-    public android.graphics.Typeface getFont(int id) {
+    private final java.util.LinkedHashMap<Integer,android.graphics.Typeface> fontCache=new java.util.LinkedHashMap<Integer,android.graphics.Typeface>(16,.75f,true);
+    public synchronized android.graphics.Typeface getFont(int id) {
+        requireOpen();android.graphics.Typeface cached=fontCache.get(id);if(cached!=null)return cached;
         android.util.TypedValue value=new android.util.TypedValue();getValue(id,value,true);
         if(value.type!=3||value.string==null)throw new NotFoundException("Resource is not a font");
         String path=value.string.toString();int weight=400,italic=0,ttc=0;
@@ -297,7 +299,9 @@ public class Resources {
         }
         android.graphics.FontFamily family=new android.graphics.FontFamily();
         if(!family.addFontFromAssetManager(getAssets(),path,value.assetCookie,false,ttc,weight,italic,null)||!family.freeze())throw new NotFoundException("Cannot load font resource #"+Integer.toHexString(id));
-        return android.graphics.Typeface.createFromFamiliesWithDefault(new android.graphics.FontFamily[]{family},weight,italic);
+        android.graphics.Typeface result=android.graphics.Typeface.createFromFamiliesWithDefault(new android.graphics.FontFamily[]{family},weight,italic);
+        fontCache.put(id,result);if(fontCache.size()>64)fontCache.remove(fontCache.keySet().iterator().next());
+        return result;
     }
     public XmlResourceParser getLayout(int id) { return getXml(id); }
     public XmlResourceParser getAnimation(int id) { return getXml(id); }
