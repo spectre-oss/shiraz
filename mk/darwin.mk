@@ -70,7 +70,7 @@ MACOS_ANDROIDFW_INCLUDE := $(MACOS_ANDROIDFW_TREE)/libandroidfw/include
 MACOS_ANDROIDFW_HEADER := $(MACOS_ANDROIDFW_INCLUDE)/androidfw/androidfw_c_api.h
 MACOS_LINK_ANDROID = $(MACOS_OUT)/libandroid.so $(MACOS_RPATH)
 MACOS_PRESENTATION_HEADERS := include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/evdev_key_codes.h include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/display_geometry.hpp
-MACOS_TESTS := test-compositor test-pointer test-keyboard test-archive-path test-native-window test-shared-frame test-choreographer test-sensors test-shared-memory test-image-reader test-hardware-buffer test-system-fonts test-media-crypto test-media-ndk test-ipc-channel test-sync-fence
+MACOS_TESTS := test-compositor test-window-aspect test-pointer test-keyboard test-archive-path test-native-window test-shared-frame test-choreographer test-sensors test-shared-memory test-image-reader test-hardware-buffer test-system-fonts test-media-crypto test-media-ndk test-ipc-channel test-sync-fence
 MACOS_SDL_TESTS := test-presentation test-live-input
 
 .PHONY: macos-deps macos-graphics-deps macos-graphics-deps-check macos-gpu-deps macos-gpu-deps-check macos-art macos-art-depsmacos-runtime-libs macos-framework-missing macos-build macos-test macos-check macos-preview macos-smoke macos-framework macos-runtime-jni-smoke macos-runtime-jni-window-smoke macos-androidfw-lib-dir-check macos-framework-resources macos-apk-fixture macos-runtime-smoke macos-runtime-window-smoke
@@ -369,7 +369,7 @@ macos-egl-shim-no-angle-test: $(MACOS_OUT)/test-egl-shim-no-angle $(MACOS_OUT)/l
 
 # SDL is linked statically here and its public API stays exported, so test
 # helpers bind to this SDL instance instead of linking a second copy.
-$(MACOS_OUT)/libshiraz-jni.so: native/jni_surface.cpp native/presentation.cpp $(MACOS_JNI_HEADERS) mk/darwin.mk $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_SDL_ARCHIVE)
+$(MACOS_OUT)/libshiraz-jni.so: native/jni_surface.cpp native/presentation.cpp include/shiraz/window_aspect.hpp $(MACOS_JNI_HEADERS) mk/darwin.mk $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_SDL_ARCHIVE)
 	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/jni_surface.cpp native/presentation.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS)
 
 $(MACOS_OUT)/libshiraz-test-input.so: tests/native/input_injector.cpp $(MACOS_OUT)/libshiraz-jni.so $(MACOS_SDL_CONFIG)
@@ -444,6 +444,8 @@ $(MACOS_OUT)/test-pointer: tests/pointer.cpp include/shiraz/pointer.hpp include/
 	$(MACOS_CXX) tests/pointer.cpp -o $@
 $(MACOS_OUT)/test-keyboard: tests/keyboard.cpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/evdev_key_codes.h $(MACOS_SDL_CONFIG) $(MACOS_OUT)/.dir
 	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/keyboard.cpp -o $@
+$(MACOS_OUT)/test-window-aspect: tests/native/window_aspect.cpp include/shiraz/window_aspect.hpp $(MACOS_OUT)/.dir
+	$(MACOS_CXX) tests/native/window_aspect.cpp -o $@
 $(MACOS_OUT)/test-archive-path: tests/native/archive_path.cpp include/shiraz/archive_path.hpp $(MACOS_OUT)/.dir
 	$(MACOS_CXX) tests/native/archive_path.cpp -o $@
 $(MACOS_OUT)/test-native-window: tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp include/shiraz/shared_frame.hpp include/shiraz/window_frames.hpp include/shiraz/native_window.h include/shiraz/window_snapshot.hpp include/shiraz/compositor.hpp $(MACOS_OUT)/.dir

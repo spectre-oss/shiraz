@@ -6,6 +6,7 @@
 #include <deque>
 #include <atomic>
 #include "shiraz/live_input.hpp"
+#include "shiraz/window_aspect.hpp"
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -16,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <algorithm>
 
 namespace shiraz {
 namespace {
@@ -119,6 +121,16 @@ int64_t eventTime(Uint32 timestamp = 0) {
     return age <= millis ? millis - age : millis;
 }
 void checked(int result) { if (result) throw std::runtime_error(SDL_GetError()); }
+// Window aspect lock (shiraz/window_aspect.hpp): user resizes keep the app's
+// long:short ratio and fit the display's usable area.
+void lockAspect(SDL_Window* window,double ratio,int lastWidth,int lastHeight,int& width,int& height) {
+    int maxWidth=0,maxHeight=0;SDL_Rect usable{};int index=SDL_GetWindowDisplayIndex(window);
+    if(index>=0&&SDL_GetDisplayUsableBounds(index,&usable)==0&&usable.w>0&&usable.h>0){
+        int top=0,left=0,bottom=0,right=0;SDL_GetWindowBordersSize(window,&top,&left,&bottom,&right);
+        maxWidth=usable.w-left-right;maxHeight=usable.h-top-bottom;
+    }
+    shiraz::snap_window_aspect(ratio,lastWidth,lastHeight,maxWidth,maxHeight,width,height);
+}
 }
 DisplayGeometry prepare_presentation(int width,int height) {
     DisplayGeometry::from(width,height,width,height);
@@ -364,6 +376,9 @@ void present(const Surface& initial, const std::string& title, int frames, const
         lastGeometry=geometry;
     };
     syncGeometry();
+    const double aspect=shiraz::window_aspect(std::getenv("SHIRAZ_WINDOW_ASPECT"),image.width,image.height);
+    int lockedWidth=0,lockedHeight=0;SDL_GetWindowSize(window.get(),&lockedWidth,&lockedHeight);
+    int scriptedWidth=-1,scriptedHeight=-1; // replay/live resizes request exact sizes
     bool running = true;
     for (int frame = 0; running && (frames < 0 || frame < frames); ) {
         textInput.sync();
@@ -371,7 +386,7 @@ void present(const Surface& initial, const std::string& title, int frames, const
         while(replayIndex<replay.size()&&replay[replayIndex].frame==frame){
             const auto& action=replay[replayIndex++];SDL_Event injected{};
             if(action.action=="resize"){
-                SDL_SetWindowSize(window.get(),action.x,action.y);injected.type=SDL_WINDOWEVENT;
+                SDL_SetWindowSize(window.get(),action.x,action.y);scriptedWidth=action.x;scriptedHeight=action.y;injected.type=SDL_WINDOWEVENT;
                 injected.window.windowID=SDL_GetWindowID(window.get());injected.window.event=SDL_WINDOWEVENT_SIZE_CHANGED;injected.window.data1=action.x;injected.window.data2=action.y;
             }else if(action.action=="move"){
                 injected.type=SDL_MOUSEMOTION;injected.motion.windowID=SDL_GetWindowID(window.get());injected.motion.x=action.x;injected.motion.y=action.y;injected.motion.state=SDL_BUTTON_LMASK;
@@ -420,7 +435,7 @@ void present(const Surface& initial, const std::string& title, int frames, const
             }
             if(event.type==liveResizeEvent&&ownWindow(event.user.windowID)){
                 int width=int(reinterpret_cast<intptr_t>(event.user.data1)),height=int(reinterpret_cast<intptr_t>(event.user.data2));
-                SDL_SetWindowSize(window.get(),width,height);event={};event.type=SDL_WINDOWEVENT;
+                SDL_SetWindowSize(window.get(),width,height);scriptedWidth=width;scriptedHeight=height;event={};event.type=SDL_WINDOWEVENT;
                 event.window.windowID=SDL_GetWindowID(window.get());event.window.event=SDL_WINDOWEVENT_SIZE_CHANGED;event.window.data1=width;event.window.data2=height;
             }
             if (event.type == SDL_QUIT || (event.type == SDL_WINDOWEVENT && ownWindow(event.window.windowID) && event.window.event == SDL_WINDOWEVENT_CLOSE) || (event.type == SDL_KEYDOWN && ownWindow(event.key.windowID) && event.key.keysym.sym == SDLK_ESCAPE && !keyboard)) {
@@ -450,6 +465,19 @@ void present(const Surface& initial, const std::string& title, int frames, const
                 int width=event.window.data1,height=event.window.data2;
                 int actualWidth,actualHeight;SDL_GetWindowSize(window.get(),&actualWidth,&actualHeight);
                 if(width!=actualWidth||height!=actualHeight)continue; // obsolete configure notification
+                if(aspect>0&&!(width==scriptedWidth&&height==scriptedHeight)){
+                    int lockedW=width,lockedH=height;lockAspect(window.get(),aspect,lockedWidth,lockedHeight,lockedW,lockedH);
+                    if(std::abs(lockedW-width)>1||std::abs(lockedH-height)>1){
+                        std::cerr<<"SHIRAZ_ASPECT_LOCK "<<width<<"x"<<height<<" -> "<<lockedW<<"x"<<lockedH<<"\n";
+                        SDL_SetWindowSize(window.get(),lockedW,lockedH);
+                        int appliedW=0,appliedH=0;SDL_GetWindowSize(window.get(),&appliedW,&appliedH);
+                        // Applied: the snapped size event relayouts. Refused (maximized,
+                        // fullscreen, tiling): lay out the size the window really has.
+                        if(std::abs(appliedW-lockedW)<=1&&std::abs(appliedH-lockedH)<=1)continue;
+                        width=appliedW;height=appliedH;
+                    }
+                }
+                lockedWidth=width;lockedHeight=height;
                 syncGeometry(event.common.timestamp);
             }
             if(event.type==SDL_WINDOWEVENT&&ownWindow(event.window.windowID)&&event.window.event==SDL_WINDOWEVENT_DISPLAY_CHANGED)syncGeometry(event.common.timestamp);
