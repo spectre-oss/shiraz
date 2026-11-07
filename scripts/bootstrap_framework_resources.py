@@ -10,31 +10,16 @@ from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import tarfile
-import urllib.request
 import zipfile
+import zlib
 from shiraz.framework_resources import ResourceIndex
-from build_apk_fixture import DOWNLOADS
+from build_apk_fixture import DOWNLOADS, aapt2_jar, fetch
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMIT = '7e7ea0991020d15cdb69c5da933c282c92f884ef'
 URL = 'https://android.googlesource.com/platform/frameworks/base/+archive/' + COMMIT + '/core/res.tar.gz'
 CONTENT_SHA256 = '4160c9accff68d789228c201dbc4fc9c2ea2e437b7600413eb4aeab9bb3941ae'
 LICENSE_SHA256 = 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30'
-
-
-def download(path, url, checksum, limit):
-    if not path.exists():
-        temporary = path.with_suffix('.download')
-        with urllib.request.urlopen(url, timeout=30) as source, temporary.open('wb') as target:
-            total = 0
-            while chunk := source.read(1024 * 1024):
-                total += len(chunk)
-                if total > limit:
-                    raise ValueError('source download exceeds limit')
-                target.write(chunk)
-        temporary.replace(path)
-    if path.stat().st_size > limit or (checksum is not None and hashlib.sha256(path.read_bytes()).hexdigest() != checksum):
-        raise ValueError('framework dependency checksum mismatch')
 
 
 def source_files(archive):
@@ -63,6 +48,20 @@ def source_content_sha256(files):
     return hashlib.sha256(''.join(entries).encode()).hexdigest()
 
 
+def verify_source(archive):
+    """Raise ValueError unless archive holds exactly the pinned core/res tree.
+
+    The Gitiles archive is not byte-stable, so fetch() cannot pin its sha256; this
+    runs before the download is renamed into the cache and on every cached copy.
+    """
+    try:
+        files = source_files(archive)
+    except (tarfile.TarError, EOFError, zlib.error) as error:
+        raise ValueError(f'not a valid framework source archive: {error}') from error
+    if source_content_sha256(files) != CONTENT_SHA256:
+        raise ValueError('framework source content checksum mismatch')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--seed', action='append', help='type/name; repeated seeds replace defaults')
@@ -75,9 +74,9 @@ def main():
     try: fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError: raise SystemExit('A framework resource build is already running')
     archive = cache / 'android-8.1.0_r81-core-res.tar.gz'
-    download(archive, URL, None, 64 * 1024 * 1024)
+    fetch(archive, URL, None, 64 * 1024 * 1024, verify=verify_source)
     license = cache / 'Apache-2.0.txt'
-    download(license, 'https://www.apache.org/licenses/LICENSE-2.0.txt', LICENSE_SHA256, 32768)
+    fetch(license, 'https://www.apache.org/licenses/LICENSE-2.0.txt', LICENSE_SHA256, 32768)
     files = source_files(archive)
     if source_content_sha256(files) != CONTENT_SHA256:
         raise ValueError('framework source content checksum mismatch')
@@ -89,8 +88,8 @@ def main():
     for name, data in outputs.items():
         target = source / name; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)
     manifest = build / 'AndroidManifest.xml'; manifest.write_text('<manifest package="android"/>\n')
-    tool_archive = cache / 'aapt2-linux.jar'; tool_url, tool_hash = DOWNLOADS['aapt2-linux.jar']
-    download(tool_archive, tool_url, tool_hash, 16 * 1024 * 1024)
+    tool_archive = cache / aapt2_jar(); tool_url, tool_hash = DOWNLOADS[aapt2_jar()]
+    fetch(tool_archive, tool_url, tool_hash, 16 * 1024 * 1024)
     with zipfile.ZipFile(tool_archive) as tools_zip:
         if tools_zip.getinfo('aapt2').file_size > 32 * 1024 * 1024: raise ValueError('compiler exceeds size limit')
         compiler = cache / 'aapt2'; compiler.write_bytes(tools_zip.read('aapt2')); compiler.chmod(0o755)

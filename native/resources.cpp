@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <jni.h>
+#if defined(__APPLE__)
+// off_t has always been 64-bit on Darwin, which has no off64_t; libandroidfw's
+// Darwin build uses the same typedef (android-base/off64_t.h).
+#include <sys/types.h>
+typedef off_t off64_t;
+#endif
 #include <androidfw/androidfw_c_api.h>
 #include <limits>
 #include <list>

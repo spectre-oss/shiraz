@@ -99,6 +99,23 @@ __attribute__((constructor)) void captureProcessArguments() {
     if(size>1024*1024)return;
     processArguments=argv[0];processArgumentBytes=size;
 }
+// Darwin has no /proc/self/cmdline. Copy argv in the /proc layout (each argument
+// NUL-terminated) at load time, before setArgV0 can overwrite the argv area.
+std::string* processCommandLine=nullptr;
+__attribute__((constructor)) void captureProcessCommandLine() {
+    int argc=*_NSGetArgc();char** argv=*_NSGetArgv();
+    if(argc<=0||argc>4096||!argv)return;
+    try{
+        std::string line;
+        for(int i=0;i<argc;i++){
+            if(!argv[i])return;
+            size_t size=strnlen(argv[i],1024*1024);
+            if(size==1024*1024||line.size()+size+1>1024*1024)return;
+            line.append(argv[i],size);line.push_back('\0');
+        }
+        processCommandLine=new std::string(std::move(line));
+    }catch(const std::bad_alloc&){}
+}
 #else
 // glibc supplies the original argv to ELF constructors, including dlopen constructors.
 __attribute__((constructor)) void captureProcessArguments(int argc,char** argv,char**) {
@@ -136,6 +153,14 @@ extern "C" JNIEXPORT void JNICALL Java_android_os_Process_setArgV0(JNIEnv* env,j
     memset(processArguments,0,processArgumentBytes);memcpy(processArguments,value,size);
     env->ReleaseStringUTFChars(name,value);
 }
+#if defined(__APPLE__)
+extern "C" JNIEXPORT jbyteArray JNICALL Java_shiraz_runtime_ServiceProcess_nativeCommandLine(JNIEnv* env,jclass){
+    if(!processCommandLine||processCommandLine->empty()){jclass c=env->FindClass("java/io/IOException");if(c)env->ThrowNew(c,"Cannot read Darwin process arguments");return nullptr;}
+    jbyteArray result=env->NewByteArray(jsize(processCommandLine->size()));
+    if(result)env->SetByteArrayRegion(result,0,jsize(processCommandLine->size()),reinterpret_cast<const jbyte*>(processCommandLine->data()));
+    return result;
+}
+#endif
 
 extern "C" JNIEXPORT jint JNICALL Java_android_os_Process_myPid(JNIEnv*, jclass) { return jint(getpid()); }
 #if defined(__APPLE__)

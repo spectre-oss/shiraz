@@ -7,10 +7,13 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'src'))
+from shiraz.host_layout import host_out_dir  # noqa: E402
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -22,7 +25,7 @@ def main():
     with tempfile.TemporaryDirectory(dir=output.parent) as directory:
         work = Path(directory)
         dex = work / 'classes.dex'
-        subprocess.run([str(ROOT/'context/art_standalone/out/host/linux-x86/bin/dx'),
+        subprocess.run([str(host_out_dir(ROOT/'context/art_standalone')/'bin/dx'),
                         '--dex', '--min-sdk-version=27', '--output='+str(dex),
                         *map(str,args.jar)], check=True)
         with zipfile.ZipFile(work/'library.jar', 'w') as archive:

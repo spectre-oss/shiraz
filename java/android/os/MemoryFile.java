@@ -8,6 +8,9 @@ public class MemoryFile {
  private static native int nativeCreate(String name,int length)throws IOException;
  public MemoryFile(String name,int length)throws IOException{
   if(length<0||length>128*1024*1024)throw new IOException("MemoryFile length outside supported bounds");this.length=length;
+  // Darwin POSIX shm descriptors can only be mapped: /dev/fd/N reopen fails (EBADF) and
+  // read/write/lseek fail, so the RandomAccessFile accessor below cannot work there.
+  if(shiraz.runtime.HostOs.darwin())throw new IOException("MemoryFile is unsupported on Darwin: shm byte access needs an mmap accessor");
   descriptor=ParcelFileDescriptor.adoptFd(nativeCreate(name,length));
   try{access=new RandomAccessFile("/proc/self/fd/"+descriptor.getFd(),"rw");}catch(IOException error){descriptor.close();throw error;}
  }

@@ -140,12 +140,12 @@ PATCHES = {
 # unaffected). Same (patch, {file: final sha256}) chain format as PATCHES.
 PATCHES_DARWIN = {
     'art_standalone': [
-        ('art-darwin-build.patch', {  # 26541 bytes
+        ('art-darwin-build.patch', {  # 27156 bytes
             'art/build/Android.common_build.mk': '5e00dd05b95a1a716200ad7f276a82c5f675b566c1301fc61a8e92698aa48e0e',
             'art/dalvikvm/Android.mk': 'ff48dc36f8b850d976ab2bd93ec0e070ce6a204d86afb77335e6073704921fe8',
             'art/libartpalette/Android.mk': '4328fba0e10923eaf16e8b7d589569ec408e889eafb35af147d9d3e1b27493b6',
             'art/runtime/Android.mk': 'e8bb97ccf347a053bcf26bd4c0c83b092b2e36556555672026ca6dbfadb60180',
-            'build/core/combo/HOST_darwin-arm64.mk': '10e68d1322a82d201b93d284998491cd867c6cc38442f889c65b14ade9a6ebfa',
+            'build/core/combo/HOST_darwin-arm64.mk': '0f2c24db7babe8d8cd3f6e392c4dfc08994fdbc74aa730f5809516b903066d26',
             'build/core/combo/include/arch/darwin-arm64/AndroidConfig.h': 'd14ab0865bb991624fbc8d3f7378f90ba7e31bfbbeaa3f9d36201b1b292d1c39',
             'build/core/envsetup.mk': '5149ae553aaa1aa42f2aade5dc1712a2db8db60f429002cefa9e70c7570517a4',
             'build/core/host_dalvik_java_library.mk': 'eedcad7c8c694d31d0c6c9a6b73ad3ab7be8b8604197b9385ee6ef74307e3dc9',
@@ -162,10 +162,12 @@ PATCHES_DARWIN = {
             'system/core/libnativebridge/Android.mk': '90efaa8abadf30173c9f2e83ed60281610da8ede440a09f559c51b026a4c5c33',
             'system/core/libutils/Android.mk': '5b6e389c2df0e78dee4f47807b76a7bb6e3dd1573f481467cc66160f9ad560e6',
         }),
-        ('art-darwin-support.patch', {  # 24278 bytes
+        ('art-darwin-support.patch', {  # 25382 bytes
             'art/libartbase/base/time_utils.cc': 'cd92619e980d867ab0e5c0c670fad8384f965430b1502c4b81586e3df822536d',
             'art/sigchainlib/sigchain.cc': 'ff66e220f125f503a9acadd478c5e0ff2af88ec788a19b222f050af92bee7f49',
             'art/sigchainlib/sigchain.h': '2f4a3284abc715d44602d9fe1c313d634d031c02d4ae276b40b5276963523518',
+            'libandroidfw/include/android/asset_manager.h': '1d05e599de4cc688e0436e15e0f259093a6f70dd51a121c7c8fec6570fb8a082',
+            'libandroidfw/include/androidfw/androidfw_c_api.h': '3877a7ea59d070c4b19d57ce72a965c0c035916fb4d55016f9042dd42ec46b38',
             'libbase/logging.cpp': '66e76b46d644f185786dc997207a4c70df87ecc85ec475f2b4cd05a54dc02dfb',
             'libnativehelper/include/nativehelper/jni.h': '70f646bfa4edc7b27d500a5c52d6258cef0698cc8c88f4fb49b806c3cc9bbdf5',
             'libziparchive/zip_archive.cc': 'a0a0ad7199274e025ebbc4c463ae65386ae4d1c618f1280bb093691661ba08de',
@@ -255,6 +257,11 @@ PATCHES_DARWIN = {
             'libcore/ojluni/src/main/native/jvm_md.h': 'a8423dd9ea7b8ae1d7ee66c3196b79121cbfb4b03724f93ab106ffacf6e9048c',
             'libcore/ojluni/src/main/native/linux_close.cpp': '154424efddc69ac211134b1763f23efe82570797900652d931fea26ae2e35dda',
             'libnativehelper/AsynchronousCloseMonitor.cpp': '1a154047dbdfdb712666b64bf65cdd62c585f58c126667075724c944f2d5b290',
+        }),
+        # okhttp is not booted on macOS yet: java.net.URL falls back to
+        # shiraz.net.http(s).Handler instead of throwing AssertionError.
+        ('art-darwin-url-handlers.patch', {  # 2635 bytes
+            'libcore/ojluni/src/main/java/java/net/URL.java': 'f9481fffcbf68eaee61bf99d1ca740f47816b8215e783367b157e0ba78bd2b32',
         }),
     ],
 }

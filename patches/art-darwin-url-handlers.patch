@@ -1,0 +1,47 @@
+diff --git a/libcore/ojluni/src/main/java/java/net/URL.java b/libcore/ojluni/src/main/java/java/net/URL.java
+index 576439df93e7a6118651d5a7aa186ef348546a86..fc34e2d50d33d2d2236d2a7810f9ac70dfd7fc45 100644
+--- a/libcore/ojluni/src/main/java/java/net/URL.java
++++ b/libcore/ojluni/src/main/java/java/net/URL.java
+@@ -1139,6 +1139,26 @@ public final class URL implements java.io.Serializable {
+     static Hashtable<String,URLStreamHandler> handlers = new Hashtable<>();
+     private static Object streamHandlerLock = new Object();
+ 
++    // BEGIN Shiraz-added (darwin): okhttp is not on the macOS boot classpath yet.
++    // Fall back to the Shiraz handler on the system class path, which parses
++    // URLs and fails openConnection with IOException. java.protocol.handler.pkgs
++    // stays unset and changeable by the app, as on Android.
++    private static URLStreamHandler builtinHandler(String okhttp, String shiraz)
++            throws ReflectiveOperationException {
++        try {
++            return (URLStreamHandler) Class.forName(okhttp).newInstance();
++        } catch (ClassNotFoundException missing) {
++            try {
++                return (URLStreamHandler) Class.forName(shiraz, true,
++                        ClassLoader.getSystemClassLoader()).newInstance();
++            } catch (ClassNotFoundException alsoMissing) {
++                missing.addSuppressed(alsoMissing);
++                throw missing;
++            }
++        }
++    }
++    // END Shiraz-added
++
+     /**
+      * Returns the Stream Handler.
+      * @param protocol the protocol to use
+@@ -1201,11 +1221,11 @@ public final class URL implements java.io.Serializable {
+                     } else if (protocol.equals("jar")) {
+                         handler = new sun.net.www.protocol.jar.Handler();
+                     } else if (protocol.equals("http")) {
+-                        handler = (URLStreamHandler)Class.
+-                            forName("com.android.okhttp.HttpHandler").newInstance();
++                        handler = builtinHandler("com.android.okhttp.HttpHandler",
++                                                 "shiraz.net.http.Handler");
+                     } else if (protocol.equals("https")) {
+-                        handler = (URLStreamHandler)Class.
+-                            forName("com.android.okhttp.HttpsHandler").newInstance();
++                        handler = builtinHandler("com.android.okhttp.HttpsHandler",
++                                                 "shiraz.net.https.Handler");
+                     }
+                     // END Android-changed
+                 } catch (Exception e) {

@@ -3,9 +3,12 @@
 """Build the unsigned, permission-free Android/Shiraz motion reference APK."""
 from pathlib import Path
 import subprocess
+import sys
 import zipfile
 from build_apk_fixture import tools, TOOLS
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'src'))
+from shiraz.host_layout import host_out_dir  # noqa: E402
 
 def main():
     tools()
@@ -17,7 +20,7 @@ def main():
     subprocess.run([str(TOOLS/'aapt2'), 'link', '-o', str(apk), '--manifest', str(source/'AndroidManifest.xml'), '-I', str(TOOLS/'android.jar')], check=True)
     subprocess.run(['javac', '--release', '8', '-cp', str(TOOLS/'android.jar'), '-d', str(classes), str(source/'MotionReferenceActivity.java')], check=True)
     dex = work / 'probe.dex'
-    subprocess.run([str(ROOT/'context/art_standalone/out/host/linux-x86/bin/dx'), '--dex', '--min-sdk-version=27', '--output='+str(dex), str(classes)], check=True)
+    subprocess.run([str(host_out_dir(ROOT/'context/art_standalone')/'bin/dx'), '--dex', '--min-sdk-version=27', '--output='+str(dex), str(classes)], check=True)
     with zipfile.ZipFile(apk, 'a') as archive:
         archive.write(dex, 'classes.dex')
     print('MOTION_REFERENCE_APK '+str(apk))

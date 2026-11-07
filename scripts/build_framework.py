@@ -7,13 +7,17 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'src'))
+from shiraz.host_layout import host_out_dir  # noqa: E402
 
 
 def main():
-    dx = ROOT / 'context/art_standalone/out/host/linux-x86/bin/dx'
+    # out/host/linux-x86 on Linux, out/host/darwin-x86 on macOS.
+    dx = host_out_dir(ROOT / 'context/art_standalone') / 'bin/dx'
     if not dx.is_file():
         raise SystemExit('Host dx is missing. Run make runtime-art before building the framework.')
     build = ROOT / 'build/framework'

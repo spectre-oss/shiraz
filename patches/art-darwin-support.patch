@@ -96,6 +96,36 @@ index fcb47c2f374ab3d98afc6e00563fdc9b73135e67..2e733f11e7dbf1d5638f54745257b6cd
  
  namespace art {
  
+diff --git a/libandroidfw/include/android/asset_manager.h b/libandroidfw/include/android/asset_manager.h
+index 2ac7d4d350ac6a8519f4259cc8e3db0073c19212..261cc37b5e78edf799e83bea12bf4bec8ba0536b 100644
+--- a/libandroidfw/include/android/asset_manager.h
++++ b/libandroidfw/include/android/asset_manager.h
+@@ -28,6 +28,10 @@
+ 
+ #include <sys/cdefs.h>
+ #include <sys/types.h>
++#if defined(__APPLE__)
++/* Mac OS has always had a 64-bit off_t, so it doesn't have off64_t. */
++typedef off_t off64_t;
++#endif
+ 
+ #ifdef __cplusplus
+ extern "C" {
+diff --git a/libandroidfw/include/androidfw/androidfw_c_api.h b/libandroidfw/include/androidfw/androidfw_c_api.h
+index 934523eb6bab31f83fe7e4c95b19fcf994c7354c..b47bdb4a284e989256fa6439b7bd2d72729fd88d 100644
+--- a/libandroidfw/include/androidfw/androidfw_c_api.h
++++ b/libandroidfw/include/androidfw/androidfw_c_api.h
+@@ -5,6 +5,10 @@
+ #include <stdbool.h>
+ #include <uchar.h>
+ #include <sys/types.h>
++#if defined(__APPLE__)
++/* Mac OS has always had a 64-bit off_t, so it doesn't have off64_t. */
++typedef off_t off64_t;
++#endif
+ 
+ #ifdef __cplusplus
+ extern "C" {
 diff --git a/libbase/logging.cpp b/libbase/logging.cpp
 index 925c89abcb435cdf8354a952defde587196c7dc8..64d32be2660e8ab9d36537cd4c0a5d1b956d01e5 100644
 --- a/libbase/logging.cpp

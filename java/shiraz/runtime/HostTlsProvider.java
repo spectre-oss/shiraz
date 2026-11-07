@@ -11,8 +11,10 @@ public final class HostTlsProvider extends Provider {
         if(Security.getProvider("wolfJSSE").getService("SSLContext","TLSv1.3")!=null)put("SSLContext.TLSv1.3",TLS13.class.getName());
         put("SSLContext.Default",Default.class.getName());
     }
+    private static boolean unavailableReported;
     public static synchronized void install()throws GeneralSecurityException{
         if(Security.getProvider("ShirazTLS")!=null)return;
+        if(unavailable())return;
         if(Security.getProvider("wolfJSSE")==null)throw new NoSuchProviderException("Pinned wolfJSSE provider is unavailable");
         SSLContext oldContext=SSLContext.getDefault();
         SSLSocketFactory oldSocket=(SSLSocketFactory)SSLSocketFactory.getDefault();
@@ -30,6 +32,23 @@ public final class HostTlsProvider extends Provider {
             Security.setProperty("ssl.SocketFactory.provider",oldFactory==null?"":oldFactory);
             Security.removeProvider(provider.getName());throw failure;
         }
+    }
+    // A host without the pinned wolfJSSE stack (the darwin launcher sets shiraz.tls=unavailable
+    // until a Security.framework trust store lands) boots without TLS. Nothing is installed:
+    // SSLContext lookups throw NoSuchAlgorithmException and the default SSL socket factories
+    // throw SocketException. There is no trust-all manager and no plaintext fallback.
+    // Linux without wolfJSSE still fails in install(), as before.
+    private static boolean unavailable(){
+        String mode=System.getProperty("shiraz.tls");
+        if(mode!=null&&!mode.equals("unavailable"))throw new IllegalArgumentException("Unsupported shiraz.tls mode: "+mode);
+        boolean pinned=Security.getProvider("wolfJSSE")!=null;
+        if(mode==null&&(pinned||!HostOs.darwin()))return false;
+        if(pinned)throw new IllegalStateException("shiraz.tls=unavailable conflicts with the registered wolfJSSE provider");
+        for(String service:new String[]{"SSLContext.Default","SSLContext.TLS"})
+            if(Security.getProviders(service)!=null)throw new IllegalStateException("TLS is unavailable but a provider offers "+service);
+        if("com.wolfssl.provider.jsse.WolfSSLSocketFactory".equals(Security.getProperty("ssl.SocketFactory.provider")))Security.setProperty("ssl.SocketFactory.provider","");
+        if(!unavailableReported){unavailableReported=true;System.err.println("SHIRAZ_UNSUPPORTED tls: pinned wolfJSSE provider absent on this host; SSLContext and HTTPS use will throw");}
+        return true;
     }
     public static class TLS extends Context {public TLS(){super("TLS");}}
     public static final class TLS12 extends Context {public TLS12(){super("TLSv1.2");}}

@@ -9,6 +9,7 @@ the host system, and Homebrew libraries are never linked or staged.
   ICU4C 78.3  shared @rpath dylibs, data packaged as libicudata, symbol renaming on
   lz4 1.10.0  static liblz4.a
   xz 5.8.4    static liblzma.a
+  libpng 1.6.59  static libpng16.a (for libandroidfw; zlib comes from the macOS SDK)
 """
 import argparse
 import fcntl
@@ -42,10 +43,15 @@ XZ_VERSION = '5.8.4'
 # Equals the independently published Homebrew xz 5.8.4 source checksum.
 XZ_SHA256 = '0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9'
 XZ_URL = f'https://github.com/tukaani-project/xz/releases/download/v{XZ_VERSION}/xz-{XZ_VERSION}.tar.gz'
+PNG_VERSION = '1.6.59'
+# Equals the independently published Homebrew libpng 1.6.59 source checksum.
+PNG_SHA256 = 'd80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389'
+PNG_URL = f'https://downloads.sourceforge.net/project/libpng/libpng16/{PNG_VERSION}/libpng-{PNG_VERSION}.tar.xz'
 ICU_LIBRARIES = ('icudata', 'icuuc', 'icui18n')
 
 ART_TARGETS = ('dalvikvm', 'libart', 'libopenjdkjvm', 'libjavacore', 'libopenjdk',
-               'libnativehelper', 'libsigchain', 'core-oj-hostdex', 'core-libart-hostdex')
+               'libnativehelper', 'libsigchain', 'core-oj-hostdex', 'core-libart-hostdex',
+               'libandroidfw')
 HOST_TAG = 'darwin-x86'
 
 # Variables that could route a build to Homebrew or other host-wide headers/libs.
@@ -256,6 +262,27 @@ def build_xz():
     install_license(source / 'COPYING.0BSD', 'xz', XZ_VERSION, XZ_URL, XZ_SHA256)
 
 
+def build_libpng():
+    archive = fetch(PNG_URL, PNG_SHA256, f'libpng-{PNG_VERSION}.tar.xz')
+    source = extract(archive, DEPS, f'libpng-{PNG_VERSION}')
+    build = BUILD / f'libpng-{PNG_VERSION}'
+    build.mkdir(parents=True, exist_ok=True)
+    env = dependency_env()
+    if not (build / 'config.status').is_file():
+        # zlib is the SDK's libz (zlib.h + libz.tbd); no Homebrew zlib is searched.
+        run([source / 'configure', '--prefix=' + str(PREFIX), '--libdir=' + str(PREFIX / 'lib'),
+             '--disable-shared', '--enable-static', '--with-pic', '--disable-tests',
+             '--disable-tools', '--disable-unversioned-libpng-config'], cwd=build, env=env)
+    run(['make', f'-j{ncpu()}', 'libpng16.la'], cwd=build, env=env)
+    # Library, headers and pkg-config file only (no man pages or libpng-config script).
+    run(['make', 'install-libLTLIBRARIES', 'install-pkgincludeHEADERS',
+         'install-nodist_pkgincludeHEADERS', 'install-pkgconfigDATA', 'install-header-links',
+         'install-library-links', 'install-libpng-pc'], cwd=build, env=env)
+    for stale in (PREFIX / 'lib').glob('libpng*.dylib'):
+        raise SystemExit(f'unexpected shared libpng in prefix: {stale}')
+    install_license(source / 'LICENSE', 'libpng', PNG_VERSION, PNG_URL, PNG_SHA256)
+
+
 def deps_key():
     """Everything the dependency builds bake into their Makefiles and outputs."""
     clang = subprocess.check_output([tool('clang'), '--version'], text=True)
@@ -268,11 +295,12 @@ def deps_outputs():
     return ([PREFIX / 'lib' / name for name in icu_names()]
             + [PREFIX / 'lib/liblz4.a', PREFIX / 'lib/liblzma.a',
                PREFIX / 'include/unicode/uversion.h', PREFIX / 'include/lz4.h',
-               PREFIX / 'include/lzma.h'])
+               PREFIX / 'include/lzma.h', PREFIX / 'lib/libpng16.a', PREFIX / 'lib/libpng.a',
+               PREFIX / 'include/png.h'])
 
 
 def build_deps():
-    """Build ICU, lz4 and liblzma once per configuration.
+    """Build ICU, lz4, liblzma and libpng once per configuration.
 
     A stamp keyed by this script, the prefix, SDK, deployment target and
     compiler skips the rebuild (so ART is not recompiled against freshly
@@ -285,10 +313,12 @@ def build_deps():
             and all(path.exists() for path in deps_outputs())):
         return
     stamp.unlink(missing_ok=True)
-    for directory in (f'icu-{ICU_VERSION}', f'xz-{XZ_VERSION}', f'lz4-{LZ4_VERSION}'):
+    for directory in (f'icu-{ICU_VERSION}', f'xz-{XZ_VERSION}', f'lz4-{LZ4_VERSION}',
+                      f'libpng-{PNG_VERSION}'):
         shutil.rmtree(BUILD / directory, ignore_errors=True)
     build_xz()
     build_lz4()
+    build_libpng()
     build_icu()
     BUILD.mkdir(parents=True, exist_ok=True)
     stamp.write_text(key + '\n')

@@ -9,6 +9,8 @@ public final class NativeSurfaceSmoke {
     private static native void focusWindow(boolean value);
     private static native void resizeWindow(int width,int height);
     public static void main(String[] args) throws Exception {
+        java.util.List<String> options = Arrays.asList(args);
+        if (options.contains("darwin-main-thread")) darwinMainThread(options.contains("darwin-window-hold"));
         try { new NativeSurface(0, 20); throw new AssertionError("Invalid size accepted"); }
         catch (IllegalArgumentException expected) { }
         NativeSurface closed;
@@ -80,5 +82,37 @@ public final class NativeSurfaceSmoke {
             if(!actions.equals(Arrays.asList(0,261,2,6,3)))throw new AssertionError("Touch lifecycle "+actions);
         }
         System.out.println("SHIRAZ_JNI_SURFACE_OK");
+    }
+    // macOS only (scripts/art_smoke.py passes the option there). Cocoa allows SDL
+    // video only on the process main thread: a worker thread must be rejected,
+    // and the prepared-display path used by ActivityRunner must present here.
+    private static void darwinMainThread(boolean hold) throws Exception {
+        final Throwable[] rejected = {null};
+        Thread worker = new Thread(new Runnable() {
+            public void run() {
+                try { NativeSurface.prepareDisplay(64, 96).close(); }
+                catch (Throwable error) { rejected[0] = error; }
+            }
+        }, "shiraz-not-main");
+        worker.start();
+        worker.join();
+        if (!(rejected[0] instanceof IllegalStateException) || !"SDL video requires the process main thread".equals(rejected[0].getMessage()))
+            throw new AssertionError("SDL video accepted off the main thread", rejected[0]);
+        try (NativeSurface.HostDisplay display = NativeSurface.prepareDisplay(160, 96);
+             NativeSurface surface = new NativeSurface(display.width, display.height)) {
+            int[] pixels = new int[display.width * display.height];
+            Arrays.fill(pixels, 0xff123456);
+            surface.post(pixels);
+            final int[] frames = {0};
+            surface.presentDispatched(hold ? 600 : 3, new NativeSurface.FrameCallback() {
+                public boolean onFrame() { frames[0]++; return true; }
+                public void onKey(int a, int k, int s, int r, int m, int f, long d, long t) {}
+                public void onText(String text, long time) {}
+                public void onPointer(int action, float x, float y, int source, long time) {}
+            });
+            int[] shown = surface.snapshot();
+            if (frames[0] < 1 || shown[shown.length / 2] != 0xff123456) throw new AssertionError("Prepared display presentation");
+            System.out.println("SHIRAZ_DARWIN_PREPARED_DISPLAY frames=" + frames[0] + " pixels=" + display.width + "x" + display.height + " density=" + display.densityDpi);
+        }
     }
 }

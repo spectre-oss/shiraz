@@ -115,7 +115,8 @@ class RuntimeTests(unittest.TestCase):
     def test_native_abi_is_checked_on_current_host_not_cached_report(self):
         for machine, own, foreign in [('x86_64', 'x86_64', 'arm64-v8a'),
                                       ('aarch64', 'arm64-v8a', 'x86_64')]:
-            with self.subTest(machine=machine), patch('shiraz.architecture.platform.machine', return_value=machine), patch.object(Path, 'is_file', return_value=False):
+            # Simulates Linux hosts; the macOS launch path has its own tests.
+            with self.subTest(machine=machine), patch('shiraz.runtime.host_system', return_value='Linux'), patch('shiraz.architecture.platform.machine', return_value=machine), patch.object(Path, 'is_file', return_value=False):
                 report = deepcopy(self.report)
                 report.update(native_abis=[foreign], host_native_candidate=True)
                 with self.assertRaisesRegex(FormatError, 'native ABI'):
@@ -127,7 +128,7 @@ class RuntimeTests(unittest.TestCase):
     def test_digitalis_requires_explicit_existing_library(self):
         report = deepcopy(self.report)
         report['native_abis'] = ['arm64-v8a']
-        with patch('shiraz.architecture.platform.machine', return_value='x86_64'):
+        with patch('shiraz.runtime.host_system', return_value='Linux'), patch('shiraz.architecture.platform.machine', return_value='x86_64'):
             with patch.dict(os.environ, {'SHIRAZ_DIGITALIS_LIBRARY': '/missing/bridge.so'}):
                 with patch.object(Path, 'is_file', return_value=False):
                     with self.assertRaisesRegex(FormatError, 'Digitalis native bridge is missing'):

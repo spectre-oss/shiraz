@@ -11,7 +11,8 @@ final class ServiceProcess implements Closeable {
  final int pid;final BinderTransport transport;final IBinder binder;
  static synchronized void configure(String[] args)throws IOException{
   if(args.length!=9)throw new IllegalArgumentException("Application launch arguments");
-  byte[] bytes;try(InputStream in=new FileInputStream("/proc/self/cmdline")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] block=new byte[4096];int n;
+  byte[] bytes;if(HostOs.darwin())bytes=darwinCommandLine();
+  else try(InputStream in=new FileInputStream("/proc/self/cmdline")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] block=new byte[4096];int n;
    while((n=in.read(block))>0){if(out.size()+n>1024*1024)throw new IOException("Runtime command limit");out.write(block,0,n);}bytes=out.toByteArray();}
   ArrayList<String> command=new ArrayList<String>();int start=0;boolean found=false;
   for(int i=0;i<bytes.length;i++)if(bytes[i]==0){String value=new String(bytes,start,i-start,StandardCharsets.UTF_8);start=i+1;
@@ -19,6 +20,13 @@ final class ServiceProcess implements Closeable {
   if(!found||command.isEmpty()||!command.get(0).startsWith("/"))throw new IOException("Cannot identify ART child command");
   prefix=command.toArray(new String[command.size()]);base=args.clone();
  }
+ // Darwin has no /proc/self/cmdline. libshiraz-host copies argv (_NSGetArgv) when it loads,
+ // before setArgV0 can overwrite it, and returns it in the same NUL-terminated layout.
+ private static byte[] darwinCommandLine()throws IOException{
+  System.loadLibrary("shiraz-host");byte[] bytes=nativeCommandLine();
+  if(bytes.length>1024*1024)throw new IOException("Runtime command limit");return bytes;
+ }
+ private static native byte[] nativeCommandLine()throws IOException;
  static synchronized boolean available(){return base!=null;}
  private ServiceProcess(int pid,BinderTransport transport,IBinder binder){this.pid=pid;this.transport=transport;this.binder=binder;}
  static ServiceProcess start(Context context,String service,String process,Intent intent)throws Exception{

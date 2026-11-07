@@ -225,9 +225,12 @@ unchanged), the version check and the commit guard.
   - ImageReader: delivery, lifetime and fences pass on IOSurface buffers; there is
     no GPU producer yet.
   - Keyboard: the in-tree `KEY_*` table is in; the Command-key policy is not.
-  - Makefile: `mk/darwin.mk` builds libandroid, the preview and the tests. ART,
-    the host library link (needs `gles_version.cpp`, EGL) and the GPU canvas are
-    not built yet; the host sources are compiled only.
+  - Makefile: `mk/darwin.mk` builds libandroid, the preview, the tests and the
+    SDL-only dylibs (`make macos-build`, gated by `make macos-check`; no ART
+    needed). `make runtime-art` (alias `macos-art`) builds the darwin-x86 ART host
+    tree; `make macos-runtime-libs` then links `libshiraz-resources.so` against its
+    libandroidfw, and `make macos-runtime-smoke` runs the fixture APK. The GPU
+    canvas is a stub that reports no GPU until M4.
 - Compiled only, not yet run on macOS: `native/host_process.cpp`,
   `native/ipc_spawn.cpp`, `native/ipc_jni.cpp` and `native/fds.cpp`. Their
   designed behaviour, still to be tested:
@@ -340,7 +343,78 @@ Not done yet:
 - Working: `Selector` uses `poll`.
 - Failing with `IOException: Function not implemented`: asynchronous channels
   (`epoll`) and `WatchService` (`inotify`).
-- M3 second exit: the Shiraz framework and a Metal window.
+
+### Shiraz framework in a Metal window (M3 second exit)
+
+`PYTHONPATH=src python3 -m shiraz run build/macos-apk/minimal.apk` boots the
+pure-Java fixture (`tests/macos-apk/`) through the Shiraz framework on darwin
+ART and presents its first frame in an SDL2 Cocoa window with the Metal
+renderer. The frame comes from the real path (ActivityRunner, the Activity,
+`View.draw` into the software canvas, SDL presentation). The launcher writes no
+pixels.
+
+Build order on a fresh Apple Silicon checkout:
+
+1. `make macos-deps`, then `make macos-check` (SDL only, no ART).
+2. `make runtime-art` (alias `macos-art`).
+3. `make macos-runtime-libs macos-framework macos-framework-resources macos-apk-fixture`.
+4. `make macos-runtime-smoke` (headless) and `make macos-runtime-window-smoke` (Metal).
+
+The smoke fails unless all of the following hold:
+- the run exits 0;
+- the content and `SHIRAZ_RUNTIME_CLEANUP_COMPLETE` markers appear;
+- the SDL backend and renderer are the expected ones;
+- the display geometry matches the requested size and density;
+- the snapshot size matches the reported pixels;
+- the centre pixel is `0x123456`.
+
+What it needs and what it shows:
+
+- **Native libraries:**
+  - New macOS dylibs: libshiraz-host, -bitmap, -sqlite (SDK sqlite 3.54) and
+    -resources (linked against the darwin libandroidfw).
+  - libandroidfw now builds in the ART tree with a hidden in-tree libpng 1.6.59.
+  - `ActivityManager` reports no GLES version (0) until M4.
+- **Main thread:** `ActivityRunner.main` runs on the primordial thread. The logs
+  show `pthread_main_np=1` for display preparation and presentation. The
+  surface bridge refuses SDL video calls from any other thread.
+- **Unavailable on macOS, failing explicitly:**
+  - `http`/`https` `URL.openConnection` throws `IOException`, because okhttp and
+    wolfJSSE are not ported. `art-darwin-url-handlers.patch` makes libcore fall
+    back to `shiraz.net` handlers when the okhttp handler classes are absent.
+    Apps can still set `java.protocol.handler.pkgs`.
+  - `SSLContext` has no provider.
+  - `MemoryFile` throws `IOException`.
+- **Optional libraries not built yet:** libshiraz-text (FreeType/HarfBuzz),
+  -path (Cairo), -image, -audio and the others. They are reported at launch with
+  `SHIRAZ_HOST_UNAVAILABLE` and would fail on first use with
+  `UnsatisfiedLinkError`.
+- **Runs, on a warm page cache:**
+  - 10 of 10 headless runs exit 0, median 0.33 s.
+  - 10 of 10 windowed Metal runs exit 0, median 0.79 s.
+  - No VM process is left behind.
+- **Window capture:** a window-only capture stores Display P3 `1b3353`, which is
+  sRGB `0x123456`.
+- **APK path:** the launcher now resolves the APK path before building the
+  classpath. A relative path failed on every host, because ART runs with its
+  working directory in the app data directory.
+- **Downloads:** Google SDK downloads try the redirector.gvt1.com mirror after
+  any dl.google.com failure (404, truncation, wrong bytes). Every candidate is
+  checked against its pinned sha256 or content check before it is renamed into
+  place.
+
+Not done yet:
+- Text, paths, images, audio and the rest of the optional libraries.
+- TLS and HTTP.
+- An arm64 device profile: the shipped profile is the x86_64 emulator identity,
+  so macOS rejects it.
+- Resize and input on macOS.
+- Cold-start timing.
+- Linux `make check` on these changes.
+- A from-pin `bootstrap_runtime.py art` failed once in dx for core-oj-hostdex
+  (`trouble writing output: excess write of 8`) and passed on retry. Six
+  concurrent dx runs on the same input were identical, so the flake has not
+  reproduced.
 
 ## Acceptance on macOS
 

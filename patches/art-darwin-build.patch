@@ -129,10 +129,10 @@ index 9b13aaa811c4c55b622cd3a2ffaec0a939e4a17e..dd2d734405a7325fa9b43b021aec20bf
  # link libartd shared library
 diff --git a/build/core/combo/HOST_darwin-arm64.mk b/build/core/combo/HOST_darwin-arm64.mk
 new file mode 100644
-index 0000000000000000000000000000000000000000..e5869de64888050c4abca3638fe000379b4a98bf
+index 0000000000000000000000000000000000000000..ded9e8f3572380b9d956d7b0ff56b080e05e5684
 --- /dev/null
 +++ b/build/core/combo/HOST_darwin-arm64.mk
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,118 @@
 +#
 +# Copyright (C) 2006 The Android Open Source Project
 +#
@@ -197,7 +197,18 @@ index 0000000000000000000000000000000000000000..e5869de64888050c4abca3638fe00037
 +# time instead of failing with "library not found".
 +HOST_DARWIN_DROPPED_LDLIBS := -lrt -latomic
 +# ld64 ignores -pie (all arm64 Mach-O executables are PIE); clang warns about it.
-+HOST_DARWIN_DROPPED_LDFLAGS := -pie
++# ld64 rejects GNU -z options; -Wl,-z,defs is covered by HOST_NO_UNDEFINED_LDFLAGS
++# (-undefined error), which every Darwin link rule below passes.
++HOST_DARWIN_DROPPED_LDFLAGS := -pie -Wl,-z,defs
++# In-tree static dependencies from .local (no system copy on macOS). They are
++# linked with ld64 -hidden-l so a dylib does not re-export their symbols.
++HOST_DARWIN_HIDDEN_LDLIBS := -lpng
++
++# $(1): a module's LDLIBS, with Linux-only libraries dropped and in-tree static
++# dependencies linked hidden.
++define darwin-host-ldlibs
++$(foreach lib,$(filter-out $(HOST_DARWIN_DROPPED_LDLIBS),$(1)),$(if $(filter $(lib),$(HOST_DARWIN_HIDDEN_LDLIBS)),-Wl$(comma)-hidden$(lib),$(lib)))
++endef
 +
 +HOST_CUSTOM_LD_COMMAND := true
 +
@@ -214,7 +225,7 @@ index 0000000000000000000000000000000000000000..e5869de64888050c4abca3638fe00037
 +        $(addprefix -Wl$(comma)-force_load$(comma), $(PRIVATE_ALL_WHOLE_STATIC_LIBRARIES)) \
 +        $(call normalize-host-libraries,$(PRIVATE_ALL_STATIC_LIBRARIES)) \
 +        $(call normalize-host-libraries,$(PRIVATE_ALL_SHARED_LIBRARIES)) \
-+        $(filter-out $(HOST_DARWIN_DROPPED_LDLIBS),$(PRIVATE_LDLIBS)) \
++        $(call darwin-host-ldlibs,$(PRIVATE_LDLIBS)) \
 +        -o $@ \
 +        -Wl,-rpath,@loader_path \
 +        $(filter-out $(HOST_DARWIN_DROPPED_LDFLAGS),$(PRIVATE_LDFLAGS))
@@ -234,7 +245,7 @@ index 0000000000000000000000000000000000000000..e5869de64888050c4abca3638fe00037
 +        $(call normalize-host-libraries,$(PRIVATE_ALL_STATIC_LIBRARIES)) \
 +        $(call normalize-host-libraries,$(PRIVATE_ALL_SHARED_LIBRARIES)) \
 +        $(filter-out $(HOST_DARWIN_DROPPED_LDFLAGS),$(PRIVATE_LDFLAGS)) \
-+        $(filter-out $(HOST_DARWIN_DROPPED_LDLIBS),$(PRIVATE_LDLIBS))
++        $(call darwin-host-ldlibs,$(PRIVATE_LDLIBS))
 +endef
 +
 +define get-file-size

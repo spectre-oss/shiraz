@@ -12,6 +12,9 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#if defined(__APPLE__)
+#include <pthread.h>
+#endif
 
 static_assert(sizeof(jint) == sizeof(uint32_t), "JNI pixel size must match ARGB8888");
 extern "C" void* ALooper_prepare(int);
@@ -58,7 +61,22 @@ shiraz::Surface snapshot(ANativeWindow* window) {
     return image;
 }
 }
+#if defined(__APPLE__)
+namespace {
+// Cocoa accepts SDL video and event calls only on the process main thread.
+// Fail explicitly instead of hopping threads (no dispatch_sync).
+bool main_thread(JNIEnv* env, const char* entry) {
+    const bool on_main = pthread_main_np() == 1;
+    std::cerr << "SHIRAZ_MAIN_THREAD pthread_main_np=" << (on_main ? 1 : 0) << " entry=" << entry << "\n";
+    if (!on_main) error(env, "java/lang/IllegalStateException", "SDL video requires the process main thread");
+    return on_main;
+}
+}
+#endif
 extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeSurface_prepareDisplayNative(JNIEnv* env,jclass,jint width,jint height) {
+#if defined(__APPLE__)
+    if (!main_thread(env, "prepareDisplay")) return nullptr;
+#endif
     try {
         auto display=shiraz::prepare_presentation(width,height);
         jint values[]={display.pixelWidth,display.pixelHeight,display.densityDpi};
@@ -155,6 +173,9 @@ extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeSurface_readPix
     } catch (const std::exception& ex) { error(env, "java/lang/RuntimeException", ex.what()); return nullptr; }
 }
 extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeSurface_presentPixels(JNIEnv* env, jclass, jlong id, jint frames) {
+#if defined(__APPLE__)
+    if (!main_thread(env, "presentPixels")) return;
+#endif
     auto window = find(env, id);
     if (!window) return;
     if (frames != -1 && (frames < 1 || frames > 600)) { error(env, "java/lang/IllegalArgumentException", "Invalid frame limit"); return; }
@@ -182,6 +203,9 @@ jstring committedText(JNIEnv* env, const std::string& input) {
 }
 }
 extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeSurface_presentDispatch(JNIEnv* env, jclass, jlong id, jint frames, jobject callback) {
+#if defined(__APPLE__)
+    if (!main_thread(env, "presentDispatch")) return;
+#endif
     auto window = find(env, id);
     if (!window) return;
     if (!callback || (frames != -1 && (frames < 1 || frames > 600))) {
