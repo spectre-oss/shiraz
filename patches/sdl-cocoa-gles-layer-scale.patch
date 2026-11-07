@@ -1,0 +1,79 @@
+Shiraz modification of SDL 2.32.10 (Cocoa video driver, EGL/GLES path).
+
+Upstream: https://www.libsdl.org/release/SDL2-2.32.10.tar.gz, sha256
+5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165
+(scripts/bootstrap_sdl.py). The patched files are Copyright (C) 1997-2025
+Sam Lantinga <slouken@libsdl.org> and remain under SDL's zlib license; this
+change is contributed under the same zlib license.
+
+Why: AppKit can leave the layer of a layer-backed content view at a stale
+contentsScale (2.0 on a 1x display). ANGLE's Metal EGL window surface sizes its
+drawable as layer bounds x contentsScale (720x1280), while SDL reports the
+drawable from the window's backing scale (360x640) and sets that viewport, so
+the frame filled the bottom-left quarter of the window. Cocoa_GLES_SyncLayerScale
+keeps the layer scale equal to the scale SDL reports, before the EGL surface is
+created and on every backing-property change.
+
+--- a/src/video/cocoa/SDL_cocoaopengles.h
++++ b/src/video/cocoa/SDL_cocoaopengles.h
+@@ -41,6 +41,8 @@
+ extern int Cocoa_GLES_MakeCurrent(_THIS, SDL_Window * window, SDL_GLContext context);
+ extern void Cocoa_GLES_DeleteContext(_THIS, SDL_GLContext context);
+ extern int Cocoa_GLES_SetupWindow(_THIS, SDL_Window * window);
++/* Shiraz: keep the GLES layer scale equal to SDL's drawable scale (patches/sdl-cocoa-gles-layer-scale.patch). */
++extern void Cocoa_GLES_SyncLayerScale(SDL_Window * window);
+ 
+ #endif /* SDL_VIDEO_OPENGL_EGL */
+ 
+--- a/src/video/cocoa/SDL_cocoaopengles.m
++++ b/src/video/cocoa/SDL_cocoaopengles.m
+@@ -106,6 +106,28 @@
+     return SDL_EGL_MakeCurrent(_this, window ? ((__bridge SDL_WindowData *) window->driverdata).egl_surface : EGL_NO_SURFACE, context);
+ }}
+ 
++/* Shiraz: The EGL surface of a layer-backed view (ANGLE's Metal backend) sizes its
++   drawable as layer bounds times the layer's contentsScale, while SDL reports
++   the drawable size from the window's backing scale. AppKit can leave the
++   content view's layer at a stale scale (2.0 on a 1x display), which makes
++   the renderer draw a 1x viewport into the corner of a 2x surface. Keep the
++   layer scale equal to the scale SDL reports. */
++void Cocoa_GLES_SyncLayerScale(SDL_Window * window)
++{ @autoreleasepool
++{
++    SDL_WindowData *windowdata = (__bridge SDL_WindowData *) window->driverdata;
++    NSView *v = windowdata ? windowdata.nswindow.contentView : nil;
++    CGFloat scale;
++
++    if (v == nil || ![v wantsLayer] || [v layer] == nil) {
++        return;
++    }
++    scale = (window->flags & SDL_WINDOW_ALLOW_HIGHDPI) ? [windowdata.nswindow backingScaleFactor] : 1.0;
++    if ([v layer].contentsScale != scale) {
++        [v layer].contentsScale = scale;
++    }
++}}
++
+ int Cocoa_GLES_SetupWindow(_THIS, SDL_Window * window)
+ {
+     NSView* v;
+@@ -129,6 +151,7 @@
+ 
+     /* Create the GLES window surface */
+     v = windowdata.nswindow.contentView;
++    Cocoa_GLES_SyncLayerScale(window); /* Shiraz: before the EGL surface is created */
+     windowdata.egl_surface = SDL_EGL_CreateSurface(_this, (__bridge NativeWindowType)[v layer]);
+ 
+     if (windowdata.egl_surface == EGL_NO_SURFACE) {
+--- a/src/video/cocoa/SDL_cocoawindow.m
++++ b/src/video/cocoa/SDL_cocoawindow.m
+@@ -953,6 +953,10 @@
+ {
+     NSNumber *oldscale = [[aNotification userInfo] objectForKey:NSBackingPropertyOldScaleFactorKey];
+ 
++#ifdef SDL_VIDEO_OPENGL_EGL
++    Cocoa_GLES_SyncLayerScale(_data.window); /* Shiraz: follow backing-scale changes */
++#endif
++
+     if (inFullscreenTransition) {
+         return;
+     }
