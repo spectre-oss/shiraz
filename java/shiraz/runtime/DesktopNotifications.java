@@ -3,10 +3,15 @@ package shiraz.runtime;
 import java.io.Closeable;
 /** Owned session-bus notification connection; no shell commands or GTK dependency. */
 public final class DesktopNotifications implements Closeable {
-    static { System.loadLibrary("shiraz-notifications"); }
+    // libshiraz-notifications is D-Bus only; on macOS it is not built and callers
+    // see the connection as unavailable (NotificationManager retries later).
+    static { if (!HostOs.darwin()) System.loadLibrary("shiraz-notifications"); }
     private long handle;
     private final java.util.LinkedHashSet<Long> posted = new java.util.LinkedHashSet<Long>();
-    public DesktopNotifications(String application) { handle = open(application); }
+    public DesktopNotifications(String application) {
+        if (HostOs.darwin()) throw new IllegalStateException("Desktop notifications are not ported to macOS");
+        handle = open(application);
+    }
     private long live() { if (handle == 0) throw new IllegalStateException("Notification connection closed"); return handle; }
     public synchronized String[] capabilities() { return capabilities(live()); }
     /** Replacing a notification of this connection that the server already closed posts a new notification. */

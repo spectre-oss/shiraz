@@ -27,6 +27,7 @@ public final class HostConnectivity {
             info.setDetailedState(NetworkInfo.DetailedState.CONNECTED,null,null);
             return info;
         }
+        if (HostOs.darwin()) return darwinActiveNetwork();
         android.os.StrictMode.ThreadPolicy old = android.os.StrictMode.allowThreadDiskReads();
         try {
             return read(new File("/proc/net"), new File("/sys/class/net"));
@@ -34,6 +35,40 @@ public final class HostConnectivity {
             throw new IllegalStateException("Cannot read host connectivity", error);
         } finally {
             android.os.StrictMode.setThreadPolicy(old);
+        }
+    }
+
+    /**
+     * macOS has no /proc/net or /sys/class/net. Without the routing socket this
+     * picks the first up, non-loopback, non-tunnel interface with a routable
+     * address; en* counts as Wi-Fi (the built-in Wi-Fi of a Mac laptop is en0)
+     * and anything else as Ethernet. Does not send probe traffic.
+     */
+    static NetworkInfo darwinActiveNetwork() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> links = java.net.NetworkInterface.getNetworkInterfaces();
+            while (links != null && links.hasMoreElements()) {
+                java.net.NetworkInterface link = links.nextElement();
+                String name = link.getName();
+                if (!link.isUp() || link.isLoopback() || link.isVirtual() || name.startsWith("utun")
+                        || name.startsWith("lo") || name.startsWith("awdl") || name.startsWith("llw")
+                        || name.startsWith("bridge") || name.startsWith("ap")) continue;
+                boolean routable = false;
+                for (java.util.Enumeration<java.net.InetAddress> it = link.getInetAddresses(); it.hasMoreElements();) {
+                    java.net.InetAddress address = it.nextElement();
+                    if (!address.isLoopbackAddress() && !address.isLinkLocalAddress()) { routable = true; break; }
+                }
+                if (!routable) continue;
+                boolean wifi = name.startsWith("en");
+                NetworkInfo info = new NetworkInfo(wifi ? ConnectivityManager.TYPE_WIFI : ConnectivityManager.TYPE_ETHERNET, 0,
+                        wifi ? "WIFI" : "ETHERNET", "");
+                info.setIsAvailable(true);
+                info.setDetailedState(NetworkInfo.DetailedState.CONNECTED, null, null);
+                return info;
+            }
+            return null;
+        } catch (java.net.SocketException error) {
+            throw new IllegalStateException("Cannot read host network interfaces", error);
         }
     }
 
@@ -69,7 +104,7 @@ public final class HostConnectivity {
     }
 
     /** Whether a wireless interface is administratively up; no scan or network identifiers. */
-    public static boolean wifiEnabled(){if(DeviceProfile.selected()){HostAppInstaller.recordAccess("connectivity:wifiEnabled");return Boolean.parseBoolean(DeviceProfile.get("wifi.enabled","false"));}android.os.StrictMode.ThreadPolicy old=android.os.StrictMode.allowThreadDiskReads();try{return wifiEnabled(new File("/sys/class/net"));}catch(IOException error){throw new IllegalStateException("Cannot read Wi-Fi interface status",error);}finally{android.os.StrictMode.setThreadPolicy(old);}}
+    public static boolean wifiEnabled(){if(DeviceProfile.selected()){HostAppInstaller.recordAccess("connectivity:wifiEnabled");return Boolean.parseBoolean(DeviceProfile.get("wifi.enabled","false"));}if(HostOs.darwin()){NetworkInfo active=darwinActiveNetwork();return active!=null&&active.getType()==ConnectivityManager.TYPE_WIFI;}android.os.StrictMode.ThreadPolicy old=android.os.StrictMode.allowThreadDiskReads();try{return wifiEnabled(new File("/sys/class/net"));}catch(IOException error){throw new IllegalStateException("Cannot read Wi-Fi interface status",error);}finally{android.os.StrictMode.setThreadPolicy(old);}}
     static boolean wifiEnabled(File sysNet)throws IOException{
         File[] links=sysNet.listFiles();if(links==null)throw new IOException("Network interfaces unavailable");
         for(File link:links){if(!new File(link,"wireless").isDirectory())continue;String flags=text(new File(link,"flags")).trim();long value=number(flags.startsWith("0x")?flags.substring(2):flags,16);if((value&1)!=0)return true;}return false;

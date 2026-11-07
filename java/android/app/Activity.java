@@ -93,11 +93,8 @@ public class Activity extends ContextThemeWrapper implements android.view.Window
     private final android.view.KeyEvent.DispatcherState keyState = new android.view.KeyEvent.DispatcherState();
     private View content;
     private android.view.Window window;
-    public ActionBar getActionBar(){
-        if(getWindow().hasFeature(android.view.Window.FEATURE_ACTION_BAR))
-            throw new UnsupportedOperationException("Native action bars are not implemented");
-        return null;
-    }
+    private ActionBar actionBar;
+    public ActionBar getActionBar(){android.view.Window w=getWindow();if(w.hasFeature(android.view.Window.FEATURE_NO_TITLE))return null;if(actionBar==null)actionBar=new ActionBar.Impl(this);return actionBar;}
     public android.view.Window getWindow(){if(window==null){window=new android.view.Window(this);window.setCallback(this);window.shirazSetRootListener(new Runnable(){public void run(){content=window.peekDecorView();}});}return window;}
     public void onContentChanged(){ }
     public void onWindowFocusChanged(boolean focused){ }

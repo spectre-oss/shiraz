@@ -272,14 +272,26 @@ class LaunchCommandTests(unittest.TestCase):
         self.write_fonts_conf()
         self.assertIsNone(runtime.darwin_fontconfig_failure(self.root))
 
-    def test_darwin_rejects_native_jni_libraries_before_launch(self):
+    def test_darwin_refuses_native_jni_libraries_when_asked(self):
         for abis in (['arm64-v8a'], ['x86_64'], ['arm64-v8a', 'armeabi-v7a']):
             report = {**self.report, 'native_abis': abis}
             with patch.object(runtime, 'host_system', return_value='Darwin'), \
+                    patch.dict(os.environ, {'SHIRAZ_REFUSE_NATIVE_LIBS': '1'}), \
                     patch.object(runtime, 'runtime_inputs', side_effect=AssertionError('must reject first')), \
                     patch.object(runtime, 'run_with_live_logs', side_effect=AssertionError('must not launch')):
                 with self.assertRaisesRegex(FormatError, 'native JNI libraries need the M5 guest loader on macOS'):
                     runtime.run_activity(Path('missing.apk'), report)
+
+    def test_darwin_reports_native_jni_libraries_and_runs_java_side(self):
+        report = {**self.report, 'native_abis': ['arm64-v8a', 'x86_64']}
+        out = io.StringIO()
+        with patch.object(runtime, 'host_system', return_value='Darwin'), \
+                patch.dict(os.environ, {'SHIRAZ_REFUSE_NATIVE_LIBS': ''}), \
+                patch.object(runtime, 'runtime_inputs', side_effect=AssertionError('reached launch inputs')), \
+                contextlib.redirect_stdout(out):
+            with self.assertRaisesRegex(AssertionError, 'reached launch inputs'):
+                runtime.run_activity(Path('missing.apk'), report)
+        self.assertIn('SHIRAZ_UNSUPPORTED native-libraries abis=arm64-v8a,x86_64 reason=m5-guest-loader-missing', out.getvalue())
 
     def test_darwin_rejects_linux_only_runtime_switches(self):
         for variable, value, message in (('SHIRAZ_ART_MODE', 'jit', 'jit is not supported on macOS'),

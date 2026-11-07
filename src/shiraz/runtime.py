@@ -721,8 +721,16 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
     digitalis = None
     if darwin:
         if report['native_abis']:
-            raise FormatError('APK contains native ABI libraries (lib/' + '/, lib/'.join(report['native_abis'])
-                              + '/); native JNI libraries need the M5 guest loader on macOS')
+            # The M5 guest loader is not there yet. Run the Java side and let the
+            # app see its native libraries as absent: System.loadLibrary throws
+            # UnsatisfiedLinkError (app_lib is not on the darwin library path),
+            # which apps with optional native code catch. Set
+            # SHIRAZ_REFUSE_NATIVE_LIBS=1 to keep the old refusal.
+            if os.environ.get('SHIRAZ_REFUSE_NATIVE_LIBS') == '1':
+                raise FormatError('APK contains native ABI libraries (lib/' + '/, lib/'.join(report['native_abis'])
+                                  + '/); native JNI libraries need the M5 guest loader on macOS')
+            print('SHIRAZ_UNSUPPORTED native-libraries abis=' + ','.join(report['native_abis'])
+                  + ' reason=m5-guest-loader-missing first-use=UnsatisfiedLinkError', flush=True)
     else:
         if not supports_native_abis(report['native_abis']) and native_abi() == 'x86_64' and 'arm64-v8a' in report['native_abis']:
             if configured_bridge := os.environ.get('SHIRAZ_DIGITALIS_LIBRARY'):
