@@ -7,6 +7,7 @@
 - [AI-assisted contributions](AI_CONTRIBUTING.md): isolated app testing, evidence collection, bug reports, and fixes.
 - [Builder](BUILDER.md): package an APK into an AppImage locally in a browser.
 - [Web](WEB.md): run apps on a Linux host and interact through a browser.
+- [macOS goal](macos_final_goal.md): native macOS (Apple Silicon, Metal) port target and API checklist.
 
 Shiraz is experimental and does not provide Android-style app isolation. Read
 the isolation requirements before running APKs. Private session logs and operator
