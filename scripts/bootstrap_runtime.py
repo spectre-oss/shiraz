@@ -23,6 +23,11 @@ SOURCES = {
 # Narrow host-port fixes; original AOSP license notices remain in dependency sources.
 PATCHES = {
     'bionic_translation': [
+        ('bionic-elf-exports.patch', {
+            'meson.build': '5d51bbd2bfe76b9078c05e4bc32ebc41b17372cce24ab9f4dca2a561ea887fba',
+            'libc/libc-elf-exports.c': '69b2058bee99a587431a565755fd66b242a1a81b3b82079e77abaf1b22e74b0b',
+            'libc/guest-exports.map': '2c5d8c95c283e0e38ff74500962386fc8d3ae5f6c3ce24d2a0d181dfe239f0d7',
+        }),
         ('bionic-dladdr-path.patch', {
             'linker/dlfcn.c': '86372bbb7474dd14aef781e948a20f8a51afd405cb02fe5b436fb32d3c004cd7',
         }),

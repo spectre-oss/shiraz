@@ -1569,3 +1569,9 @@ modern-font-smoke: framework build/libshiraz-text.so build/libshiraz-host.so
 	javac --release 8 -cp build/framework/classes -d build/modern-font-smoke tests/java/ModernFontSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/modern-font-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar ModernFontSmoke .local/share/shiraz/fonts/NotoSerif-Regular.ttf
 check: modern-font-smoke
+
+.PHONY: bionic-elf-exports-smoke
+bionic-elf-exports-smoke:
+	@mkdir -p build
+	$(CC) -Wall -Wextra -Werror tests/bionic_elf_exports.c -o build/test-bionic-elf-exports -ldl
+	LD_LIBRARY_PATH="$(CURDIR)/.local/lib" build/test-bionic-elf-exports "$(CURDIR)/.local/lib/libc_bio.so.0"

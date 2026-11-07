@@ -2,6 +2,9 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import shutil
+import subprocess
+import sys
 import struct
 import unittest
 from unittest.mock import patch
@@ -13,6 +16,47 @@ packaging = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(packaging)
 
 class AppImageTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('cc'), 'native fixture compiler required')
+    def test_bionic_libc_mapping_and_aliases_survive_relocation(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            source = root/'fixture.c'
+            source.write_text('int bridge_marker(void) { return 73; }\n')
+            library = root/'fixture.so'
+            subprocess.run(['cc', '-shared', '-fPIC', str(source), '-o', str(library)], check=True)
+            libraries = packaging.Libraries(root/'AppDir')
+            with patch.object(libraries, 'scan'):
+                libraries.add(library, 'libc_bio.so')
+                libraries.add(library, 'libc_bio.so.0')
+            before = packaging.sha256(library)
+            packaging.package_bionic_libc(libraries)
+            relocated = root/'relocated'
+            (root/'AppDir').rename(relocated)
+            lib = relocated/'usr/lib'
+            for name in ('libc_bio.so', 'libc_bio.so.0'):
+                self.assertEqual(packaging.sha256(lib/name), before)
+                self.assertEqual((lib/name).resolve(), lib/'bionic/libc.so')
+            # Inspect the real kernel mapping, not a mocked path resolver.
+            script = """import ctypes,sys
+from pathlib import Path
+lib=ctypes.CDLL(sys.argv[1])
+assert lib.bridge_marker()==73
+assert str(Path(sys.argv[1]).resolve()) in Path('/proc/self/maps').read_text()
+"""
+            subprocess.run([sys.executable, '-c', script, str(lib/'libc_bio.so.0')], check=True)
+            self.assertFalse((lib/'libc.so').exists())
+
+    def test_bionic_libc_layout_does_not_replace_existing_destination(self):
+        with tempfile.TemporaryDirectory() as work:
+            libraries = packaging.Libraries(Path(work)/'AppDir')
+            directory = libraries.directory
+            (directory/'libc_bio.so.0').write_bytes(b'bridge')
+            (directory/'bionic').mkdir()
+            (directory/'bionic/libc.so').write_bytes(b'existing')
+            with self.assertRaisesRegex(RuntimeError, 'Conflicting Bionic'):
+                packaging.package_bionic_libc(libraries)
+            self.assertEqual((directory/'bionic/libc.so').read_bytes(), b'existing')
+
     def report(self):
         return {'host_native_candidate': True, 'native_abis': [], 'manifest': {'package': 'org.example.app', 'min_sdk': '21',
                 'launcher_activities': [{'target': 'org.example.app.Main'}]}}

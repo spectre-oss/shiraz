@@ -1,0 +1,131 @@
+--- a/meson.build
++++ b/meson.build
+@@ -111,6 +111,7 @@
+ c_bio = shared_library('c_bio',
+ 	sources: [
+ 		'libc/libc.c',
++		'libc/libc-elf-exports.c',
+ 		'libc/libc-chk.c',
+ 		'libc/libc-math.c',
+ 		'libc/libc-misc.c',
+@@ -137,6 +138,7 @@
+ 	],
+ 	link_args: [
+ 		libc_bio_hardcoded_symbols,
++		'-Wl,--version-script=' + meson.current_source_dir() / 'libc/guest-exports.map',
+ 		'-Wl,-wrap,_IO_file_xsputn',
+ 		'-Wl,--no-as-needed', # needed to put stuff in DT_NEEDED that we don't necessarily directly use (sadly this doesn't apply to the link_with libraries, since they are specified before this on the cmdline)
+ 		pthread_bio.full_path() # as-needed is the default on some platforms, and the explicit no-as-needed above only applies to libraries specified after it
+--- /dev/null
++++ b/libc/libc-elf-exports.c
+@@ -0,0 +1,106 @@
++/* SPDX-License-Identifier: GPL-3.0-only */
++/* Direct ELF lookup compatibility for 64-bit glibc hosts. The linker normally
++ * forwards these names to host libc. Guest code which inspects the shim's ELF
++ * symbol table needs real definitions too. Non-default versions keep Android
++ * entry points (notably sysconf) from interposing on host libc calls. */
++#include <features.h>
++#if defined(__GLIBC__) && defined(__LP64__)
++#include <fcntl.h>
++#include <stdarg.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <signal.h>
++#include <sys/eventfd.h>
++#include <sys/inotify.h>
++#include <unistd.h>
++
++extern int bionic_open(char *, int, ...);
++extern long bionic_sysconf(int);
++
++#define GUEST_EXPORT(name) \
++    __asm__(".symver shiraz_guest_" #name "," #name "@SHIRAZ_BIONIC_1.0")
++
++ssize_t shiraz_guest_read(int fd, void *buffer, size_t count) {
++    return read(fd, buffer, count);
++}
++GUEST_EXPORT(read);
++
++int shiraz_guest_open(const char *path, int flags, ...) {
++    if ((flags & O_CREAT) || ((flags & O_TMPFILE) == O_TMPFILE)) {
++        va_list args;
++        va_start(args, flags);
++        mode_t mode = va_arg(args, mode_t);
++        va_end(args);
++        return bionic_open((char *)path, flags, mode);
++    }
++    return bionic_open((char *)path, flags, (mode_t)0);
++}
++GUEST_EXPORT(open);
++
++_Noreturn void shiraz_guest_exit(int status) { exit(status); }
++GUEST_EXPORT(exit);
++void *shiraz_guest_malloc(size_t count) { return malloc(count); }
++GUEST_EXPORT(malloc);
++void shiraz_guest_free(void *pointer) { free(pointer); }
++GUEST_EXPORT(free);
++void *shiraz_guest_mmap(void *address, size_t length, int protection,
++                        int flags, int fd, off_t offset) {
++    return mmap(address, length, protection, flags, fd, offset);
++}
++GUEST_EXPORT(mmap);
++int shiraz_guest_munmap(void *address, size_t length) {
++    return munmap(address, length);
++}
++GUEST_EXPORT(munmap);
++int shiraz_guest_close(int fd) { return close(fd); }
++GUEST_EXPORT(close);
++pid_t shiraz_guest_fork(void) { return fork(); }
++GUEST_EXPORT(fork);
++int shiraz_guest_killpg(pid_t group, int signal_number) {
++    return killpg(group, signal_number);
++}
++GUEST_EXPORT(killpg);
++int shiraz_guest_eventfd(unsigned int initial, int flags) {
++    return eventfd(initial, flags);
++}
++GUEST_EXPORT(eventfd);
++int shiraz_guest_inotify_init(void) { return inotify_init(); }
++GUEST_EXPORT(inotify_init);
++
++/* Variadic syscall/prctl entry points must preserve the argument registers and
++ * stack exactly. A C va_arg loop would read arguments callers need not supply.
++ * Versioned host references also avoid recursively entering these exports. */
++#if defined(__aarch64__)
++#define HOST_LIBC_VERSION "GLIBC_2.17"
++#define HOST_BRANCH(name) "b shiraz_host_" #name "\n"
++#elif defined(__x86_64__)
++#define HOST_LIBC_VERSION "GLIBC_2.2.5"
++#define HOST_BRANCH(name) "jmp shiraz_host_" #name "@PLT\n"
++#endif
++#ifdef HOST_LIBC_VERSION
++#define FORWARD_VARIADIC(name) \
++    __asm__(".symver shiraz_host_" #name "," #name "@" HOST_LIBC_VERSION "\n" \
++            ".text\n.balign 4\n.globl shiraz_guest_" #name "\n" \
++            ".type shiraz_guest_" #name ", %function\n" \
++            "shiraz_guest_" #name ":\n" HOST_BRANCH(name) \
++            ".size shiraz_guest_" #name ", .-shiraz_guest_" #name "\n"); \
++    GUEST_EXPORT(name)
++FORWARD_VARIADIC(syscall);
++FORWARD_VARIADIC(prctl);
++#endif
++off_t shiraz_guest_lseek(int fd, off_t offset, int whence) {
++    return lseek(fd, offset, whence);
++}
++GUEST_EXPORT(lseek);
++int shiraz_guest_mprotect(void *address, size_t length, int protection) {
++    return mprotect(address, length, protection);
++}
++GUEST_EXPORT(mprotect);
++long shiraz_guest_sysconf(int name) { return bionic_sysconf(name); }
++GUEST_EXPORT(sysconf);
++char *shiraz_guest_strstr(const char *text, const char *needle) {
++    return strstr(text, needle);
++}
++GUEST_EXPORT(strstr);
++#endif
+--- /dev/null
++++ b/libc/guest-exports.map
+@@ -0,0 +1 @@
++SHIRAZ_BIONIC_1.0 { local: shiraz_guest_*; };

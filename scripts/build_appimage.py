@@ -246,6 +246,29 @@ def validate_unwind_abi(directory):
         raise RuntimeError('Packaged libunwind lacks bionic bridge symbols: ' + ', '.join(sorted(missing)))
 
 
+def package_bionic_libc(libraries):
+    """Keep the guest libc filename visible in the kernel's real mappings.
+
+    Preserve host-linker SONAME aliases, without placing a guest libc in the
+    host's unversioned libc search location or changing library contents.
+    """
+    directory = libraries.directory
+    alias = directory/'libc_bio.so.0'
+    if not alias.exists():
+        return
+    original = alias.resolve(strict=True)
+    if original.parent != directory.resolve() or original.is_symlink():
+        raise RuntimeError('Bionic libc must be stored within the bundle library directory')
+    target = directory/'bionic/libc.so'
+    target.parent.mkdir(exist_ok=True)
+    if target.exists() or target.is_symlink():
+        raise RuntimeError('Conflicting Bionic libc destination')
+    original.rename(target)
+    original.symlink_to('bionic/libc.so')
+    libraries.extra_sources['usr/lib/bionic/libc.so'] = {
+        'source': 'bundled Bionic libc compatibility library', 'sha256': sha256(target)}
+
+
 def notices(share, libraries):
     dest = share/'licenses'
     shutil.copytree(ROOT/'LICENSES', dest)
@@ -466,6 +489,7 @@ def build(args):
     copy_file(ROOT/'packaging/shiraz-app.svg', installer/'fallback-icon.svg')
     copy_file(tool, installer/'appimagetool')
     copy_file(runtime, installer/'runtime')
+    package_bionic_libc(libraries)
     notices(share, libraries)
     provenance = {'format': 'Shiraz AppImage v1', 'version': version, 'apk_sha256': report['apk_sha256'],
                   'package': package, 'apk_version': report['manifest'].get('version_name'), 'architecture': architecture,
