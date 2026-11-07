@@ -31,8 +31,10 @@ and supports a user-selected local base when the published base is unavailable.
 Downloads are generated only after user submission. A build can package a supported
 APK; it does not prove that the app will work. Keep the Go assembler checks in place.
 
-Pages publishing builds this site and `scripts/package_browser_site.py` adds the
-verified runtime bases and manifest. The downloadable offline builder ZIP retains
+The independent website workflow builds this site and
+`scripts/prepare_pages_runtime.py` adds checksum-verified runtime bases from the
+latest published release. Website deployment does not wait for native builds.
+Successful native releases trigger a website refresh. The downloadable offline builder ZIP retains
 the standalone Go demo, independently of the SvelteKit site.
 
 Original code is GPL-3.0-only. Adapted Heroicons paths and animation retain MIT

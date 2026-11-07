@@ -1,0 +1,62 @@
+name: Shiraz website
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Shiraz prerelease and Pages]
+    types: [completed]
+
+concurrency:
+  group: shiraz-website-pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  website:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go-wasm/go.mod
+          cache: false
+      - name: Build the SvelteKit website and WASM builder
+        env:
+          BASE_PATH: /shiraz
+        run: |
+          npm ci --prefix landing
+          npm --prefix landing run check
+          npm --prefix landing run build
+      - name: Add latest published runtime with verified checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/prepare_pages_runtime.py
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: landing/build
+  deploy:
+    needs: website
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4

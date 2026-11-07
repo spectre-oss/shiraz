@@ -16,6 +16,9 @@ site = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(site)
 
 
+import prepare_pages_runtime as runtime
+
+
 class BrowserSiteTests(unittest.TestCase):
     def prepare(self, root):
         (root/'VERSION').write_text('1.2.3\n')
@@ -52,6 +55,24 @@ class BrowserSiteTests(unittest.TestCase):
                 self.assertIn(arch, entry['base_file'])
                 self.assertEqual(entry['base_size'], 64)
                 self.assertTrue((root/'build/pages-site'/entry['base_file']).is_file())
+
+    def test_independent_pages_uses_latest_complete_published_release(self):
+        def release(version, complete=True):
+            name = f'Shiraz-Browser-Base-{version}-x86_64.AppImage'
+            return dict(tag_name='v'+version, assets=[dict(name=name), dict(name=name+'.sha256')] if complete else [])
+        selected = runtime.select_release([release('1.9.0'), release('1.10.0'), release('2.0.0', False)])
+        self.assertEqual(selected['tag_name'], 'v1.10.0')
+
+    def test_independent_pages_installs_and_verifies_available_architectures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.prepare(root)
+            output = root/'landing/build'
+            runtime.install_runtime(output, root/'dist', '1.2.3')
+            self.assertEqual(set(json.loads((output/'release.json').read_text())['architectures']), {'x86_64','aarch64'})
+            self.base(root, 'aarch64', 62)
+            with self.assertRaises(RuntimeError):
+                runtime.install_runtime(output, root/'dist', '1.2.3')
 
     def test_rejects_relabelled_or_corrupt_base(self):
         for wrong_machine in (True, False):
