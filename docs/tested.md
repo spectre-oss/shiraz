@@ -30,3 +30,33 @@ remain explicit. No unrelated private experiments are included in this list.
 | [Tiny Crate](experiments/godot/TINY_CRATE.md) | Godot | ARM64/OpenGL ES release renders its animated menu after adding a missing framework theme. Keyboard navigation, jumping, first two levels and two-star progress after restart verified; crate pickup/release also works. Added EGL11 and fixed capability-probe display lifetime, current-surface preservation and stale-frame handling. Repeated resizing now renders with portrait letterboxing; on-screen touch selection works. Music-volume control produces verified PCM through a VM file sink. Full touch gameplay, physical audio, clean shutdown and later levels remain unverified. |
 | [Mindustry](experiments/arc/MINDUSTRY.md) | Arc | Fixed missing GLES30 vertex-array operations; assets load and the main menu renders. Fixed Java framebuffer routing that left Campaign gray. Planet previews, Serpulo selection and Ground Zero’s tutorial world now render; touch dragging, landscape resizing and copper mining (`0/15` to `6/15`) work. Mechanical Drill research/construction and restoration after Save & Quit plus process restart are verified. Conveyor research, long-press construction and resource delivery into the core work; the 100-copper and 25-lead objectives complete, reaching turret construction. Portrait redraws but tutorial text clips; tutorial completion, combat and audio remain under test. |
 | [Ember Quest](experiments/flutter/EMBER_QUEST.md) | Flutter / Flame | Impeller OpenGLES renders the scene and menu. Fixed CLI native font setup to restore labels, instructions and score. Initial keyboard-focus assignment restores left/right movement and jumping; Game Over and Play Again work. Direct landscape launch shows the full player and ground; portrait-to-landscape resize clips the player. Collection, progression, persistence and audio remain unverified. |
+
+## 2048 by tpcstld — separate app retest
+
+The Play listing supplied for this test identifies `com.tpcstld.twozerogame`,
+not the Unity app `com.starsep.game2048` above. These are separate applications.
+The tested artifact is the unchanged upstream [GitHub 1.3.3 release](https://github.com/tpcstld/2048/releases/tag/1.3.3),
+`133-release.apk`, SHA-256
+`caed84eb0556cb5745da3cfaab8587244fc0122b49fe3df80d0caea3908f1f39`.
+It has no native libraries. This is not a newly downloaded Google Play build.
+
+On 2026-11-07, a bounded x86-64 standalone ART run with software SDL presentation,
+390×720 dimensions, isolated app storage and no network reached `MainActivity`
+and `MainView.createBitmapCells`. The first run rejected the tile's root
+`android:padding` attribute. Android's GradientDrawable reads padding from its
+`<padding>` child; this misplaced root attribute is ignored. Shiraz now accepts
+it without applying padding and retains the child-padding behavior.
+
+Retesting the unchanged APK rendered the real game board. After dismissing a
+Google Play Services warning, pointer swipes moved the tiles. A subsequent swipe
+merged two 2 tiles into a 4 tile, with score and high score increasing to 4.
+Resizing to 720×390 recreated the activity, preserved the board and rendered the
+landscape layout. A clean window close and restart back to 390×720 restored the
+same board, score and high score. The Play Services warning recurs on recreation;
+it can be dismissed to continue offline play. The Undo control also restored the
+previous board and score while retaining the high score.
+
+These are bounded gameplay observations, not complete app certification. Long
+games, reaching 2048, Play services features and the current Play Store build
+remain unverified. The separate starsep Unity variant was removed from the web
+catalog at the user's request; its older experiment report remains historical.

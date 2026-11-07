@@ -39,3 +39,19 @@ the standalone Go demo, independently of the SvelteKit site.
 
 Original code is GPL-3.0-only. Adapted Heroicons paths and animation retain MIT
 notices in `static/licenses/`. The Spectre SVG is the existing project brand asset.
+
+## Contribute compatibility results
+
+`src/lib/compatibility.json` is the compatibility page’s single source of
+app records. Add or update one entry per app and submit a pull request. Each entry
+has a unique stable `id`, `name`, `framework`, `status`, `observed`, `limitations`,
+and `source` (a public Markdown report relative to the repository’s `docs/`).
+Use `Partial` for bounded interactive results, `Blocked` for a documented blocker,
+and `Historical` for earlier observations. Do not infer full support from launch.
+
+Keep APK version, architecture, runtime version/commit, test environment, steps,
+and evidence in the linked report, following `docs/AI_CONTRIBUTING.md`. Never add
+APKs, private logs, credentials, or personal app data to the catalog. New public
+reports must follow the repository documentation allowlist rules. `npm run check`
+validates unique IDs, required fields, status values and evidence paths before
+checking the Svelte app. This catalog is source code under the project GPL license.

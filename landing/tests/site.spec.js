@@ -82,3 +82,58 @@ test('poem translates only the hovered verse and supports keyboard focus', async
   await lines.nth(0).focus();
   await expect(lines.nth(0)).toHaveClass(/verse-translated/);
 });
+
+test('compatibility directory filters recorded evidence and handles empty searches', async ({page}) => {
+  await page.goto('/compatibility/');
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(13);
+  await page.getByRole('button',{name:'Blocked',exact:true}).click();
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(1);
+  await page.getByRole('group',{name:'Filter by recorded status'}).getByRole('button',{name:'All',exact:true}).click();
+  await page.getByLabel('Framework',{exact:true}).selectOption('Flutter');
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(2);
+  await page.getByRole('searchbox').fill('no matching application');
+  await expect(page.getByRole('heading',{name:'No matching apps'})).toBeVisible();
+  await page.getByRole('button',{name:'Reset filters'}).click();
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(13);
+  await page.getByRole('searchbox').fill('Joplin');
+  await page.getByRole('button',{name:'Known limitations',exact:true}).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByText(/Body editing is unsupported/)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.getByRole('button',{name:'Known limitations',exact:true})).toBeFocused();
+});
+
+test('compatibility mobile view stays within the viewport and is accessible', async ({page}) => {
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('/compatibility/');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});
+  const violations = await page.evaluate(async()=> (await window.axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations);
+  expect(violations).toEqual([]);
+});
+
+
+test('compatibility alphabet filters and preserves alphabetical row order', async ({page}) => {
+  await page.goto('/compatibility/');
+  const names = await page.locator('.compat-table tbody th').allTextContents();
+  expect(names).toEqual([...names].sort((a,b)=>a.localeCompare(b,'en',{numeric:true})));
+  await page.getByRole('navigation',{name:'Filter apps by first letter'}).getByRole('button',{name:'S',exact:true}).click();
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(2);
+  await expect(page.locator('.compat-table tbody th').first()).toHaveText('SEN-214 Calculator');
+});
+
+test('limitations dialog can reverse an interrupted close and honors reduced motion', async ({page}) => {
+  await page.goto('/compatibility/');
+  await page.locator('.limitations-link').first().click();
+  await page.waitForTimeout(50);
+  await page.locator('dialog').evaluate(dialog => dialog.querySelector('button').click());
+  await page.waitForTimeout(40);
+  await page.locator('.limitations-link').first().evaluate(button => button.click());
+  await expect(page.locator('dialog')).toHaveAttribute('open','');
+  await expect.poll(()=>page.locator('dialog').evaluate(dialog=>Number(getComputedStyle(dialog).opacity))).toBe(1);
+  await page.emulateMedia({reducedMotion:'reduce'});
+  expect(await page.locator('dialog').evaluate(dialog=>getComputedStyle(dialog).transitionDuration)).toBe('0s');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog')).not.toBeVisible();
+});

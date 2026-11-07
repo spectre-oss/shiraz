@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "check": "svelte-kit sync && svelte-check --fail-on-warnings",
+    "check": "node scripts/check-compatibility.mjs && svelte-kit sync && svelte-check --fail-on-warnings",
     "prebuild": "node scripts/prepare-assets.mjs",
     "predev": "node scripts/prepare-assets.mjs",
     "test": "playwright test"
