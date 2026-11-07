@@ -357,8 +357,10 @@ Build order on a fresh Apple Silicon checkout:
 
 1. `make macos-deps`, then `make macos-check` (SDL only, no ART).
 2. `make runtime-art` (alias `macos-art`).
-3. `make macos-runtime-libs macos-framework macos-framework-resources macos-apk-fixture`.
-4. `make macos-runtime-smoke` (headless) and `make macos-runtime-window-smoke` (Metal).
+3. `make fonts macos-graphics-deps` (python3 3.12+; `macos-runtime-libs` now
+   links the text, path and image libraries, see "Text, paths and images").
+4. `make macos-runtime-libs macos-framework macos-framework-resources macos-apk-fixture`.
+5. `make macos-runtime-smoke` (headless) and `make macos-runtime-window-smoke` (Metal).
 
 The smoke fails unless all of the following hold:
 - the run exits 0;
@@ -431,10 +433,9 @@ unchanged `native/text.cpp`, `path.cpp`, `ripple.cpp` and `image.cpp`. An APK
 draws Latin, Persian and Hebrew text, vector paths and decoded PNG, JPEG and
 WebP images through the Activity/View path, headless and in a Metal window.
 
-Build order after the steps above (python3 3.12+ is required for the tarball
-filter):
+Build steps (python3 3.12+ is required for the tarball filter):
 
-1. `make fonts macos-graphics-deps` builds pinned FreeType 2.14.3, HarfBuzz
+1. `make fonts macos-graphics-deps` (step 3 above) builds pinned FreeType 2.14.3, HarfBuzz
    15.1.0, fontconfig 2.18.3, pixman 0.46.4, cairo 1.18.6, libwebp 1.6.0 and
    libjpeg-turbo 3.2.1 as static arm64 archives in `.local` (Meson and Ninja in an
    in-tree venv). zlib and expat come from the SDK; libpng and ICU come from
