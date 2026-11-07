@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 test('responsive site keeps table columns aligned and has no accessibility violations', async ({page}) => {
-  for (const width of [1182, 390, 320]) {
+  for (const width of [2560, 1182, 390, 320]) {
     await page.setViewportSize({width, height: 881});
     await page.goto('/');
     await expect(page.locator('#builder')).toBeVisible();
@@ -55,4 +55,30 @@ test('architecture cards support radio keyboard selection and refresh the runtim
   await page.keyboard.press('ArrowRight');
   await expect(arm).toBeChecked();
   await expect(page.locator('.builder-base p')).toContainText('aarch64');
+});
+
+
+test('social previews are present before JavaScript and use a real PNG card', async ({request}) => {
+  const html = await (await request.get('/')).text();
+  expect(html).toContain('property="og:image"');
+  expect(html).toContain('name="twitter:card" content="summary_large_image"');
+  const response = await request.get('/social-card.png');
+  expect(response.ok()).toBe(true);
+  const png = await response.body();
+  expect(png.subarray(1,4).toString()).toBe('PNG');
+  expect(png.readUInt32BE(16)).toBe(1200);
+  expect(png.readUInt32BE(20)).toBe(630);
+});
+
+test('poem translates only the hovered verse and supports keyboard focus', async ({page}) => {
+  await page.goto('/');
+  const lines = page.locator('.verse-line');
+  await lines.nth(1).hover();
+  await expect(lines.nth(1)).toHaveClass(/verse-translated/);
+  await expect(page.locator('.verse-translated')).toHaveCount(1);
+  await lines.nth(2).hover();
+  await expect(lines.nth(1)).not.toHaveClass(/verse-translated/);
+  await expect(lines.nth(2)).toHaveClass(/verse-translated/);
+  await lines.nth(0).focus();
+  await expect(lines.nth(0)).toHaveClass(/verse-translated/);
 });

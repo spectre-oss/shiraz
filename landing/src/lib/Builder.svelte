@@ -119,7 +119,7 @@
 </script>
 
 <section class="builder" id="builder" aria-labelledby="builder-title">
-  <header class="builder-heading"><p class="eyebrow">Don’t believe it? Try it now!</p><h2 id="builder-title">Your APK.<br><span>A Linux app.</span></h2><p>Package a supported Android app into an AppImage, right here.<br>Your APK stays on your device.</p></header>
+  <header class="builder-heading"><p class="eyebrow">Don’t believe it? Try it now!</p><h2 id="builder-title">Your APK.<br><span>A Linux app.</span></h2><p>Package a supported Android™ app into an AppImage, right here.<br>Your APK stays on your device. The AppImage is built in your browser.</p></header>
   <form class="builder-panel" onsubmit={(event) => { event.preventDefault(); assemble(); }} aria-busy={busy}>
     <fieldset disabled={busy}>
       <legend class="visually-hidden">AppImage build options</legend>
@@ -132,7 +132,7 @@
       </fieldset>
       <div class="builder-base"><strong>{releaseVersion}</strong><p>{releaseDetail}</p></div>
       <details><summary>Use a local base AppImage</summary><label for="base">Shiraz browser base</label><input id="base" type="file" accept=".AppImage" bind:files={baseFile} /></details>
-      <label for="apk">Android APK</label><input id="apk" type="file" accept=".apk" bind:files={apkFile} />
+      <label for="apk">Android™ APK</label><input id="apk" type="file" accept=".apk" bind:files={apkFile} />
       <button class="button primary" id="assemble" type="submit">{busy ? 'Building…' : 'Build AppImage'}<svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></button>
     </fieldset>
     <p class="builder-status" id="status" data-state={state} role="status" aria-live="polite">{status}</p>

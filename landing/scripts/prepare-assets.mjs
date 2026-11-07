@@ -12,3 +12,7 @@ if (process.env.SHIRAZ_PREBUILT_WASM !== '1') {
   copyFileSync(runtime, `${root}go-wasm/wasm_exec.js`);
 }
 for (const name of ['shiraz-assemble.wasm', 'wasm_exec.js']) copyFileSync(`${root}go-wasm/${name}`, `${root}landing/static/${name}`);
+
+// Raster preview for Open Graph clients that do not support SVG cards.
+const { default: sharp } = await import('sharp');
+await sharp(`${root}landing/src/lib/social-card.svg`).png().toFile(`${root}landing/static/social-card.png`);

@@ -82,3 +82,4 @@ __pycache__/
 /landing/static/wasm_exec.js
 /landing/test-results/
 /landing/playwright-report/
+/landing/static/social-card.png
