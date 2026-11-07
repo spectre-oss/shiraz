@@ -67,6 +67,15 @@ def main():
         reason = unsafe(path, data, mode)
         if reason:
             errors.append((path, reason))
+    # Case-insensitive filesystems (default APFS) merge paths that differ only
+    # in case, so one silently overwrites the other in a checkout.
+    seen = {}
+    for item in index.split(b'\0'):
+        if item:
+            path = item.split(b'\t', 1)[1].decode('utf-8', 'surrogateescape')
+            other = seen.setdefault(path.casefold(), path)
+            if other != path:
+                errors.append((path, f'differs from {other} only by case'))
     for path, reason in errors:
         print(f'Blocked: {path}: {reason}')
     raise SystemExit(bool(errors))
