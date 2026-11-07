@@ -1,5 +1,92 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/hardware_buffer.h"
+#if defined(__APPLE__)
+#include <cassert>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <sys/socket.h>
+#include <unistd.h>
+// macOS: IOSurface-backed CPU allocate/describe/lock run for real. EGL dma-buf
+// import, sync_file fences and SCM_RIGHTS handle transfer are not available yet
+// and must fail explicitly instead of pretending to work.
+int main() {
+    AHardwareBuffer_Desc desc{4, 4, 1, 1, 0x333, 0, 0, 0};
+    AHardwareBuffer* buffer = nullptr;
+    assert(AHardwareBuffer_allocate(nullptr, &buffer) == -EINVAL && !buffer);
+    assert(AHardwareBuffer_allocate(&desc, nullptr) == -EINVAL);
+    auto invalid = desc; invalid.usage |= 1 << 14;
+    assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
+    invalid = desc; invalid.width = 0xffffffff;
+    assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
+    invalid = desc; invalid.format = 0x21; // BLOB is rejected, as on Linux.
+    assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer && !AHardwareBuffer_isSupported(&invalid));
+    invalid = desc; invalid.layers = 2;
+    assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
+    assert(AHardwareBuffer_isSupported(&desc) == 1);
+    assert(AHardwareBuffer_allocate(&desc, &buffer) == 0 && buffer);
+    AHardwareBuffer_Desc actual{}; AHardwareBuffer_describe(buffer, &actual);
+    assert(actual.width == 4 && actual.height == 4 && actual.stride >= 4 && actual.format == 1 && actual.usage == 0x333);
+    void* pixels = nullptr;
+    ARect outside{0, 0, 5, 4};
+    assert(AHardwareBuffer_lock(buffer, 0x30, -1, &outside, &pixels) == -EINVAL && !pixels);
+    assert(AHardwareBuffer_lock(buffer, 0x300, -1, nullptr, &pixels) == -EINVAL && !pixels);
+    assert(AHardwareBuffer_lock(buffer, 0x30, -1, nullptr, &pixels) == 0 && pixels);
+    auto* rgba = static_cast<unsigned char*>(pixels);
+    for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x) {
+        auto* p = rgba + (y * actual.stride + x) * 4; p[0] = 51; p[1] = 102; p[2] = 153; p[3] = 255;
+    }
+    void* blocked = nullptr;
+    assert(AHardwareBuffer_lock(buffer, 3, -1, nullptr, &blocked) == -EBUSY && !blocked);
+    assert(AHardwareBuffer_lock(buffer, 0x30, -1, nullptr, &blocked) == -EBUSY && !blocked);
+    int fence = 99; assert(AHardwareBuffer_unlock(buffer, &fence) == 0 && fence == -1);
+    assert(AHardwareBuffer_unlock(buffer, nullptr) == -EINVAL);
+    // Read-only locks share one mapping and see the written pixels, including the last row.
+    assert(AHardwareBuffer_lock(buffer, 3, -1, nullptr, &pixels) == 0 && pixels);
+    assert(std::memcmp(pixels, "\x33\x66\x99\xff", 4) == 0);
+    assert(std::memcmp(static_cast<unsigned char*>(pixels) + (3 * actual.stride + 3) * 4, "\x33\x66\x99\xff", 4) == 0);
+    void* another = nullptr; assert(AHardwareBuffer_lock(buffer, 2, -1, nullptr, &another) == 0 && another == pixels);
+    assert(AHardwareBuffer_lock(buffer, 0x30, -1, nullptr, &blocked) == -EBUSY && !blocked);
+    assert(AHardwareBuffer_unlock(buffer, nullptr) == 0 && AHardwareBuffer_unlock(buffer, nullptr) == 0);
+    assert(AHardwareBuffer_unlock(buffer, nullptr) == -EINVAL);
+    // A signalled fence fd is waited on before locking.
+    int signal[2]; assert(pipe(signal) == 0 && write(signal[1], "x", 1) == 1);
+    assert(AHardwareBuffer_lock(buffer, 3, signal[0], nullptr, &pixels) == 0 && pixels);
+    assert(AHardwareBuffer_unlock(buffer, nullptr) == 0); close(signal[0]); close(signal[1]);
+    // Reference counting matches Linux: the buffer survives until the last release.
+    AHardwareBuffer_acquire(buffer); AHardwareBuffer_release(buffer);
+    AHardwareBuffer_describe(buffer, &actual); assert(actual.width == 4);
+    AHardwareBuffer_describe(nullptr, &actual); assert(actual.width == 0 && actual.stride == 0);
+    // RGBX_8888 and RGB_565 allocate with element-aligned pitch.
+    const uint32_t formats[] = {2, 4};
+    for (uint32_t format : formats) {
+        AHardwareBuffer_Desc other{17, 3, 1, format, 0x33, 0, 0, 0};
+        AHardwareBuffer* extra = nullptr;
+        assert(AHardwareBuffer_allocate(&other, &extra) == 0 && extra);
+        AHardwareBuffer_describe(extra, &other); assert(other.width == 17 && other.stride >= 17 && other.format == format);
+        void* data = nullptr; assert(AHardwareBuffer_lock(extra, 0x30, -1, nullptr, &data) == 0 && data);
+        unsigned element = format == 4 ? 2 : 4;
+        std::memset(data, 0x5a, size_t(other.stride) * element * 3);
+        assert(AHardwareBuffer_unlock(extra, nullptr) == 0);
+        assert(AHardwareBuffer_lock(extra, 3, -1, nullptr, &data) == 0 && static_cast<unsigned char*>(data)[size_t(other.stride) * element * 3 - 1] == 0x5a);
+        assert(AHardwareBuffer_unlock(extra, nullptr) == 0);
+        AHardwareBuffer_release(extra);
+    }
+    // Cross-process export/import and the EGL dma-buf export fail explicitly.
+    int pair[2]; assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+    assert(AHardwareBuffer_sendHandleToUnixSocket(nullptr, pair[0]) == -EINVAL);
+    errno = 0; assert(AHardwareBuffer_sendHandleToUnixSocket(buffer, pair[0]) == -ENOTSUP && errno == ENOTSUP);
+    AHardwareBuffer* imported = reinterpret_cast<AHardwareBuffer*>(1);
+    assert(AHardwareBuffer_recvHandleFromUnixSocket(pair[1], nullptr) == -EINVAL);
+    errno = 0; assert(AHardwareBuffer_recvHandleFromUnixSocket(pair[1], &imported) == -ENOTSUP && !imported && errno == ENOTSUP);
+    close(pair[0]); close(pair[1]);
+    uint32_t format = 0, pitch = 0;
+    assert(shiraz_hardware_buffer_export(buffer, nullptr, &pitch) == -EINVAL);
+    errno = 0; assert(shiraz_hardware_buffer_export(buffer, &format, &pitch) == -ENOTSUP && errno == ENOTSUP);
+    AHardwareBuffer_release(buffer);
+    std::puts("HARDWARE_BUFFER_CPU_OK IPC_GPU=unsupported");
+}
+#else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
@@ -98,3 +185,4 @@ int main() {
     AHardwareBuffer_release(imported); AHardwareBuffer_release(buffer);
     std::puts("HARDWARE_BUFFER_CPU_IPC_GPU_ROUNDTRIP_OK");
 }
+#endif

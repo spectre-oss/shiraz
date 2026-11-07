@@ -12,7 +12,12 @@
 #include <unordered_set>
 #include <vector>
 #include <poll.h>
+#if defined(__APPLE__)
+#include <cerrno>
+#include <fcntl.h>
+#else
 #include <sys/eventfd.h>
+#endif
 #include <unistd.h>
 namespace {
 constexpr int invalid = -10004, unsupported = -10002, unknown = -10000;
@@ -37,8 +42,17 @@ class Retirement {
     std::vector<Entry> entries;
     bool stopping = false;
     int wake = -1;
+#if defined(__APPLE__)
+    // Darwin has no eventfd: wake is the read end of a non-blocking close-on-exec
+    // pipe and notify its write end. A full pipe is still readable, like a saturated counter.
+    int notify = -1;
+#endif
     std::thread worker;
+#if defined(__APPLE__)
+    void signal() { char value=1; [[maybe_unused]] const auto written=write(notify,&value,sizeof(value)); }
+#else
     void signal() { uint64_t value=1; [[maybe_unused]] const auto written=write(wake,&value,sizeof(value)); }
+#endif
     void run() {
         std::unique_lock<std::mutex> lock(mutex);
         for (;;) {
@@ -52,7 +66,12 @@ class Retirement {
             int result;
             do {result=poll(descriptors.data(),descriptors.size(),-1);}while(result<0&&errno==EINTR);
             lock.lock();
+#if defined(__APPLE__)
+            // Draining every queued byte resets the wake pipe as one eventfd read resets its counter.
+            if(descriptors[0].revents){char drain[64];while(read(wake,drain,sizeof(drain))>0){}}
+#else
             if(descriptors[0].revents){uint64_t value;[[maybe_unused]] const auto bytes=read(wake,&value,sizeof(value));}
+#endif
             for(size_t i=descriptors.size();i>1;--i)if(descriptors[i-1].revents){
                 auto entry=entries[i-2];close(entry.fence);AHardwareBuffer_release(entry.buffer);
                 entries.erase(entries.begin()+i-2);
@@ -60,12 +79,25 @@ class Retirement {
         }
     }
 public:
+#if defined(__APPLE__)
+    Retirement(){
+        int ends[2];
+        if(pipe(ends))throw std::system_error(errno,std::generic_category());
+        wake=ends[0];notify=ends[1];
+        for(int fd:ends)if(fcntl(fd,F_SETFD,FD_CLOEXEC)<0||fcntl(fd,F_SETFL,O_NONBLOCK)<0){
+            const int error=errno;close(wake);close(notify);throw std::system_error(error,std::generic_category());
+        }
+        try{worker=std::thread([this]{run();});}catch(...){close(wake);close(notify);throw;}
+    }
+    ~Retirement(){ {std::lock_guard<std::mutex> lock(mutex);stopping=true;signal();}worker.join();close(wake);close(notify); }
+#else
     Retirement(){
         wake=eventfd(0,EFD_CLOEXEC|EFD_NONBLOCK);
         if(wake<0)throw std::system_error(errno,std::generic_category());
         try{worker=std::thread([this]{run();});}catch(...){close(wake);throw;}
     }
     ~Retirement(){ {std::lock_guard<std::mutex> lock(mutex);stopping=true;signal();}worker.join();close(wake); }
+#endif
     void add(AHardwareBuffer* buffer,int fence) {
         std::lock_guard<std::mutex> lock(mutex);entries.push_back({buffer,fence});signal();
     }

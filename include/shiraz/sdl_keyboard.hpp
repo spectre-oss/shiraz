@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include <SDL.h>
+#if defined(__APPLE__)
+#include "shiraz/evdev_key_codes.h"
+#else
 #include <linux/input-event-codes.h>
+#endif
 namespace shiraz {
 // Printable editor keys are committed by SDL_TEXTINPUT. Keep shortcuts and controls
 // on the physical-key path; AltGr (right Alt/MODE) remains layout-produced text.
@@ -77,4 +81,13 @@ inline int android_meta(SDL_Keymod modifiers) {
     // supplied by SDL_TEXTINPUT instead of guessing a US character mapping.
     return result;
 }
+#if defined(__APPLE__)
+// macOS Command-key policy: how the Command key (KMOD_LGUI/KMOD_RGUI) reaches
+// Android apps. Android apps expect Ctrl for copy/paste/select-all/undo, while
+// Mac users press Command. The returned modifiers feed android_meta().
+inline SDL_Keymod macos_shortcut_modifiers(SDL_Keymod mods) {
+    // TODO(policy): decide the Command-key mapping (see docs/macos_final_goal.md, Input).
+    return mods;
+}
+#endif
 }

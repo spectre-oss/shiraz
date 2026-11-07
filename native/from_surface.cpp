@@ -1,7 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/native_window.h"
+#if defined(__APPLE__)
+// ANGLE-Metal provides EGL with milestone M4 (docs/macos_final_goal.md). Until then this
+// file needs only the handful of EGL types its dispatch table names; no EGL call is made.
+#include <atomic>
+#include <cerrno>
+#include <cstdint>
+typedef unsigned int EGLBoolean;typedef unsigned int EGLenum;typedef int32_t EGLint;
+typedef void* EGLDisplay;typedef void* EGLContext;typedef void* EGLSurface;typedef void* EGLConfig;typedef void* EGLNativeWindowType;
+#define EGL_NO_DISPLAY ((EGLDisplay)0)
+#define EGL_NO_CONTEXT ((EGLContext)0)
+#define EGL_NO_SURFACE ((EGLSurface)0)
+#define EGL_NONE 0x3038
+#define EGL_CONTEXT_MAJOR_VERSION 0x3098
+#define EGL_CONTEXT_CLIENT_VERSION 0x3098
+#else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#endif
 #include <dlfcn.h>
 #include <cstdio>
 #include <cstdlib>
@@ -80,6 +96,13 @@ Egl* egl() {
     static Egl backend;
     std::lock_guard<std::mutex> guard(eglMutex);
     if (backend.ready) return &backend;
+#if defined(__APPLE__)
+    // Same result as the Linux path when no EGL library loads: callers return 0/false.
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true)) std::fprintf(stderr, "SHIRAZ_UNSUPPORTED egl-pending-angle Surface EGL contexts need ANGLE-Metal\n");
+    errno = ENOSYS;
+    return nullptr;
+#else
     Egl state;
     void* library = dlopen("libEGL_shiraz.so.1", RTLD_NOW | RTLD_LOCAL);
     if (!library) library = dlopen("libEGL.so.1", RTLD_NOW | RTLD_LOCAL);
@@ -111,6 +134,7 @@ Egl* egl() {
     state.ready = true;
     backend = state;
     return &backend;
+#endif
 }
 EGLSurface windowSurface(Egl* e, ANativeWindow* window) {
     std::lock_guard<std::mutex> guard(eglMutex);

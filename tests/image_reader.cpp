@@ -7,7 +7,9 @@
 #include <cstring>
 #include <fcntl.h>
 #include <mutex>
+#if !defined(__APPLE__)
 #include <sys/eventfd.h>
+#endif
 #include <thread>
 #include <unistd.h>
 #include <cstdio>
@@ -33,7 +35,12 @@ int main(){
     AImage_delete(first);AImage_delete(second);
     post(window,0xff010203);post(window,0xff040506);
     assert(AImageReader_acquireLatestImage(reader,&first)==0);checkColor(first,"\x04\x05\x06\xff");
+#if defined(__APPLE__)
+    // Darwin release fences are Shiraz pipe fences: the read end turns readable once written.
+    int ends[2]{-1,-1};assert(pipe(ends)==0);int signal=ends[1],release=ends[0];assert(signal>=0&&release>=0);
+#else
     int signal=eventfd(0,EFD_CLOEXEC|EFD_NONBLOCK),release=dup(signal);assert(signal>=0&&release>=0);
+#endif
     auto start=std::chrono::steady_clock::now();AImage_deleteAsync(first,release);
     assert(std::chrono::steady_clock::now()-start<100ms&&fcntl(release,F_GETFD)>=0);
     uint64_t value=1;assert(write(signal,&value,sizeof(value))==sizeof(value));

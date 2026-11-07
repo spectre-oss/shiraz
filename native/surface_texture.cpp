@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/native_window.h"
+#if defined(__APPLE__)
+#include <atomic>
+#include <cerrno>
+#include <cstdint>
+#else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
+#endif
 #include <jni.h>
 #include <dlfcn.h>
 #include <vector>
@@ -12,6 +18,16 @@
 #include <cstring>
 
 namespace {
+#if defined(__APPLE__)
+// ANGLE-Metal EGL/GLES arrives with milestone M4 (docs/macos_final_goal.md). Until then no
+// EGL context can be current, so every GL-dependent entry point takes the Linux failure
+// for a missing EGL library: IllegalStateException, no GL objects. Bookkeeping stays.
+typedef unsigned int GLuint;
+struct Texture {
+ GLuint name=0;bool attached;
+ Texture(GLuint value,bool enabled):name(value),attached(enabled){}
+};
+#else
 struct Api {
  void* library=nullptr;
  PFNEGLGETCURRENTCONTEXTPROC context=nullptr;
@@ -38,15 +54,43 @@ struct Texture {
  unsigned updates=0;uint64_t revision=0;int width=0,height=0;std::vector<uint32_t> pixels;
  Texture(GLuint value,bool enabled):name(value),attached(enabled){}
 };
+#endif
 void fail(JNIEnv* env,const char* message){jclass cls=env->FindClass("java/lang/IllegalStateException");if(cls){env->ThrowNew(cls,message);env->DeleteLocalRef(cls);}}
+#if defined(__APPLE__)
+bool current(JNIEnv* env,Texture*){
+ static std::atomic<bool> reported{false};
+ if(!reported.exchange(true))std::fprintf(stderr,"SHIRAZ_UNSUPPORTED egl-pending-angle SurfaceTexture needs ANGLE-Metal EGL/GLES\n");
+ errno=ENOSYS;fail(env,"SurfaceTexture requires a current EGL context");return false;
+}
+#else
 bool current(JNIEnv* env,Texture* t){
  Api& a=api();if(!a.ready()||a.context()==EGL_NO_CONTEXT){fail(env,"SurfaceTexture requires a current EGL context");return false;}
  if(t->context!=EGL_NO_CONTEXT&&(t->context!=a.context()||t->display!=a.display())){fail(env,"SurfaceTexture belongs to another EGL context");return false;}
  t->context=a.context();t->display=a.display();return true;
 }
 void imageRelease(Texture* t){if(t->image!=EGL_NO_IMAGE_KHR){api().destroy(t->display,t->image);t->image=EGL_NO_IMAGE_KHR;}if(t->source){glDeleteTextures(1,&t->source);t->source=0;}t->revision=0;t->width=t->height=0;}
+#endif
 }
 extern "C" JNIEXPORT jlong JNICALL Java_android_graphics_SurfaceTexture_nativeCreate(JNIEnv*,jclass,jint name,jboolean attached){return reinterpret_cast<jlong>(new Texture(GLuint(name),attached));}
+#if defined(__APPLE__)
+extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeAttach(JNIEnv* env,jclass,jlong value,jint){
+ auto* t=reinterpret_cast<Texture*>(value);if(t->attached){fail(env,"SurfaceTexture is already attached");return;}
+ current(env,t);
+}
+extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeDetach(JNIEnv* env,jclass,jlong value){
+ auto* t=reinterpret_cast<Texture*>(value);if(!t->attached){fail(env,"SurfaceTexture is already detached");return;}
+ // No EGL context ever becomes current, so no GL objects exist to release.
+ t->name=0;t->attached=false;
+}
+extern "C" JNIEXPORT jboolean JNICALL Java_android_graphics_SurfaceTexture_nativeUpdate(JNIEnv* env,jclass,jlong value,jlong){
+ auto* t=reinterpret_cast<Texture*>(value);
+ if(!t->attached){fail(env,"SurfaceTexture is detached");return false;}current(env,t);return false;
+}
+extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeRelease(JNIEnv*,jclass,jlong value){
+ auto* t=reinterpret_cast<Texture*>(value);if(!t)return;
+ delete t;
+}
+#else
 extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeAttach(JNIEnv* env,jclass,jlong value,jint name){
  auto* t=reinterpret_cast<Texture*>(value);if(t->attached){fail(env,"SurfaceTexture is already attached");return;}
  if(!current(env,t))return;
@@ -97,3 +141,4 @@ extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeRel
  if(t->context!=EGL_NO_CONTEXT&&api().context()==t->context&&api().display()==t->display){if(t->source)glDeleteTextures(1,&t->source);}
  delete t;
 }
+#endif

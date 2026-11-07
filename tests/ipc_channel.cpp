@@ -10,6 +10,17 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <cstdlib>
+#include <string>
+// Darwin has no memfd_create: an unlinked temporary file keeps pread/pwrite semantics.
+#define MFD_CLOEXEC 1u
+static int memfd_create(const char*,unsigned){
+    const char* directory=getenv("TMPDIR");std::string path=std::string(directory&&*directory?directory:"/tmp")+"/shiraz-ipc-XXXXXX";
+    int fd=mkstemp(&path[0]);if(fd<0)return -1;unlink(path.c_str());
+    if(fcntl(fd,F_SETFD,FD_CLOEXEC)){close(fd);return -1;}return fd;
+}
+#endif
 int main(){
     int sockets[2];assert(shiraz::ipc_pair(sockets)==0);
     int fd=memfd_create("shiraz-ipc-test",MFD_CLOEXEC);assert(fd>=0);

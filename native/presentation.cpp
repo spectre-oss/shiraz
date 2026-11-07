@@ -430,7 +430,11 @@ void present(const Surface& initial, const std::string& title, int frames, const
             if(event.type==SDL_WINDOWEVENT&&ownWindow(event.window.windowID)&&event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED&&focus)focus(true);
             if(event.type==SDL_WINDOWEVENT&&ownWindow(event.window.windowID)&&visibility){switch(event.window.event){case SDL_WINDOWEVENT_HIDDEN:case SDL_WINDOWEVENT_MINIMIZED:touches.cancel(eventTime(event.common.timestamp));pointer.cancel(eventTime(event.common.timestamp));visibility(false);break;case SDL_WINDOWEVENT_SHOWN:case SDL_WINDOWEVENT_RESTORED:case SDL_WINDOWEVENT_MAXIMIZED:visibility(true);break;default:break;}}
             if (keyboard && (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) && ownWindow(event.key.windowID)) {
+#if defined(__APPLE__)
+                int meta = android_meta(macos_shortcut_modifiers(SDL_Keymod(event.key.keysym.mod)));
+#else
                 int meta = android_meta(SDL_Keymod(event.key.keysym.mod));
+#endif
                 if (event.type == SDL_KEYDOWN) keys.down(event.key.keysym.scancode, android_key(event.key.keysym.sym), linux_scan(event.key.keysym.scancode), meta, event.key.repeat != 0, eventTime(event.key.timestamp), text && (text_input_request.load() & 1) && editor_text_key(event.key.keysym.sym, SDL_Keymod(event.key.keysym.mod)));
                 else keys.up(event.key.keysym.scancode, meta, eventTime(event.key.timestamp));
             }

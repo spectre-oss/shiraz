@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/hardware_buffer.h"
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOSurface/IOSurface.h>
+#include <atomic>
+#include <cerrno>
+#include <cstdio>
+#include <mutex>
+#include <new>
+#include <poll.h>
+#else
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
@@ -11,9 +21,19 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 namespace {
 constexpr uint64_t cpuRead = 0xf, cpuWrite = 0xf0, gpu = 0x300;
+#if defined(__APPLE__)
+// IOSurface pixel formats: 'RGBA' (R,G,B,A bytes, matching Android RGBA_8888 and
+// RGBX_8888 memory order) and 'L565' (kCVPixelFormatType_16LE565). BLOB and every
+// other format stay rejected, as on Linux.
+uint32_t format(uint32_t android) {
+    switch (android) { case 1: case 2: return 0x52474241; case 4: return 0x4C353635; default: return 0; }
+}
+void unsupported() { std::fputs("SHIRAZ_UNSUPPORTED hardware-buffer-cross-process\n", stderr); errno = ENOTSUP; }
+#else
 constexpr uint32_t magic = 0x53484231;
 struct Device {
     int fd = -1;
@@ -35,6 +55,7 @@ uint32_t format(uint32_t android) {
     switch (android) { case 1: return GBM_FORMAT_ABGR8888; case 2: return GBM_FORMAT_XBGR8888;
         case 4: return GBM_FORMAT_RGB565; default: return 0; }
 }
+#endif
 unsigned bytes(uint32_t android) { return android == 4 ? 2 : 4; }
 bool cpuUsage(uint64_t u) {
     unsigned r = u & cpuRead, w = (u & cpuWrite) >> 4;
@@ -45,8 +66,24 @@ bool valid(const AHardwareBuffer_Desc* d) {
         uint64_t(d->width) * d->height <= 16 * 1024 * 1024 && d->layers == 1 &&
         format(d->format) && !d->rfu0 && !d->rfu1 && !(d->usage & ~(cpuRead | cpuWrite | gpu)) && cpuUsage(d->usage);
 }
+#if defined(__APPLE__)
+#else
 struct Wire { uint32_t version; uint32_t pitch; AHardwareBuffer_Desc desc; };
+#endif
 }
+#if defined(__APPLE__)
+struct AHardwareBuffer {
+    std::atomic<unsigned> refs{1};
+    AHardwareBuffer_Desc desc{};
+    IOSurfaceRef surface = nullptr;
+    std::mutex mutex;
+    void* mapping = nullptr;
+    IOSurfaceLockOptions lockOptions = 0; // IOSurfaceUnlock must repeat the IOSurfaceLock options.
+    unsigned readers = 0;
+    bool writer = false;
+    ~AHardwareBuffer() { if (mapping) IOSurfaceUnlock(surface, lockOptions, nullptr); if (surface) CFRelease(surface); }
+};
+#else
 struct AHardwareBuffer {
     std::atomic<unsigned> refs{1};
     AHardwareBuffer_Desc desc{};
@@ -58,10 +95,35 @@ struct AHardwareBuffer {
     bool writer = false;
     ~AHardwareBuffer() { if (mapData) gbm_bo_unmap(bo, mapData); if (bo) gbm_bo_destroy(bo); }
 };
+#endif
 extern "C" int AHardwareBuffer_allocate(const AHardwareBuffer_Desc* d, AHardwareBuffer** out) {
     if (!out) return -EINVAL;
     *out = nullptr;
     if (!valid(d)) return -EINVAL;
+#if defined(__APPLE__)
+    // A linear IOSurface is shared directly by Metal and CPU mappings; its pitch is
+    // fixed at creation, so the Linux map-time stride check happens here once.
+    int width = int(d->width), height = int(d->height), bpe = int(bytes(d->format)), pixel = int(format(d->format));
+    int pitch = int(IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, size_t(width) * bpe));
+    const void* keys[] = {kIOSurfaceWidth, kIOSurfaceHeight, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow, kIOSurfacePixelFormat};
+    CFNumberRef values[] = {CFNumberCreate(nullptr, kCFNumberIntType, &width), CFNumberCreate(nullptr, kCFNumberIntType, &height),
+        CFNumberCreate(nullptr, kCFNumberIntType, &bpe), CFNumberCreate(nullptr, kCFNumberIntType, &pitch),
+        CFNumberCreate(nullptr, kCFNumberSInt32Type, &pixel)};
+    bool numbers = true; for (auto* v : values) numbers = numbers && v;
+    CFDictionaryRef properties = numbers ? CFDictionaryCreate(nullptr, keys, reinterpret_cast<const void**>(values), 5,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) : nullptr;
+    for (auto* v : values) if (v) CFRelease(v);
+    IOSurfaceRef surface = properties ? IOSurfaceCreate(properties) : nullptr;
+    if (properties) CFRelease(properties);
+    if (!surface) return -ENOMEM;
+    size_t rowBytes = IOSurfaceGetBytesPerRow(surface);
+    if (IOSurfaceGetWidth(surface) != size_t(width) || IOSurfaceGetHeight(surface) != size_t(height) ||
+        rowBytes < size_t(width) * bpe || rowBytes % bpe) { CFRelease(surface); return -ENOTSUP; }
+    auto* b = new(std::nothrow) AHardwareBuffer;
+    if (!b) { CFRelease(surface); return -ENOMEM; }
+    b->surface = surface; b->desc = *d; b->desc.stride = uint32_t(rowBytes / bpe);
+    *out = b; return 0;
+#else
     gbm_device* dev = device();
     if (!dev) return -ENODEV;
     // A linear DMA buffer is shared directly by Mesa and CPU mappings. Never
@@ -73,6 +135,7 @@ extern "C" int AHardwareBuffer_allocate(const AHardwareBuffer_Desc* d, AHardware
     if (!b) { gbm_bo_destroy(bo); return -ENOMEM; }
     b->bo = bo; b->desc = *d; b->desc.stride = gbm_bo_get_stride(bo) / bytes(d->format);
     *out = b; return 0;
+#endif
 }
 extern "C" int AHardwareBuffer_isSupported(const AHardwareBuffer_Desc* d) {
     AHardwareBuffer* b = nullptr;
@@ -101,12 +164,22 @@ extern "C" int AHardwareBuffer_lock(AHardwareBuffer* b, uint64_t usage, int32_t 
     bool writing = usage & cpuWrite;
     if (b->writer || (writing && b->readers)) return -EBUSY;
     if (!b->mapping) {
+#if defined(__APPLE__)
+        IOSurfaceLockOptions options = writing ? 0 : kIOSurfaceLockReadOnly;
+        if (IOSurfaceLock(b->surface, options, nullptr) != kIOReturnSuccess) return -EIO;
+        b->mapping = IOSurfaceGetBaseAddress(b->surface); b->lockOptions = options;
+        if (!b->mapping) { IOSurfaceUnlock(b->surface, options, nullptr); return -EIO; }
+        if (IOSurfaceGetBytesPerRow(b->surface) != size_t(b->desc.stride) * bytes(b->desc.format)) {
+            IOSurfaceUnlock(b->surface, options, nullptr); b->mapping = nullptr; return -ENOTSUP;
+        }
+#else
         uint32_t stride = 0, flags = (usage & cpuRead ? GBM_BO_TRANSFER_READ : 0) | (writing ? GBM_BO_TRANSFER_WRITE : 0);
         b->mapping = gbm_bo_map(b->bo, 0, 0, b->desc.width, b->desc.height, flags, &stride, &b->mapData);
         if (!b->mapping) { b->mapData = nullptr; return -EIO; }
         if (stride != b->desc.stride * bytes(b->desc.format)) {
             gbm_bo_unmap(b->bo, b->mapData); b->mapping = b->mapData = nullptr; return -ENOTSUP;
         }
+#endif
     }
     if (writing) b->writer = true; else ++b->readers;
     *out = b->mapping; return 0;
@@ -117,9 +190,30 @@ extern "C" int AHardwareBuffer_unlock(AHardwareBuffer* b, int32_t* fence) {
     std::lock_guard<std::mutex> guard(b->mutex);
     if (!b->writer && !b->readers) return -EINVAL;
     if (b->writer) b->writer = false; else --b->readers;
+#if defined(__APPLE__)
+    if (!b->readers) { IOSurfaceUnlock(b->surface, b->lockOptions, nullptr); b->mapping = nullptr; b->lockOptions = 0; }
+#else
     if (!b->readers) { gbm_bo_unmap(b->bo, b->mapData); b->mapping = b->mapData = nullptr; }
+#endif
     return 0;
 }
+#if defined(__APPLE__)
+// IOSurfaces have no file descriptor. The dma-buf export used by the EGL bridge and
+// the SCM_RIGHTS handle transfer fail explicitly until the Mach-port path lands.
+extern "C" int shiraz_hardware_buffer_export(AHardwareBuffer* b, uint32_t* f, uint32_t* pitch) {
+    if (!b || !f || !pitch) return -EINVAL;
+    unsupported(); return -ENOTSUP;
+}
+extern "C" int AHardwareBuffer_sendHandleToUnixSocket(const AHardwareBuffer* b, int) {
+    if (!b) return -EINVAL;
+    unsupported(); return -ENOTSUP;
+}
+extern "C" int AHardwareBuffer_recvHandleFromUnixSocket(int, AHardwareBuffer** out) {
+    if (!out) return -EINVAL;
+    *out = nullptr;
+    unsupported(); return -ENOTSUP;
+}
+#else
 extern "C" int shiraz_hardware_buffer_export(AHardwareBuffer* b, uint32_t* f, uint32_t* pitch) {
     if (!b || !f || !pitch) return -EINVAL;
     *f = gbm_bo_get_format(b->bo); *pitch = gbm_bo_get_stride(b->bo);
@@ -172,3 +266,4 @@ extern "C" int AHardwareBuffer_recvHandleFromUnixSocket(int socket, AHardwareBuf
     if (!b) { gbm_bo_destroy(bo); return -ENOMEM; }
     b->bo = bo; b->desc = data.desc; *out = b; return 0;
 }
+#endif

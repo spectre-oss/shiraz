@@ -25,9 +25,16 @@ int main() {
     std::strcpy(data, "shared");
     int other = dup(fd);
     assert(other >= 0 && ASharedMemory_getSize(other) == 4096);
+#if defined(__APPLE__)
+    // Darwin shm cannot refuse new writable mappings, so write removal fails explicitly.
+    assert(ASharedMemory_setProt(other, PROT_READ) == -1 && errno == ENOTSUP);
+    assert(ASharedMemory_setProt(fd, PROT_READ | PROT_WRITE) == 0);
+    assert(ASharedMemory_setProt(STDERR_FILENO, PROT_READ) == -1 && errno == EINVAL);
+#else
     assert(ASharedMemory_setProt(other, PROT_READ) == 0);
     assert(ASharedMemory_setProt(fd, PROT_READ | PROT_WRITE) == -1 && errno == EINVAL);
     assert(mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) == MAP_FAILED);
+#endif
     assert(pwrite(fd, "x", 1, 0) == -1);
     data[0] = 'S'; // Existing mappings must remain writable.
     pid_t child = fork();
@@ -35,7 +42,12 @@ int main() {
     if (!child) {
         auto* read = static_cast<char*>(mmap(nullptr, 4096, PROT_READ, MAP_SHARED, other, 0));
         assert(read != MAP_FAILED && std::strcmp(read, "Shared") == 0);
+#if defined(__APPLE__)
+        // The requested size survives fork.
+        assert(ASharedMemory_getSize(other) == 4096);
+#else
         assert(mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, other, 0) == MAP_FAILED);
+#endif
         _exit(0);
     }
     int status = 0;

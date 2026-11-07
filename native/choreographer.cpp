@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Software frame pacing for the host display. Callbacks run on the owning
 // ALooper; this is not a compositor presentation-timestamp implementation.
+#if defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/event.h>
+#include <sys/time.h>
+#include <fcntl.h>
+#include <time.h>
+#else
 #include <sys/timerfd.h>
+#endif
 #include <unistd.h>
 #include <algorithm>
 #include <cstdint>
@@ -25,6 +33,16 @@ int64_t now() {
     clock_gettime(CLOCK_MONOTONIC,&value);
     return int64_t(value.tv_sec)*1000000000+value.tv_nsec;
 }
+#if defined(__APPLE__)
+// timerfd replacement: a private kqueue holding one EVFILT_TIMER knote. A kqueue
+// fd is readable while it has pending events, so it is watched through the
+// public ALooper_addFd API exactly like the Linux timerfd.
+int timer_create_fd() {
+    const int fd=kqueue();
+    if(fd>=0&&fcntl(fd,F_SETFD,FD_CLOEXEC)) { close(fd); return -1; }
+    return fd;
+}
+#endif
 }
 struct AChoreographer {
     struct Pending {
@@ -37,11 +55,30 @@ struct AChoreographer {
     int timer;
     std::mutex mutex;
     std::vector<Pending> pending;
+#if defined(__APPLE__)
+    explicit AChoreographer(ALooper* owner):looper(owner),timer(timer_create_fd()) { ALooper_acquire(looper); }
+#else
     explicit AChoreographer(ALooper* owner):looper(owner),timer(timerfd_create(CLOCK_MONOTONIC,TFD_CLOEXEC|TFD_NONBLOCK)) { ALooper_acquire(looper); }
+#endif
     ~AChoreographer() {
         if(timer>=0) { ALooper_removeFd(looper,timer); close(timer); }
         ALooper_release(looper);
     }
+#if defined(__APPLE__)
+    // One-shot relative timer to the earliest due time; a past due fires at once.
+    // Relative nanoseconds keep CLOCK_MONOTONIC as the only clock (NOTE_ABSOLUTE
+    // would use the wall clock or mach time instead).
+    void arm() {
+        struct kevent change;
+        if(pending.empty()) EV_SET(&change,0,EVFILT_TIMER,EV_DELETE,0,0,nullptr);
+        else {
+            int64_t due=std::min_element(pending.begin(),pending.end(),[](const Pending& a,const Pending& b){return a.due<b.due;})->due;
+            const int64_t delay=std::max<int64_t>(0,due-now());
+            EV_SET(&change,0,EVFILT_TIMER,EV_ADD|EV_ONESHOT,NOTE_NSECONDS|NOTE_CRITICAL,delay,nullptr);
+        }
+        kevent(timer,&change,1,nullptr,0,nullptr);
+    }
+#else
     void arm() {
         itimerspec value{};
         if(!pending.empty()) {
@@ -51,10 +88,17 @@ struct AChoreographer {
         }
         timerfd_settime(timer,TFD_TIMER_ABSTIME,&value,nullptr);
     }
+#endif
     static int dispatch(int fd,int,void* data) {
         auto& self=*static_cast<AChoreographer*>(data);
+#if defined(__APPLE__)
+        struct kevent fired;
+        const timespec immediate{};
+        if(kevent(fd,nullptr,0,&fired,1,&immediate)!=1||fired.filter!=EVFILT_TIMER)return 1;
+#else
         uint64_t expirations;
         if(read(fd,&expirations,sizeof(expirations))!=sizeof(expirations))return 1;
+#endif
         const int64_t frame=now();
         std::vector<Pending> ready;
         {

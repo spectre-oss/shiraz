@@ -1594,3 +1594,7 @@ digitalis-platform-proxies: build/libandroid.so build/libEGL_shiraz.so.1 build/l
 digitalis-platform-smoke:
 	@test -n "$(DIGITALIS_GUEST_SYSTEM)" || { echo 'Set DIGITALIS_GUEST_SYSTEM to the pinned guest-support system directory'; exit 1; }
 	python3 scripts/digitalis/platform_smoke.py --guest-system "$(DIGITALIS_GUEST_SYSTEM)"
+
+ifeq ($(shell uname -s),Darwin)
+include mk/darwin.mk
+endif
