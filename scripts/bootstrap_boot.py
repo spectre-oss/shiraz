@@ -71,16 +71,17 @@ def boot_archive(classes, dex_archive, destination):
             output.writestr(entry, dex)
 
 
-def desugar_boot(root=ROOT, modules=MODULES):
+def desugar_boot(root=ROOT, modules=MODULES, host=None, host_tag='linux-x86', work=None):
     # Caller owns .deps/runtime-build.lock. Never run alongside an ART make.
-    host = root / 'context/art_standalone/out/host'
+    # host is the tree's out/host directory; host_tag selects its <tag>/framework.
+    host = Path(host) if host is not None else root / 'context/art_standalone/out/host'
     intermediates = host / 'common/obj/JAVA_LIBRARIES'
     all_classes = intermediates / 'core-all-hostdex_intermediates/classes.jar'
     inputs = {module: intermediates / (module + '_intermediates/classes.jar') for module in modules}
     if not all(path.is_file() for path in [all_classes, *inputs.values()]):
         raise SystemExit('ART boot classes are missing. Run make runtime-art first.')
     tool = compiler(root)
-    work = root / 'build/runtime-boot'
+    work = Path(work) if work is not None else root / 'build/runtime-boot'
     work.mkdir(parents=True, exist_ok=True)
     manifest = {'compiler': R8_VERSION, 'compiler_sha256': R8_SHA256, 'min_api': 26, 'classpath_sha256': hashlib.sha256(all_classes.read_bytes()).hexdigest(), 'modules': {}}
     # Prepare both archives before replacing either installed module. A failed
@@ -98,7 +99,7 @@ def desugar_boot(root=ROOT, modules=MODULES):
                                             'output_sha256': hashlib.sha256(output.read_bytes()).hexdigest()}
         for module in inputs:
             output = staged / (module + '.jar')
-            destination = host / 'linux-x86/framework' / output.name
+            destination = host / host_tag / 'framework' / output.name
             if not destination.exists() or destination.read_bytes() != output.read_bytes():
                 os.replace(output, destination)
     (work / ('result.json' if modules == MODULES else 'network-result.json')).write_text(json.dumps(manifest, indent=2) + '\n')

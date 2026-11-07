@@ -1,0 +1,1624 @@
+diff --git a/art/openjdkjvm/OpenjdkJvm.cc b/art/openjdkjvm/OpenjdkJvm.cc
+index ff122947027c3717cb168afafb97284c8db0fee1..abe8fd722f480633be76eefe98a9e46fbe7a71d8 100644
+--- a/art/openjdkjvm/OpenjdkJvm.cc
++++ b/art/openjdkjvm/OpenjdkJvm.cc
+@@ -169,6 +169,18 @@ JNIEXPORT jint JVM_GetLastErrorString(char* buf, int len) {
+     buf[len - 1] = '\0';
+   }
+ 
++  return strlen(buf);
++#elif defined(__APPLE__)
++  if (len == 0) {
++    return 0;
++  }
++
++  // Darwin has the XSI strerror_r (int result). On ERANGE it leaves a truncated
++  // message and on EINVAL it writes "Unknown error: N", so buf is usable either way.
++  const int err = errno;
++  strerror_r(err, buf, len);
++  buf[len - 1] = '\0';
++
+   return strlen(buf);
+ #else
+   UNUSED(buf);
+diff --git a/libcore/luni/src/main/native/DarwinSockoptSentinels.h b/libcore/luni/src/main/native/DarwinSockoptSentinels.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..47fbb8e203dffe3ffa247de4b94a84c625387cb2
+--- /dev/null
++++ b/libcore/luni/src/main/native/DarwinSockoptSentinels.h
+@@ -0,0 +1,37 @@
++/*
++ * Copyright (C) 2026 The Shiraz Authors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef DARWIN_SOCKOPT_SENTINELS_H_included
++#define DARWIN_SOCKOPT_SENTINELS_H_included
++
++#if !defined(__APPLE__)
++#error "DarwinSockoptSentinels.h is Darwin-only"
++#endif
++
++// Darwin has no SO_DOMAIN, SO_PROTOCOL or IP_MULTICAST_ALL, but libcore Java
++// uses them unconditionally (BlockGuardOs.isInetSocket on every accept(),
++// PlainDatagramSocketImpl.datagramSocketCreate on every DatagramSocket).
++// android_system_OsConstants.cpp exports these private sentinel option names
++// instead of 0, and Linux_getsockoptInt/Linux_setsockoptInt in
++// libcore_io_Linux.cpp emulate them. The values are far above every real
++// Darwin SOL_SOCKET (<= 0x1200) and IPPROTO_IP option, so if one ever reaches
++// the kernel through another path it fails with ENOPROTOOPT instead of
++// aliasing a real option.
++#define SHIRAZ_DARWIN_SO_DOMAIN         0x7f000001
++#define SHIRAZ_DARWIN_SO_PROTOCOL       0x7f000002
++#define SHIRAZ_DARWIN_IP_MULTICAST_ALL  0x7f000003
++
++#endif  // DARWIN_SOCKOPT_SENTINELS_H_included
+diff --git a/libcore/luni/src/main/native/Portability.h b/libcore/luni/src/main/native/Portability.h
+index 4df33530c5a0d1f0c21b152bf6a423ed7461ea76..262a60ab8339cf073701dd98ee6b64388d7cb341 100644
+--- a/libcore/luni/src/main/native/Portability.h
++++ b/libcore/luni/src/main/native/Portability.h
+@@ -17,8 +17,12 @@
+ #ifndef PORTABILITY_H_included
+ #define PORTABILITY_H_included
+ 
++#if defined(__APPLE__)
++#include "Portability_darwin.h"
++#else
+ #include <byteswap.h>
+ #include <sys/sendfile.h>
++#endif
+ #include <sys/statvfs.h>
+ 
+ #include <netdb.h>
+diff --git a/libcore/luni/src/main/native/Portability_darwin.h b/libcore/luni/src/main/native/Portability_darwin.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d88cb1505eac36eb95e8819c6acaa04a8d63864
+--- /dev/null
++++ b/libcore/luni/src/main/native/Portability_darwin.h
+@@ -0,0 +1,270 @@
++/*
++ * Copyright (C) 2026 The Shiraz Authors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++// Darwin (macOS) host compatibility for the libcore natives that were written
++// against glibc/bionic (libcore_io_Linux.cpp, libcore_io_Memory.cpp,
++// android_system_OsConstants.cpp). Included only from Portability.h and only
++// when __APPLE__ is defined.
++//
++// Rules followed here:
++//  - Where Darwin has an equivalent, map to it (LFS names, byte swapping).
++//  - Where a Linux facility can be emulated faithfully from user space, do so
++//    (sendfile(2) file-to-anything copies, pipe2(2), posix_fallocate(3)).
++//  - Where it cannot (capabilities, most prctl options), fail explicitly with
++//    ENOSYS so the Java caller sees an ErrnoException, never a silent success.
++
++#ifndef PORTABILITY_DARWIN_H_included
++#define PORTABILITY_DARWIN_H_included
++
++#if !defined(__APPLE__)
++#error "Portability_darwin.h is only for Darwin hosts"
++#endif
++
++// System headers first: the LFS macros below must not rename anything that
++// the SDK headers declare.
++#include <errno.h>
++#include <fcntl.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <sys/uio.h>
++#include <sys/xattr.h>
++#include <unistd.h>
++
++// <byteswap.h>
++#define bswap_16(x) __builtin_bswap16(x)
++#define bswap_32(x) __builtin_bswap32(x)
++#define bswap_64(x) __builtin_bswap64(x)
++
++// Large-file-support names. off_t, struct stat and struct flock are already
++// 64-bit on Darwin, so the *64 variants are the plain calls.
++#define off64_t off_t
++#define stat64 stat
++#define lstat64 lstat
++#define fstat64 fstat
++#define flock64 flock
++#define lseek64 lseek
++#define pread64 pread
++#define pwrite64 pwrite
++#define mmap64 mmap
++#define ftruncate64 ftruncate
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++// Exported by libsystem_kernel but not declared in the SDK headers.
++int fdatasync(int fd);
++#ifdef __cplusplus
++}
++#endif
++
++// posix_fallocate(3): returns an error number, like the real one.
++static inline int posix_fallocate64(int fd, off_t offset, off_t length) {
++    if (offset < 0 || length <= 0) {
++        return EINVAL;
++    }
++    if (offset > INT64_MAX - length) {
++        return EFBIG;
++    }
++    struct stat sb;
++    if (fstat(fd, &sb) == -1) {
++        return errno;
++    }
++    off_t end = offset + length;
++    if (end <= sb.st_size) {
++        return 0;
++    }
++    fstore_t store;
++    memset(&store, 0, sizeof(store));
++    store.fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL;
++    store.fst_posmode = F_PEOFPOSMODE;
++    store.fst_offset = 0;
++    store.fst_length = end - sb.st_size;
++    if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
++        store.fst_flags = F_ALLOCATEALL;  // Retry without the contiguity request.
++        if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
++            return errno;
++        }
++    }
++    if (ftruncate(fd, end) == -1) {
++        return errno;
++    }
++    return 0;
++}
++
++// Linux sendfile(2): copy up to count bytes from in_fd to out_fd. Darwin's
++// sendfile(2) only sends a file to a socket and has another signature, so the
++// copy is done in user space. With a non-NULL offset, in_fd is read with
++// pread() from *offset (its file position is unchanged) and *offset advances;
++// otherwise in_fd is read from, and advances, its file position. Returns the
++// number of bytes written, or -1 with errno set if nothing could be copied.
++static inline ssize_t shiraz_darwin_sendfile(int out_fd, int in_fd, off_t* offset, size_t count) {
++    char buf[64 * 1024];
++    size_t total = 0;
++    while (total < count) {
++        size_t chunk = count - total;
++        if (chunk > sizeof(buf)) {
++            chunk = sizeof(buf);
++        }
++        ssize_t n = (offset != NULL) ? pread(in_fd, buf, chunk, *offset) : read(in_fd, buf, chunk);
++        if (n == -1) {
++            if (total == 0) {
++                return -1;  // Includes EINTR: the caller's TEMP_FAILURE_RETRY restarts.
++            }
++            break;
++        }
++        if (n == 0) {
++            break;  // EOF.
++        }
++        ssize_t written = 0;
++        while (written < n) {
++            ssize_t w = write(out_fd, buf + written, n - written);
++            if (w == -1) {
++                if (errno == EINTR) {
++                    continue;
++                }
++                if (total == 0 && written == 0) {
++                    return -1;
++                }
++                // Report what was written; the data already read but not
++                // written is not consumed from the offset.
++                if (offset != NULL) {
++                    *offset += written;
++                } else if (n > written) {
++                    lseek(in_fd, -(off_t)(n - written), SEEK_CUR);
++                }
++                return (ssize_t)(total + written);
++            }
++            written += w;
++        }
++        total += (size_t)n;
++        if (offset != NULL) {
++            *offset += n;
++        }
++    }
++    return (ssize_t)total;
++}
++#define sendfile shiraz_darwin_sendfile
++
++// pipe2(2) is only in macOS 27+; emulate it for the macOS 15 baseline. The
++// two fds are not created atomically with O_CLOEXEC (no fork can race this in
++// the single ART process at the point libcore calls it, but note it anyway).
++static inline int shiraz_darwin_pipe2(int fds[2], int flags) {
++    if ((flags & ~(O_CLOEXEC | O_NONBLOCK)) != 0) {
++        errno = EINVAL;
++        return -1;
++    }
++    if (pipe(fds) == -1) {
++        return -1;
++    }
++    for (int i = 0; i < 2; ++i) {
++        if (((flags & O_CLOEXEC) != 0 && fcntl(fds[i], F_SETFD, FD_CLOEXEC) == -1) ||
++            ((flags & O_NONBLOCK) != 0 &&
++             fcntl(fds[i], F_SETFL, fcntl(fds[i], F_GETFL) | O_NONBLOCK) == -1)) {
++            int saved_errno = errno;
++            close(fds[0]);
++            close(fds[1]);
++            errno = saved_errno;
++            return -1;
++        }
++    }
++    return 0;
++}
++#define pipe2 shiraz_darwin_pipe2
++
++// prctl(2). The only caller is Linux_prctl, i.e. android.system.Os.prctl, whose
++// arguments are Java longs. OsConstants exports no PR_SET_NAME (only
++// PR_GET_DUMPABLE, which Darwin lacks, so it stays unset). For PR_SET_NAME
++// (Linux value 15) Linux copies the name from the user pointer in arg2 and
++// returns EFAULT when that address is unreadable. A Java long is never a
++// readable C string pointer, and user space cannot validate an arbitrary
++// address without risking SIGSEGV, so PR_SET_NAME always fails with EFAULT
++// (arg2 is never dereferenced). Every other option fails with ENOSYS.
++#define PR_SET_NAME 15
++static inline int prctl(int option, unsigned long, unsigned long, unsigned long,
++                        unsigned long) {
++    errno = (option == PR_SET_NAME) ? EFAULT : ENOSYS;
++    return -1;
++}
++
++// Linux capabilities: no Darwin equivalent. The types keep the JNI glue
++// compiling; capget/capset always fail with ENOSYS.
++struct __user_cap_header_struct {
++    uint32_t version;
++    int pid;
++};
++struct __user_cap_data_struct {
++    uint32_t effective;
++    uint32_t permitted;
++    uint32_t inheritable;
++};
++static inline int capget(__user_cap_header_struct*, __user_cap_data_struct*) {
++    errno = ENOSYS;
++    return -1;
++}
++static inline int capset(__user_cap_header_struct*, const __user_cap_data_struct*) {
++    errno = ENOSYS;
++    return -1;
++}
++
++// Linux-signature extended attribute calls (path variants follow symlinks,
++// like Linux). Darwin's take an extra position argument (resource forks only)
++// and an options word; these C++ overloads differ in arity from the SDK's.
++// Flags for setxattr are passed through: Java reads XATTR_CREATE/REPLACE from
++// OsConstants, which carries the Darwin values.
++// A missing attribute is ENOATTR (93) on Darwin but ENODATA on Linux, and Java
++// callers compare against OsConstants.ENODATA (Darwin's ENODATA, 96), so
++// ENOATTR is reported as ENODATA.
++static inline void shiraz_darwin_xattr_errno() {
++    if (errno == ENOATTR) {
++        errno = ENODATA;
++    }
++}
++static inline ssize_t getxattr(const char* path, const char* name, void* value, size_t size) {
++    ssize_t rc = getxattr(path, name, value, size, 0, 0);
++    if (rc == -1) shiraz_darwin_xattr_errno();
++    return rc;
++}
++static inline ssize_t listxattr(const char* path, char* list, size_t size) {
++    ssize_t rc = listxattr(path, list, size, 0);
++    if (rc == -1) shiraz_darwin_xattr_errno();
++    return rc;
++}
++static inline int removexattr(const char* path, const char* name) {
++    int rc = removexattr(path, name, 0);
++    if (rc == -1) shiraz_darwin_xattr_errno();
++    return rc;
++}
++static inline int setxattr(const char* path, const char* name, const void* value, size_t size,
++                           int flags) {
++    int rc = setxattr(path, name, value, size, 0, flags);
++    if (rc == -1) shiraz_darwin_xattr_errno();
++    return rc;
++}
++
++// SO_PEERCRED's struct ucred. Darwin reports peer credentials of AF_UNIX
++// sockets through LOCAL_PEERCRED (struct xucred) and LOCAL_PEERPID instead.
++struct ucred {
++    pid_t pid;
++    uid_t uid;
++    gid_t gid;
++};
++
++#endif  // PORTABILITY_DARWIN_H_included
+diff --git a/libcore/luni/src/main/native/android_system_OsConstants.cpp b/libcore/luni/src/main/native/android_system_OsConstants.cpp
+index 993b1f7a782206d5c6051af2cb1770eee906daa9..8f0e2b74dee3079029afc81e61a0c277110f441d 100644
+--- a/libcore/luni/src/main/native/android_system_OsConstants.cpp
++++ b/libcore/luni/src/main/native/android_system_OsConstants.cpp
+@@ -19,6 +19,9 @@
+ #include <nativehelper/JNIHelp.h>
+ #include <nativehelper/JniConstants.h>
+ #include "Portability.h"
++#if defined(__APPLE__)
++#include "DarwinSockoptSentinels.h"
++#endif
+ 
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -32,7 +35,9 @@
+ #include <stdlib.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
++#ifndef __APPLE__
+ #include <sys/prctl.h>
++#endif
+ #include <sys/resource.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+@@ -42,6 +47,7 @@
+ #include <unistd.h>
+ 
+ #include <net/if_arp.h>
++#ifndef __APPLE__
+ #include <linux/if_ether.h>
+ 
+ // After the others because these are not necessarily self-contained in glibc.
+@@ -50,6 +56,7 @@
+ 
+ // Include linux socket constants for setting sockopts
+ #include <linux/udp.h>
++#endif
+ 
+ #include <net/if.h> // After <sys/socket.h> to work around a Mac header file bug.
+ 
+@@ -65,8 +72,10 @@ static void initConstant(JNIEnv* env, jclass c, const char* fieldName, int value
+ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "AF_INET", AF_INET);
+     initConstant(env, c, "AF_INET6", AF_INET6);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "AF_PACKET", AF_PACKET);
+     initConstant(env, c, "AF_NETLINK", AF_NETLINK);
++#endif  // !__APPLE__
+     initConstant(env, c, "AF_UNIX", AF_UNIX);
+     initConstant(env, c, "AF_UNSPEC", AF_UNSPEC);
+     initConstant(env, c, "AI_ADDRCONFIG", AI_ADDRCONFIG);
+@@ -79,7 +88,9 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "AI_PASSIVE", AI_PASSIVE);
+     initConstant(env, c, "AI_V4MAPPED", AI_V4MAPPED);
+     initConstant(env, c, "ARPHRD_ETHER", ARPHRD_ETHER);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "ARPHRD_LOOPBACK", ARPHRD_LOOPBACK);
++#endif  // !__APPLE__
+ #if defined(CAP_LAST_CAP)
+     initConstant(env, c, "CAP_AUDIT_CONTROL", CAP_AUDIT_CONTROL);
+     initConstant(env, c, "CAP_AUDIT_WRITE", CAP_AUDIT_WRITE);
+@@ -183,7 +194,9 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "ENOLINK", ENOLINK);
+     initConstant(env, c, "ENOMEM", ENOMEM);
+     initConstant(env, c, "ENOMSG", ENOMSG);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "ENONET", ENONET);
++#endif  // !__APPLE__
+     initConstant(env, c, "ENOPROTOOPT", ENOPROTOOPT);
+     initConstant(env, c, "ENOSPC", ENOSPC);
+     initConstant(env, c, "ENOSR", ENOSR);
+@@ -208,10 +221,12 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "ESPIPE", ESPIPE);
+     initConstant(env, c, "ESRCH", ESRCH);
+     initConstant(env, c, "ESTALE", ESTALE);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "ETH_P_ALL", ETH_P_ALL);
+     initConstant(env, c, "ETH_P_ARP", ETH_P_ARP);
+     initConstant(env, c, "ETH_P_IP", ETH_P_IP);
+     initConstant(env, c, "ETH_P_IPV6", ETH_P_IPV6);
++#endif  // !__APPLE__
+     initConstant(env, c, "ETIME", ETIME);
+     initConstant(env, c, "ETIMEDOUT", ETIMEDOUT);
+     initConstant(env, c, "ETXTBSY", ETXTBSY);
+@@ -339,7 +354,13 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+ #endif
+     initConstant(env, c, "IPV6_UNICAST_HOPS", IPV6_UNICAST_HOPS);
+     initConstant(env, c, "IPV6_V6ONLY", IPV6_V6ONLY);
++#ifndef __APPLE__
+     initConstant(env, c, "IP_MULTICAST_ALL", IP_MULTICAST_ALL);
++#else  // __APPLE__
++    // PlainDatagramSocketImpl sets IP_MULTICAST_ALL=0 on every DatagramSocket.
++    // Darwin has no such option; libcore_io_Linux.cpp emulates the sentinel.
++    initConstant(env, c, "IP_MULTICAST_ALL", SHIRAZ_DARWIN_IP_MULTICAST_ALL);
++#endif  // !__APPLE__
+     initConstant(env, c, "IP_MULTICAST_IF", IP_MULTICAST_IF);
+     initConstant(env, c, "IP_MULTICAST_LOOP", IP_MULTICAST_LOOP);
+     initConstant(env, c, "IP_MULTICAST_TTL", IP_MULTICAST_TTL);
+@@ -350,7 +371,9 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "_LINUX_CAPABILITY_VERSION_3", _LINUX_CAPABILITY_VERSION_3);
+ #endif
+     initConstant(env, c, "MAP_FIXED", MAP_FIXED);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "MAP_POPULATE", MAP_POPULATE);
++#endif  // !__APPLE__
+     initConstant(env, c, "MAP_PRIVATE", MAP_PRIVATE);
+     initConstant(env, c, "MAP_SHARED", MAP_SHARED);
+ #if defined(MCAST_JOIN_GROUP)
+@@ -383,8 +406,10 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "MS_ASYNC", MS_ASYNC);
+     initConstant(env, c, "MS_INVALIDATE", MS_INVALIDATE);
+     initConstant(env, c, "MS_SYNC", MS_SYNC);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "NETLINK_NETFILTER", NETLINK_NETFILTER);
+     initConstant(env, c, "NETLINK_ROUTE", NETLINK_ROUTE);
++#endif  // !__APPLE__
+     initConstant(env, c, "NI_DGRAM", NI_DGRAM);
+     initConstant(env, c, "NI_NAMEREQD", NI_NAMEREQD);
+     initConstant(env, c, "NI_NOFQDN", NI_NOFQDN);
+@@ -439,6 +464,7 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+ // members. The best we can do (barring UAPI / kernel version checks) is
+ // to hope they exist on all host linuxes we're building on. These
+ // constants have been around since 2.6.35 at least, so we should be ok.
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "RT_SCOPE_HOST", RT_SCOPE_HOST);
+     initConstant(env, c, "RT_SCOPE_LINK", RT_SCOPE_LINK);
+     initConstant(env, c, "RT_SCOPE_NOWHERE", RT_SCOPE_NOWHERE);
+@@ -457,6 +483,7 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "RTMGRP_NEIGH", RTMGRP_NEIGH);
+     initConstant(env, c, "RTMGRP_NOTIFY", RTMGRP_NOTIFY);
+     initConstant(env, c, "RTMGRP_TC", RTMGRP_TC);
++#endif  // !__APPLE__
+     initConstant(env, c, "SEEK_CUR", SEEK_CUR);
+     initConstant(env, c, "SEEK_END", SEEK_END);
+     initConstant(env, c, "SEEK_SET", SEEK_SET);
+@@ -520,11 +547,23 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "SO_DEBUG", SO_DEBUG);
+ #if defined(SO_DOMAIN)
+     initConstant(env, c, "SO_DOMAIN", SO_DOMAIN);
++#elif defined(__APPLE__)
++    // BlockGuardOs.accept() reads SO_DOMAIN on every accepted fd. Darwin has
++    // no SO_DOMAIN; libcore_io_Linux.cpp emulates the sentinel.
++    initConstant(env, c, "SO_DOMAIN", SHIRAZ_DARWIN_SO_DOMAIN);
+ #endif
+     initConstant(env, c, "SO_DONTROUTE", SO_DONTROUTE);
+     initConstant(env, c, "SO_ERROR", SO_ERROR);
+     initConstant(env, c, "SO_KEEPALIVE", SO_KEEPALIVE);
++#if defined(__APPLE__)
++    // Linux SO_LINGER counts seconds, Darwin SO_LINGER counts 10 ms ticks.
++    // IoBridge, BlockGuardOs and Os.get/setsockoptLinger expect seconds, so
++    // export Darwin's seconds option (struct linger, at most 327 s; larger
++    // values fail with EDOM).
++    initConstant(env, c, "SO_LINGER", SO_LINGER_SEC);
++#else
+     initConstant(env, c, "SO_LINGER", SO_LINGER);
++#endif
+     initConstant(env, c, "SO_OOBINLINE", SO_OOBINLINE);
+ #if defined(SO_PASSCRED)
+     initConstant(env, c, "SO_PASSCRED", SO_PASSCRED);
+@@ -534,6 +573,9 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+ #endif
+ #if defined(SO_PROTOCOL)
+     initConstant(env, c, "SO_PROTOCOL", SO_PROTOCOL);
++#elif defined(__APPLE__)
++    // Darwin has no SO_PROTOCOL; libcore_io_Linux.cpp emulates the sentinel.
++    initConstant(env, c, "SO_PROTOCOL", SHIRAZ_DARWIN_SO_PROTOCOL);
+ #endif
+     initConstant(env, c, "SO_RCVBUF", SO_RCVBUF);
+     initConstant(env, c, "SO_RCVLOWAT", SO_RCVLOWAT);
+@@ -546,15 +588,19 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "STDERR_FILENO", STDERR_FILENO);
+     initConstant(env, c, "STDIN_FILENO", STDIN_FILENO);
+     initConstant(env, c, "STDOUT_FILENO", STDOUT_FILENO);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "ST_MANDLOCK", ST_MANDLOCK);
+     initConstant(env, c, "ST_NOATIME", ST_NOATIME);
+     initConstant(env, c, "ST_NODEV", ST_NODEV);
+     initConstant(env, c, "ST_NODIRATIME", ST_NODIRATIME);
+     initConstant(env, c, "ST_NOEXEC", ST_NOEXEC);
++#endif  // !__APPLE__
+     initConstant(env, c, "ST_NOSUID", ST_NOSUID);
+     initConstant(env, c, "ST_RDONLY", ST_RDONLY);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "ST_RELATIME", ST_RELATIME);
+     initConstant(env, c, "ST_SYNCHRONOUS", ST_SYNCHRONOUS);
++#endif  // !__APPLE__
+     initConstant(env, c, "S_IFBLK", S_IFBLK);
+     initConstant(env, c, "S_IFCHR", S_IFCHR);
+     initConstant(env, c, "S_IFDIR", S_IFDIR);
+@@ -583,9 +629,11 @@ static void OsConstants_initConstants(JNIEnv* env, jclass c) {
+     initConstant(env, c, "TCP_USER_TIMEOUT", TCP_USER_TIMEOUT);
+ #endif
+     initConstant(env, c, "TIOCOUTQ", TIOCOUTQ);
++#ifndef __APPLE__  // Linux-only; the Java field keeps its placeholder value 0.
+     initConstant(env, c, "UDP_ENCAP", UDP_ENCAP);
+     initConstant(env, c, "UDP_ENCAP_ESPINUDP_NON_IKE", UDP_ENCAP_ESPINUDP_NON_IKE);
+     initConstant(env, c, "UDP_ENCAP_ESPINUDP", UDP_ENCAP_ESPINUDP);
++#endif  // !__APPLE__
+     // UNIX_PATH_MAX is mentioned in some versions of unix(7), but not actually declared.
+     initConstant(env, c, "UNIX_PATH_MAX", sizeof(sockaddr_un::sun_path));
+     initConstant(env, c, "WCONTINUED", WCONTINUED);
+diff --git a/libcore/luni/src/main/native/libcore_io_Linux.cpp b/libcore/luni/src/main/native/libcore_io_Linux.cpp
+index 4e1937fac92bd4b6f7895c356c3bb76261ff1673..2b7a20bc0d397f5d648593407ff239b7bc27940c 100644
+--- a/libcore/luni/src/main/native/libcore_io_Linux.cpp
++++ b/libcore/luni/src/main/native/libcore_io_Linux.cpp
+@@ -20,19 +20,34 @@
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <ifaddrs.h>
++#ifndef __APPLE__
+ #include <linux/rtnetlink.h>
++#endif
+ #include <net/if.h>
++#if defined(__APPLE__)
++#include <crt_externs.h>
++#include <libproc.h>
++#include <net/if_dl.h>
++#include <sys/proc_info.h>
++#include <sys/ucred.h>
++#endif
+ #include <netdb.h>
+ #include <netinet/in.h>
++#ifndef __APPLE__
+ #include <netpacket/packet.h>
++#endif
+ #include <poll.h>
+ #include <pwd.h>
+ #include <signal.h>
+ #include <stdlib.h>
++#ifndef __APPLE__
+ #include <sys/capability.h>
++#endif
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
++#ifndef __APPLE__
+ #include <sys/prctl.h>
++#endif
+ #include <sys/resource.h>
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+@@ -65,6 +80,9 @@
+ #include "JniException.h"
+ #include "NetworkUtilities.h"
+ #include "Portability.h"
++#if defined(__APPLE__)
++#include "DarwinSockoptSentinels.h"
++#endif
+ 
+ #ifndef __unused
+ #define __unused __attribute__((__unused__))
+@@ -389,6 +407,7 @@ static jobject makeSocketAddress(JNIEnv* env, const sockaddr_storage& ss, const
+             return NULL;
+         }
+         return env->NewObject(JniConstants::unixSocketAddressClass, ctor, javaSunPath);
++#ifndef __APPLE__  // Darwin has neither AF_NETLINK nor AF_PACKET.
+     } else if (ss.ss_family == AF_NETLINK) {
+         const struct sockaddr_nl* nl_addr = reinterpret_cast<const struct sockaddr_nl*>(&ss);
+         static jmethodID ctor = env->GetMethodID(JniConstants::netlinkSocketAddressClass,
+@@ -419,6 +438,7 @@ static jobject makeSocketAddress(JNIEnv* env, const sockaddr_storage& ss, const
+                 static_cast<jbyte>(sll->sll_pkttype),
+                 byteArray.get());
+         return packetSocketAddress;
++#endif  // !__APPLE__
+     }
+     jniThrowExceptionFmt(env, "java/lang/IllegalArgumentException", "unsupported ss_family: %d",
+             ss.ss_family);
+@@ -455,15 +475,27 @@ static jobject makeStructStat(JNIEnv* env, const struct stat64& sb) {
+         return NULL;
+     }
+ 
++#if defined(__APPLE__)
++    jobject atim_timespec = makeStructTimespec(env, sb.st_atimespec);
++#else
+     jobject atim_timespec = makeStructTimespec(env, sb.st_atim);
++#endif
+     if (atim_timespec == NULL) {
+         return NULL;
+     }
++#if defined(__APPLE__)
++    jobject mtim_timespec = makeStructTimespec(env, sb.st_mtimespec);
++#else
+     jobject mtim_timespec = makeStructTimespec(env, sb.st_mtim);
++#endif
+     if (mtim_timespec == NULL) {
+         return NULL;
+     }
++#if defined(__APPLE__)
++    jobject ctim_timespec = makeStructTimespec(env, sb.st_ctimespec);
++#else
+     jobject ctim_timespec = makeStructTimespec(env, sb.st_ctim);
++#endif
+     if (ctim_timespec == NULL) {
+         return NULL;
+     }
+@@ -629,6 +661,15 @@ static bool javaInetSocketAddressToSockaddr(
+ 
+ static bool javaNetlinkSocketAddressToSockaddr(
+         JNIEnv* env, jobject javaSocketAddress, sockaddr_storage& ss, socklen_t& sa_len) {
++#if defined(__APPLE__)
++    // Darwin has no AF_NETLINK.
++    (void) javaSocketAddress;
++    (void) ss;
++    (void) sa_len;
++    errno = EAFNOSUPPORT;
++    throwErrnoException(env, "NetlinkSocketAddress");
++    return false;
++#else
+     static jfieldID nlPidFid = env->GetFieldID(
+             JniConstants::netlinkSocketAddressClass, "nlPortId", "I");
+     static jfieldID nlGroupsFid = env->GetFieldID(
+@@ -640,6 +681,7 @@ static bool javaNetlinkSocketAddressToSockaddr(
+     nlAddr->nl_groups = env->GetIntField(javaSocketAddress, nlGroupsFid);
+     sa_len = sizeof(sockaddr_nl);
+     return true;
++#endif
+ }
+ 
+ static bool javaUnixSocketAddressToSockaddr(
+@@ -669,6 +711,15 @@ static bool javaUnixSocketAddressToSockaddr(
+ 
+ static bool javaPacketSocketAddressToSockaddr(
+         JNIEnv* env, jobject javaSocketAddress, sockaddr_storage& ss, socklen_t& sa_len) {
++#if defined(__APPLE__)
++    // Darwin has no AF_PACKET.
++    (void) javaSocketAddress;
++    (void) ss;
++    (void) sa_len;
++    errno = EAFNOSUPPORT;
++    throwErrnoException(env, "PacketSocketAddress");
++    return false;
++#else
+     static jfieldID protocolFid = env->GetFieldID(
+             JniConstants::packetSocketAddressClass, "sll_protocol", "S");
+     static jfieldID ifindexFid = env->GetFieldID(
+@@ -701,6 +752,7 @@ static bool javaPacketSocketAddressToSockaddr(
+     }
+     sa_len = sizeof(sockaddr_ll);
+     return true;
++#endif
+ }
+ 
+ static bool javaSocketAddressToSockaddr(
+@@ -945,6 +997,22 @@ static jobject Linux_accept(JNIEnv* env, jobject, jobject javaFd, jobject javaSo
+     sockaddr* peer = (javaSocketAddress != NULL) ? reinterpret_cast<sockaddr*>(&ss) : NULL;
+     socklen_t* peerLength = (javaSocketAddress != NULL) ? &sl : 0;
+     jint clientFd = NET_FAILURE_RETRY(env, int, accept, javaFd, peer, peerLength);
++#if defined(__APPLE__)
++    // Linux accept(2) does not copy O_NONBLOCK/O_ASYNC from the listening
++    // socket; BSD/Darwin accept(2) does. Every java.net.ServerSocket fd is
++    // non-blocking (PlainSocketImpl.socketCreate), so without this the
++    // accepted Socket's reads fail with EAGAIN instead of blocking.
++    if (clientFd != -1) {
++        int flags = fcntl(clientFd, F_GETFL);
++        if (flags == -1 ||
++            ((flags & (O_NONBLOCK | O_ASYNC)) != 0 &&
++             fcntl(clientFd, F_SETFL, flags & ~(O_NONBLOCK | O_ASYNC)) == -1)) {
++            throwErrnoException(env, "accept");  // Before close() clobbers errno.
++            close(clientFd);
++            return NULL;
++        }
++    }
++#endif
+     if (clientFd == -1 || !fillSocketAddress(env, javaSocketAddress, ss, *peerLength)) {
+         close(clientFd);
+         return NULL;
+@@ -1117,8 +1185,13 @@ static jobject Linux_dup2(JNIEnv* env, jobject, jobject javaOldFd, jint newFd) {
+ }
+ 
+ static jobjectArray Linux_environ(JNIEnv* env, jobject) {
++#if defined(__APPLE__)
++    // A dylib cannot reference environ directly on Darwin.
++    return toStringArray(env, *_NSGetEnviron());
++#else
+     extern char** environ; // Standard, but not in any header file.
+     return toStringArray(env, environ);
++#endif
+ }
+ 
+ static void Linux_execve(JNIEnv* env, jobject, jstring javaFilename, jobjectArray javaArgv, jobjectArray javaEnvp) {
+@@ -1408,9 +1481,57 @@ static jobject Linux_getsockoptInAddr(JNIEnv* env, jobject, jobject javaFd, jint
+     return sockaddrToInetAddress(env, ss, NULL);
+ }
+ 
++#if defined(__APPLE__)
++// Emulates Linux SO_DOMAIN/SO_PROTOCOL (see DarwinSockoptSentinels.h). The
++// kernel records the family and protocol of each socket, and proc_pidfdinfo()
++// returns them exactly (including IPPROTO_ICMP for SOCK_DGRAM ping sockets,
++// which SO_TYPE plus the family cannot tell apart from UDP). Returns -1 with
++// errno set (EBADF, ENOTSOCK, ...) on failure, like getsockopt().
++static int shirazDarwinSocketDomainOrProtocol(int fd, int option, jint* result) {
++    struct socket_fdinfo si;
++    memset(&si, 0, sizeof(si));
++    int n = proc_pidfdinfo(getpid(), fd, PROC_PIDFDSOCKETINFO, &si, sizeof(si));
++    if (n < static_cast<int>(sizeof(si))) {
++        if (n > 0) errno = EIO;  // Short reply: refuse rather than guess.
++        return -1;
++    }
++    *result = (option == SHIRAZ_DARWIN_SO_DOMAIN) ? si.psi.soi_family : si.psi.soi_protocol;
++    return 0;
++}
++
++// IP_MULTICAST_ALL is an IPPROTO_IP option: like Linux, fail with EBADF or
++// ENOTSOCK for an fd that is not an open socket, and with EOPNOTSUPP (Darwin's
++// errno for IPPROTO_IP options on AF_UNIX) for a non-inet socket. Returns -1
++// with errno set on failure.
++static int shirazDarwinCheckInetSocket(int fd) {
++    jint domain = 0;
++    if (shirazDarwinSocketDomainOrProtocol(fd, SHIRAZ_DARWIN_SO_DOMAIN, &domain) == -1) {
++        return -1;
++    }
++    if (domain != AF_INET && domain != AF_INET6) {
++        errno = EOPNOTSUPP;
++        return -1;
++    }
++    return 0;
++}
++
++#endif
+ static jint Linux_getsockoptInt(JNIEnv* env, jobject, jobject javaFd, jint level, jint option) {
+     int fd = jniGetFDFromFileDescriptor(env, javaFd);
+     jint result = 0;
++#if defined(__APPLE__)
++    if (level == SOL_SOCKET &&
++        (option == SHIRAZ_DARWIN_SO_DOMAIN || option == SHIRAZ_DARWIN_SO_PROTOCOL)) {
++        throwIfMinusOne(env, "getsockopt", shirazDarwinSocketDomainOrProtocol(fd, option, &result));
++        return result;
++    }
++    if (level == IPPROTO_IP && option == SHIRAZ_DARWIN_IP_MULTICAST_ALL) {
++        // Darwin always behaves like Linux IP_MULTICAST_ALL=0: a socket only
++        // receives multicast for groups it joined itself.
++        throwIfMinusOne(env, "getsockopt", shirazDarwinCheckInetSocket(fd));
++        return 0;
++    }
++#endif
+     socklen_t size = sizeof(result);
+     throwIfMinusOne(env, "getsockopt", TEMP_FAILURE_RETRY(getsockopt(fd, level, option, &result, &size)));
+     return result;
+@@ -1443,6 +1564,31 @@ static jobject Linux_getsockoptTimeval(JNIEnv* env, jobject, jobject javaFd, jin
+ }
+ 
+ static jobject Linux_getsockoptUcred(JNIEnv* env, jobject, jobject javaFd, jint level, jint option) {
++#if defined(__APPLE__)
++  // Darwin has no SO_PEERCRED: AF_UNIX peer credentials come from
++  // LOCAL_PEERCRED and LOCAL_PEERPID, whatever level/option Java passed.
++  (void) level;
++  (void) option;
++  int fd = jniGetFDFromFileDescriptor(env, javaFd);
++  struct xucred xu;
++  socklen_t xu_size = sizeof(xu);
++  memset(&xu, 0, xu_size);
++  if (TEMP_FAILURE_RETRY(getsockopt(fd, SOL_LOCAL, LOCAL_PEERCRED, &xu, &xu_size)) == -1) {
++    throwErrnoException(env, "getsockopt");
++    return NULL;
++  }
++  pid_t pid = 0;
++  socklen_t pid_size = sizeof(pid);
++  if (TEMP_FAILURE_RETRY(getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &pid_size)) == -1) {
++    throwErrnoException(env, "getsockopt");
++    return NULL;
++  }
++  struct ucred u;
++  u.pid = pid;
++  u.uid = xu.cr_uid;
++  u.gid = xu.cr_ngroups > 0 ? xu.cr_groups[0] : static_cast<gid_t>(-1);
++  return makeStructUcred(env, u);
++#else
+   int fd = jniGetFDFromFileDescriptor(env, javaFd);
+   struct ucred u;
+   socklen_t size = sizeof(u);
+@@ -1453,11 +1599,17 @@ static jobject Linux_getsockoptUcred(JNIEnv* env, jobject, jobject javaFd, jint
+     return NULL;
+   }
+   return makeStructUcred(env, u);
++#endif
+ }
+ 
+ static jint Linux_gettid(JNIEnv* env __unused, jobject) {
+ #if defined(__BIONIC__)
+   return TEMP_FAILURE_RETRY(gettid());
++#elif defined(__APPLE__)
++  // Darwin thread ids are 64-bit; Java's gettid() returns an int.
++  uint64_t tid = 0;
++  pthread_threadid_np(NULL, &tid);
++  return static_cast<jint>(tid);
+ #else
+   return syscall(__NR_gettid);
+ #endif
+@@ -1567,6 +1719,36 @@ static jobjectArray Linux_getifaddrs(JNIEnv* env, jobject) {
+                     broad = NULL;
+                 }
+                 break;
++#if defined(__APPLE__)
++            case AF_LINK: {
++                // Link-layer interface (Darwin's counterpart of AF_PACKET).
++                sockaddr_dl* sdl = reinterpret_cast<sockaddr_dl*>(ifa->ifa_addr);
++                const unsigned char* lladdr = reinterpret_cast<const unsigned char*>(LLADDR(sdl));
++
++                bool allZero = true;
++                for (int i = 0; i < sdl->sdl_alen; ++i) {
++                    if (lladdr[i] != 0) {
++                        allZero = false;
++                        break;
++                    }
++                }
++
++                if (!allZero) {
++                    hwaddr = env->NewByteArray(sdl->sdl_alen);
++                    if (hwaddr == NULL) {
++                        return NULL;
++                    }
++                    env->SetByteArrayRegion(hwaddr, 0, sdl->sdl_alen,
++                                            reinterpret_cast<const jbyte*>(lladdr));
++                }
++                addr = netmask = broad = NULL;
++                break;
++            }
++            default:
++                // Other families are reported without addresses.
++                addr = netmask = broad = NULL;
++                break;
++#else
+             case AF_PACKET:
+                 // Raw Interface.
+                 sockaddr_ll* sll = reinterpret_cast<sockaddr_ll*>(ifa->ifa_addr);
+@@ -1589,6 +1771,7 @@ static jobjectArray Linux_getifaddrs(JNIEnv* env, jobject) {
+                 }
+                 addr = netmask = broad = NULL;
+                 break;
++#endif
+             }
+         } else {
+             // Preserve the entry even if the interface has no interface address.
+@@ -1771,7 +1954,11 @@ static void Linux_mincore(JNIEnv* env, jobject, jlong address, jlong byteCount,
+         return;
+     }
+     void* ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(address));
++#if defined(__APPLE__)
++    char* vec = reinterpret_cast<char*>(vector.get());  // Darwin: mincore(void*, size_t, char*).
++#else
+     unsigned char* vec = reinterpret_cast<unsigned char*>(vector.get());
++#endif
+     throwIfMinusOne(env, "mincore", TEMP_FAILURE_RETRY(mincore(ptr, byteCount, vec)));
+ }
+ 
+@@ -2187,6 +2374,21 @@ static void Linux_setsockoptIfreq(JNIEnv* env, jobject, jobject javaFd, jint lev
+ 
+ static void Linux_setsockoptInt(JNIEnv* env, jobject, jobject javaFd, jint level, jint option, jint value) {
+     int fd = jniGetFDFromFileDescriptor(env, javaFd);
++#if defined(__APPLE__)
++    if (level == IPPROTO_IP && option == SHIRAZ_DARWIN_IP_MULTICAST_ALL) {
++        // Darwin always behaves like Linux IP_MULTICAST_ALL=0 (see
++        // Linux_getsockoptInt), so 0 is a successful no-op. Darwin cannot
++        // deliver the traffic of groups joined by other sockets to this one,
++        // so any other value fails explicitly.
++        if (shirazDarwinCheckInetSocket(fd) == -1) {
++            throwErrnoException(env, "setsockopt");
++        } else if (value != 0) {
++            errno = ENOPROTOOPT;
++            throwErrnoException(env, "setsockopt");
++        }
++        return;
++    }
++#endif
+     throwIfMinusOne(env, "setsockopt", TEMP_FAILURE_RETRY(setsockopt(fd, level, option, &value, sizeof(value))));
+ }
+ 
+@@ -2211,6 +2413,12 @@ static void Linux_setsockoptGroupReq(JNIEnv* env, jobject, jobject javaFd, jint
+     if (!inetAddressToSockaddrVerbatim(env, javaGroup.get(), 0, req.gr_group, sa_len)) {
+         return;
+     }
++#if defined(__APPLE__)
++    // The BSD sockaddr has a length byte. The kernel sets it for bind/connect/
++    // sendto addresses itself, but MCAST_* setsockopt payloads must carry it:
++    // Darwin rejects a group sockaddr with ss_len 0 with EINVAL.
++    req.gr_group.ss_len = static_cast<uint8_t>(sa_len);
++#endif
+ 
+     int fd = jniGetFDFromFileDescriptor(env, javaFd);
+     int rc = TEMP_FAILURE_RETRY(setsockopt(fd, level, option, &req, sizeof(req)));
+@@ -2244,6 +2452,9 @@ static void Linux_setsockoptGroupSourceReq(JNIEnv* env, jobject, jobject javaFd,
+     if (!inetAddressToSockaddrVerbatim(env, javaGroup.get(), 0, req.gsr_group, sa_len)) {
+         return;
+     }
++#if defined(__APPLE__)
++    req.gsr_group.ss_len = static_cast<uint8_t>(sa_len);  // See Linux_setsockoptGroupReq.
++#endif
+ 
+     // Get the IPv4 or IPv6 multicast address to add to the filter.
+     static jfieldID gsrSourceFid = env->GetFieldID(JniConstants::structGroupSourceReqClass, "gsr_source", "Ljava/net/InetAddress;");
+@@ -2251,6 +2462,9 @@ static void Linux_setsockoptGroupSourceReq(JNIEnv* env, jobject, jobject javaFd,
+     if (!inetAddressToSockaddrVerbatim(env, javaSource.get(), 0, req.gsr_source, sa_len)) {
+         return;
+     }
++#if defined(__APPLE__)
++    req.gsr_source.ss_len = static_cast<uint8_t>(sa_len);  // See Linux_setsockoptGroupReq.
++#endif
+ 
+     int fd = jniGetFDFromFileDescriptor(env, javaFd);
+     int rc = TEMP_FAILURE_RETRY(setsockopt(fd, level, option, &req, sizeof(req)));
+@@ -2324,9 +2538,11 @@ static void Linux_shutdown(JNIEnv* env, jobject, jobject javaFd, jint how) {
+ }
+ 
+ static jobject Linux_socket(JNIEnv* env, jobject, jint domain, jint type, jint protocol) {
++#ifndef __APPLE__
+     if (domain == AF_PACKET) {
+         protocol = htons(protocol);  // Packet sockets specify the protocol in host byte order.
+     }
++#endif
+     int fd = throwIfMinusOne(env, "socket", TEMP_FAILURE_RETRY(socket(domain, type, protocol)));
+     return fd != -1 ? jniCreateFileDescriptor(env, fd) : NULL;
+ }
+diff --git a/libcore/ojluni/src/main/native/EPoll.c b/libcore/ojluni/src/main/native/EPoll.c
+index ea9cdf4dd039a52330cc00b838c645eb13972918..66ede9af2a738726cf7341df915e0b49fa4acc59 100644
+--- a/libcore/ojluni/src/main/native/EPoll.c
++++ b/libcore/ojluni/src/main/native/EPoll.c
+@@ -34,7 +34,39 @@
+ #include <dlfcn.h>
+ #include <unistd.h>
+ #include <sys/types.h>
++#ifdef __APPLE__
++/*
++ * Darwin has no epoll. EPoll backs only LinuxAsynchronousChannelProvider
++ * (selectors use PollSelectorProvider), so keep the JNI entry points and make
++ * every epoll call fail explicitly with ENOSYS.
++ */
++#include <errno.h>
++#include <stdint.h>
++typedef union epoll_data {
++    void *ptr;
++    int fd;
++    uint32_t u32;
++    uint64_t u64;
++} epoll_data_t;
++struct epoll_event {
++    uint32_t events;
++    epoll_data_t data;
++};
++static int epoll_create(int size) {
++    errno = ENOSYS;
++    return -1;
++}
++static int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event) {
++    errno = ENOSYS;
++    return -1;
++}
++static int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout) {
++    errno = ENOSYS;
++    return -1;
++}
++#else
+ #include <sys/epoll.h>
++#endif
+ 
+ JNIEXPORT jint JNICALL
+ Java_sun_nio_ch_EPoll_eventSize(JNIEnv* env, jclass this)
+diff --git a/libcore/ojluni/src/main/native/LinuxNativeDispatcher.c b/libcore/ojluni/src/main/native/LinuxNativeDispatcher.c
+index c8500db5c877e63aea7cb71c598230c3d4bae77d..d7c03d93426b1ae943cf71a1493e2379e15c5164 100644
+--- a/libcore/ojluni/src/main/native/LinuxNativeDispatcher.c
++++ b/libcore/ojluni/src/main/native/LinuxNativeDispatcher.c
+@@ -32,7 +32,14 @@
+ #include <string.h>
+ #include <dlfcn.h>
+ #include <errno.h>
++#ifdef __APPLE__
++#include <stdlib.h>
++#include <sys/param.h>
++#include <sys/mount.h>
++#include <sys/xattr.h>
++#else
+ #include <mntent.h>
++#endif
+ 
+ #include "sun_nio_fs_LinuxNativeDispatcher.h"
+ 
+@@ -46,6 +53,151 @@ fsetxattr_func* my_fsetxattr_func = NULL;
+ fremovexattr_func* my_fremovexattr_func = NULL;
+ flistxattr_func* my_flistxattr_func = NULL;
+ 
++#ifdef __APPLE__
++/*
++ * Darwin has no <mntent.h> and no /proc/mounts. Emulate the mntent stream
++ * over a getmntinfo_r_np() snapshot of the mount table: the path argument
++ * (normally "/proc/mounts") is ignored and the opaque FILE* handle points at
++ * the snapshot.
++ */
++struct mntent {
++    char *mnt_fsname;
++    char *mnt_dir;
++    char *mnt_type;
++    char *mnt_opts;
++    int mnt_freq;
++    int mnt_passno;
++};
++
++typedef struct {
++    struct statfs *mounts;
++    int count;
++    int next;
++} darwin_mntent_stream;
++
++static FILE* setmntent(const char* path, const char* mode) {
++    darwin_mntent_stream* stream = calloc(1, sizeof(darwin_mntent_stream));
++    if (stream == NULL) {
++        errno = ENOMEM;
++        return NULL;
++    }
++    stream->count = getmntinfo_r_np(&stream->mounts, MNT_NOWAIT);
++    if (stream->count <= 0) {
++        int saved_errno = errno;
++        free(stream);
++        errno = saved_errno;
++        return NULL;
++    }
++    return (FILE*)stream;
++}
++
++static int darwin_append(char** out, size_t* left, const char* text, int separator) {
++    size_t need = strlen(text) + (separator ? 1 : 0);
++    if (need >= *left) {
++        return -1;
++    }
++    if (separator) {
++        *(*out)++ = ',';
++    }
++    strcpy(*out, text);
++    *out += strlen(text);
++    *left -= need;
++    return 0;
++}
++
++static struct mntent* getmntent_r(FILE* fp, struct mntent* ent, char* buf, int buflen) {
++    darwin_mntent_stream* stream = (darwin_mntent_stream*)fp;
++    if (stream == NULL || stream->next >= stream->count) {
++        return NULL;
++    }
++    const struct statfs* fs = &stream->mounts[stream->next++];
++    char* out = buf;
++    size_t left = (size_t)buflen;
++    const char* fields[3] = { fs->f_mntfromname, fs->f_mntonname, fs->f_fstypename };
++    char* starts[3];
++    for (int i = 0; i < 3; ++i) {
++        starts[i] = out;
++        if (darwin_append(&out, &left, fields[i], 0) != 0) {
++            return NULL;
++        }
++        *out++ = '\0';
++        left--;
++    }
++    /* Options in the Linux /proc/mounts spelling where one exists. */
++    char* opts = out;
++    int sep = 0;
++    if (darwin_append(&out, &left, (fs->f_flags & MNT_RDONLY) ? "ro" : "rw", sep) != 0) {
++        return NULL;
++    }
++    sep = 1;
++    if ((fs->f_flags & MNT_NOSUID) && darwin_append(&out, &left, "nosuid", sep) != 0) {
++        return NULL;
++    }
++    if ((fs->f_flags & MNT_NODEV) && darwin_append(&out, &left, "nodev", sep) != 0) {
++        return NULL;
++    }
++    if ((fs->f_flags & MNT_NOEXEC) && darwin_append(&out, &left, "noexec", sep) != 0) {
++        return NULL;
++    }
++    if ((fs->f_flags & MNT_SYNCHRONOUS) && darwin_append(&out, &left, "sync", sep) != 0) {
++        return NULL;
++    }
++    if ((fs->f_flags & MNT_NOATIME) && darwin_append(&out, &left, "noatime", sep) != 0) {
++        return NULL;
++    }
++    ent->mnt_fsname = starts[0];
++    ent->mnt_dir = starts[1];
++    ent->mnt_type = starts[2];
++    ent->mnt_opts = opts;
++    ent->mnt_freq = 0;
++    ent->mnt_passno = 0;
++    return ent;
++}
++
++static int endmntent(FILE* fp) {
++    darwin_mntent_stream* stream = (darwin_mntent_stream*)fp;
++    if (stream != NULL) {
++        free(stream->mounts);
++        free(stream);
++    }
++    return 1;
++}
++
++/*
++ * Darwin's f*xattr calls take an extra options argument (and a position for
++ * the get/set calls). Adapt them to the Linux signatures used below instead
++ * of looking the symbols up with dlsym(), which would call them with the
++ * wrong arguments. A missing attribute is ENOATTR on Darwin but ENODATA on
++ * Linux, and Java callers compare against ENODATA, so ENOATTR is reported as
++ * ENODATA.
++ */
++static void darwin_xattr_errno(void) {
++    if (errno == ENOATTR) {
++        errno = ENODATA;
++    }
++}
++static size_t darwin_fgetxattr(int fd, const char* name, void* value, size_t size) {
++    ssize_t res = fgetxattr(fd, name, value, size, 0, 0);
++    if (res == -1) darwin_xattr_errno();
++    return (size_t)res;
++}
++static int darwin_fsetxattr(int fd, const char* name, void* value, size_t size, int flags) {
++    int res = fsetxattr(fd, name, value, size, 0, flags);
++    if (res == -1) darwin_xattr_errno();
++    return res;
++}
++static int darwin_fremovexattr(int fd, const char* name) {
++    int res = fremovexattr(fd, name, 0);
++    if (res == -1) darwin_xattr_errno();
++    return res;
++}
++static int darwin_flistxattr(int fd, char* list, size_t size) {
++    ssize_t res = flistxattr(fd, list, size, 0);
++    if (res == -1) darwin_xattr_errno();
++    return (int)res;
++}
++
++#endif
+ static jfieldID entry_name;
+ static jfieldID entry_dir;
+ static jfieldID entry_fstype;
+@@ -62,10 +214,17 @@ static void throwUnixException(JNIEnv* env, int errnum) {
+ JNIEXPORT void JNICALL
+ Java_sun_nio_fs_LinuxNativeDispatcher_init(JNIEnv *env, jclass clazz)
+ {
++#ifdef __APPLE__
++    my_fgetxattr_func = darwin_fgetxattr;
++    my_fsetxattr_func = darwin_fsetxattr;
++    my_fremovexattr_func = darwin_fremovexattr;
++    my_flistxattr_func = darwin_flistxattr;
++#else
+     my_fgetxattr_func = (fgetxattr_func*)dlsym(RTLD_DEFAULT, "fgetxattr");
+     my_fsetxattr_func = (fsetxattr_func*)dlsym(RTLD_DEFAULT, "fsetxattr");
+     my_fremovexattr_func = (fremovexattr_func*)dlsym(RTLD_DEFAULT, "fremovexattr");
+     my_flistxattr_func = (flistxattr_func*)dlsym(RTLD_DEFAULT, "flistxattr");
++#endif
+ 
+     clazz = (*env)->FindClass(env, "sun/nio/fs/UnixMountEntry");
+     CHECK_NULL(clazz);
+diff --git a/libcore/ojluni/src/main/native/LinuxWatchService.c b/libcore/ojluni/src/main/native/LinuxWatchService.c
+index 375aaa485050c8449b4343a981420d1ec6099300..f9c78de50c100b61e821a0f0087adba73acecc51 100644
+--- a/libcore/ojluni/src/main/native/LinuxWatchService.c
++++ b/libcore/ojluni/src/main/native/LinuxWatchService.c
+@@ -33,7 +33,37 @@
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <sys/poll.h>
++#ifdef __APPLE__
++/*
++ * Darwin has no inotify (its native mechanisms are FSEvents and kqueue).
++ * Keep the JNI entry points so the class links, and make initialisation fail
++ * explicitly: inotify_init() fails with ENOSYS, so creating a
++ * LinuxWatchService throws an IOException.
++ */
++#include <errno.h>
++#include <stdint.h>
++struct inotify_event {
++    int wd;
++    uint32_t mask;
++    uint32_t cookie;
++    uint32_t len;
++    char name[];
++};
++static int inotify_init(void) {
++    errno = ENOSYS;
++    return -1;
++}
++static int inotify_add_watch(int fd, const char *path, uint32_t mask) {
++    errno = ENOSYS;
++    return -1;
++}
++static int inotify_rm_watch(int fd, int wd) {
++    errno = ENOSYS;
++    return -1;
++}
++#else
+ #include <sys/inotify.h>
++#endif
+ 
+ #include "sun_nio_fs_LinuxWatchService.h"
+ 
+diff --git a/libcore/ojluni/src/main/native/Net.c b/libcore/ojluni/src/main/native/Net.c
+index 01ea3f2b58682c7fcfa77b996e46558b8b60d799..c7d34566e80dc1692d76dd4c9e34f886950f6399 100644
+--- a/libcore/ojluni/src/main/native/Net.c
++++ b/libcore/ojluni/src/main/native/Net.c
+@@ -428,6 +428,108 @@ Java_sun_nio_ch_Net_localInetAddress(JNIEnv *env, jclass clazz, jobject fdo)
+     return NET_SockaddrToInetAddress(env, (struct sockaddr *)&sa, &port);
+ }
+ 
++#ifdef __APPLE__
++/*
++ * sun.nio.ch.SocketOptionRegistry is generated on Linux and hard-codes the
++ * Linux (level, optname) pairs; it is the only source of the level/opt that
++ * reach getIntOption0/setIntOption0. Darwin numbers most of them differently
++ * (SOL_SOCKET is 0xffff, IP_TOS is 3, ...), so translate every registry pair
++ * to the native one here. Any other pair fails with ENOPROTOOPT rather than
++ * being passed through to a possibly different Darwin option.
++ */
++static int shiraz_darwin_sockopt(jint *level, jint *opt)
++{
++    int l = -1, o = -1;
++    switch (*level) {
++    case 1:                                     /* Linux SOL_SOCKET */
++        l = SOL_SOCKET;
++        switch (*opt) {
++        case 2:  o = SO_REUSEADDR; break;
++        case 6:  o = SO_BROADCAST; break;
++        case 7:  o = SO_SNDBUF;    break;
++        case 8:  o = SO_RCVBUF;    break;
++        case 9:  o = SO_KEEPALIVE; break;
++        case 10: o = SO_OOBINLINE; break;
++        /*
++         * Linux SO_LINGER counts seconds; Darwin SO_LINGER counts 10 ms
++         * ticks and SO_LINGER_SEC counts seconds. Darwin rejects more than
++         * 327 s with EDOM, which surfaces as a SocketException.
++         */
++        case 13: o = SO_LINGER_SEC; break;
++        }
++        break;
++    case 0:                                     /* IPPROTO_IP */
++        l = IPPROTO_IP;
++        switch (*opt) {
++        case 1:  o = IP_TOS;            break;
++        case 32: o = IP_MULTICAST_IF;   break;
++        case 33: o = IP_MULTICAST_TTL;  break;
++        case 34: o = IP_MULTICAST_LOOP; break;
++        }
++        break;
++    case 41:                                    /* IPPROTO_IPV6 */
++        l = IPPROTO_IPV6;
++        switch (*opt) {
++        case 67: o = IPV6_TCLASS;         break;
++        case 17: o = IPV6_MULTICAST_IF;   break;
++        case 18: o = IPV6_MULTICAST_HOPS; break;
++        case 19: o = IPV6_MULTICAST_LOOP; break;
++        }
++        break;
++    case 6:                                     /* IPPROTO_TCP */
++        l = IPPROTO_TCP;
++        if (*opt == 1) o = TCP_NODELAY;
++        break;
++    }
++    if (o < 0) {
++        errno = ENOPROTOOPT;
++        return -1;
++    }
++    *level = l;
++    *opt = o;
++    return 0;
++}
++
++/*
++ * NIO IP_TOS on an INET6 channel becomes IPV6_TCLASS. Linux also sets IP_TOS
++ * for IPv4/v4-mapped traffic (see the __linux__ block in setIntOption0);
++ * Darwin rejects IPPROTO_IP options on AF_INET6 sockets, so IPV6_TCLASS never
++ * reaches IPv4 peers. Returns 1 when this socket can carry IPv4 traffic
++ * (IPV6_V6ONLY is 0 and the peer is v4-mapped, or there is no peer and the
++ * local address is v4-mapped or unspecified), 0 when it carries only native
++ * IPv6, and -1 with errno set on error.
++ */
++static int shiraz_darwin_v4_traffic_possible(int fd)
++{
++    struct sockaddr_in6 sa;
++    socklen_t len;
++    int v6only = 0;
++
++    len = sizeof(v6only);
++    if (getsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, &len) < 0)
++        return -1;
++    if (v6only)
++        return 0;
++    memset(&sa, 0, sizeof(sa));
++    len = sizeof(sa);
++    if (getpeername(fd, (struct sockaddr *)&sa, &len) == 0) {
++        if (sa.sin6_family != AF_INET6)
++            return 0;
++        return IN6_IS_ADDR_V4MAPPED(&sa.sin6_addr) ? 1 : 0;
++    }
++    if (errno != ENOTCONN)
++        return -1;
++    memset(&sa, 0, sizeof(sa));
++    len = sizeof(sa);
++    if (getsockname(fd, (struct sockaddr *)&sa, &len) < 0)
++        return -1;
++    if (sa.sin6_family != AF_INET6)
++        return 0;
++    return (IN6_IS_ADDR_V4MAPPED(&sa.sin6_addr) ||
++            IN6_IS_ADDR_UNSPECIFIED(&sa.sin6_addr)) ? 1 : 0;
++}
++
++#endif /* __APPLE__ */
+ JNIEXPORT jint JNICALL
+ Java_sun_nio_ch_Net_getIntOption0(JNIEnv *env, jclass clazz, jobject fdo,
+                                   jboolean mayNeedConversion, jint level, jint opt)
+@@ -439,6 +541,16 @@ Java_sun_nio_ch_Net_getIntOption0(JNIEnv *env, jclass clazz, jobject fdo,
+     socklen_t arglen;
+     int n;
+ 
++#ifdef __APPLE__
++    /* Before the native-value comparisons below (SO_LINGER, IP_MULTICAST_*). */
++    if (shiraz_darwin_sockopt(&level, &opt) < 0) {
++        JNU_ThrowByNameWithLastError(env,
++                                     JNU_JAVANETPKG "SocketException",
++                                     "sun.nio.ch.Net.getIntOption");
++        return -1;
++    }
++
++#endif /* __APPLE__ */
+     /* Option value is an int except for a few specific cases */
+ 
+     arg = (void *)&result;
+@@ -450,7 +562,12 @@ Java_sun_nio_ch_Net_getIntOption0(JNIEnv *env, jclass clazz, jobject fdo,
+         arglen = sizeof(carg);
+     }
+ 
++#ifdef __APPLE__
++    /* The translator maps Linux SO_LINGER (seconds) to SO_LINGER_SEC. */
++    if (level == SOL_SOCKET && (opt == SO_LINGER || opt == SO_LINGER_SEC)) {
++#else
+     if (level == SOL_SOCKET && opt == SO_LINGER) {
++#endif
+         arg = (void *)&linger;
+         arglen = sizeof(linger);
+     }
+@@ -473,7 +590,11 @@ Java_sun_nio_ch_Net_getIntOption0(JNIEnv *env, jclass clazz, jobject fdo,
+         return (jint)carg;
+     }
+ 
++#ifdef __APPLE__
++    if (level == SOL_SOCKET && (opt == SO_LINGER || opt == SO_LINGER_SEC))
++#else
+     if (level == SOL_SOCKET && opt == SO_LINGER)
++#endif
+         return linger.l_onoff ? (jint)linger.l_linger : (jint)-1;
+ 
+     return (jint)result;
+@@ -491,6 +612,36 @@ Java_sun_nio_ch_Net_setIntOption0(JNIEnv *env, jclass clazz, jobject fdo,
+     socklen_t arglen;
+     int n;
+ 
++#ifdef __APPLE__
++    /* Before the native-value comparisons below (SO_LINGER, IP_MULTICAST_*). */
++    if (shiraz_darwin_sockopt(&level, &opt) < 0) {
++        JNU_ThrowByNameWithLastError(env,
++                                     JNU_JAVANETPKG "SocketException",
++                                     "sun.nio.ch.Net.setIntOption");
++        return;
++    }
++    /*
++     * Fail explicitly rather than report success for a TOS that IPv4 peers
++     * would never see (no Darwin counterpart of the __linux__ IP_TOS block
++     * below). Native-IPv6-only sockets keep IPV6_TCLASS.
++     */
++    if (level == IPPROTO_IPV6 && opt == IPV6_TCLASS && isIPv6) {
++        int v4 = shiraz_darwin_v4_traffic_possible(fdval(env, fdo));
++        if (v4 > 0) {
++            JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException",
++                            "ENOPROTOOPT: IP_TOS is not supported for IPv4 "
++                            "traffic on a dual-stack socket on Darwin");
++            return;
++        }
++        if (v4 < 0) {
++            JNU_ThrowByNameWithLastError(env,
++                                         JNU_JAVANETPKG "SocketException",
++                                         "sun.nio.ch.Net.setIntOption");
++            return;
++        }
++    }
++
++#endif /* __APPLE__ */
+     /* Option value is an int except for a few specific cases */
+ 
+     parg = (void*)&arg;
+@@ -503,7 +654,12 @@ Java_sun_nio_ch_Net_setIntOption0(JNIEnv *env, jclass clazz, jobject fdo,
+         carg = (u_char)arg;
+     }
+ 
++#ifdef __APPLE__
++    /* The translator maps Linux SO_LINGER (seconds) to SO_LINGER_SEC. */
++    if (level == SOL_SOCKET && (opt == SO_LINGER || opt == SO_LINGER_SEC)) {
++#else
+     if (level == SOL_SOCKET && opt == SO_LINGER) {
++#endif
+         parg = (void *)&linger;
+         arglen = sizeof(linger);
+         if (arg >= 0) {
+diff --git a/libcore/ojluni/src/main/native/System.c b/libcore/ojluni/src/main/native/System.c
+index 547873f8eca2b44a3e646b19406244c6d3588b80..b88717f3ae55b0cf5dc909d8a1d0db34f17f4642 100644
+--- a/libcore/ojluni/src/main/native/System.c
++++ b/libcore/ojluni/src/main/native/System.c
+@@ -39,7 +39,12 @@
+ #include "jni_util.h"
+ #include "jvm.h"
+ 
++#ifdef __APPLE__
++/* No OpenSSL on macOS hosts; libopenjdk does not link it. */
++#define OPENSSL_VERSION_TEXT "unavailable"
++#else
+ #include "openssl/opensslv.h"
++#endif
+ #include "zlib.h"
+ #include <nativehelper/JNIHelp.h>
+ #if defined(__ANDROID__)
+diff --git a/libcore/ojluni/src/main/native/UNIXProcess_md.c b/libcore/ojluni/src/main/native/UNIXProcess_md.c
+index f944c310d81cf0e1916e171aff6f02ae63001b9c..99984ec8aeb748a767bd696d6ea163d945ef6e34 100644
+--- a/libcore/ojluni/src/main/native/UNIXProcess_md.c
++++ b/libcore/ojluni/src/main/native/UNIXProcess_md.c
+@@ -44,11 +44,15 @@
+ #include <stdlib.h>
+ #include <sys/types.h>
+ #include <ctype.h>
++#ifdef __APPLE__
++#include <sys/wait.h>
++#else
+ #ifdef _ALLBSD_SOURCE
+ #include <wait.h>
+ #else
+ #include <sys/wait.h>
+ #endif
++#endif
+ #include <signal.h>
+ #include <string.h>
+ #include <errno.h>
+diff --git a/libcore/ojluni/src/main/native/UnixNativeDispatcher.c b/libcore/ojluni/src/main/native/UnixNativeDispatcher.c
+index e8a1623a87de4b030c87af1090fe17b88fb24de9..2a16b4c60aa488e947f5d9c065a7082e77cadf41 100644
+--- a/libcore/ojluni/src/main/native/UnixNativeDispatcher.c
++++ b/libcore/ojluni/src/main/native/UnixNativeDispatcher.c
+@@ -122,6 +122,19 @@ typedef int renameat_func(int, const char*, int, const char*);
+ typedef int futimesat_func(int, const char *, const struct timeval *);
+ typedef DIR* fdopendir_func(int);
+ 
++#if defined(__APPLE__)
++/*
++ * sun.nio.fs.UnixConstants hard-codes the Linux AT_* values as compile-time
++ * constants. Darwin uses different bits, so translate them here.
++ */
++static int shiraz_darwin_at_flags(int flags) {
++    int out = 0;
++    if (flags & 0x100) out |= AT_SYMLINK_NOFOLLOW; /* Linux AT_SYMLINK_NOFOLLOW */
++    if (flags & 0x200) out |= AT_REMOVEDIR;        /* Linux AT_REMOVEDIR */
++    return out;
++}
++
++#endif
+ static openat64_func* my_openat64_func = NULL;
+ static fstatat64_func* my_fstatat64_func = NULL;
+ static unlinkat_func* my_unlinkat_func = NULL;
+@@ -464,6 +477,14 @@ static void prepAttributes(JNIEnv* env, struct stat64* buf, jobject attrs) {
+     (*env)->SetLongField(env, attrs, attrs_st_mtime_nsec, (jlong)buf->st_mtim.tv_nsec);
+     (*env)->SetLongField(env, attrs, attrs_st_ctime_nsec, (jlong)buf->st_ctim.tv_nsec);
+ #endif
++#if defined(__APPLE__)
++    /* Darwin names the timespec fields st_*timespec (no st_*tim, and
++     * _POSIX_C_SOURCE is unset with _DARWIN_C_SOURCE), so fill the
++     * nanoseconds here; otherwise NIO file times lose sub-second precision. */
++    (*env)->SetLongField(env, attrs, attrs_st_atime_nsec, (jlong)buf->st_atimespec.tv_nsec);
++    (*env)->SetLongField(env, attrs, attrs_st_mtime_nsec, (jlong)buf->st_mtimespec.tv_nsec);
++    (*env)->SetLongField(env, attrs, attrs_st_ctime_nsec, (jlong)buf->st_ctimespec.tv_nsec);
++#endif
+ }
+ 
+ JNIEXPORT void JNICALL
+@@ -525,7 +546,11 @@ Java_sun_nio_fs_UnixNativeDispatcher_fstatat0(JNIEnv* env, jclass this, jint dfd
+         JNU_ThrowInternalError(env, "should not reach here");
+         return;
+     }
++#if defined(__APPLE__)
++    RESTARTABLE((*my_fstatat64_func)((int)dfd, path, &buf, shiraz_darwin_at_flags((int)flag)), err);
++#else
+     RESTARTABLE((*my_fstatat64_func)((int)dfd, path, &buf, (int)flag), err);
++#endif
+     if (err == -1) {
+         throwUnixException(env, errno);
+     } else {
+@@ -786,7 +811,11 @@ Java_sun_nio_fs_UnixNativeDispatcher_unlinkat0(JNIEnv* env, jclass this, jint df
+     }
+ 
+     /* EINTR not listed as a possible error */
++#if defined(__APPLE__)
++    if ((*my_unlinkat_func)((int)dfd, path, shiraz_darwin_at_flags((int)flags)) == -1) {
++#else
+     if ((*my_unlinkat_func)((int)dfd, path, (int)flags) == -1) {
++#endif
+         throwUnixException(env, errno);
+     }
+ }
+diff --git a/libcore/ojluni/src/main/native/io_util_md.c b/libcore/ojluni/src/main/native/io_util_md.c
+index 8b8a6873cb9556329493e8345d88d55e397f303d..2a45abd426216a999cca1be0d5419ccc7102cf0b 100644
+--- a/libcore/ojluni/src/main/native/io_util_md.c
++++ b/libcore/ojluni/src/main/native/io_util_md.c
+@@ -62,6 +62,13 @@ jstring newStringPlatform(JNIEnv *env, const char* str)
+ }
+ #endif
+ 
++#ifdef __APPLE__
++/* off_t and struct stat are 64-bit on Darwin; there are no LFS variants. */
++#define open64 open
++#define stat64 stat
++#define fstat64 fstat
++
++#endif
+ FD
+ handleOpen(const char *path, int oflag, int mode) {
+     FD fd;
+diff --git a/libcore/ojluni/src/main/native/jvm_md.h b/libcore/ojluni/src/main/native/jvm_md.h
+index a366445687307fc879c874ba0a91502dc7d71e22..caa54952c426bde5de5afb6a1daca71b49d1c9e2 100644
+--- a/libcore/ojluni/src/main/native/jvm_md.h
++++ b/libcore/ojluni/src/main/native/jvm_md.h
+@@ -42,8 +42,13 @@
+ 
+ #define JNI_LIB_PREFIX "lib"
+ #ifdef __APPLE__
+-#define JNI_LIB_SUFFIX ".dylib"
+-#define VERSIONED_JNI_LIB_NAME(NAME, VERSION) JNI_LIB_PREFIX NAME "." VERSION JNI_LIB_SUFFIX
++/*
++ * The macOS host build keeps Android's ".so" names for its Mach-O JNI
++ * libraries (HOST_JNILIB_SUFFIX := .so), so System.mapLibraryName() must
++ * produce "libNAME.so" there as well.
++ */
++#define JNI_LIB_SUFFIX ".so"
++#define VERSIONED_JNI_LIB_NAME(NAME, VERSION) JNI_LIB_PREFIX NAME JNI_LIB_SUFFIX "." VERSION
+ #else
+ #define JNI_LIB_SUFFIX ".so"
+ #define VERSIONED_JNI_LIB_NAME(NAME, VERSION) JNI_LIB_PREFIX NAME JNI_LIB_SUFFIX "." VERSION
+diff --git a/libcore/ojluni/src/main/native/linux_close.cpp b/libcore/ojluni/src/main/native/linux_close.cpp
+index fa0c5b4a53784d8be722db3faacb6c3d4950184f..81c06ce26d7db8e7b6a9e5f2443b10679c94b30c 100644
+--- a/libcore/ojluni/src/main/native/linux_close.cpp
++++ b/libcore/ojluni/src/main/native/linux_close.cpp
+@@ -51,7 +51,13 @@ extern "C" {
+  */
+ // Android-changed: Bionic (and AsynchronousCloseMonitor) expects libcore to use
+ // __SIGRTMIN + 2, not __SIGRTMAX - 2
++#ifdef __APPLE__
++// Darwin has no real-time signals; NativeThread.c (_ALLBSD_SOURCE) and
++// libnativehelper's AsynchronousCloseMonitor use SIGIO there.
++static int sigWakeup = SIGIO;
++#else
+ static int sigWakeup = (SIGRTMAX - 2);
++#endif
+ 
+ /*
+  * Close or dup2 a file descriptor ensuring that all threads blocked on
+diff --git a/libnativehelper/AsynchronousCloseMonitor.cpp b/libnativehelper/AsynchronousCloseMonitor.cpp
+index 0d25e482d6657a3c61680fff96a734fb1af769a0..6d530bca1668ceca21fa8642f255cc37544009b9 100644
+--- a/libnativehelper/AsynchronousCloseMonitor.cpp
++++ b/libnativehelper/AsynchronousCloseMonitor.cpp
+@@ -44,7 +44,13 @@ static AsynchronousCloseMonitor* blockedThreadList = NULL;
+  * The specific signal chosen here is arbitrary, but bionic needs to know so that SIGRTMIN
+  * starts at a higher value.
+  */
++#if defined(__APPLE__)
++// Darwin has no real-time signals (NSIG is 32). libopenjdk's linux_close.cpp
++// and NativeThread.c use SIGIO there too; all three must agree.
++static const int BLOCKED_THREAD_SIGNAL = SIGIO;
++#else
+ static const int BLOCKED_THREAD_SIGNAL = __SIGRTMIN + 2;
++#endif
+ 
+ static void blockedThreadSignalHandler(int /*signal*/) {
+     // Do nothing. We only sent this signal for its side-effect of interrupting syscalls.

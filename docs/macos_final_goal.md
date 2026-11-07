@@ -30,8 +30,8 @@ Measured on an Apple M2 Pro running macOS 27.2:
 
 | Fact | Consequence |
 |---|---|
-| Page size is 16 KiB. | ART's `constexpr kPageSize = 4096` must become a runtime value. 4 KiB-aligned APK `.so` segments must be copy-loaded, not mapped from the file. |
-| Nothing can be mapped below 4 GB (arm64 binaries need a hard 4 GB `__PAGEZERO`). | ART's low-4G allocator and 32-bit compressed heap references need a heap base above 4 GB (base-relative references). |
+| Page size is 16 KiB. | ART's `kPageSize` is a compile-time 16384 on darwin-arm64 (`runtime.cc` checks it against `sysconf(_SC_PAGE_SIZE)` at startup). 4 KiB-aligned APK `.so` segments must be copy-loaded, not mapped from the file. |
+| Nothing can be mapped below 4 GB (arm64 binaries need a hard 4 GB `__PAGEZERO`). | The Java heap lives in a fixed 4 GiB window at `0x10000000000`; a 32-bit reference is the low half of the address and decodes as `base | ref` (0 stays null). |
 | The kernel rewrites `tpidr_el0` on context switch (a written value reverts to the kernel's CPU id). | Bionic-ABI code that reads `tpidr_el0` for TLS (stack guard, ELF TLS, GL slots) cannot run unmodified; the loader must rewrite those instructions. |
 | RWX memory requires `MAP_JIT` plus per-thread `pthread_jit_write_protect_np`; plain RWX `mmap`/`mprotect` fails. | ART JIT and the ELF loader share one executable-memory allocator. |
 | Apple arm64 ABI differs from AAPCS64: variadic arguments on the stack, `char*` `va_list`, 64-bit `long double`, signed `char`, caller-extended narrow arguments, `x18` reserved. | Every bionic-to-libSystem crossing goes through a thunk; variadic and `va_list` functions need hand-written argument marshalling. |
@@ -61,16 +61,16 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 
 | Status | Item | Repo / source | macOS implementation | Diff |
 |---|---|---|---|---|
-| [ ] | ART builds as Mach-O for darwin-arm64 | `context/art_standalone`, `scripts/bootstrap_runtime.py` | Apple clang build of ART, libartbase, libdexfile, libnativehelper, libcore natives; Mach-O macros in arm64 `.S` files (underscore prefix, `.private_extern`, no `.type`/`.size`) | X |
-| [ ] | Runtime page size | `art/libartbase/base/globals.h`, `runtime.cc` | `kPageSize` read from `sysconf(_SC_PAGESIZE)` (16 KiB), or rebase on ART with the page-agnostic `gPageSize` work | X |
-| [ ] | Heap above 4 GB | `mem_map.h` (`USE_ART_LOW_4G_ALLOCATOR`) | Base-relative compressed references (heap base + 32-bit offset) or 64-bit references; no low-4G mappings | X |
+| [~] | ART builds as Mach-O for darwin-arm64 | `context/art_standalone`, `patches/art-darwin-*.patch`, `scripts/bootstrap_darwin.py` | Apple clang build of ART, libartbase, libdexfile, libnativehelper, libcore natives; Mach-O macros in arm64 `.S` files (underscore prefix, `.private_extern`, no `.type`/`.size`); static `.set` alias tables for asm-to-C symbols. Release libart only; mterp is assembled but never runs | X |
+| [x] | Page size | `art/libartbase/base/globals.h`, `runtime.cc` | `kPageSize` is `constexpr 16384` on darwin-arm64; monitor-pool chunks stay 4 KiB; stack-overflow gaps 16 KiB | X |
+| [~] | Heap above 4 GB | `mem_map.cc`, `mirror/object_reference.h`, `lock_word.h` | `MemMap::Init` reserves `[0x10000000000, +4 GiB)` with `mach_vm_allocate(VM_FLAGS_FIXED)`; `low_4gb` maps come from that window; references decode as `base | ref`; forwarding addresses are window-relative. Boot images (`ART_BASE_ADDRESS`) and compiled code are not adapted yet | X |
 | [ ] | Executable memory | `jit_code_cache.cc` | Single `MAP_JIT` region, `pthread_jit_write_protect_np` around writes, `sys_icache_invalidate`; no `memfd_create` dual view, no RWX `mprotect` | H |
 | [ ] | Fault handling | `fault_handler_arm64.cc`, sigchain | Darwin `ucontext_t` (`uc_mcontext->__ss.__pc/__sp/__x[]`), SIGBUS vs SIGSEGV, Mach exception ports not stealing faults | H |
 | [ ] | Memory remap | ART `MemMap` | `mach_vm_remap` instead of `mremap` | M |
 | [ ] | Interpreter-only first, JIT next, AOT last | `oat_file.cc`, `scripts/package_aot.py` | `-Xint` → JIT; OAT files loaded by ART's own ELF loader into `MAP_JIT` memory | H |
 | [ ] | Embedding launcher | `packaging/app_run.cpp`, `src/shiraz/runtime.py` | `.app` main executable, `_NSGetExecutablePath`, `JNI_CreateJavaVM` on the primordial thread (Cocoa requirement), `@rpath` dylib lookup; no `ld.so --preload`, no `DYLD_INSERT_LIBRARIES` | M |
 | [ ] | TLS trust store | `patches/art-host-trust-store.patch` | Security.framework (`SecTrustCopyAnchorCertificates` / keychain roots) | M |
-| [ ] | Library name suffix | libcore `jvm_md.h`, `Runtime.java` | Keep `JNI_LIB_SUFFIX` as `.so` so `System.loadLibrary` finds APK `libfoo.so` | L |
+| [x] | Library name suffix | libcore `jvm_md.h`, `Runtime.java` | Keep `JNI_LIB_SUFFIX` as `.so` so `System.loadLibrary` finds APK `libfoo.so` | L |
 
 ### 2. Guest ELF loader and bionic ABI personality
 
@@ -253,6 +253,94 @@ unchanged), the version check and the commit guard.
     than `EINTR`.
   - Pipes, socket pairs and received descriptors get `FD_CLOEXEC` after creation,
     not atomically. Shiraz's own spawn is safe; other fork/exec paths are not.
+
+### ART on darwin-arm64 (M3 first exit)
+
+`python3 scripts/bootstrap_runtime.py art` applies `patches/art-darwin-*.patch`
+(Darwin hosts only, after the Linux patch chain), builds ICU4C 78.3, lz4 and
+liblzma into `.local`, runs a cold ART make in about 2 min 20 s, stages the ICU
+dylibs next to the ART natives and desugars the boot jars. `dalvikvm -Xint`
+from `context/art_standalone/out/host/darwin-x86` then runs:
+
+- a hello-world DEX: exit 0 in 20 of 20 runs under ASLR, about 80 ms wall each;
+- a 22-check stress DEX: threads and monitor contention, wait/notify, interrupts,
+  executors, 16 MiB of large objects across explicit GCs, NPE, bounds and
+  stack-overflow errors, reflection, `java.lang.reflect.Proxy`, ICU text
+  (Turkish casing, German number format, collation), UTF-8 file IO, 100k-entry
+  maps, identity hashes across GC. All pass, with and without `-Xcheck:jni`, and
+  under the CMS (default), SS, GSS and MS collectors;
+- a JNI dylib loaded with `System.loadLibrary`, whose natives take 24 mixed-width
+  arguments (narrow types and floats on the stack): results match the Java
+  reference, so the Apple arm64 stack-argument packing in the generic JNI
+  trampoline works.
+
+`vmmap` of a running VM shows the reservation at `0x10000000000` (64 KiB guard)
+and the main space at `0x10012c00000`.
+
+Two adversarial review rounds and the fixes they prompted found 24 defects in
+the port. Each now has a fix and a regression run that failed before it:
+
+- Heap: Darwin `MADV_DONTNEED` does not zero pages. RosAlloc, `RosAllocSpace`
+  clear/create and `BumpPointerSpace::Clear` now zero explicitly with
+  `MADV_ZERO`, and only over writable pages. Before the fix, homogeneous-space
+  compaction for OOM ended in `SIGBUS`, and so did zygote collector transitions,
+  whose backup space is `PROT_NONE`. Also fixed: empty-range bitmap walks
+  with a non-zero bitmap base, which crashed GSS with the map large-object
+  space, and a 32-bit direct-buffer address in `VarHandle`.
+- Time and sync: `NanoTime`/`MilliTime`, absolute `InitTimeSpec` and the futex
+  shim all use `CLOCK_UPTIME_RAW` (`mach_absolute_time`), so a wall-clock step
+  cannot fire a thread-suspension timeout. The futex shim also saturates
+  timeout arithmetic, slices `FUTEX_CLOCK_REALTIME` waits to 1 s and treats a
+  transient `EFAULT` as a spurious wake-up.
+- Signals: XNU discards a blocked signal whose disposition is `SIG_IGN`. A VM
+  started as a background job, where the shell ignores `SIGQUIT`, hung at exit
+  waiting for its signal catcher. `SIGQUIT` and `SIGUSR1` are now reset to the
+  default action before they are blocked.
+- Loader: `dlopen` of a native library never passes a bare leaf name to dyld,
+  which searches the current directory first. A `libjavacore.so` planted in the
+  working directory ran before the fix.
+- libcore: `SO_DOMAIN`/`SO_PROTOCOL` (emulated through `proc_pidfdinfo`) and
+  `IP_MULTICAST_ALL` (0 is a no-op, other values fail with `ENOPROTOOPT`) are
+  private sentinels on Darwin. Before the fix, every `ServerSocket.accept` and
+  every `DatagramSocket` constructor failed. Further libcore fixes:
+  - NIO socket options are translated from the Linux numbers to Darwin's.
+  - `SO_LINGER` is `SO_LINGER_SEC`, so lingers last seconds as on Linux, not
+    10 ms ticks.
+  - `IP_TOS` on a dual-stack IPv6 socket that can carry IPv4 traffic throws
+    `ENOPROTOOPT` instead of reporting a success that never reaches the wire.
+  - The `IP_MULTICAST_ALL` emulation validates its descriptor.
+  - Accepted sockets no longer inherit `O_NONBLOCK`.
+  - `group_req` sockaddrs carry `ss_len`.
+  - `prctl` never dereferences its argument.
+  - A missing xattr reports `ENODATA`.
+  - NIO file times keep nanoseconds.
+
+The regression suite passes from the bootstrap output (logs kept outside the
+repository). It covers hello, stress, JNI with and without `-Xcheck:jni`, every
+collector, both large-object spaces, sockets, NIO options, xattrs, the OOM
+compaction case, zygote collector transitions, a VM with `SIGQUIT` ignored, a
+20 s park/wait/stack-walk run and the planted library.
+
+Not done yet:
+- Boot image: image reservations outside the window are refused.
+- JIT, dex2oat/AOT and mterp.
+- The debug libart, so the window `DCHECK`s have never run.
+- Signal interposition: libsigchain cannot interpose `sigaction` under
+  two-level namespaces, so the fault manager stays off and implicit null and
+  stack checks are disabled.
+- Networking gaps:
+  - IPv4 socket options on IPv6 sockets: XNU rejects `IPPROTO_IP` options on
+    `AF_INET6` sockets. This breaks `MulticastSocket` TTL, loopback and
+    interface, `DatagramSocket.setTrafficClass` and IPv4 multicast on dual-stack
+    sockets. NIO IPv4 multicast works.
+  - IPv6 multicast send fails with `EHOSTUNREACH`.
+  - Linger values above 327 s fail with `EDOM`; Linux accepts up to 65535 s.
+- The `SIGQUIT` thread dump hangs unless `-XX:DumpNativeStackOnSigQuit:false`
+  is given (native stack unwinding of other threads is not ported).
+- Working: `Selector` uses `poll`.
+- Failing with `IOException: Function not implemented`: asynchronous channels
+  (`epoll`) and `WatchService` (`inotify`).
+- M3 second exit: the Shiraz framework and a Metal window.
 
 ## Acceptance on macOS
 

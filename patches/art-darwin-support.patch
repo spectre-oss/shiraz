@@ -1,0 +1,475 @@
+diff --git a/art/libartbase/base/time_utils.cc b/art/libartbase/base/time_utils.cc
+index aa6c987669db9d5601210663b4a14b64660a2352..75af93cab6bac3536a7063bca66bc3980c103594 100644
+--- a/art/libartbase/base/time_utils.cc
++++ b/art/libartbase/base/time_utils.cc
+@@ -149,6 +149,14 @@ uint64_t MilliTime() {
+   timespec now;
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000) + now.tv_nsec / UINT64_C(1000000);
++#elif defined(__APPLE__)
++  // Darwin: a monotonic clock, not gettimeofday. A wall-clock step would make unsigned
++  // elapsed-time math (e.g. ThreadList::SuspendThreadByPeer) wrap and abort the runtime.
++  // CLOCK_UPTIME_RAW is mach_absolute_time: like Linux CLOCK_MONOTONIC it stops during
++  // sleep, and it is the timebase of the futex shim (OS_CLOCK_MACH_ABSOLUTE_TIME).
++  timespec now;
++  clock_gettime(CLOCK_UPTIME_RAW, &now);
++  return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000) + now.tv_nsec / UINT64_C(1000000);
+ #else
+   timeval now;
+   GetTimeOfDay(&now, nullptr);
+@@ -161,6 +169,10 @@ uint64_t MicroTime() {
+   timespec now;
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000) + now.tv_nsec / UINT64_C(1000);
++#elif defined(__APPLE__)
++  timespec now;
++  clock_gettime(CLOCK_UPTIME_RAW, &now);  // Darwin: see MilliTime().
++  return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000) + now.tv_nsec / UINT64_C(1000);
+ #else
+   timeval now;
+   GetTimeOfDay(&now, nullptr);
+@@ -173,6 +185,10 @@ uint64_t NanoTime() {
+   timespec now;
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) + now.tv_nsec;
++#elif defined(__APPLE__)
++  timespec now;
++  clock_gettime(CLOCK_UPTIME_RAW, &now);  // Darwin: see MilliTime().
++  return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) + now.tv_nsec;
+ #else
+   timeval now;
+   GetTimeOfDay(&now, nullptr);
+@@ -181,7 +197,7 @@ uint64_t NanoTime() {
+ }
+ 
+ uint64_t ThreadCpuNanoTime() {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__APPLE__)
+   timespec now;
+   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
+   return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) + now.tv_nsec;
+@@ -192,7 +208,7 @@ uint64_t ThreadCpuNanoTime() {
+ }
+ 
+ uint64_t ProcessCpuNanoTime() {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__APPLE__)
+   timespec now;
+   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now);
+   return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) + now.tv_nsec;
+@@ -218,6 +234,11 @@ void InitTimeSpec(bool absolute, int clock, int64_t ms, int32_t ns, timespec* ts
+   if (absolute) {
+ #if defined(__linux__)
+     clock_gettime(clock, ts);
++#elif defined(__APPLE__)
++    // Darwin: CLOCK_MONOTONIC counts time asleep there, unlike Linux. Map it to
++    // CLOCK_UPTIME_RAW so absolute monotonic deadlines share the timebase of NanoTime()
++    // and of the futex shim (darwin/futex_darwin.h). CLOCK_REALTIME stays wall time.
++    clock_gettime(clock == CLOCK_MONOTONIC ? CLOCK_UPTIME_RAW : static_cast<clockid_t>(clock), ts);
+ #else
+     UNUSED(clock);
+     timeval tv;
+diff --git a/art/sigchainlib/sigchain.cc b/art/sigchainlib/sigchain.cc
+index f2e8f23ef874652b673b17395a9a01ad9797b553..93b64d95098ab976616531d79918bf1ec4b33259 100644
+--- a/art/sigchainlib/sigchain.cc
++++ b/art/sigchainlib/sigchain.cc
+@@ -34,7 +34,6 @@
+ 
+ #if defined(__APPLE__)
+ #define _NSIG NSIG
+-#define sighandler_t sig_t
+ 
+ // Darwin has an #error when ucontext.h is included without _XOPEN_SOURCE defined.
+ #define _XOPEN_SOURCE
+diff --git a/art/sigchainlib/sigchain.h b/art/sigchainlib/sigchain.h
+index fcb47c2f374ab3d98afc6e00563fdc9b73135e67..2e733f11e7dbf1d5638f54745257b6cdfc9e0264 100644
+--- a/art/sigchainlib/sigchain.h
++++ b/art/sigchainlib/sigchain.h
+@@ -19,6 +19,10 @@
+ 
+ #include <signal.h>
+ #include <stdint.h>
++#if defined(__APPLE__)
++// Darwin names the signal(3) handler type sig_t; glibc and bionic call it sighandler_t.
++typedef sig_t sighandler_t;
++#endif
+ 
+ namespace art {
+ 
+diff --git a/libbase/logging.cpp b/libbase/logging.cpp
+index 925c89abcb435cdf8354a952defde587196c7dc8..64d32be2660e8ab9d36537cd4c0a5d1b956d01e5 100644
+--- a/libbase/logging.cpp
++++ b/libbase/logging.cpp
+@@ -28,6 +28,8 @@
+ // TODO: why errno??? (fwiw, we want libbsd anyway)
+ #if defined(__GLIBC__)
+ #include <errno.h>
++#elif defined(__APPLE__)
++#include <stdlib.h>
+ #else
+ #include <bsd/stdlib.h>
+ #endif
+@@ -61,6 +63,7 @@
+ // For gettid.
+ #if defined(__APPLE__)
+ #include "AvailabilityMacros.h"  // For MAC_OS_X_VERSION_MAX_ALLOWED
++#include <pthread.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <sys/syscall.h>
+@@ -83,7 +86,9 @@ static thread_id GetThreadId() {
+ #if defined(__BIONIC__)
+   return gettid();
+ #elif defined(__APPLE__)
+-  return syscall(SYS_thread_selfid);
++  uint64_t tid = 0;
++  pthread_threadid_np(nullptr, &tid);
++  return static_cast<thread_id>(tid);
+ #elif defined(__linux__)
+   return syscall(__NR_gettid);
+ #elif defined(_WIN32)
+diff --git a/libnativehelper/include/nativehelper/jni.h b/libnativehelper/include/nativehelper/jni.h
+index 1c2fb0cd7c5d0e4fe5c45f3bb4a1483a3c6f2eee..a108030a5b512e396459ab0b7bed3c93e2da0739 100644
+--- a/libnativehelper/include/nativehelper/jni.h
++++ b/libnativehelper/include/nativehelper/jni.h
+@@ -191,7 +191,7 @@ struct JNINativeInterface {
+     jobject     (*AllocObject)(JNIEnv*, jclass);
+     jobject     (*NewObject)(JNIEnv*, jclass, jmethodID, ...);
+     jobject     (*NewObjectV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jobject     (*NewObjectA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jobject     (*NewObjectA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+ 
+     jclass      (*GetObjectClass)(JNIEnv*, jobject);
+     jboolean    (*IsInstanceOf)(JNIEnv*, jobject, jclass);
+@@ -199,95 +199,95 @@ struct JNINativeInterface {
+ 
+     jobject     (*CallObjectMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jobject     (*CallObjectMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jobject     (*CallObjectMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jobject     (*CallObjectMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jboolean    (*CallBooleanMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jboolean    (*CallBooleanMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jboolean    (*CallBooleanMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jboolean    (*CallBooleanMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jbyte       (*CallByteMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jbyte       (*CallByteMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jbyte       (*CallByteMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jbyte       (*CallByteMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jchar       (*CallCharMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jchar       (*CallCharMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jchar       (*CallCharMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jchar       (*CallCharMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jshort      (*CallShortMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jshort      (*CallShortMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jshort      (*CallShortMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jshort      (*CallShortMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jint        (*CallIntMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jint        (*CallIntMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jint        (*CallIntMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jint        (*CallIntMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jlong       (*CallLongMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jlong       (*CallLongMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jlong       (*CallLongMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jlong       (*CallLongMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jfloat      (*CallFloatMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jfloat      (*CallFloatMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jfloat      (*CallFloatMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jfloat      (*CallFloatMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     jdouble     (*CallDoubleMethod)(JNIEnv*, jobject, jmethodID, ...);
+     jdouble     (*CallDoubleMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    jdouble     (*CallDoubleMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    jdouble     (*CallDoubleMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+     void        (*CallVoidMethod)(JNIEnv*, jobject, jmethodID, ...);
+     void        (*CallVoidMethodV)(JNIEnv*, jobject, jmethodID, va_list);
+-    void        (*CallVoidMethodA)(JNIEnv*, jobject, jmethodID, jvalue*);
++    void        (*CallVoidMethodA)(JNIEnv*, jobject, jmethodID, const jvalue*);
+ 
+     jobject     (*CallNonvirtualObjectMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jobject     (*CallNonvirtualObjectMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jobject     (*CallNonvirtualObjectMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     jboolean    (*CallNonvirtualBooleanMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jboolean    (*CallNonvirtualBooleanMethodV)(JNIEnv*, jobject, jclass,
+                          jmethodID, va_list);
+     jboolean    (*CallNonvirtualBooleanMethodA)(JNIEnv*, jobject, jclass,
+-                         jmethodID, jvalue*);
++                         jmethodID, const jvalue*);
+     jbyte       (*CallNonvirtualByteMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jbyte       (*CallNonvirtualByteMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jbyte       (*CallNonvirtualByteMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     jchar       (*CallNonvirtualCharMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jchar       (*CallNonvirtualCharMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jchar       (*CallNonvirtualCharMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     jshort      (*CallNonvirtualShortMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jshort      (*CallNonvirtualShortMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jshort      (*CallNonvirtualShortMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     jint        (*CallNonvirtualIntMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jint        (*CallNonvirtualIntMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jint        (*CallNonvirtualIntMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     jlong       (*CallNonvirtualLongMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jlong       (*CallNonvirtualLongMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jlong       (*CallNonvirtualLongMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     jfloat      (*CallNonvirtualFloatMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jfloat      (*CallNonvirtualFloatMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jfloat      (*CallNonvirtualFloatMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     jdouble     (*CallNonvirtualDoubleMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     jdouble     (*CallNonvirtualDoubleMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     jdouble     (*CallNonvirtualDoubleMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+     void        (*CallNonvirtualVoidMethod)(JNIEnv*, jobject, jclass,
+                         jmethodID, ...);
+     void        (*CallNonvirtualVoidMethodV)(JNIEnv*, jobject, jclass,
+                         jmethodID, va_list);
+     void        (*CallNonvirtualVoidMethodA)(JNIEnv*, jobject, jclass,
+-                        jmethodID, jvalue*);
++                        jmethodID, const jvalue*);
+ 
+     jfieldID    (*GetFieldID)(JNIEnv*, jclass, const char*, const char*);
+ 
+@@ -315,36 +315,36 @@ struct JNINativeInterface {
+ 
+     jobject     (*CallStaticObjectMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jobject     (*CallStaticObjectMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jobject     (*CallStaticObjectMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jobject     (*CallStaticObjectMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     jboolean    (*CallStaticBooleanMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jboolean    (*CallStaticBooleanMethodV)(JNIEnv*, jclass, jmethodID,
+                         va_list);
+     jboolean    (*CallStaticBooleanMethodA)(JNIEnv*, jclass, jmethodID,
+-                        jvalue*);
++                        const jvalue*);
+     jbyte       (*CallStaticByteMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jbyte       (*CallStaticByteMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jbyte       (*CallStaticByteMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jbyte       (*CallStaticByteMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     jchar       (*CallStaticCharMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jchar       (*CallStaticCharMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jchar       (*CallStaticCharMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jchar       (*CallStaticCharMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     jshort      (*CallStaticShortMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jshort      (*CallStaticShortMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jshort      (*CallStaticShortMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jshort      (*CallStaticShortMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     jint        (*CallStaticIntMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jint        (*CallStaticIntMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jint        (*CallStaticIntMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jint        (*CallStaticIntMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     jlong       (*CallStaticLongMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jlong       (*CallStaticLongMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jlong       (*CallStaticLongMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jlong       (*CallStaticLongMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     jfloat      (*CallStaticFloatMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jfloat      (*CallStaticFloatMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jfloat      (*CallStaticFloatMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jfloat      (*CallStaticFloatMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     jdouble     (*CallStaticDoubleMethod)(JNIEnv*, jclass, jmethodID, ...);
+     jdouble     (*CallStaticDoubleMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    jdouble     (*CallStaticDoubleMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    jdouble     (*CallStaticDoubleMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+     void        (*CallStaticVoidMethod)(JNIEnv*, jclass, jmethodID, ...);
+     void        (*CallStaticVoidMethodV)(JNIEnv*, jclass, jmethodID, va_list);
+-    void        (*CallStaticVoidMethodA)(JNIEnv*, jclass, jmethodID, jvalue*);
++    void        (*CallStaticVoidMethodA)(JNIEnv*, jclass, jmethodID, const jvalue*);
+ 
+     jfieldID    (*GetStaticFieldID)(JNIEnv*, jclass, const char*,
+                         const char*);
+@@ -579,7 +579,7 @@ struct _JNIEnv {
+     jobject NewObjectV(jclass clazz, jmethodID methodID, va_list args)
+     { return functions->NewObjectV(this, clazz, methodID, args); }
+ 
+-    jobject NewObjectA(jclass clazz, jmethodID methodID, jvalue* args)
++    jobject NewObjectA(jclass clazz, jmethodID methodID, const jvalue* args)
+     { return functions->NewObjectA(this, clazz, methodID, args); }
+ 
+     jclass GetObjectClass(jobject obj)
+@@ -608,7 +608,7 @@ struct _JNIEnv {
+     { return functions->Call##_jname##MethodV(this, obj, methodID, args); }
+ #define CALL_TYPE_METHODA(_jtype, _jname)                                   \
+     _jtype Call##_jname##MethodA(jobject obj, jmethodID methodID,           \
+-        jvalue* args)                                                       \
++        const jvalue* args)                                                       \
+     { return functions->Call##_jname##MethodA(this, obj, methodID, args); }
+ 
+ #define CALL_TYPE(_jtype, _jname)                                           \
+@@ -635,7 +635,7 @@ struct _JNIEnv {
+     }
+     void CallVoidMethodV(jobject obj, jmethodID methodID, va_list args)
+     { functions->CallVoidMethodV(this, obj, methodID, args); }
+-    void CallVoidMethodA(jobject obj, jmethodID methodID, jvalue* args)
++    void CallVoidMethodA(jobject obj, jmethodID methodID, const jvalue* args)
+     { functions->CallVoidMethodA(this, obj, methodID, args); }
+ 
+ #define CALL_NONVIRT_TYPE_METHOD(_jtype, _jname)                            \
+@@ -657,7 +657,7 @@ struct _JNIEnv {
+         methodID, args); }
+ #define CALL_NONVIRT_TYPE_METHODA(_jtype, _jname)                           \
+     _jtype CallNonvirtual##_jname##MethodA(jobject obj, jclass clazz,       \
+-        jmethodID methodID, jvalue* args)                                   \
++        jmethodID methodID, const jvalue* args)                                   \
+     { return functions->CallNonvirtual##_jname##MethodA(this, obj, clazz,   \
+         methodID, args); }
+ 
+@@ -688,7 +688,7 @@ struct _JNIEnv {
+         jmethodID methodID, va_list args)
+     { functions->CallNonvirtualVoidMethodV(this, obj, clazz, methodID, args); }
+     void CallNonvirtualVoidMethodA(jobject obj, jclass clazz,
+-        jmethodID methodID, jvalue* args)
++        jmethodID methodID, const jvalue* args)
+     { functions->CallNonvirtualVoidMethodA(this, obj, clazz, methodID, args); }
+ 
+     jfieldID GetFieldID(jclass clazz, const char* name, const char* sig)
+@@ -754,7 +754,7 @@ struct _JNIEnv {
+         args); }
+ #define CALL_STATIC_TYPE_METHODA(_jtype, _jname)                            \
+     _jtype CallStatic##_jname##MethodA(jclass clazz, jmethodID methodID,    \
+-        jvalue* args)                                                       \
++        const jvalue* args)                                                       \
+     { return functions->CallStatic##_jname##MethodA(this, clazz, methodID,  \
+         args); }
+ 
+@@ -782,7 +782,7 @@ struct _JNIEnv {
+     }
+     void CallStaticVoidMethodV(jclass clazz, jmethodID methodID, va_list args)
+     { functions->CallStaticVoidMethodV(this, clazz, methodID, args); }
+-    void CallStaticVoidMethodA(jclass clazz, jmethodID methodID, jvalue* args)
++    void CallStaticVoidMethodA(jclass clazz, jmethodID methodID, const jvalue* args)
+     { functions->CallStaticVoidMethodA(this, clazz, methodID, args); }
+ 
+     jfieldID GetStaticFieldID(jclass clazz, const char* name, const char* sig)
+diff --git a/libziparchive/zip_archive.cc b/libziparchive/zip_archive.cc
+index 5a0271f66f01dbe90f6772a3612d07a66f85f8ae..ae3726ca0426299e34a71a978c7ce9f28891e7c8 100644
+--- a/libziparchive/zip_archive.cc
++++ b/libziparchive/zip_archive.cc
+@@ -99,6 +99,9 @@ static constexpr uint64_t kMaxFileLength = 256 * static_cast<uint64_t>(1u << 30u
+ 
+ #ifdef __linux__
+ static const size_t kPageSize = getpagesize();
++#elif defined(__APPLE__)
++// arm64 macOS uses 16 KiB pages; madvise() needs page-aligned ranges.
++static const size_t kPageSize = getpagesize();
+ #else
+ constexpr size_t kPageSize = 4096;
+ #endif
+diff --git a/system/core/libcutils/threads.c b/system/core/libcutils/threads.c
+index 036f8c5b7ef65d431e33a88a5e75115e086305cd..1e0ca1878b7fcba4fe5a92eff03a40eca6780697 100644
+--- a/system/core/libcutils/threads.c
++++ b/system/core/libcutils/threads.c
+@@ -19,6 +19,7 @@
+ // For gettid.
+ #if defined(__APPLE__)
+ #include "AvailabilityMacros.h"  // For MAC_OS_X_VERSION_MAX_ALLOWED
++#include <pthread.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <sys/syscall.h>
+@@ -35,7 +36,9 @@
+ #ifndef __ANDROID__
+ pid_t gettid() {
+ #if defined(__APPLE__)
+-  return syscall(SYS_thread_selfid);
++  uint64_t tid = 0;
++  pthread_threadid_np(NULL, &tid);
++  return (pid_t)tid;
+ #elif defined(__linux__)
+   return syscall(__NR_gettid);
+ #elif defined(_WIN32)
+diff --git a/system/core/liblog/logd_write.c b/system/core/liblog/logd_write.c
+index fff7cc4ddcd50b32c7173b43083ee3cc70c3e8c5..18199df7b569e895b0bb5bd813c204997b670ead 100644
+--- a/system/core/liblog/logd_write.c
++++ b/system/core/liblog/logd_write.c
+@@ -34,6 +34,13 @@
+ #define LOG_BUF_SIZE	1024
+ 
+ #if FAKE_LOG_DEVICE
++#if defined(__APPLE__)
++// Defined in fake_log_device.c. Apple clang rejects implicit function declarations,
++// and fakeLogWritev returns ssize_t, not int.
++int fakeLogOpen(const char *pathName, int flags);
++int fakeLogClose(int fd);
++ssize_t fakeLogWritev(int fd, const struct iovec* vector, int count);
++#endif
+ // This will be defined when building for the host.
+ #define log_open(pathname, flags) fakeLogOpen(pathname, flags)
+ #define log_writev(filedes, vector, count) fakeLogWritev(filedes, vector, count)
+diff --git a/system/core/libnativebridge/native_bridge.cc b/system/core/libnativebridge/native_bridge.cc
+index d9e9648713115f40c5721a4a83508d6c4d4afd3c..de00dbc76a9224a31b121faf26b8a98366cc9b52 100644
+--- a/system/core/libnativebridge/native_bridge.cc
++++ b/system/core/libnativebridge/native_bridge.cc
+@@ -223,6 +223,11 @@ static void ReleaseAppCodeCacheDir() {
+ // /system/lib or /vendor/lib. Only allow a small range of characters, that is
+ // names consisting of [a-zA-Z0-9._-] and starting with [a-zA-Z].
+ bool NativeBridgeNameAcceptable(const char* nb_library_filename) {
++#if defined(__APPLE__)
++  // Apple clang: -Werror,-Wunused-parameter and -Wunused-function (body is disabled below).
++  (void)nb_library_filename;
++  (void)CharacterAllowed;
++#endif
+   return true;
+ /*  const char* ptr = nb_library_filename;
+   if (*ptr == 0) {
+diff --git a/system/core/libutils/Looper.cpp b/system/core/libutils/Looper.cpp
+index 2541aa807a1e3928a05f56712d1e8eee41db51a2..cea4ec124447aef3777c4fa612ab408780846660 100644
+--- a/system/core/libutils/Looper.cpp
++++ b/system/core/libutils/Looper.cpp
+@@ -4,6 +4,10 @@
+ // A looper implementation based on epoll().
+ //
+ #define LOG_TAG "Looper"
++#if defined(__APPLE__)
++// Darwin has no epoll/eventfd. Looper is not ported there yet (no ART or libcore
++// user); this translation unit is empty on __APPLE__ so a caller fails at link time.
++#else
+ 
+ //#define LOG_NDEBUG 0
+ 
+@@ -688,3 +692,4 @@ MessageHandler::~MessageHandler() { }
+ LooperCallback::~LooperCallback() { }
+ 
+ } // namespace android
++#endif  // defined(__APPLE__)
+diff --git a/system/core/libutils/include/utils/Compat.h b/system/core/libutils/include/utils/Compat.h
+index 3221899f7a4d74d08b1708f5730eb4abe32e7877..2c91e75e4c130132881e91e987fc9b2384ac3be5 100644
+--- a/system/core/libutils/include/utils/Compat.h
++++ b/system/core/libutils/include/utils/Compat.h
+@@ -25,6 +25,10 @@
+ 
+ #if defined(__APPLE__)
+ 
++#if !defined(__cplusplus)
++#include <assert.h> /* C11 static_assert macro */
++#endif
++
+ /* Mac OS has always had a 64-bit off_t, so it doesn't have off64_t. */
+ static_assert(sizeof(off_t) >= 8, "This code requires that Mac OS have at least a 64-bit off_t.");
+ typedef off_t off64_t;

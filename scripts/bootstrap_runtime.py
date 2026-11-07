@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import platform
 import shutil
 from pathlib import Path
 import subprocess
@@ -135,6 +136,128 @@ PATCHES = {
         }),
     ],
 }
+# macOS-only patches, applied after PATCHES on Darwin hosts only (Linux trees are
+# unaffected). Same (patch, {file: final sha256}) chain format as PATCHES.
+PATCHES_DARWIN = {
+    'art_standalone': [
+        ('art-darwin-build.patch', {  # 26541 bytes
+            'art/build/Android.common_build.mk': '5e00dd05b95a1a716200ad7f276a82c5f675b566c1301fc61a8e92698aa48e0e',
+            'art/dalvikvm/Android.mk': 'ff48dc36f8b850d976ab2bd93ec0e070ce6a204d86afb77335e6073704921fe8',
+            'art/libartpalette/Android.mk': '4328fba0e10923eaf16e8b7d589569ec408e889eafb35af147d9d3e1b27493b6',
+            'art/runtime/Android.mk': 'e8bb97ccf347a053bcf26bd4c0c83b092b2e36556555672026ca6dbfadb60180',
+            'build/core/combo/HOST_darwin-arm64.mk': '10e68d1322a82d201b93d284998491cd867c6cc38442f889c65b14ade9a6ebfa',
+            'build/core/combo/include/arch/darwin-arm64/AndroidConfig.h': 'd14ab0865bb991624fbc8d3f7378f90ba7e31bfbbeaa3f9d36201b1b292d1c39',
+            'build/core/envsetup.mk': '5149ae553aaa1aa42f2aade5dc1712a2db8db60f429002cefa9e70c7570517a4',
+            'build/core/host_dalvik_java_library.mk': 'eedcad7c8c694d31d0c6c9a6b73ad3ab7be8b8604197b9385ee6ef74307e3dc9',
+            'build/core/host_dalvik_static_java_library.mk': 'c41de9866724bc7a77dc201af5bff3a757bc381565cd713b5e0f4d9bee312fe1',
+            'build/core/product_config.mk': 'aefb46d1ff2301de593e278f8a6ef9a217fbd75513abc18470108153906aae4e',
+            'external/fdlibm/Android.mk': 'e87054689af8c7a7ab23634f45cd6d11deed95ac93acad47d7fe4c3d758a42d2',
+            'libbase/Android.mk': '92b4ba08b54c90afb2ebc0f9d031dad65cb7b870d216100a3201b35dd226e13d',
+            'libcore/JavaLibrary.mk': '82160ad1179ebf6801b27b19b1573c153e64637704b9cbecced3dc387b24ade7',
+            'libcore/NativeCode.mk': 'f7b4f8184f2668e1b10fc242490ba755af715d9e8b04ff3f650104a50f83e54b',
+            'libcore/luni/src/main/native/sub.mk': '0537268fc514fa7547db4279e8b008e6fddca19b6195e2b26f8f69fd656af94d',
+            'libnativehelper/Android.mk': '266e70d67d56d91f1d4fa5b34031111889da5dfc349b18bce6ded85ed939336c',
+            'system/core/libbacktrace/Android.mk': 'b9971d50c3bae29d443bc2787f8f0fe2b88addd2cdc36b53db275ca87173868d',
+            'system/core/libcutils/Android.mk': '3958665f31c69c552f54cca6972afe000f12492c7812a98a993f9ccdff97d36b',
+            'system/core/libnativebridge/Android.mk': '90efaa8abadf30173c9f2e83ed60281610da8ede440a09f559c51b026a4c5c33',
+            'system/core/libutils/Android.mk': '5b6e389c2df0e78dee4f47807b76a7bb6e3dd1573f481467cc66160f9ad560e6',
+        }),
+        ('art-darwin-support.patch', {  # 24278 bytes
+            'art/libartbase/base/time_utils.cc': 'cd92619e980d867ab0e5c0c670fad8384f965430b1502c4b81586e3df822536d',
+            'art/sigchainlib/sigchain.cc': 'ff66e220f125f503a9acadd478c5e0ff2af88ec788a19b222f050af92bee7f49',
+            'art/sigchainlib/sigchain.h': '2f4a3284abc715d44602d9fe1c313d634d031c02d4ae276b40b5276963523518',
+            'libbase/logging.cpp': '66e76b46d644f185786dc997207a4c70df87ecc85ec475f2b4cd05a54dc02dfb',
+            'libnativehelper/include/nativehelper/jni.h': '70f646bfa4edc7b27d500a5c52d6258cef0698cc8c88f4fb49b806c3cc9bbdf5',
+            'libziparchive/zip_archive.cc': 'a0a0ad7199274e025ebbc4c463ae65386ae4d1c618f1280bb093691661ba08de',
+            'system/core/libcutils/threads.c': '9b800baa7107081994ea3db3a8431069db175c3214e6576787729551cc821a8a',
+            'system/core/liblog/logd_write.c': 'd2fc1e9e3bc212692433c2e385a6d85b524c05a0c6f013e8dd38af2a292f9462',
+            'system/core/libnativebridge/native_bridge.cc': '262062cec65699e66061bab229b5d5adb4384e1338e604a41a963e7474b39e51',
+            'system/core/libutils/Looper.cpp': '5e0cd53679ccde407f64bef40ca134dc91f5ca2c0607377d1ea09a4ce72c62ac',
+            'system/core/libutils/include/utils/Compat.h': 'e7552020c4ea081eb2f7d6bf18abd537aa194753b9f46ceeca47a68b89924dc8',
+        }),
+        ('art-darwin-heap.patch', {  # 55158 bytes
+            'art/libartbase/base/casts.h': '50348370f70069ce2370989d91827a49bf36ac563f5ecb9e3d61dcc8b00c3a05',
+            'art/libartbase/base/globals.h': 'a662226bcc5fcdf08713cd22c1699d5e3a1eb8484c1f7f5b7c6bd59999f83a6d',
+            'art/libartbase/base/mem_map.cc': 'b4e1c147a99325fd2d58d4cbdbef38a641e24f4a9511b9041852c511ba6853c8',
+            'art/libartbase/base/mem_map.h': '9a1c7fff2c50716562747b21a6c2a3443f51eb4d0d16e57fefd8f9402f0a5a53',
+            'art/libartbase/base/mem_map_unix.cc': '536905efa5b0884153abbecaf5678fbbb2656453b6bc5a764d0e608676799bf1',
+            'art/libartbase/base/utils.h': 'a937895adc6f9dbde1fef0e6e888668e29f4b3db6a2f90a615f86ef7c6e4561d',
+            'art/runtime/class_table-inl.h': '4392ae60380d129323e59db7441850fcdc6ec2e1d953a3681f2e5320d4140ef2',
+            'art/runtime/gc/accounting/space_bitmap-inl.h': 'c6a810da8102921024aa80e5303ed1cd44f2f87ab9b436e6afd04d7773d2da6f',
+            'art/runtime/gc/allocator/rosalloc.cc': '58df4708aee71d78a9c9a8ff9e4cffb01434ccf627b68014c304c36be5894ddb',
+            'art/runtime/gc/heap.cc': '7352431af8ca4a86aa6ee3ea3d31789b1d221da854b18201d4d3cb00fd6d1f99',
+            'art/runtime/gc/space/bump_pointer_space.cc': 'a35388904eff64c5d185370848541f9969cd33eaf86a97ea250f0c1a724461af',
+            'art/runtime/gc/space/large_object_space.cc': '50345dc2b9a86053c22cd4908be652e1ecda9827e20653de19fdda0ca7b12cb2',
+            'art/runtime/gc/space/rosalloc_space.cc': '3cd81b690b493d2fca1fd924fe1443142daba32808eb84056405b8b222a3255d',
+            'art/runtime/gc/space/space.cc': '86db7278df7bcd19c074703ff20c21a00d7fb584756a319ab15981cad44b3264',
+            'art/runtime/interpreter/interpreter.cc': 'afd0e4c76139d2cef6e9f78f33b58ccbcd7b2eee0a5f97187af0107e95ec6b96',
+            'art/runtime/interpreter/interpreter_common.cc': 'ce6df15bb441d2a283a2d0d690a7b2fbb799dd87937007e350b983923444dcea',
+            'art/runtime/lock_word-inl.h': 'b77e952394bfe4d003fd570be365687d37c0c87717d634fa3eabe7b6fecc481c',
+            'art/runtime/lock_word.h': '2eb0cfb4430f5d369194d1c15ffd99462e436cc3f502ab4818752d1aac4dda47',
+            'art/runtime/method_handles.cc': '95fd813913bb905cba57512b6a2c80029a8820cf852ca5f2710e7362c855cda9',
+            'art/runtime/mirror/object_reference.h': '915ba4d3e7424602eeef3258300f061deb1eab4c93ee4de6bd2ad62aa8f55738',
+            'art/runtime/mirror/var_handle.cc': '9efd7d98b28ec383d1ad03f8fb9165faa4582c625d11744c268006fddea91aeb',
+            'art/runtime/monitor.cc': 'a39a751ecf49659280028809981d1a35d9250ae4218cd812d35dba0b63b0f19f',
+            'art/runtime/monitor_pool.h': 'bc2b58a63eae19cbb2a7c7c44770bb147564975f18f2d18cdf5feaf7545a24dc',
+            'art/runtime/obj_ptr-inl.h': '6438f4bb0900b3113e6cd95bc85ec987575384b73a0b87e87a37eb21662421c1',
+            'art/runtime/obj_ptr.h': '656688d8c0775dcbc8eb88e448d2bea78427b48bb471e422a907074c6d2ad0e6',
+            'art/runtime/quick_exception_handler.cc': '0464ffe06d8ad336c93eadfcd9c272432895b92dfe4b3bc7cb40142ab8baeacf',
+            'art/runtime/stack.cc': '0e18bbb3c98b9fb36e0eab5f2ecec7490ba9be2826ba323df4ed143e3e6824e8',
+        }),
+        ('art-darwin-runtime.patch', {  # 155609 bytes
+            'art/darwin/include/LICENSE.musl': 'f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af',
+            'art/darwin/include/elf.h': '70d3150b17e682299f4ff31e0311efa80468cf3fc6b747b61795dae7fa32125b',
+            'art/runtime/arch/arm64/context_arm64.cc': '5c0b18a80cd3e486ea59561e4888130e3ac8eb2b121fbd88f6088ff6a5aeddd6',
+            'art/runtime/arch/arm64/fault_handler_arm64.cc': 'da849e909b300e0fcebd84b6f78dc3409fb7bdc36709a64bafcaf7f4a2838ffb',
+            'art/runtime/base/mutex-inl.h': '479ebcac24c29d607cf766c2d95d1ed942e4ca3a3212f4e2778add8042d0bee1',
+            'art/runtime/base/mutex.h': '543e3f454e50916c1ba8c866ede2463c44370dc808a433124881423e6ff1a3f2',
+            'art/runtime/darwin/dl_bio_darwin.cc': '723c3f8a016e041a66542b9c062de36d69c08083e5c938092f932fbc5c56bcf7',
+            'art/runtime/darwin/futex_darwin.h': 'dd46d14cab87635ef2518f122f16a9ee7907df9097278fff07d059d283fca136',
+            'art/runtime/entrypoints/quick/quick_alloc_entrypoints.cc': '0967e5996b2c8ce71a64e630adda0287020c59a2a0c8076c1e9fdccb4f2d79a1',
+            'art/runtime/entrypoints/quick/quick_trampoline_entrypoints.cc': '71c387e6460bfee909ca77e0442bd5de157edefd8bb06b71b0c26b4b5e5e6210',
+            'art/runtime/exec_utils.cc': 'b6bcc1febc044cb52c56ad85ef4c6d1532b7b2d382456b58ce6c765d0b3eec75',
+            'art/runtime/interpreter/mterp/mterp.cc': '1f37d852e007dea263149e4cf0dbae90fcacf8ef8569eee2ba41c668d2b7c798',
+            'art/runtime/jni/jni_internal.cc': '229c199b7056d7764a044e402c663a2682f7a672e25420f368ffdaea1d7adbfc',
+            'art/runtime/parsed_options.cc': '1eb0a31325a2f683da6e7c06a7b5363088272ed78f5f6e499ac1cb2607b3e0e6',
+            'art/runtime/runtime.cc': 'dd2eeca7a1ee16f43617b4f246b000b31f8958ebfe2737cb3d0f00d4abcf0f4c',
+            'art/runtime/runtime.h': '83b59063cbfcba4e29380322edb9dda271e4078b5a4c6e487bab264712df1100',
+            'art/runtime/runtime_common.cc': '2c7179c0c455a333a2a6cb1f07d5e8d44f90fc2e08505fc32d329d97f6870136',
+            'art/runtime/thread.cc': '1eb8a474a258ef87bbafdb397d5be57783855b0883513b39ff050463aa9b2a77',
+            'art/runtime/thread_list.cc': '3a4a849e27853ab4bf12578722812b13d08b013d8cdde8a0510cb838fc3964d2',
+            'art/runtime/ti/agent.cc': 'd861248884917b394105d7fed1f755fdedddffcfccd74a8be5787c39b7b30d3e',
+        }),
+        ('art-darwin-asm.patch', {  # 81301 bytes
+            'art/runtime/arch/arm64/asm_support_arm64.S': 'b4e87a3d72285362f921d9356ec741aa6683f0eb6badfc91855ec9d7159084fb',
+            'art/runtime/arch/arm64/darwin_symbol_aliases.S': '50b1e70fc6bd2b8e68912ce9be7bf4431cb24411ad3c8787bac5a200428005fc',
+            'art/runtime/arch/arm64/memcmp16_arm64.S': 'c0c54193ae1e2ac2ac15e9adb5ad5c8fd41b985d16f3204d6bdfdf809e52439e',
+            'art/runtime/arch/arm64/quick_entrypoints_arm64.S': 'eb443974a0d6fb9d244ffe5927446e552ae6c610b600648d8c17170cd4cb00d3',
+            'art/runtime/interpreter/mterp/arm64/control_flow.S': '08ae4cdbf592c9b612ff5772819cdc39fb8390589098b9e8e0edc85a5800acdf',
+            'art/runtime/interpreter/mterp/arm64/main.S': 'b69f8ed52c3f26dc77d29b59136b1a43ad8194d8e6f9ebafb4fefd86d2cd1bc9',
+            'art/runtime/interpreter/mterp/arm64/object.S': 'df05c5312a25ef923ab118e883f48229b1f2539dc6a8b2891582d7b6e90d95b2',
+            'art/runtime/interpreter/mterp/common/gen_setup.py': 'c55d995d106624790fdfb13003edd2b7df7f7bdcd8310d8f74204959ed4e7534',
+            'art/runtime/interpreter/mterp/darwin_symbol_aliases_arm64.S': '18131f5b5768a9437a73d8434e30417e3b6fb74db76f9d48bbe0db4a670bc851',
+        }),
+        ('art-darwin-libcore.patch', {  # 63461 bytes
+            'art/openjdkjvm/OpenjdkJvm.cc': 'abe8d8e51a368b78d8d579e11c73ebc1670886f3f32741995c5aeadce1e6734f',
+            'libcore/luni/src/main/native/DarwinSockoptSentinels.h': '01aff1d66faaeafdab9590425e08620ab7eb707fb8ced435c0ef16013ef55b2b',
+            'libcore/luni/src/main/native/Portability.h': '2a4ce8f92919a545017ddfe3ce5196b91aafed75353f0fdfcdf685d5bea39fd8',
+            'libcore/luni/src/main/native/Portability_darwin.h': '99e385eccd84eaf0d97f936bf2fa33a90eef89be3426d193fd3a9549d5bee8c3',
+            'libcore/luni/src/main/native/android_system_OsConstants.cpp': '5633625f75271d80ae6245c1b46559d8dd7ba629c516de042433e0d7b5e539aa',
+            'libcore/luni/src/main/native/libcore_io_Linux.cpp': '363e7b8ac32395e6fca93feb8c31418be73695f9fec855fc4eb3a0b44b9bffc5',
+            'libcore/ojluni/src/main/native/EPoll.c': '99267e4fde5de5a57234883e52e3b172b0a1f7d9515f92cfdae56777a1f04d6b',
+            'libcore/ojluni/src/main/native/LinuxNativeDispatcher.c': '3b384cd946d62a2cad594209de4efbe3101f7eb45005dc0725187cd5f4f38222',
+            'libcore/ojluni/src/main/native/LinuxWatchService.c': 'fa72a428e33d2d01fb027e05309663936eb204bf948df63bc646396347cf4336',
+            'libcore/ojluni/src/main/native/Net.c': '625598cb8ca91083dc93b6f2696b1ef7d7e7da496a2b9b7bfa037252584598ef',
+            'libcore/ojluni/src/main/native/System.c': '1d1eb9280f361f430781bed4a3060478882c63263918aa54be5cb370c3e3510a',
+            'libcore/ojluni/src/main/native/UNIXProcess_md.c': '15a87ec4566c90e5a77a5e497d7c6707c19215e15fe8cee9a6680342a80d3ac3',
+            'libcore/ojluni/src/main/native/UnixNativeDispatcher.c': 'da6b5b3af24264725b1089f29aea38b0e8b7c65fb2684897aceb72c47c2db152',
+            'libcore/ojluni/src/main/native/io_util_md.c': '5ce529d368275bd83ced819b6ee835c2d0f4ea3a3a1c09740aac54c5a03981d6',
+            'libcore/ojluni/src/main/native/jvm_md.h': 'a8423dd9ea7b8ae1d7ee66c3196b79121cbfb4b03724f93ab106ffacf6e9048c',
+            'libcore/ojluni/src/main/native/linux_close.cpp': '154424efddc69ac211134b1763f23efe82570797900652d931fea26ae2e35dda',
+            'libnativehelper/AsynchronousCloseMonitor.cpp': '1a154047dbdfdb712666b64bf65cdd62c585f58c126667075724c944f2d5b290',
+        }),
+    ],
+}
 BSD_VERSION = '0.12.2'
 BSD_SHA256 = 'b88cc9163d0c652aaf39a99991d974ddba1c3a9711db8f1b5838af2a14731014'
 
@@ -162,6 +285,8 @@ def sources():
             raise SystemExit(f'{name}: local revision differs from pin; refusing to overwrite')
         dirty = subprocess.check_output(['git', 'diff', '--no-ext-diff', '--name-only', 'HEAD'], cwd=directory, text=True)
         patches = PATCHES.get(name, [])
+        if platform.system() == 'Darwin':
+            patches = patches + PATCHES_DARWIN.get(name, [])
         expected_files = {file: checksum for _, files in patches for file, checksum in files.items()}
         changed = set(dirty.splitlines())
         if not changed.issubset(expected_files):
@@ -173,6 +298,24 @@ def sources():
         current = {file: digest(file) for file in expected_files}
         if current == expected_files:
             continue  # Final recipe, including files superseded by overlapping patches.
+
+        # `git clean` removes patch-created (untracked) files while tracked files keep
+        # their final content. Recreate only those files, from the last patch that
+        # writes each one, when everything else already matches the final recipe.
+        def in_head(file):
+            return subprocess.run(['git', 'cat-file', '-e', f'HEAD:{file}'], cwd=directory,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+        missing = [file for file, checksum in expected_files.items()
+                   if current[file] is None and checksum is not None and not in_head(file)]
+        if missing and all(current[file] == checksum for file, checksum in expected_files.items()
+                           if file not in missing):
+            for file in missing:
+                patch = [patch for patch, files in patches if file in files][-1]
+                run(['git', 'apply', f'--include={file}', ROOT / 'patches' / patch], cwd=directory)
+                if digest(file) != expected_files[file]:
+                    raise SystemExit(f'{name}: restored source differs from recorded checksum: {file}')
+            continue
 
         # Independent patches may have been installed in any order (new fixes can be
         # prepended). Overlapping patches form a chain whose complete intermediate
@@ -204,7 +347,9 @@ def sources():
             matches = [step for step, snapshot in enumerate(snapshots)
                        if all(current[file] == checksum for file, checksum in snapshot.items())]
             if not matches:
-                raise SystemExit(f'{name}: modified or partially applied dependency patch chain')
+                raise SystemExit(f'{name}: modified or partially applied dependency patch chain; '
+                                 f'to rebuild it from the pin run: git -C {directory} checkout -- . '
+                                 f'&& git -C {directory} clean -fdx -e out')
             pending.update(ordered[max(matches):])
         for index, (patch, files) in enumerate(patches):
             if index not in pending:
@@ -268,6 +413,11 @@ def main():
     for name, suffix in [('PKG_CONFIG_PATH', 'lib/pkgconfig'), ('LIBRARY_PATH', 'lib'),
                          ('LD_LIBRARY_PATH', 'lib'), ('CPATH', 'include')]:
         env[name] = str(PREFIX / suffix) + (':' + env[name] if env.get(name) else '')
+    if platform.system() == 'Darwin':
+        # macOS builds in-tree ICU/lz4/xz and ART without libbsd or bionic_translation.
+        import bootstrap_darwin
+        bootstrap_darwin.run_stage(args.stage)
+        return
     if args.stage == 'memory':
         run(['make', '-j2', 'libartbase', '____PREFIX=' + str(PREFIX), '____LIBDIR=lib'], cwd=ROOT / 'context/art_standalone', env=env)
         return

@@ -1,0 +1,1144 @@
+diff --git a/art/libartbase/base/casts.h b/art/libartbase/base/casts.h
+index 76ff67948bd66282a54fec940fa3c3623dc86eec..a7f85d97d7f142afac4a9937e6e009ea29e9bcb5 100644
+--- a/art/libartbase/base/casts.h
++++ b/art/libartbase/base/casts.h
+@@ -167,6 +167,15 @@ inline Dest reinterpret_cast64(Source* ptr) {
+ 
+ // A version of reinterpret_cast<>() between pointers and int32_t/uint32_t that enforces
+ // zero-extension and checks that the values are converted without loss of precision.
++#if defined(__APPLE__) && defined(__aarch64__)
++// darwin-arm64: these are deliberately NOT heap-reference-window aware. They are used for
++// native pointers (ArtMethod* in 32-bit pointer-size tables, image addresses) as well as for
++// mirror::Object*. Do not use them to encode or decode heap references there: use
++// mirror::PtrCompression / StackReference, or DecodeReferenceRegister() (object_reference.h).
++// In a release build the pointer-to-uint32 overload truncates, which is the correct compressed
++// form of a window address; the uint32-to-pointer overload zero-extends, which is wrong for heap
++// references (remaining callers: unstarted_runtime.cc, pre-Runtime::Start only).
++#endif
+ 
+ template <typename Dest, typename Source>
+ inline Dest reinterpret_cast32(Source source) {
+diff --git a/art/libartbase/base/globals.h b/art/libartbase/base/globals.h
+index 97eae635d4d2a029ac154b2d05cbb5e6785e512c..cf6915bed871f7ddc04bf47777d9c0f25b7d5f2e 100644
+--- a/art/libartbase/base/globals.h
++++ b/art/libartbase/base/globals.h
+@@ -36,7 +36,26 @@ static constexpr size_t kStackAlignment = 16;
+ 
+ // System page size. We check this against sysconf(_SC_PAGE_SIZE) at runtime, but use a simple
+ // compile-time constant so the compiler can generate better code.
++#if defined(__APPLE__) && defined(__aarch64__)
++// Native arm64 macOS always uses 16 KiB pages (Rosetta is not supported).
++static constexpr int kPageSize = 16384;
++#else
+ static constexpr int kPageSize = 4096;
++#endif
++
++// Compressed (32-bit) heap references are offsets into a 4 GiB window that starts at
++// kHeapReferenceBase. On hosts that can map the low 4 GiB the base is 0 and a reference is the
++// object address itself. darwin-arm64 cannot map below 4 GiB (__PAGEZERO), so MemMap::Init()
++// reserves the window at a fixed 4 GiB-aligned address above it; references are compressed by
++// truncation and decompressed as (ref == 0 ? nullptr : kHeapReferenceBase | ref).
++#if defined(__APPLE__) && defined(__aarch64__)
++static constexpr uintptr_t kHeapReferenceBase = 0x10000000000ull;
++#else
++static constexpr uintptr_t kHeapReferenceBase = 0u;
++#endif
++static constexpr uintptr_t kHeapReferenceWindowSize = static_cast<uintptr_t>(4) * GB;
++static_assert((kHeapReferenceBase & (kHeapReferenceWindowSize - 1)) == 0,
++              "The heap reference window must be aligned to its size");
+ 
+ // Clion, clang analyzer, etc can falsely believe that "if (kIsDebugBuild)" always
+ // returns the same value. By wrapping into a call to another constexpr function, we force it
+diff --git a/art/libartbase/base/mem_map.cc b/art/libartbase/base/mem_map.cc
+index 2d11d8457705aee3e625735041cf32983b045ec2..d58c2c435d8e09cdfc63be15078f06afd03dffd6 100644
+--- a/art/libartbase/base/mem_map.cc
++++ b/art/libartbase/base/mem_map.cc
+@@ -29,6 +29,10 @@
+ #include <map>
+ #include <memory>
+ #include <sstream>
++#if defined(__APPLE__) && defined(__aarch64__)
++#include <algorithm>
++#include <vector>
++#endif
+ 
+ #include "android-base/stringprintf.h"
+ #include "android-base/unique_fd.h"
+@@ -62,6 +66,73 @@ static Maps* gMaps GUARDED_BY(MemMap::GetMemMapsLock()) = nullptr;
+ // A map containing unique strings used for indentifying anonymous mappings
+ static std::map<std::string, int> debugStrMap GUARDED_BY(MemMap::GetMemMapsLock());
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++// Ranges [first, second) of the heap reference window that MapInternal() committed with
++// MAP_FIXED but whose MemMap is not yet in gMaps (the MemMap constructor inserts it after
++// mem_maps_lock_ was dropped). On Linux a non-fixed mmap hint can never clobber such a range;
++// with MAP_FIXED inside the window the allocator must treat claims as occupied.
++static std::vector<std::pair<uintptr_t, uintptr_t>> gHeapReferenceWindowClaims
++    GUARDED_BY(MemMap::GetMemMapsLock());
++
++static void AddHeapReferenceWindowClaim(void* begin, size_t length)
++    REQUIRES(MemMap::GetMemMapsLock()) {
++  const uintptr_t b = reinterpret_cast<uintptr_t>(begin);
++  gHeapReferenceWindowClaims.emplace_back(b, b + length);
++}
++
++static void RemoveHeapReferenceWindowClaim(void* begin) REQUIRES(MemMap::GetMemMapsLock()) {
++  const uintptr_t b = reinterpret_cast<uintptr_t>(begin);
++  for (auto it = gHeapReferenceWindowClaims.begin(); it != gHeapReferenceWindowClaims.end();
++       ++it) {
++    if (it->first == b) {
++      gHeapReferenceWindowClaims.erase(it);
++      return;
++    }
++  }
++}
++
++// Returns the lowest page-aligned address >= `from` such that [address, address + length) does
++// not intersect any MemMap in gMaps nor any claim, or 0 if there is none below `limit`.
++// Unlike the Linux scan this is exact: it also accounts for maps nested in other maps.
++static uintptr_t FindFreeHeapReferenceWindowRange(uintptr_t from, size_t length, uintptr_t limit)
++    REQUIRES(MemMap::GetMemMapsLock()) {
++  uintptr_t candidate = RoundUp(from, kPageSize);
++  while (true) {
++    if (candidate > limit || limit - candidate < length) {
++      return 0u;
++    }
++    // gMaps is ordered by base address. A map ending at or before `candidate` cannot overlap;
++    // the first map starting at or after candidate + length ends the search.
++    for (auto it = gMaps->lower_bound(reinterpret_cast<void*>(kHeapReferenceBase)),
++              end = gMaps->end();
++         it != end;
++         ++it) {
++      const uintptr_t map_begin = reinterpret_cast<uintptr_t>(it->first);
++      const uintptr_t map_end = map_begin + it->second->BaseSize();
++      if (map_begin >= candidate + length) {
++        break;
++      }
++      if (map_end > candidate) {
++        candidate = RoundUp(map_end, kPageSize);
++        if (candidate > limit || limit - candidate < length) {
++          return 0u;
++        }
++      }
++    }
++    bool moved = false;
++    for (const std::pair<uintptr_t, uintptr_t>& claim : gHeapReferenceWindowClaims) {
++      if (claim.first < candidate + length && claim.second > candidate) {
++        candidate = RoundUp(claim.second, kPageSize);
++        moved = true;
++      }
++    }
++    if (!moved) {
++      return candidate;
++    }
++  }
++}
++
++#endif
+ // Retrieve iterator to a `gMaps` entry that is known to exist.
+ Maps::iterator GetGMapsEntry(const MemMap& map) REQUIRES(MemMap::GetMemMapsLock()) {
+   DCHECK(map.IsValid());
+@@ -138,6 +209,10 @@ static uintptr_t GenerateNextMemPos() {
+   uint64_t random_data;
+   arc4random_buf(&random_data, sizeof(random_data));
+   return CreateStartPos(random_data);
++#elif defined(__APPLE__) && defined(__aarch64__)
++  // The low_4gb range is the heap reference window, see mem_map.h.
++  static_assert(LOW_MEM_START == kHeapReferenceWindowGuardSize, "Guard size mismatch");
++  return kHeapReferenceBase + LOW_MEM_START;
+ #else
+   // No arc4random on host, see above.
+   return LOW_MEM_START;
+@@ -199,6 +274,12 @@ bool MemMap::CheckMapRequest(uint8_t* expected_ptr, void* actual_ptr, size_t byt
+   }
+ 
+   // We asked for an address but didn't get what we wanted, all paths below here should fail.
++#if defined(__APPLE__) && defined(__aarch64__)
++  {
++    std::lock_guard<std::mutex> mu(*mem_maps_lock_);
++    RemoveHeapReferenceWindowClaim(actual_ptr);
++  }
++#endif
+   int result = TargetMUnmap(actual_ptr, byte_count);
+   if (result == -1) {
+     PLOG(WARNING) << StringPrintf("munmap(%p, %zd) failed", actual_ptr, byte_count);
+@@ -261,6 +342,16 @@ void* MemMap::TryMemMapLow4GB(void* ptr,
+                                     int flags,
+                                     int fd,
+                                     off_t offset) {
++#if defined(__APPLE__) && defined(__aarch64__)
++  // The caller found [ptr, ptr + size) free in gMaps inside our own PROT_NONE reservation, so
++  // commit it with MAP_FIXED (a hint would never be honoured over the reservation).
++  if (!IsInHeapReferenceWindow(ptr, page_aligned_byte_count) ||
++      reinterpret_cast<uintptr_t>(ptr) < kHeapReferenceBase + kHeapReferenceWindowGuardSize) {
++    errno = ENOMEM;
++    return MAP_FAILED;
++  }
++  return TargetMMap(ptr, page_aligned_byte_count, prot, flags | MAP_FIXED, fd, offset);
++#else
+   void* actual = TargetMMap(ptr, page_aligned_byte_count, prot, flags, fd, offset);
+   if (actual != MAP_FAILED) {
+     // Since we didn't use MAP_FIXED the kernel may have mapped it somewhere not in the low
+@@ -271,6 +362,7 @@ void* MemMap::TryMemMapLow4GB(void* ptr,
+     }
+   }
+   return actual;
++#endif
+ }
+ #endif
+ 
+@@ -685,6 +777,11 @@ MemMap::MemMap(const std::string& name, uint8_t* begin, size_t size, void* base_
+     std::lock_guard<std::mutex> mu(*mem_maps_lock_);
+     DCHECK(gMaps != nullptr);
+     gMaps->insert(std::make_pair(base_begin_, this));
++#if defined(__APPLE__) && defined(__aarch64__)
++    if (!gHeapReferenceWindowClaims.empty()) {
++      RemoveHeapReferenceWindowClaim(base_begin_);
++    }
++#endif
+   }
+ }
+ 
+@@ -807,11 +904,35 @@ void MemMap::ReleaseReservedMemory(size_t byte_count) {
+   }
+ }
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++// madvise(MADV_DONTNEED) does not zero anonymous memory on Darwin (kMadviseZeroes is false).
++// MADV_ZERO zeroes the resident pages without faulting in the others, which avoids committing
++// whole spaces the way memset() does. Falls back to memset() where MADV_ZERO is refused (for
++// example on non-writable or file-backed ranges). `begin` and `length` must be page-aligned.
++static void ZeroPageAlignedRange(void* begin, size_t length) {
++  DCHECK_ALIGNED(begin, kPageSize);
++  DCHECK_ALIGNED(length, kPageSize);
++  if (length == 0u) {
++    return;
++  }
++#if defined(MADV_ZERO)
++  if (madvise(begin, length, MADV_ZERO) == 0) {
++    return;
++  }
++#endif
++  memset(begin, 0, length);
++}
++
++#endif
+ void MemMap::MadviseDontNeedAndZero() {
+   if (base_begin_ != nullptr || base_size_ != 0) {
++#if defined(__APPLE__) && defined(__aarch64__)
++    ZeroPageAlignedRange(base_begin_, base_size_);
++#else
+     if (!kMadviseZeroes) {
+       memset(base_begin_, 0, base_size_);
+     }
++#endif
+ #ifdef _WIN32
+     // It is benign not to madvise away the pages here.
+     PLOG(WARNING) << "MemMap::MadviseDontNeedAndZero does not madvise on Windows.";
+@@ -991,6 +1112,9 @@ void MemMap::Shutdown() {
+     DCHECK(gMaps != nullptr);
+     delete gMaps;
+     gMaps = nullptr;
++#if defined(__APPLE__) && defined(__aarch64__)
++    gHeapReferenceWindowClaims.clear();
++#endif
+   }
+   delete mem_maps_lock_;
+   mem_maps_lock_ = nullptr;
+@@ -1022,6 +1146,33 @@ void* MemMap::MapInternalArtLow4GBAllocator(size_t length,
+                                             int flags,
+                                             int fd,
+                                             off_t offset) {
++#if defined(__APPLE__) && defined(__aarch64__)
++  // gMaps (plus in-flight claims) is authoritative inside the reserved window: msync() reports
++  // reserved PROT_NONE pages as mapped and rejects sub-16K alignment, so there is no probe.
++  // First fit from next_mem_pos_, then once more from the bottom of the window.
++  const uintptr_t window_begin = kHeapReferenceBase + LOW_MEM_START;
++  const uintptr_t window_end = kHeapReferenceBase + kHeapReferenceWindowSize;
++  std::lock_guard<std::mutex> mu(*mem_maps_lock_);
++  uintptr_t start = std::clamp(next_mem_pos_, window_begin, window_end);
++  for (uintptr_t from : {start, window_begin}) {
++    uintptr_t ptr = FindFreeHeapReferenceWindowRange(from, length, window_end);
++    if (ptr == 0u) {
++      continue;
++    }
++    void* actual = TryMemMapLow4GB(reinterpret_cast<void*>(ptr), length, prot, flags, fd, offset);
++    if (actual == MAP_FAILED) {
++      // The range is free, so this is a genuine mmap error (bad fd, offset, ...): report it.
++      return MAP_FAILED;
++    }
++    CHECK_EQ(actual, reinterpret_cast<void*>(ptr));
++    AddHeapReferenceWindowClaim(actual, length);
++    next_mem_pos_ = ptr + length;
++    return actual;
++  }
++  LOG(ERROR) << "Could not find " << length << " contiguous bytes in the heap reference window.";
++  errno = ENOMEM;
++  return MAP_FAILED;
++#else
+ #if USE_ART_LOW_4G_ALLOCATOR
+   void* actual = MAP_FAILED;
+ 
+@@ -1108,6 +1259,7 @@ void* MemMap::MapInternalArtLow4GBAllocator(size_t length,
+   LOG(FATAL) << "Unreachable";
+   UNREACHABLE();
+ #endif
++#endif  // __APPLE__ && __aarch64__
+ }
+ 
+ void* MemMap::MapInternal(void* addr,
+@@ -1117,6 +1269,38 @@ void* MemMap::MapInternal(void* addr,
+                           int fd,
+                           off_t offset,
+                           bool low_4gb) {
++#if defined(__APPLE__) && defined(__aarch64__)
++  // When requesting low_4g memory and having an expectation, the requested range should fit into
++  // the heap reference window (the darwin-arm64 "low 4GB", see mem_map.h).
++  if (low_4gb && addr != nullptr &&
++      (reinterpret_cast<uintptr_t>(addr) < kHeapReferenceBase ||
++       ((reinterpret_cast<uintptr_t>(addr) - kHeapReferenceBase) >> 32) != 0 ||
++       ((reinterpret_cast<uintptr_t>(addr) - kHeapReferenceBase + length) >> 32) != 0)) {
++    LOG(ERROR) << "The requested address space (" << addr << ", "
++               << reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(addr) + length)
++               << ") cannot fit in the heap reference window";
++    return MAP_FAILED;
++  }
++  if (addr != nullptr && (flags & MAP_FIXED) == 0 && OverlapsHeapReferenceWindow(addr, length)) {
++    // A plain hint is never honoured over the PROT_NONE reservation, so emulate the kernel: map
++    // exactly there if gMaps says the range is free, otherwise fail like a missed hint would
++    // (CheckMapRequest() rejects a mapping at another address anyway).
++    std::lock_guard<std::mutex> mu(*mem_maps_lock_);
++    const uintptr_t begin = reinterpret_cast<uintptr_t>(addr);
++    if (!IsAligned<kPageSize>(begin) ||
++        begin < kHeapReferenceBase + LOW_MEM_START ||
++        !IsInHeapReferenceWindow(addr, length) ||
++        FindFreeHeapReferenceWindowRange(begin, length, begin + length) != begin) {
++      errno = ENOMEM;
++      return MAP_FAILED;
++    }
++    void* actual = TargetMMap(addr, length, prot, flags | MAP_FIXED, fd, offset);
++    if (actual != MAP_FAILED) {
++      AddHeapReferenceWindowClaim(actual, length);
++    }
++    return actual;
++  }
++#else
+ #ifdef __LP64__
+   // When requesting low_4g memory and having an expectation, the requested range should fit into
+   // 4GB.
+@@ -1133,6 +1317,7 @@ void* MemMap::MapInternal(void* addr,
+ #else
+   UNUSED(low_4gb);
+ #endif
++#endif  // __APPLE__ && __aarch64__
+   DCHECK_ALIGNED(length, kPageSize);
+   // TODO:
+   // A page allocator would be a useful abstraction here, as
+@@ -1158,6 +1343,12 @@ void* MemMap::MapInternal(void* addr,
+     if (orig_prot != prot_non_exec) {
+       if (mprotect(actual, length, orig_prot) != 0) {
+         PLOG(ERROR) << "Could not protect to requested prot: " << orig_prot;
++#if defined(__APPLE__) && defined(__aarch64__)
++        {
++          std::lock_guard<std::mutex> mu(*mem_maps_lock_);
++          RemoveHeapReferenceWindowClaim(actual);
++        }
++#endif
+         TargetMUnmap(actual, length);
+         errno = ENOMEM;
+         return MAP_FAILED;
+@@ -1242,6 +1433,14 @@ void ZeroAndReleasePages(void* address, size_t length) {
+   uint8_t* const mem_end = mem_begin + length;
+   uint8_t* const page_begin = AlignUp(mem_begin, kPageSize);
+   uint8_t* const page_end = AlignDown(mem_end, kPageSize);
++#if defined(__APPLE__) && defined(__aarch64__)
++  if (page_begin < page_end) {
++    std::fill(mem_begin, page_begin, 0);
++    ZeroPageAlignedRange(page_begin, page_end - page_begin);
++    std::fill(page_end, mem_end, 0);
++    return;
++  }
++#endif
+   if (!kMadviseZeroes || page_begin >= page_end) {
+     // No possible area to madvise.
+     std::fill(mem_begin, mem_end, 0);
+diff --git a/art/libartbase/base/mem_map.h b/art/libartbase/base/mem_map.h
+index 525e622690233e8d6164ceb178f49b9be7697f33..d020314f9ca01a4580130a7071f3a8f3ce312a06 100644
+--- a/art/libartbase/base/mem_map.h
++++ b/art/libartbase/base/mem_map.h
+@@ -26,6 +26,9 @@
+ 
+ #include "android-base/thread_annotations.h"
+ #include "macros.h"
++#if defined(__APPLE__) && defined(__aarch64__)
++#include "globals.h"
++#endif
+ 
+ namespace art {
+ 
+@@ -49,6 +52,33 @@ static constexpr bool kMadviseZeroes = false;
+ #define HAVE_MREMAP_SYSCALL false
+ #endif
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++// darwin-arm64 cannot map anything below 4 GiB (__PAGEZERO), so the low_4gb allocator serves
++// requests from the heap reference window [kHeapReferenceBase, kHeapReferenceBase +
++// kHeapReferenceWindowSize), which MemMap::Init() reserves as PROT_NONE at a fixed address.
++// gMaps is authoritative inside the window: mappings are committed there with MAP_FIXED and
++// unmapping re-reserves the range as PROT_NONE so no foreign mapping can take the hole.
++// The first kHeapReferenceWindowGuardSize bytes are never handed out, so that small compressed
++// reference values (and base|0 == null) never decode to mapped memory.
++static constexpr uintptr_t kHeapReferenceWindowGuardSize = 64 * KB;
++
++// Whether [begin, begin + length) lies entirely inside the heap reference window.
++inline bool IsInHeapReferenceWindow(const void* begin, size_t length) {
++  const uintptr_t b = reinterpret_cast<uintptr_t>(begin);
++  return b >= kHeapReferenceBase &&
++      length <= kHeapReferenceWindowSize &&
++      b - kHeapReferenceBase <= kHeapReferenceWindowSize - length;
++}
++
++// Whether [begin, begin + length) intersects the heap reference window.
++inline bool OverlapsHeapReferenceWindow(const void* begin, size_t length) {
++  const uintptr_t b = reinterpret_cast<uintptr_t>(begin);
++  return length != 0u &&
++      b < kHeapReferenceBase + kHeapReferenceWindowSize &&
++      b + length > kHeapReferenceBase;
++}
++
++#endif
+ // Used to keep track of mmap segments.
+ //
+ // On 64b systems not supporting MAP_32BIT, the implementation of MemMap will do a linear scan
+diff --git a/art/libartbase/base/mem_map_unix.cc b/art/libartbase/base/mem_map_unix.cc
+index ac854dfd524d30bb4c518e31b039f0c6f4928bfd..57142f508b009e8e32da15255d2fbcd1b20dc1f0 100644
+--- a/art/libartbase/base/mem_map_unix.cc
++++ b/art/libartbase/base/mem_map_unix.cc
+@@ -18,17 +18,117 @@
+ 
+ #include "mman.h"
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++#include <errno.h>
++#include <libproc.h>
++#include <mach/mach.h>
++#include <mach/mach_error.h>
++#include <mach/mach_vm.h>
++#include <unistd.h>
++
++#include <sstream>
++
++#include "android-base/logging.h"
++#include "android-base/stringprintf.h"
++#include "globals.h"
++
++#endif
+ namespace art {
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++// Set once MemMap::Init() reserved the heap reference window. The reservation is never
++// released: it outlives MemMap::Shutdown() so that a later MemMap::Init() reuses it.
++static bool gHeapReferenceWindowReserved = false;
++
++// Describes the VM regions that intersect the heap reference window, for the fatal error when
++// the window cannot be reserved.
++static std::string DescribeHeapReferenceWindowOccupants() {
++  std::ostringstream os;
++  const mach_vm_address_t window_end = kHeapReferenceBase + kHeapReferenceWindowSize;
++  mach_vm_address_t address = kHeapReferenceBase;
++  for (int i = 0; i < 8 && address < window_end; ++i) {
++    mach_vm_size_t size = 0;
++    vm_region_basic_info_data_64_t info;
++    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
++    mach_port_t object_name = MACH_PORT_NULL;
++    kern_return_t kr = mach_vm_region(mach_task_self(),
++                                      &address,
++                                      &size,
++                                      VM_REGION_BASIC_INFO_64,
++                                      reinterpret_cast<vm_region_info_t>(&info),
++                                      &count,
++                                      &object_name);
++    if (kr != KERN_SUCCESS || address >= window_end) {
++      break;
++    }
++    char path[PROC_PIDPATHINFO_MAXSIZE];
++    int path_length = proc_regionfilename(getpid(), address, path, sizeof(path));
++    os << android::base::StringPrintf(" [0x%llx-0x%llx prot=%d/%d %s]",
++                                      static_cast<unsigned long long>(address),
++                                      static_cast<unsigned long long>(address + size),
++                                      info.protection,
++                                      info.max_protection,
++                                      path_length > 0 ? path : "anonymous");
++    address += size;
++  }
++  std::string result = os.str();
++  return result.empty() ? std::string(" (no region found)") : result;
++}
++
++void MemMap::TargetMMapInit() {
++  if (gHeapReferenceWindowReserved) {
++    return;
++  }
++  // Reserve the whole window as PROT_NONE in one fixed allocation. VM_FLAGS_FIXED without
++  // VM_FLAGS_OVERWRITE fails instead of replacing whatever already occupies the range.
++  mach_vm_address_t address = kHeapReferenceBase;
++  kern_return_t kr = mach_vm_map(mach_task_self(),
++                                 &address,
++                                 kHeapReferenceWindowSize,
++                                 /*mask=*/ 0,
++                                 VM_FLAGS_FIXED,
++                                 MEMORY_OBJECT_NULL,
++                                 /*offset=*/ 0,
++                                 /*copy=*/ FALSE,
++                                 VM_PROT_NONE,
++                                 VM_PROT_ALL,
++                                 VM_INHERIT_DEFAULT);
++  if (kr != KERN_SUCCESS || address != kHeapReferenceBase) {
++    LOG(FATAL) << android::base::StringPrintf(
++                      "Cannot reserve the 4 GiB heap reference window at 0x%llx: %s (%d).",
++                      static_cast<unsigned long long>(kHeapReferenceBase),
++                      mach_error_string(kr),
++                      kr)
++               << " Occupied by:" << DescribeHeapReferenceWindowOccupants();
++    UNREACHABLE();
++  }
++  gHeapReferenceWindowReserved = true;
++  if (next_mem_pos_ < kHeapReferenceBase + kHeapReferenceWindowGuardSize ||
++      next_mem_pos_ >= kHeapReferenceBase + kHeapReferenceWindowSize) {
++    next_mem_pos_ = kHeapReferenceBase + kHeapReferenceWindowGuardSize;
++  }
++}
++#else
+ void MemMap::TargetMMapInit() {
+   // no-op for unix
+ }
++#endif
+ 
+ void* MemMap::TargetMMap(void* start, size_t len, int prot, int flags, int fd, off_t fd_off) {
+   return mmap(start, len, prot, flags, fd, fd_off);
+ }
+ 
+ int MemMap::TargetMUnmap(void* start, size_t len) {
++#if defined(__APPLE__) && defined(__aarch64__)
++  if (gHeapReferenceWindowReserved && OverlapsHeapReferenceWindow(start, len)) {
++    // Keep the hole reserved: replace the range with a fresh PROT_NONE mapping. This also drops
++    // the pages, as munmap would.
++    CHECK(IsInHeapReferenceWindow(start, len))
++        << "Unmap range " << start << "+" << len << " straddles the heap reference window";
++    void* result = mmap(start, len, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
++    return result == MAP_FAILED ? -1 : 0;
++  }
++#endif
+   return munmap(start, len);
+ }
+ 
+diff --git a/art/libartbase/base/utils.h b/art/libartbase/base/utils.h
+index f434cb40db2b218f2ef29bb242f0a78a1dea18a3..0f41cc05481f00106af7db04a5b205604fdd8f46 100644
+--- a/art/libartbase/base/utils.h
++++ b/art/libartbase/base/utils.h
+@@ -35,7 +35,13 @@ namespace art {
+ 
+ static inline uint32_t PointerToLowMemUInt32(const void* p) {
+   uintptr_t intp = reinterpret_cast<uintptr_t>(p);
++#if defined(__APPLE__) && defined(__aarch64__)
++  // "Low memory" is the 4 GiB heap reference window on darwin-arm64 (see globals.h); the low
++  // 32 bits are the offset in the window, which is what callers store.
++  DCHECK(intp <= 0xFFFFFFFFU || intp - kHeapReferenceBase < kHeapReferenceWindowSize) << p;
++#else
+   DCHECK_LE(intp, 0xFFFFFFFFU);
++#endif
+   return intp & 0xFFFFFFFFU;
+ }
+ 
+diff --git a/art/runtime/class_table-inl.h b/art/runtime/class_table-inl.h
+index 5f8a0b03c841827655a526a2a56f217a3e30b0a8..4761f947f80cf9c077e7d296607e4b6ed89a0434 100644
+--- a/art/runtime/class_table-inl.h
++++ b/art/runtime/class_table-inl.h
+@@ -117,7 +117,12 @@ inline void ClassTable::TableSlot::VisitRoot(const Visitor& visitor) const {
+ }
+ 
+ inline ObjPtr<mirror::Class> ClassTable::TableSlot::ExtractPtr(uint32_t data) {
++#if defined(__APPLE__) && defined(__aarch64__)
++  // The slot holds a truncated heap reference; rebase it into the heap window.
++  return reinterpret_cast<mirror::Class*>(DecodeReferenceRegister(data & ~kHashMask));
++#else
+   return reinterpret_cast<mirror::Class*>(data & ~kHashMask);
++#endif
+ }
+ 
+ inline uint32_t ClassTable::TableSlot::Encode(ObjPtr<mirror::Class> klass, uint32_t hash_bits) {
+diff --git a/art/runtime/gc/accounting/space_bitmap-inl.h b/art/runtime/gc/accounting/space_bitmap-inl.h
+index d460e000752e4e7d7d5a117e0c0efaae1c2dc3ce..f78c4b0ad95529646771abca538731accdabfb80 100644
+--- a/art/runtime/gc/accounting/space_bitmap-inl.h
++++ b/art/runtime/gc/accounting/space_bitmap-inl.h
+@@ -69,6 +69,16 @@ inline void SpaceBitmap<kAlignment>::VisitMarkedRange(uintptr_t visit_begin,
+                                                       uintptr_t visit_end,
+                                                       Visitor&& visitor) const {
+   DCHECK_LE(visit_begin, visit_end);
++#if defined(__APPLE__) && defined(__aarch64__)
++  // An empty range visits nothing. Return before computing word indices: the large-object
++  // bitmaps are based at kHeapReferenceBase on Darwin, so the [nullptr, nullptr) range of a
++  // LargeObjectMapSpace that has not allocated yet (SemiSpace, ConcurrentCopying) would index
++  // far outside the bitmap. On Linux heap_begin_ is 0 there and the range reads word 0.
++  // Non-empty out-of-window ranges are not clamped; they stay a caller bug.
++  if (visit_begin >= visit_end) {
++    return;
++  }
++#endif
+ #if 0
+   for (uintptr_t i = visit_begin; i < visit_end; i += kAlignment) {
+     mirror::Object* obj = reinterpret_cast<mirror::Object*>(i);
+diff --git a/art/runtime/gc/allocator/rosalloc.cc b/art/runtime/gc/allocator/rosalloc.cc
+index 2faa7e58db9651e86c9e6d2a316687e163e0c42a..d0ac71be3708f69d1cc7924cff2be59cfe6c5cf8 100644
+--- a/art/runtime/gc/allocator/rosalloc.cc
++++ b/art/runtime/gc/allocator/rosalloc.cc
+@@ -69,9 +69,20 @@ RosAlloc::RosAlloc(void* base, size_t capacity, size_t max_capacity,
+   CHECK_LE(capacity, max_capacity);
+   CHECK_ALIGNED(page_release_size_threshold_, kPageSize);
+   // Zero the memory explicitly (don't rely on that the mem map is zero-initialized).
++#if defined(__APPLE__) && defined(__aarch64__)
++  // madvise(MADV_DONTNEED) does not zero on Darwin, and a memset() would commit the whole range.
++  // ZeroAndReleasePages() uses MADV_ZERO, which only touches resident pages, and falls back to
++  // memset(). Only [base_, base_ + capacity) is guaranteed writable here: RosAllocSpace::Clear()
++  // calls this with the tail beyond the footprint PROT_NONE, where MADV_ZERO fails (EPERM) and the
++  // memset() fallback would fault. Callers must therefore hand over [capacity, max_capacity)
++  // already zero: RosAllocSpace::CreateFromMemMap() zeroes it before calling in, Clear() zeroes
++  // the old footprint, and pages only become PROT_NONE through Trim() of zeroed free page runs.
++  ZeroAndReleasePages(base_, capacity);
++#else
+   if (!kMadviseZeroes) {
+     memset(base_, 0, max_capacity);
+   }
++#endif
+   CHECK_EQ(madvise(base_, max_capacity, MADV_DONTNEED), 0);
+   if (!initialized_) {
+     Initialize();
+@@ -1370,9 +1381,15 @@ bool RosAlloc::Trim() {
+     if (madvise_size > 0) {
+       DCHECK_ALIGNED(madvise_begin, kPageSize);
+       DCHECK_EQ(RoundUp(madvise_size, kPageSize), madvise_size);
++#if defined(__APPLE__) && defined(__aarch64__)
++      // The page map tail must stay zero (kPageMapReleased) for a later footprint increase, and
++      // Darwin's MADV_DONTNEED does not zero; MADV_ZERO avoids committing the whole tail.
++      ZeroAndReleasePages(madvise_begin, madvise_size);
++#else
+       if (!kMadviseZeroes) {
+         memset(madvise_begin, 0, madvise_size);
+       }
++#endif
+       CHECK_EQ(madvise(madvise_begin, madvise_size, MADV_DONTNEED), 0);
+     }
+     if (madvise_begin - zero_begin) {
+@@ -2049,10 +2066,17 @@ size_t RosAlloc::ReleasePageRange(uint8_t* start, uint8_t* end) {
+       return 0;
+     }
+   }
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Free pages must read as zero, and Darwin's MADV_DONTNEED does not zero. MADV_ZERO (via
++  // ZeroAndReleasePages()) zeroes only the resident pages, where memset() would recommit pages
++  // that were already released. The range lies within the footprint, so it is writable.
++  ZeroAndReleasePages(start, end - start);
++#else
+   if (!kMadviseZeroes) {
+     // TODO: Do this when we resurrect the page instead.
+     memset(start, 0, end - start);
+   }
++#endif
+   CHECK_EQ(madvise(start, end - start, MADV_DONTNEED), 0);
+   size_t pm_idx = ToPageMapIndex(start);
+   size_t reclaimed_bytes = 0;
+diff --git a/art/runtime/gc/heap.cc b/art/runtime/gc/heap.cc
+index ff53f7896eccff75cad797a52319687efefa6c66..0cf061a42bc4cdcbafe1b726b86ea0df19ab48bf 100644
+--- a/art/runtime/gc/heap.cc
++++ b/art/runtime/gc/heap.cc
+@@ -153,6 +153,12 @@ static constexpr bool kUsePartialTlabs = true;
+ // allocate with relaxed ergonomics for that long.
+ static constexpr size_t kPostForkMaxHeapDurationMS = 2000;
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++// Same layout as other 64-bit hosts, but inside the heap reference window (globals.h):
++// window base + 300 MB - (default non-moving space capacity).
++uint8_t* const Heap::kPreferredAllocSpaceBegin =
++    reinterpret_cast<uint8_t*>(kHeapReferenceBase + 300 * MB - kDefaultNonMovingSpaceCapacity);
++#else
+ #if defined(__LP64__) || !defined(ADDRESS_SANITIZER)
+ // 300 MB (0x12c00000) - (default non-moving space capacity).
+ uint8_t* const Heap::kPreferredAllocSpaceBegin =
+@@ -166,6 +172,7 @@ uint8_t* const Heap::kPreferredAllocSpaceBegin = reinterpret_cast<uint8_t*>(0x20
+ uint8_t* const Heap::kPreferredAllocSpaceBegin = reinterpret_cast<uint8_t*>(0x40000000);
+ #endif
+ #endif
++#endif  // __APPLE__ && __aarch64__
+ 
+ static inline bool CareAboutPauseTimes() {
+   return Runtime::Current()->InJankPerceptibleProcessState();
+@@ -590,8 +597,16 @@ Heap::Heap(size_t initial_size,
+   // Start at 4 KB, we can be sure there are no spaces mapped this low since the address range is
+   // reserved by the kernel.
+   static constexpr size_t kMinHeapAddress = 4 * KB;
++#if defined(__APPLE__) && defined(__aarch64__)
++  // All spaces live in the 4 GiB heap reference window (MemMap low_4gb), so cover the window.
++  // 32 MiB of card table, as on hosts whose window starts at 0.
++  card_table_.reset(accounting::CardTable::Create(
++      reinterpret_cast<uint8_t*>(kHeapReferenceBase + kMinHeapAddress),
++      kHeapReferenceWindowSize - kMinHeapAddress));
++#else
+   card_table_.reset(accounting::CardTable::Create(reinterpret_cast<uint8_t*>(kMinHeapAddress),
+                                                   4 * GB - kMinHeapAddress));
++#endif
+   CHECK(card_table_.get() != nullptr) << "Failed to create card table";
+   if (foreground_collector_type_ == kCollectorTypeCC && kUseTableLookupReadBarrier) {
+     rb_table_.reset(new accounting::ReadBarrierTable());
+diff --git a/art/runtime/gc/space/bump_pointer_space.cc b/art/runtime/gc/space/bump_pointer_space.cc
+index 609ccee7b410f85945772ed14f9b278459060c9c..70274b903574ae6373cf575bd28399f4fa35ce26 100644
+--- a/art/runtime/gc/space/bump_pointer_space.cc
++++ b/art/runtime/gc/space/bump_pointer_space.cc
+@@ -74,9 +74,16 @@ BumpPointerSpace::BumpPointerSpace(const std::string& name, MemMap&& mem_map)
+ 
+ void BumpPointerSpace::Clear() {
+   // Release the pages back to the operating system.
++#if defined(__APPLE__) && defined(__aarch64__)
++  // kMadviseZeroes is false on Darwin. MADV_ZERO (via ZeroAndReleasePages()) zeroes only the
++  // resident pages; memset() would commit the whole semispace capacity on every SS/GSS collection.
++  // The whole space is writable here.
++  ZeroAndReleasePages(Begin(), Limit() - Begin());
++#else
+   if (!kMadviseZeroes) {
+     memset(Begin(), 0, Limit() - Begin());
+   }
++#endif
+   CHECK_NE(madvise(Begin(), Limit() - Begin(), MADV_DONTNEED), -1) << "madvise failed";
+   // Reset the end of the space back to the beginning, we move the end forward as we allocate
+   // objects.
+diff --git a/art/runtime/gc/space/large_object_space.cc b/art/runtime/gc/space/large_object_space.cc
+index 2c18888c5fba2ef9e6705e6591ce4a74f1a0c1f5..26a5b903613bfdd99b2e1a8f4b7b813ef241aa10 100644
+--- a/art/runtime/gc/space/large_object_space.cc
++++ b/art/runtime/gc/space/large_object_space.cc
+@@ -470,6 +470,12 @@ size_t FreeListSpace::Free(Thread* self, mirror::Object* obj) {
+   --num_objects_allocated_;
+   DCHECK_LE(allocation_size, num_bytes_allocated_);
+   num_bytes_allocated_ -= allocation_size;
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Alloc() hands this block out again without zeroing it, relying on MADV_DONTNEED to zero
++  // anonymous memory as it does on Linux. Darwin's MADV_DONTNEED keeps the contents, so zero
++  // explicitly (MADV_ZERO for whole pages, see ZeroAndReleasePages()).
++  ZeroAndReleasePages(obj, allocation_size);
++#endif
+   madvise(obj, allocation_size, MADV_DONTNEED);
+   if (kIsDebugBuild) {
+     // Can't disallow reads since we use them to find next chunks during coalescing.
+diff --git a/art/runtime/gc/space/rosalloc_space.cc b/art/runtime/gc/space/rosalloc_space.cc
+index 36fd864bf3b3fd4c492b4d7e5d4a133a53bc5e76..8eda678d7eb26d217d3d0c47c7ce589f71f84e12 100644
+--- a/art/runtime/gc/space/rosalloc_space.cc
++++ b/art/runtime/gc/space/rosalloc_space.cc
+@@ -80,12 +80,40 @@ RosAllocSpace* RosAllocSpace::CreateFromMemMap(MemMap&& mem_map,
+ 
+   bool running_on_memory_tool = Runtime::Current()->IsRunningOnMemoryTool();
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++  // The RosAlloc constructor zeroes only [0, starting_size) on Darwin and requires the rest to be
++  // zero already (MADV_DONTNEED does not zero here). A reused map (TransitionCollector,
++  // PreZygoteFork) may hold stale data, so zero [starting_size, capacity) as the constructor used
++  // to. The map need not be writable: in release builds Heap::TransitionCollector hands over the
++  // bump pointer from-space that SemiSpace::ReclaimPhase left PROT_NONE, where MADV_ZERO fails
++  // (EPERM) and the memset() fallback faults. Make it RW with a raw mprotect() (MemMap's recorded
++  // protection is left alone) and restore the original protection on the head below; the tail is
++  // set PROT_NONE below as upstream does.
++  CHECK_LE(starting_size, capacity);
++  const int darwin_old_prot = mem_map.GetProtect();
++  const bool darwin_unprotect = (darwin_old_prot & PROT_WRITE) == 0;
++  if (darwin_unprotect) {
++    CheckedCall(mprotect, name.c_str(), mem_map.Begin(), capacity, PROT_READ | PROT_WRITE);
++  }
++  ZeroAndReleasePages(mem_map.Begin() + starting_size, capacity - starting_size);
++#endif
+   allocator::RosAlloc* rosalloc = CreateRosAlloc(mem_map.Begin(),
+                                                  starting_size,
+                                                  initial_size,
+                                                  capacity,
+                                                  low_memory_mode,
+                                                  running_on_memory_tool);
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Restore the head [0, starting_size) to its original protection now that the constructor has
++  // zeroed it; on success the tail becomes PROT_NONE below.
++  if (darwin_unprotect) {
++    CheckedCall(mprotect, name.c_str(), mem_map.Begin(), starting_size, darwin_old_prot);
++    if (rosalloc == nullptr && capacity > starting_size) {
++      CheckedCall(mprotect, name.c_str(), mem_map.Begin() + starting_size,
++                  capacity - starting_size, darwin_old_prot);
++    }
++  }
++#endif
+   if (rosalloc == nullptr) {
+     LOG(ERROR) << "Failed to initialize rosalloc for alloc space (" << name << ")";
+     return nullptr;
+@@ -426,9 +454,27 @@ void RosAllocSpace::AssertAllThreadLocalBuffersAreRevoked() {
+ 
+ void RosAllocSpace::Clear() {
+   size_t footprint_limit = GetFootprintLimit();
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Darwin's MADV_DONTNEED below does not zero. Zero the RW footprint here: SetEnd() drops it to
++  // starting_size_ without PROT_NONE, MoreCore() later hands [starting_size_, old End()) back to
++  // the new RosAlloc, and its constructor only zeroes the first starting_size_ bytes because the
++  // tail beyond End() is PROT_NONE.
++  ZeroAndReleasePages(Begin(), End() - Begin());
++#endif
+   madvise(GetMemMap()->Begin(), GetMemMap()->Size(), MADV_DONTNEED);
+   live_bitmap_->Clear();
+   mark_bitmap_->Clear();
++#if defined(__APPLE__) && defined(__aarch64__)
++  // End() can be below starting_size_: RosAlloc::Trim() of a fully free space shrinks the
++  // footprint to 0 and MoreCore() makes [Begin(), old End()) PROT_NONE. SetEnd() alone does not
++  // make [End(), starting_size_) writable again, and the Darwin RosAlloc constructor zeroes it
++  // (MADV_ZERO fails with EPERM there and the memset() fallback faults). Do what MoreCore() does
++  // when it grows the footprint; the constructor then zeroes [Begin(), starting_size_).
++  if (End() < begin_ + starting_size_) {
++    CheckedCall(mprotect, GetName(), End(), begin_ + starting_size_ - End(),
++                PROT_READ | PROT_WRITE);
++  }
++#endif
+   SetEnd(begin_ + starting_size_);
+   delete rosalloc_;
+   rosalloc_ = CreateRosAlloc(mem_map_.Begin(),
+diff --git a/art/runtime/gc/space/space.cc b/art/runtime/gc/space/space.cc
+index e7961eb256a32a00d30e7e4bde693cb3cc88d4c5..0fa30e944f9e954931ce9551287a037b1ea974fc 100644
+--- a/art/runtime/gc/space/space.cc
++++ b/art/runtime/gc/space/space.cc
+@@ -81,11 +81,21 @@ DiscontinuousSpace::DiscontinuousSpace(const std::string& name,
+     Space(name, gc_retention_policy) {
+   // TODO: Fix this if we ever support objects not in the low 32 bit.
+   const size_t capacity = static_cast<size_t>(std::numeric_limits<uint32_t>::max());
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Objects live in the 4 GiB heap reference window, not in the low 4 GiB.
++  uint8_t* const heap_begin = reinterpret_cast<uint8_t*>(kHeapReferenceBase);
++  live_bitmap_.reset(accounting::LargeObjectBitmap::Create("large live objects", heap_begin,
++                                                           capacity));
++  CHECK(live_bitmap_.get() != nullptr);
++  mark_bitmap_.reset(accounting::LargeObjectBitmap::Create("large marked objects", heap_begin,
++                                                           capacity));
++#else
+   live_bitmap_.reset(accounting::LargeObjectBitmap::Create("large live objects", nullptr,
+                                                            capacity));
+   CHECK(live_bitmap_.get() != nullptr);
+   mark_bitmap_.reset(accounting::LargeObjectBitmap::Create("large marked objects", nullptr,
+                                                            capacity));
++#endif
+   CHECK(mark_bitmap_.get() != nullptr);
+ }
+ 
+diff --git a/art/runtime/interpreter/interpreter.cc b/art/runtime/interpreter/interpreter.cc
+index 4b617eda69684a7c179f9fbc13da4ad9514fbd59..4f3c7fb7ca41d3c56ad4dc80908654ef9588c64e 100644
+--- a/art/runtime/interpreter/interpreter.cc
++++ b/art/runtime/interpreter/interpreter.cc
+@@ -42,7 +42,11 @@ namespace interpreter {
+ 
+ ALWAYS_INLINE static ObjPtr<mirror::Object> ObjArg(uint32_t arg)
+     REQUIRES_SHARED(Locks::mutator_lock_) {
++#if defined(__APPLE__) && defined(__aarch64__)
++  return DecodeReferenceRegister(arg);
++#else
+   return reinterpret_cast<mirror::Object*>(arg);
++#endif
+ }
+ 
+ static void InterpreterJni(Thread* self,
+diff --git a/art/runtime/interpreter/interpreter_common.cc b/art/runtime/interpreter/interpreter_common.cc
+index 30c4b90ea83fa55e70431590d0af0fb7f1e83c85..5b87793a8b9987fbe3a7621bc67b9c4daa7075a1 100644
+--- a/art/runtime/interpreter/interpreter_common.cc
++++ b/art/runtime/interpreter/interpreter_common.cc
+@@ -636,11 +636,20 @@ void SetStringInitValueToAllAliases(ShadowFrame* shadow_frame,
+   // Set the string init result into all aliases.
+   for (uint32_t i = 0, e = shadow_frame->NumberOfVRegs(); i < e; ++i) {
+     if (shadow_frame->GetVRegReference(i) == existing) {
++#if defined(__APPLE__) && defined(__aarch64__)
++      // The vreg holds the compressed (window-relative) reference, not the address.
++      DCHECK_EQ(shadow_frame->GetVRegReference(i),
++                DecodeReferenceRegister(static_cast<uint32_t>(shadow_frame->GetVReg(i))));
++      shadow_frame->SetVRegReference(i, result.GetL());
++      DCHECK_EQ(shadow_frame->GetVRegReference(i),
++                DecodeReferenceRegister(static_cast<uint32_t>(shadow_frame->GetVReg(i))));
++#else
+       DCHECK_EQ(shadow_frame->GetVRegReference(i),
+                 reinterpret_cast32<mirror::Object*>(shadow_frame->GetVReg(i)));
+       shadow_frame->SetVRegReference(i, result.GetL());
+       DCHECK_EQ(shadow_frame->GetVRegReference(i),
+                 reinterpret_cast32<mirror::Object*>(shadow_frame->GetVReg(i)));
++#endif
+     }
+   }
+ }
+@@ -1496,7 +1505,13 @@ static inline void AssignRegister(ShadowFrame* new_shadow_frame, const ShadowFra
+   // If both register locations contains the same value, the register probably holds a reference.
+   // Note: As an optimization, non-moving collectors leave a stale reference value
+   // in the references array even after the original vreg was overwritten to a non-reference.
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Vregs hold compressed (window-relative) references: compare with the truncated pointer
++  // (reinterpret_cast32 would DCHECK-fail on an address above 4 GiB).
++  if (src_value == static_cast<uint32_t>(reinterpret_cast<uintptr_t>(o.Ptr()))) {
++#else
+   if (src_value == reinterpret_cast32<uint32_t>(o.Ptr())) {
++#endif
+     new_shadow_frame->SetVRegReference(dest_reg, o);
+   } else {
+     new_shadow_frame->SetVReg(dest_reg, src_value);
+diff --git a/art/runtime/lock_word-inl.h b/art/runtime/lock_word-inl.h
+index 4a2a293400777b481c8f71114e327d070bfeb0d5..b728ca3760341dfc56355b42eae9fbde731ef0ca 100644
+--- a/art/runtime/lock_word-inl.h
++++ b/art/runtime/lock_word-inl.h
+@@ -43,7 +43,12 @@ inline Monitor* LockWord::FatLockMonitor() const {
+ 
+ inline size_t LockWord::ForwardingAddress() const {
+   DCHECK_EQ(GetState(), kForwardingAddress);
++#if defined(__APPLE__) && defined(__aarch64__)
++  // See FromForwardingAddress(): the 32-bit shift drops the state bits, leaving the offset.
++  return kHeapReferenceBase + static_cast<uint32_t>(value_ << kForwardingAddressShift);
++#else
+   return value_ << kForwardingAddressShift;
++#endif
+ }
+ 
+ inline LockWord::LockWord() : value_(0) {
+diff --git a/art/runtime/lock_word.h b/art/runtime/lock_word.h
+index ac7890c12f44631ff000a1892ef6fab0225bca1f..e836ad5e786f7b1f104bbae9d5e810bada4c44c4 100644
+--- a/art/runtime/lock_word.h
++++ b/art/runtime/lock_word.h
+@@ -148,6 +148,12 @@ class LockWord {
+ 
+   static LockWord FromForwardingAddress(size_t target) {
+     DCHECK_ALIGNED(target, (1 << kStateSize));
++#if defined(__APPLE__) && defined(__aarch64__)
++    // Objects live in the 4 GiB heap reference window above 4 GiB; store the offset in the
++    // window, as the absolute address would overflow into the state bits.
++    DCHECK_LT(target - kHeapReferenceBase, kHeapReferenceWindowSize);
++    target -= kHeapReferenceBase;
++#endif
+     return LockWord((target >> kForwardingAddressShift) | kStateForwardingAddressShifted);
+   }
+ 
+diff --git a/art/runtime/method_handles.cc b/art/runtime/method_handles.cc
+index 5471d387510f49e07b9eb9cdfee65c6aec5c90c0..0efd178ab4ef7c5c2699e9cf74a2ad7c8d0e76bd 100644
+--- a/art/runtime/method_handles.cc
++++ b/art/runtime/method_handles.cc
+@@ -323,7 +323,12 @@ inline void CopyArgumentsFromCallerFrame(const ShadowFrame& caller_frame,
+     // If both register locations contains the same value, the register probably holds a reference.
+     // Note: As an optimization, non-moving collectors leave a stale reference value
+     // in the references array even after the original vreg was overwritten to a non-reference.
++#if defined(__APPLE__) && defined(__aarch64__)
++    // Vregs hold compressed (window-relative) references; compare against the compressed form.
++    if (src_value == static_cast<uint32_t>(reinterpret_cast<uintptr_t>(o.Ptr()))) {
++#else
+     if (src_value == reinterpret_cast<uintptr_t>(o.Ptr())) {
++#endif
+       callee_frame->SetVRegReference(dst_reg, o);
+     } else {
+       callee_frame->SetVReg(dst_reg, src_value);
+diff --git a/art/runtime/mirror/object_reference.h b/art/runtime/mirror/object_reference.h
+index f01bcbd83ae4b895782cd87d6fe27dc488febc58..1f013299119a82de2612e6baa418a7abfa192fd9 100644
+--- a/art/runtime/mirror/object_reference.h
++++ b/art/runtime/mirror/object_reference.h
+@@ -35,6 +35,26 @@ class Object;
+ template<bool kPoisonReferences, class MirrorType>
+ class PtrCompression {
+  public:
++#if defined(__APPLE__) && defined(__aarch64__)
++  // The heap lives in the 4 GiB window at kHeapReferenceBase (see base/globals.h). The window
++  // is aligned to its size, so truncating to the low 32 bits gives the offset in the window.
++  static uint32_t Compress(MirrorType* mirror_ptr) {
++    uintptr_t as_bits = reinterpret_cast<uintptr_t>(mirror_ptr);
++    DCHECK(as_bits == 0u || (as_bits - kHeapReferenceBase) < kHeapReferenceWindowSize)
++        << "Reference " << reinterpret_cast<void*>(as_bits) << " outside the heap window";
++    uint32_t ref = static_cast<uint32_t>(as_bits);
++    return kPoisonReferences ? -ref : ref;
++  }
++
++  // Uncompress an encoded reference from its bit representation. 0 stays null; the first
++  // 64 KiB of the window are never mapped, so base | 0 cannot be a valid object anyway.
++  static MirrorType* Decompress(uint32_t ref) {
++    uint32_t offset = kPoisonReferences ? -ref : ref;
++    return offset == 0u
++        ? nullptr
++        : reinterpret_cast<MirrorType*>(kHeapReferenceBase | static_cast<uintptr_t>(offset));
++  }
++#else
+   // Compress reference to its bit representation.
+   static uint32_t Compress(MirrorType* mirror_ptr) {
+     uintptr_t as_bits = reinterpret_cast<uintptr_t>(mirror_ptr);
+@@ -46,6 +66,7 @@ class PtrCompression {
+     uintptr_t as_bits = kPoisonReferences ? -ref : ref;
+     return reinterpret_cast<MirrorType*>(as_bits);
+   }
++#endif
+ 
+   // Convert an ObjPtr to a compressed reference.
+   static uint32_t Compress(ObjPtr<MirrorType> ptr) REQUIRES_SHARED(Locks::mutator_lock_);
+@@ -178,6 +199,24 @@ class MANAGED CompressedReference : public mirror::ObjectReference<false, Mirror
+ };
+ 
+ }  // namespace mirror
++
++#if defined(__APPLE__) && defined(__aarch64__)
++// Decodes a reference that arrives in a machine register or a 32-bit vreg slot, for example a
++// receiver that an assembly stub loaded with a zero-extending 'ldr wN' and passes on to C++ as
++// mirror::Object*. Only the low 32 bits are significant: 0 is null, anything else is an offset
++// into the heap reference window. Already-decoded window pointers decode to themselves.
++inline mirror::Object* DecodeReferenceRegister(uintptr_t raw) {
++  const uint32_t ref = static_cast<uint32_t>(raw);
++  return ref == 0u
++      ? nullptr
++      : reinterpret_cast<mirror::Object*>(kHeapReferenceBase | static_cast<uintptr_t>(ref));
++}
++#else
++// References are plain (zero-extended) addresses below 4 GiB on this host.
++inline mirror::Object* DecodeReferenceRegister(uintptr_t raw) {
++  return reinterpret_cast<mirror::Object*>(raw);
++}
++#endif
+ }  // namespace art
+ 
+ #endif  // ART_RUNTIME_MIRROR_OBJECT_REFERENCE_H_
+diff --git a/art/runtime/mirror/var_handle.cc b/art/runtime/mirror/var_handle.cc
+index d887b5a11426055b214c835ee450fc12cae41f12..4841dec698961a035198117ccca80e9e5e97bc9d 100644
+--- a/art/runtime/mirror/var_handle.cc
++++ b/art/runtime/mirror/var_handle.cc
+@@ -1970,7 +1970,13 @@ bool ByteBufferViewVarHandle::Access(AccessMode access_mode,
+         GetMemberOffset(WellKnownClasses::java_nio_ByteBuffer_hb));
+     data = heap_byte_array->GetData();
+   } else {
++#if defined(__APPLE__) && defined(__aarch64__)
++    // Direct buffers come from newNonMovableArray() + addressOf(), which lie in the heap window
++    // above 4 GiB on Darwin; keep all 64 bits of the address.
++    data = reinterpret_cast<int8_t*>(static_cast<uintptr_t>(native_address));
++#else
+     data = reinterpret_cast<int8_t*>(static_cast<uint32_t>(native_address));
++#endif
+   }
+ 
+   bool byte_swap = !GetNativeByteOrder();
+diff --git a/art/runtime/monitor.cc b/art/runtime/monitor.cc
+index 676bceb766a521c4984bd6ee7827c8bb4fb6fdb8..19bfe6a7391a7bba4fd9f4f202ccead2e32f485c 100644
+--- a/art/runtime/monitor.cc
++++ b/art/runtime/monitor.cc
+@@ -1483,7 +1483,12 @@ void Monitor::VisitLocks(StackVisitor* stack_visitor,
+       uint32_t value;
+       success = stack_visitor->GetVReg(m, dex_reg, kReferenceVReg, &value);
+       if (success) {
++#if defined(__APPLE__) && defined(__aarch64__)
++        // A reference vreg holds the compressed (window-relative) reference.
++        ObjPtr<mirror::Object> o = DecodeReferenceRegister(value);
++#else
+         ObjPtr<mirror::Object> o = reinterpret_cast<mirror::Object*>(value);
++#endif
+         callback(o, callback_context);
+         break;
+       }
+diff --git a/art/runtime/monitor_pool.h b/art/runtime/monitor_pool.h
+index 4521a22c6fee49f05cb2caf43fc093e39ce8fbed..9f772e7fbd56e3bc7ec2e1e7a706cd92c93a8cbb 100644
+--- a/art/runtime/monitor_pool.h
++++ b/art/runtime/monitor_pool.h
+@@ -189,11 +189,19 @@ class MonitorPool {
+   // Size of a monitor, rounded up to a multiple of alignment.
+   static constexpr size_t kAlignedMonitorSize = (sizeof(Monitor) + kMonitorAlignment - 1) &
+                                                 -kMonitorAlignment;
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Chunks come from allocator_ (malloc, not page-granular mappings), so a chunk need not be a
++  // page. Keep the 4 KiB chunk of the 4 KiB-page hosts: with 16 KiB pages kMaxListSize *
++  // kChunkSize would overflow the 28-bit LockWord monitor id (static_assert below).
++  static constexpr size_t kChunkSize = 4096;
++  static constexpr size_t kChunkCapacity = kChunkSize / kAlignedMonitorSize;
++#else
+   // As close to a page as we can get seems a good start.
+   static constexpr size_t kChunkCapacity = kPageSize / kAlignedMonitorSize;
+   // Chunk size that is referenced in the id. We can collapse this to the actually used storage
+   // in a chunk, i.e., kChunkCapacity * kAlignedMonitorSize, but this will mean proper divisions.
+   static constexpr size_t kChunkSize = kPageSize;
++#endif
+   static_assert(IsPowerOfTwo(kChunkSize), "kChunkSize must be power of 2");
+   // The number of chunks of storage that can be referenced by the initial chunk list.
+   // The total number of usable monitor chunks is typically 255 times this number, so it
+diff --git a/art/runtime/obj_ptr-inl.h b/art/runtime/obj_ptr-inl.h
+index ae13465e5989920e287121007bebeb40be14eb94..65c724caec8cdb24bab62a653b3fc26aceb9e47d 100644
+--- a/art/runtime/obj_ptr-inl.h
++++ b/art/runtime/obj_ptr-inl.h
+@@ -55,7 +55,14 @@ inline uintptr_t ObjPtr<MirrorType>::Encode(MirrorType* ptr) {
+   uintptr_t ref = reinterpret_cast<uintptr_t>(ptr);
+   DCHECK_ALIGNED(ref, kObjectAlignment);
+   if (kObjPtrPoisoning && ref != 0) {
++#if defined(__APPLE__) && defined(__aarch64__)
++    // Objects live in the 4 GiB heap reference window; keep only the offset (see
++    // PtrUnchecked()).
++    DCHECK_LT(ref - kHeapReferenceBase, kHeapReferenceWindowSize);
++    ref -= kHeapReferenceBase;
++#else
+     DCHECK_LE(ref, 0xFFFFFFFFU);
++#endif
+     ref >>= kObjectAlignmentShift;
+     // Put cookie in high bits.
+     ref |= GetCurrentTrimedCookie() << kCookieShift;
+diff --git a/art/runtime/obj_ptr.h b/art/runtime/obj_ptr.h
+index a03b67bed7c3cf81daf2401fc3f6a4398409a846..5bda9bd03fcdd07e6d20de087a877fd8600ea761 100644
+--- a/art/runtime/obj_ptr.h
++++ b/art/runtime/obj_ptr.h
+@@ -90,8 +90,16 @@ class ObjPtr {
+   // Ptr unchecked does not check that object pointer is valid. Do not use if you can avoid it.
+   OBJPTR_INLINE MirrorType* PtrUnchecked() const {
+     if (kObjPtrPoisoning) {
++#if defined(__APPLE__) && defined(__aarch64__)
++      // Encode() stored the offset in the heap reference window; 0 stays null.
++      const uint32_t offset = static_cast<uint32_t>(reference_ << kObjectAlignmentShift);
++      return offset == 0u
++          ? nullptr
++          : reinterpret_cast<MirrorType*>(kHeapReferenceBase | static_cast<uintptr_t>(offset));
++#else
+       return reinterpret_cast<MirrorType*>(
+           static_cast<uintptr_t>(static_cast<uint32_t>(reference_ << kObjectAlignmentShift)));
++#endif
+     } else {
+       return reinterpret_cast<MirrorType*>(reference_);
+     }
+diff --git a/art/runtime/quick_exception_handler.cc b/art/runtime/quick_exception_handler.cc
+index 3bc718b05813c40fd1878a381747d3d5e7c6d90a..8a5868078b3ac9cc4760b69d679e17b9968027b6 100644
+--- a/art/runtime/quick_exception_handler.cc
++++ b/art/runtime/quick_exception_handler.cc
+@@ -536,7 +536,12 @@ class DeoptimizeStackVisitor final : public StackVisitor {
+         }
+       }
+       if (is_reference) {
++#if defined(__APPLE__) && defined(__aarch64__)
++        // Compiled code keeps the compressed (window-relative) reference in the 32-bit slot.
++        new_frame->SetVRegReference(vreg, DecodeReferenceRegister(value));
++#else
+         new_frame->SetVRegReference(vreg, reinterpret_cast<mirror::Object*>(value));
++#endif
+       } else {
+         new_frame->SetVReg(vreg, value);
+       }
+diff --git a/art/runtime/stack.cc b/art/runtime/stack.cc
+index 80a563b57f57cfbb756c48a9c3e89dffea59a16c..35c2d9cf51d20ed5df3e8e1023ba9c6ccce2ab66 100644
+--- a/art/runtime/stack.cc
++++ b/art/runtime/stack.cc
+@@ -142,7 +142,12 @@ mirror::Object* StackVisitor::GetThisObject() const {
+       if (!GetVReg(m, reg, kReferenceVReg, &value)) {
+         return nullptr;
+       }
++#if defined(__APPLE__) && defined(__aarch64__)
++      // A reference vreg holds the compressed (window-relative) reference.
++      return DecodeReferenceRegister(value);
++#else
+       return reinterpret_cast<mirror::Object*>(value);
++#endif
+     }
+   }
+ }
+@@ -393,7 +398,12 @@ bool StackVisitor::SetVReg(ArtMethod* m,
+     thread_->GetUpdatedVRegFlags(frame_id)[vreg] = true;
+   }
+   if (kind == kReferenceVReg) {
++#if defined(__APPLE__) && defined(__aarch64__)
++    // A reference vreg value is the compressed (window-relative) reference.
++    shadow_frame->SetVRegReference(vreg, DecodeReferenceRegister(new_value));
++#else
+     shadow_frame->SetVRegReference(vreg, reinterpret_cast<mirror::Object*>(new_value));
++#endif
+   } else {
+     shadow_frame->SetVReg(vreg, new_value);
+   }

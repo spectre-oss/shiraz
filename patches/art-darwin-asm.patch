@@ -1,0 +1,1897 @@
+diff --git a/art/runtime/arch/arm64/asm_support_arm64.S b/art/runtime/arch/arm64/asm_support_arm64.S
+index 715fc35ff4bf4a9dee9ac2b0a1a48f058d66fbe0..c6245889b47e7aeb0fc6260c80b2be3cda768000 100644
+--- a/art/runtime/arch/arm64/asm_support_arm64.S
++++ b/art/runtime/arch/arm64/asm_support_arm64.S
+@@ -40,6 +40,38 @@
+ #define wMR w20
+ #endif
+ 
++#if defined(__APPLE__)
++// Mach-O (darwin-arm64). C symbols carry a leading underscore, there is no
++// .type/.size, and .private_extern replaces .hidden. On arm64 Mach-O every
++// non-temporary label starts a new atom and the assembler cannot resolve a
++// CFI advance across atoms, so labels inside a function must be
++// assembler-temporary, which on Mach-O means an "L" prefix (see L() below).
++#define SYMBOL(name) _ ## name
++#define ASM_HIDDEN .private_extern
++// Function-local label: assembler-temporary on both object formats.
++#define L(name) L ## name
++// Unprefixed asm-to-C references resolve through `.set name, _name`.
++#include "arch/arm64/darwin_symbol_aliases.S"
++
++.macro ENTRY name
++    .private_extern _\name  // Hide this as a global symbol, so we do not incur stub calls.
++    .globl _\name
++    /* Cache alignment for function entry */
++    .balign 16
++_\name:
++\name:  // Unprefixed local alias at the same address for intra-asm references.
++    .cfi_startproc
++.endm
++
++.macro END name
++    .cfi_endproc
++.endm
++#else
++#define SYMBOL(name) name
++#define ASM_HIDDEN .hidden
++// Function-local label: assembler-temporary on both object formats.
++#define L(name) .L ## name
++
+ .macro ENTRY name
+     .type \name, #function
+     .hidden \name  // Hide this as a global symbol, so we do not incur plt calls.
+@@ -54,6 +86,7 @@
+     .cfi_endproc
+     .size \name, .-\name
+ .endm
++#endif  // defined(__APPLE__)
+ 
+ .macro UNIMPLEMENTED name
+     ENTRY \name
+diff --git a/art/runtime/arch/arm64/darwin_symbol_aliases.S b/art/runtime/arch/arm64/darwin_symbol_aliases.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7ee2bd2f688fae86059bac7785a4780469ec608
+--- /dev/null
++++ b/art/runtime/arch/arm64/darwin_symbol_aliases.S
+@@ -0,0 +1,208 @@
++/*
++ * Copyright (C) 2026 The Shiraz Authors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++// Mach-O (darwin-arm64) only; included by asm_support_arm64.S under __APPLE__.
++//
++// The arm64 entrypoints refer to C/C++ functions by their unprefixed C names,
++// while Mach-O gives every C symbol a leading underscore. Each line makes the
++// unprefixed name an alias of the real Mach-O symbol. Names defined in the
++// assembly itself are not listed: ENTRY emits an unprefixed local label too.
++//
++// This is a static, checked-in list; the build never regenerates it. It is
++// the union of `nm -u` over quick_entrypoints_arm64.o and jni_entrypoints_arm64.o
++// assembled with the libart darwin flags, with and without
++// USE_READ_BARRIER+USE_BAKER_READ_BARRIER, USE_HEAP_POISONING and NDEBUG.
++// Regenerate after adding a new asm-to-C reference: assemble with this file
++// emptied, then
++//   nm -u quick_entrypoints_arm64.o jni_entrypoints_arm64.o | grep -v '^_' |
++//     grep -v -e ':$' -e '^$' | sort -u | sed 's/.*/    .set &, _&/'
++// and check that `nm -u` of the reassembled objects lists only "_" names.
++// An unused alias still adds an undefined "_name" reference to the object;
++// every listed name is defined in libart itself.
++
++#ifndef ART_RUNTIME_ARCH_ARM64_DARWIN_SYMBOL_ALIASES_S_
++#define ART_RUNTIME_ARCH_ARM64_DARWIN_SYMBOL_ALIASES_S_
++
++#if defined(__APPLE__)
++
++    .set artAllocArrayFromCodeResolvedBumpPointer, _artAllocArrayFromCodeResolvedBumpPointer
++    .set artAllocArrayFromCodeResolvedBumpPointerInstrumented, _artAllocArrayFromCodeResolvedBumpPointerInstrumented
++    .set artAllocArrayFromCodeResolvedDlMalloc, _artAllocArrayFromCodeResolvedDlMalloc
++    .set artAllocArrayFromCodeResolvedDlMallocInstrumented, _artAllocArrayFromCodeResolvedDlMallocInstrumented
++    .set artAllocArrayFromCodeResolvedRegion, _artAllocArrayFromCodeResolvedRegion
++    .set artAllocArrayFromCodeResolvedRegionInstrumented, _artAllocArrayFromCodeResolvedRegionInstrumented
++    .set artAllocArrayFromCodeResolvedRegionTLAB, _artAllocArrayFromCodeResolvedRegionTLAB
++    .set artAllocArrayFromCodeResolvedRegionTLABInstrumented, _artAllocArrayFromCodeResolvedRegionTLABInstrumented
++    .set artAllocArrayFromCodeResolvedRosAlloc, _artAllocArrayFromCodeResolvedRosAlloc
++    .set artAllocArrayFromCodeResolvedRosAllocInstrumented, _artAllocArrayFromCodeResolvedRosAllocInstrumented
++    .set artAllocArrayFromCodeResolvedTLAB, _artAllocArrayFromCodeResolvedTLAB
++    .set artAllocArrayFromCodeResolvedTLABInstrumented, _artAllocArrayFromCodeResolvedTLABInstrumented
++    .set artAllocObjectFromCodeInitializedBumpPointer, _artAllocObjectFromCodeInitializedBumpPointer
++    .set artAllocObjectFromCodeInitializedBumpPointerInstrumented, _artAllocObjectFromCodeInitializedBumpPointerInstrumented
++    .set artAllocObjectFromCodeInitializedDlMalloc, _artAllocObjectFromCodeInitializedDlMalloc
++    .set artAllocObjectFromCodeInitializedDlMallocInstrumented, _artAllocObjectFromCodeInitializedDlMallocInstrumented
++    .set artAllocObjectFromCodeInitializedRegion, _artAllocObjectFromCodeInitializedRegion
++    .set artAllocObjectFromCodeInitializedRegionInstrumented, _artAllocObjectFromCodeInitializedRegionInstrumented
++    .set artAllocObjectFromCodeInitializedRegionTLAB, _artAllocObjectFromCodeInitializedRegionTLAB
++    .set artAllocObjectFromCodeInitializedRegionTLABInstrumented, _artAllocObjectFromCodeInitializedRegionTLABInstrumented
++    .set artAllocObjectFromCodeInitializedRosAlloc, _artAllocObjectFromCodeInitializedRosAlloc
++    .set artAllocObjectFromCodeInitializedRosAllocInstrumented, _artAllocObjectFromCodeInitializedRosAllocInstrumented
++    .set artAllocObjectFromCodeInitializedTLAB, _artAllocObjectFromCodeInitializedTLAB
++    .set artAllocObjectFromCodeInitializedTLABInstrumented, _artAllocObjectFromCodeInitializedTLABInstrumented
++    .set artAllocObjectFromCodeResolvedBumpPointer, _artAllocObjectFromCodeResolvedBumpPointer
++    .set artAllocObjectFromCodeResolvedBumpPointerInstrumented, _artAllocObjectFromCodeResolvedBumpPointerInstrumented
++    .set artAllocObjectFromCodeResolvedDlMalloc, _artAllocObjectFromCodeResolvedDlMalloc
++    .set artAllocObjectFromCodeResolvedDlMallocInstrumented, _artAllocObjectFromCodeResolvedDlMallocInstrumented
++    .set artAllocObjectFromCodeResolvedRegion, _artAllocObjectFromCodeResolvedRegion
++    .set artAllocObjectFromCodeResolvedRegionInstrumented, _artAllocObjectFromCodeResolvedRegionInstrumented
++    .set artAllocObjectFromCodeResolvedRegionTLAB, _artAllocObjectFromCodeResolvedRegionTLAB
++    .set artAllocObjectFromCodeResolvedRegionTLABInstrumented, _artAllocObjectFromCodeResolvedRegionTLABInstrumented
++    .set artAllocObjectFromCodeResolvedRosAlloc, _artAllocObjectFromCodeResolvedRosAlloc
++    .set artAllocObjectFromCodeResolvedRosAllocInstrumented, _artAllocObjectFromCodeResolvedRosAllocInstrumented
++    .set artAllocObjectFromCodeResolvedTLAB, _artAllocObjectFromCodeResolvedTLAB
++    .set artAllocObjectFromCodeResolvedTLABInstrumented, _artAllocObjectFromCodeResolvedTLABInstrumented
++    .set artAllocObjectFromCodeWithChecksBumpPointer, _artAllocObjectFromCodeWithChecksBumpPointer
++    .set artAllocObjectFromCodeWithChecksBumpPointerInstrumented, _artAllocObjectFromCodeWithChecksBumpPointerInstrumented
++    .set artAllocObjectFromCodeWithChecksDlMalloc, _artAllocObjectFromCodeWithChecksDlMalloc
++    .set artAllocObjectFromCodeWithChecksDlMallocInstrumented, _artAllocObjectFromCodeWithChecksDlMallocInstrumented
++    .set artAllocObjectFromCodeWithChecksRegion, _artAllocObjectFromCodeWithChecksRegion
++    .set artAllocObjectFromCodeWithChecksRegionInstrumented, _artAllocObjectFromCodeWithChecksRegionInstrumented
++    .set artAllocObjectFromCodeWithChecksRegionTLAB, _artAllocObjectFromCodeWithChecksRegionTLAB
++    .set artAllocObjectFromCodeWithChecksRegionTLABInstrumented, _artAllocObjectFromCodeWithChecksRegionTLABInstrumented
++    .set artAllocObjectFromCodeWithChecksRosAlloc, _artAllocObjectFromCodeWithChecksRosAlloc
++    .set artAllocObjectFromCodeWithChecksRosAllocInstrumented, _artAllocObjectFromCodeWithChecksRosAllocInstrumented
++    .set artAllocObjectFromCodeWithChecksTLAB, _artAllocObjectFromCodeWithChecksTLAB
++    .set artAllocObjectFromCodeWithChecksTLABInstrumented, _artAllocObjectFromCodeWithChecksTLABInstrumented
++    .set artAllocStringFromBytesFromCodeBumpPointer, _artAllocStringFromBytesFromCodeBumpPointer
++    .set artAllocStringFromBytesFromCodeBumpPointerInstrumented, _artAllocStringFromBytesFromCodeBumpPointerInstrumented
++    .set artAllocStringFromBytesFromCodeDlMalloc, _artAllocStringFromBytesFromCodeDlMalloc
++    .set artAllocStringFromBytesFromCodeDlMallocInstrumented, _artAllocStringFromBytesFromCodeDlMallocInstrumented
++    .set artAllocStringFromBytesFromCodeRegion, _artAllocStringFromBytesFromCodeRegion
++    .set artAllocStringFromBytesFromCodeRegionInstrumented, _artAllocStringFromBytesFromCodeRegionInstrumented
++    .set artAllocStringFromBytesFromCodeRegionTLAB, _artAllocStringFromBytesFromCodeRegionTLAB
++    .set artAllocStringFromBytesFromCodeRegionTLABInstrumented, _artAllocStringFromBytesFromCodeRegionTLABInstrumented
++    .set artAllocStringFromBytesFromCodeRosAlloc, _artAllocStringFromBytesFromCodeRosAlloc
++    .set artAllocStringFromBytesFromCodeRosAllocInstrumented, _artAllocStringFromBytesFromCodeRosAllocInstrumented
++    .set artAllocStringFromBytesFromCodeTLAB, _artAllocStringFromBytesFromCodeTLAB
++    .set artAllocStringFromBytesFromCodeTLABInstrumented, _artAllocStringFromBytesFromCodeTLABInstrumented
++    .set artAllocStringFromCharsFromCodeBumpPointer, _artAllocStringFromCharsFromCodeBumpPointer
++    .set artAllocStringFromCharsFromCodeBumpPointerInstrumented, _artAllocStringFromCharsFromCodeBumpPointerInstrumented
++    .set artAllocStringFromCharsFromCodeDlMalloc, _artAllocStringFromCharsFromCodeDlMalloc
++    .set artAllocStringFromCharsFromCodeDlMallocInstrumented, _artAllocStringFromCharsFromCodeDlMallocInstrumented
++    .set artAllocStringFromCharsFromCodeRegion, _artAllocStringFromCharsFromCodeRegion
++    .set artAllocStringFromCharsFromCodeRegionInstrumented, _artAllocStringFromCharsFromCodeRegionInstrumented
++    .set artAllocStringFromCharsFromCodeRegionTLAB, _artAllocStringFromCharsFromCodeRegionTLAB
++    .set artAllocStringFromCharsFromCodeRegionTLABInstrumented, _artAllocStringFromCharsFromCodeRegionTLABInstrumented
++    .set artAllocStringFromCharsFromCodeRosAlloc, _artAllocStringFromCharsFromCodeRosAlloc
++    .set artAllocStringFromCharsFromCodeRosAllocInstrumented, _artAllocStringFromCharsFromCodeRosAllocInstrumented
++    .set artAllocStringFromCharsFromCodeTLAB, _artAllocStringFromCharsFromCodeTLAB
++    .set artAllocStringFromCharsFromCodeTLABInstrumented, _artAllocStringFromCharsFromCodeTLABInstrumented
++    .set artAllocStringFromStringFromCodeBumpPointer, _artAllocStringFromStringFromCodeBumpPointer
++    .set artAllocStringFromStringFromCodeBumpPointerInstrumented, _artAllocStringFromStringFromCodeBumpPointerInstrumented
++    .set artAllocStringFromStringFromCodeDlMalloc, _artAllocStringFromStringFromCodeDlMalloc
++    .set artAllocStringFromStringFromCodeDlMallocInstrumented, _artAllocStringFromStringFromCodeDlMallocInstrumented
++    .set artAllocStringFromStringFromCodeRegion, _artAllocStringFromStringFromCodeRegion
++    .set artAllocStringFromStringFromCodeRegionInstrumented, _artAllocStringFromStringFromCodeRegionInstrumented
++    .set artAllocStringFromStringFromCodeRegionTLAB, _artAllocStringFromStringFromCodeRegionTLAB
++    .set artAllocStringFromStringFromCodeRegionTLABInstrumented, _artAllocStringFromStringFromCodeRegionTLABInstrumented
++    .set artAllocStringFromStringFromCodeRosAlloc, _artAllocStringFromStringFromCodeRosAlloc
++    .set artAllocStringFromStringFromCodeRosAllocInstrumented, _artAllocStringFromStringFromCodeRosAllocInstrumented
++    .set artAllocStringFromStringFromCodeTLAB, _artAllocStringFromStringFromCodeTLAB
++    .set artAllocStringFromStringFromCodeTLABInstrumented, _artAllocStringFromStringFromCodeTLABInstrumented
++    .set artAllocStringObjectBumpPointer, _artAllocStringObjectBumpPointer
++    .set artAllocStringObjectBumpPointerInstrumented, _artAllocStringObjectBumpPointerInstrumented
++    .set artAllocStringObjectDlMalloc, _artAllocStringObjectDlMalloc
++    .set artAllocStringObjectDlMallocInstrumented, _artAllocStringObjectDlMallocInstrumented
++    .set artAllocStringObjectRegion, _artAllocStringObjectRegion
++    .set artAllocStringObjectRegionInstrumented, _artAllocStringObjectRegionInstrumented
++    .set artAllocStringObjectRegionTLAB, _artAllocStringObjectRegionTLAB
++    .set artAllocStringObjectRegionTLABInstrumented, _artAllocStringObjectRegionTLABInstrumented
++    .set artAllocStringObjectRosAlloc, _artAllocStringObjectRosAlloc
++    .set artAllocStringObjectRosAllocInstrumented, _artAllocStringObjectRosAllocInstrumented
++    .set artAllocStringObjectTLAB, _artAllocStringObjectTLAB
++    .set artAllocStringObjectTLABInstrumented, _artAllocStringObjectTLABInstrumented
++    .set artDeliverExceptionFromCode, _artDeliverExceptionFromCode
++    .set artDeliverPendingExceptionFromCode, _artDeliverPendingExceptionFromCode
++    .set artDeoptimize, _artDeoptimize
++    .set artDeoptimizeFromCompiledCode, _artDeoptimizeFromCompiledCode
++    .set artFindNativeMethod, _artFindNativeMethod
++    .set artGet32InstanceFromCompiledCode, _artGet32InstanceFromCompiledCode
++    .set artGet32StaticFromCompiledCode, _artGet32StaticFromCompiledCode
++    .set artGet64InstanceFromCompiledCode, _artGet64InstanceFromCompiledCode
++    .set artGet64StaticFromCompiledCode, _artGet64StaticFromCompiledCode
++    .set artGetBooleanInstanceFromCompiledCode, _artGetBooleanInstanceFromCompiledCode
++    .set artGetBooleanStaticFromCompiledCode, _artGetBooleanStaticFromCompiledCode
++    .set artGetByteInstanceFromCompiledCode, _artGetByteInstanceFromCompiledCode
++    .set artGetByteStaticFromCompiledCode, _artGetByteStaticFromCompiledCode
++    .set artGetCharInstanceFromCompiledCode, _artGetCharInstanceFromCompiledCode
++    .set artGetCharStaticFromCompiledCode, _artGetCharStaticFromCompiledCode
++    .set artGetObjInstanceFromCompiledCode, _artGetObjInstanceFromCompiledCode
++    .set artGetObjStaticFromCompiledCode, _artGetObjStaticFromCompiledCode
++    .set artGetShortInstanceFromCompiledCode, _artGetShortInstanceFromCompiledCode
++    .set artGetShortStaticFromCompiledCode, _artGetShortStaticFromCompiledCode
++    .set artHandleFillArrayDataFromCode, _artHandleFillArrayDataFromCode
++    .set artInitializeStaticStorageFromCode, _artInitializeStaticStorageFromCode
++    .set artInstanceOfFromCode, _artInstanceOfFromCode
++    .set artInstrumentationMethodEntryFromCode, _artInstrumentationMethodEntryFromCode
++    .set artInstrumentationMethodExitFromCode, _artInstrumentationMethodExitFromCode
++    .set artInvokeCustom, _artInvokeCustom
++    .set artInvokeDirectTrampolineWithAccessCheck, _artInvokeDirectTrampolineWithAccessCheck
++    .set artInvokeInterfaceTrampoline, _artInvokeInterfaceTrampoline
++    .set artInvokeInterfaceTrampolineWithAccessCheck, _artInvokeInterfaceTrampolineWithAccessCheck
++    .set artInvokeObsoleteMethod, _artInvokeObsoleteMethod
++    .set artInvokePolymorphic, _artInvokePolymorphic
++    .set artInvokeStaticTrampolineWithAccessCheck, _artInvokeStaticTrampolineWithAccessCheck
++    .set artInvokeSuperTrampolineWithAccessCheck, _artInvokeSuperTrampolineWithAccessCheck
++    .set artInvokeVirtualTrampolineWithAccessCheck, _artInvokeVirtualTrampolineWithAccessCheck
++    .set artIsAssignableFromCode, _artIsAssignableFromCode
++    .set artLockObjectFromCode, _artLockObjectFromCode
++    .set artLookupResolvedMethod, _artLookupResolvedMethod
++    .set artQuickGenericJniEndTrampoline, _artQuickGenericJniEndTrampoline
++    .set artQuickGenericJniTrampoline, _artQuickGenericJniTrampoline
++    .set artQuickProxyInvokeHandler, _artQuickProxyInvokeHandler
++    .set artQuickResolutionTrampoline, _artQuickResolutionTrampoline
++    .set artQuickToInterpreterBridge, _artQuickToInterpreterBridge
++    .set artReadBarrierMark, _artReadBarrierMark
++    .set artReadBarrierSlow, _artReadBarrierSlow
++    .set artResolveMethodHandleFromCode, _artResolveMethodHandleFromCode
++    .set artResolveMethodTypeFromCode, _artResolveMethodTypeFromCode
++    .set artResolveStringFromCode, _artResolveStringFromCode
++    .set artResolveTypeAndVerifyAccessFromCode, _artResolveTypeAndVerifyAccessFromCode
++    .set artResolveTypeFromCode, _artResolveTypeFromCode
++    .set artSet16InstanceFromCompiledCode, _artSet16InstanceFromCompiledCode
++    .set artSet16StaticFromCompiledCode, _artSet16StaticFromCompiledCode
++    .set artSet32InstanceFromCompiledCode, _artSet32InstanceFromCompiledCode
++    .set artSet32StaticFromCompiledCode, _artSet32StaticFromCompiledCode
++    .set artSet64InstanceFromCompiledCode, _artSet64InstanceFromCompiledCode
++    .set artSet64StaticFromCompiledCode, _artSet64StaticFromCompiledCode
++    .set artSet8InstanceFromCompiledCode, _artSet8InstanceFromCompiledCode
++    .set artSet8StaticFromCompiledCode, _artSet8StaticFromCompiledCode
++    .set artSetObjInstanceFromCompiledCode, _artSetObjInstanceFromCompiledCode
++    .set artSetObjStaticFromCompiledCode, _artSetObjStaticFromCompiledCode
++    .set artTestSuspendFromCode, _artTestSuspendFromCode
++    .set artThrowArrayBoundsFromCode, _artThrowArrayBoundsFromCode
++    .set artThrowArrayStoreException, _artThrowArrayStoreException
++    .set artThrowClassCastExceptionForObject, _artThrowClassCastExceptionForObject
++    .set artThrowDivZeroFromCode, _artThrowDivZeroFromCode
++    .set artThrowNullPointerExceptionFromCode, _artThrowNullPointerExceptionFromCode
++    .set artThrowNullPointerExceptionFromSignal, _artThrowNullPointerExceptionFromSignal
++    .set artThrowStackOverflowFromCode, _artThrowStackOverflowFromCode
++    .set artThrowStringBoundsFromCode, _artThrowStringBoundsFromCode
++    .set artUnlockObjectFromCode, _artUnlockObjectFromCode
++
++#endif  // defined(__APPLE__)
++
++#endif  // ART_RUNTIME_ARCH_ARM64_DARWIN_SYMBOL_ALIASES_S_
+diff --git a/art/runtime/arch/arm64/memcmp16_arm64.S b/art/runtime/arch/arm64/memcmp16_arm64.S
+index 582940a929550ad44c95dadd93f2326bacd7ab4d..d0575419ec6531a81712e20a18ee35fadeb91640 100644
+--- a/art/runtime/arch/arm64/memcmp16_arm64.S
++++ b/art/runtime/arch/arm64/memcmp16_arm64.S
+@@ -48,32 +48,32 @@
+ //          art_quick_string_compareto, which relies on these temps being unused.
+ 
+ ENTRY __memcmp16
+-  cbz     limit, .Lret0
++  cbz     limit, L(ret0)
+   lsl     limit, limit, #1  /* Half-words to bytes.  */
+   eor     tmp1, src1, src2
+   tst     tmp1, #7
+-  b.ne    .Lmisaligned8
++  b.ne    L(misaligned8)
+   ands    tmp1, src1, #7
+-  b.ne    .Lmutual_align
++  b.ne    L(mutual_align)
+   add     limit_wd, limit, #7
+   lsr     limit_wd, limit_wd, #3
+   /* Start of performance-critical section  -- one 64B cache line.  */
+-.Lloop_aligned:
++L(loop_aligned):
+   ldr     data1, [src1], #8
+   ldr     data2, [src2], #8
+-.Lstart_realigned:
++L(start_realigned):
+   subs    limit_wd, limit_wd, #1
+   eor     diff, data1, data2  /* Non-zero if differences found.  */
+   csinv   endloop, diff, xzr, ne  /* Last Dword or differences.  */
+-  cbz     endloop, .Lloop_aligned
++  cbz     endloop, L(loop_aligned)
+   /* End of performance-critical section  -- one 64B cache line.  */
+ 
+   /* Not reached the limit, must have found a diff.  */
+-  cbnz    limit_wd, .Lnot_limit
++  cbnz    limit_wd, L(not_limit)
+ 
+   /* Limit % 8 == 0 => all bytes significant.  */
+   ands    limit, limit, #7
+-  b.eq    .Lnot_limit
++  b.eq    L(not_limit)
+ 
+   lsl     limit, limit, #3  /* Bits -> bytes.  */
+   mov     mask, #~0
+@@ -81,7 +81,7 @@ ENTRY __memcmp16
+   bic     data1, data1, mask
+   bic     data2, data2, mask
+ 
+-.Lnot_limit:
++L(not_limit):
+ 
+   // Swap the byte order of diff. Exact reverse is not important, as we only need to detect
+   // the half-word.
+@@ -102,7 +102,7 @@ ENTRY __memcmp16
+   sub     result, data1, data2
+   ret
+ 
+-.Lmutual_align:
++L(mutual_align):
+   /* Sources are mutually aligned, but are not currently at an
+      alignment boundary.  Round down the addresses and then mask off
+      the bytes that precede the start point.  */
+@@ -120,14 +120,14 @@ ENTRY __memcmp16
+   orr     data1, data1, tmp2
+   orr     data2, data2, tmp2
+   lsr     limit_wd, limit_wd, #3
+-  b       .Lstart_realigned
++  b       L(start_realigned)
+ 
+-.Lret0:
++L(ret0):
+   mov     result, #0
+   ret
+ 
+   .p2align 6
+-.Lmisaligned8:
++L(misaligned8):
+   sub     limit, limit, #1
+ 1:
+   /* Perhaps we can do better than this.  */
+diff --git a/art/runtime/arch/arm64/quick_entrypoints_arm64.S b/art/runtime/arch/arm64/quick_entrypoints_arm64.S
+index 93355c42721f1faee68fc2501ad1299dbb7c95d3..bea4196d1abcd6f64bce3f5f8d2a655f4f6f93ee 100644
+--- a/art/runtime/arch/arm64/quick_entrypoints_arm64.S
++++ b/art/runtime/arch/arm64/quick_entrypoints_arm64.S
+@@ -85,8 +85,13 @@
+ .macro SETUP_SAVE_ALL_CALLEE_SAVES_FRAME
+     // art::Runtime* xIP0 = art::Runtime::instance_;
+     // Our registers aren't intermixed - just spill in order.
++#if defined(__APPLE__)
++    adrp xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGE
++    ldr xIP0, [xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGEOFF]
++#else
+     adrp xIP0, :got:_ZN3art7Runtime9instance_E
+     ldr xIP0, [xIP0, #:got_lo12:_ZN3art7Runtime9instance_E]
++#endif
+     ldr xIP0, [xIP0]
+ 
+     // ArtMethod* xIP0 = Runtime::instance_->callee_save_methods_[kSaveAllCalleeSaves];
+@@ -128,8 +133,13 @@
+ .macro SETUP_SAVE_REFS_ONLY_FRAME
+     // art::Runtime* xIP0 = art::Runtime::instance_;
+     // Our registers aren't intermixed - just spill in order.
++#if defined(__APPLE__)
++    adrp xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGE
++    ldr xIP0, [xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGEOFF]
++#else
+     adrp xIP0, :got:_ZN3art7Runtime9instance_E
+     ldr xIP0, [xIP0, #:got_lo12:_ZN3art7Runtime9instance_E]
++#endif
+     ldr xIP0, [xIP0]
+ 
+     // ArtMethod* xIP0 = Runtime::instance_->callee_save_methods_[kSaveRefOnly];
+@@ -227,8 +237,13 @@
+ .macro SETUP_SAVE_REFS_AND_ARGS_FRAME
+     // art::Runtime* xIP0 = art::Runtime::instance_;
+     // Our registers aren't intermixed - just spill in order.
++#if defined(__APPLE__)
++    adrp xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGE
++    ldr xIP0, [xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGEOFF]
++#else
+     adrp xIP0, :got:_ZN3art7Runtime9instance_E
+     ldr xIP0, [xIP0, #:got_lo12:_ZN3art7Runtime9instance_E]
++#endif
+     ldr xIP0, [xIP0]
+ 
+     // ArtMethod* xIP0 = Runtime::instance_->callee_save_methods_[kSaveRefAndArgs];
+@@ -326,8 +341,13 @@
+     SAVE_TWO_REGS x27, x28, 480
+ 
+     // art::Runtime* xIP0 = art::Runtime::instance_;
++#if defined(__APPLE__)
++    adrp xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGE
++    ldr xIP0, [xIP0, SYMBOL(_ZN3art7Runtime9instance_E)@GOTPAGEOFF]
++#else
+     adrp xIP0, :got:_ZN3art7Runtime9instance_E
+     ldr xIP0, [xIP0, #:got_lo12:_ZN3art7Runtime9instance_E]
++#endif
+     ldr xIP0, [xIP0]
+ 
+     // ArtMethod* xIP0 = Runtime::instance_->callee_save_methods_[kSaveEverything];
+@@ -740,10 +760,10 @@ ENTRY art_quick_invoke_stub
+     // Fill registers x/w1 to x/w7 and s/d0 to s/d7 with parameters.
+     // Parse the passed shorty to determine which register to load.
+     // Load addresses for routines that load WXSD registers.
+-    adr  x11, .LstoreW2
+-    adr  x12, .LstoreX2
+-    adr  x13, .LstoreS0
+-    adr  x14, .LstoreD0
++    adr  x11, L(storeW2)
++    adr  x12, L(storeX2)
++    adr  x13, L(storeS0)
++    adr  x14, L(storeD0)
+ 
+     // Initialize routine offsets to 0 for integers and floats.
+     // x8 for integers, x15 for floating point.
+@@ -754,106 +774,101 @@ ENTRY art_quick_invoke_stub
+     ldr w1, [x9],#4         // Load "this" parameter, and increment arg pointer.
+ 
+     // Loop to fill registers.
+-.LfillRegisters:
++L(fillRegisters):
+     ldrb w17, [x10], #1       // Load next character in signature, and increment.
+-    cbz w17, .LcallFunction   // Exit at end of signature. Shorty 0 terminated.
++    cbz w17, L(callFunction)   // Exit at end of signature. Shorty 0 terminated.
+ 
+     cmp  w17, #'F' // is this a float?
+-    bne .LisDouble
++    bne L(isDouble)
+ 
+     cmp x15, # 8*12         // Skip this load if all registers full.
+-    beq .Ladvance4
++    beq L(advance4)
+ 
+     add x17, x13, x15       // Calculate subroutine to jump to.
+     br  x17
+ 
+-.LisDouble:
++L(isDouble):
+     cmp w17, #'D'           // is this a double?
+-    bne .LisLong
++    bne L(isLong)
+ 
+     cmp x15, # 8*12         // Skip this load if all registers full.
+-    beq .Ladvance8
++    beq L(advance8)
+ 
+     add x17, x14, x15       // Calculate subroutine to jump to.
+     br x17
+ 
+-.LisLong:
++L(isLong):
+     cmp w17, #'J'           // is this a long?
+-    bne .LisOther
++    bne L(isOther)
+ 
+     cmp x8, # 6*12          // Skip this load if all registers full.
+-    beq .Ladvance8
++    beq L(advance8)
+ 
+     add x17, x12, x8        // Calculate subroutine to jump to.
+     br x17
+ 
+-.LisOther:                  // Everything else takes one vReg.
++L(isOther):                  // Everything else takes one vReg.
+     cmp x8, # 6*12          // Skip this load if all registers full.
+-    beq .Ladvance4
++    beq L(advance4)
+ 
+     add x17, x11, x8        // Calculate subroutine to jump to.
+     br x17
+ 
+-.Ladvance4:
++L(advance4):
+     add x9, x9, #4
+-    b .LfillRegisters
++    b L(fillRegisters)
+ 
+-.Ladvance8:
++L(advance8):
+     add x9, x9, #8
+-    b .LfillRegisters
++    b L(fillRegisters)
+ 
+ // Macro for loading a parameter into a register.
+ //  counter - the register with offset into these tables
+ //  size - the size of the register - 4 or 8 bytes.
+ //  register - the name of the register to be loaded.
+-.macro LOADREG counter size register return
++.macro LOADREG counter, size, register, return
+     ldr \register , [x9], #\size
+     add \counter, \counter, 12
+     b \return
+ .endm
+ 
+ // Store ints.
+-.LstoreW2:
+-    LOADREG x8 4 w2 .LfillRegisters
+-    LOADREG x8 4 w3 .LfillRegisters
+-    LOADREG x8 4 w4 .LfillRegisters
+-    LOADREG x8 4 w5 .LfillRegisters
+-    LOADREG x8 4 w6 .LfillRegisters
+-    LOADREG x8 4 w7 .LfillRegisters
+-
++L(storeW2):
++    LOADREG x8, 4, w2, L(fillRegisters)
++    LOADREG x8, 4, w3, L(fillRegisters)
++    LOADREG x8, 4, w4, L(fillRegisters)
++    LOADREG x8, 4, w5, L(fillRegisters)
++    LOADREG x8, 4, w6, L(fillRegisters)
++    LOADREG x8, 4, w7, L(fillRegisters)
+ // Store longs.
+-.LstoreX2:
+-    LOADREG x8 8 x2 .LfillRegisters
+-    LOADREG x8 8 x3 .LfillRegisters
+-    LOADREG x8 8 x4 .LfillRegisters
+-    LOADREG x8 8 x5 .LfillRegisters
+-    LOADREG x8 8 x6 .LfillRegisters
+-    LOADREG x8 8 x7 .LfillRegisters
+-
++L(storeX2):
++    LOADREG x8, 8, x2, L(fillRegisters)
++    LOADREG x8, 8, x3, L(fillRegisters)
++    LOADREG x8, 8, x4, L(fillRegisters)
++    LOADREG x8, 8, x5, L(fillRegisters)
++    LOADREG x8, 8, x6, L(fillRegisters)
++    LOADREG x8, 8, x7, L(fillRegisters)
+ // Store singles.
+-.LstoreS0:
+-    LOADREG x15 4 s0 .LfillRegisters
+-    LOADREG x15 4 s1 .LfillRegisters
+-    LOADREG x15 4 s2 .LfillRegisters
+-    LOADREG x15 4 s3 .LfillRegisters
+-    LOADREG x15 4 s4 .LfillRegisters
+-    LOADREG x15 4 s5 .LfillRegisters
+-    LOADREG x15 4 s6 .LfillRegisters
+-    LOADREG x15 4 s7 .LfillRegisters
+-
++L(storeS0):
++    LOADREG x15, 4, s0, L(fillRegisters)
++    LOADREG x15, 4, s1, L(fillRegisters)
++    LOADREG x15, 4, s2, L(fillRegisters)
++    LOADREG x15, 4, s3, L(fillRegisters)
++    LOADREG x15, 4, s4, L(fillRegisters)
++    LOADREG x15, 4, s5, L(fillRegisters)
++    LOADREG x15, 4, s6, L(fillRegisters)
++    LOADREG x15, 4, s7, L(fillRegisters)
+ // Store doubles.
+-.LstoreD0:
+-    LOADREG x15 8 d0 .LfillRegisters
+-    LOADREG x15 8 d1 .LfillRegisters
+-    LOADREG x15 8 d2 .LfillRegisters
+-    LOADREG x15 8 d3 .LfillRegisters
+-    LOADREG x15 8 d4 .LfillRegisters
+-    LOADREG x15 8 d5 .LfillRegisters
+-    LOADREG x15 8 d6 .LfillRegisters
+-    LOADREG x15 8 d7 .LfillRegisters
+-
+-
+-.LcallFunction:
++L(storeD0):
++    LOADREG x15, 8, d0, L(fillRegisters)
++    LOADREG x15, 8, d1, L(fillRegisters)
++    LOADREG x15, 8, d2, L(fillRegisters)
++    LOADREG x15, 8, d3, L(fillRegisters)
++    LOADREG x15, 8, d4, L(fillRegisters)
++    LOADREG x15, 8, d5, L(fillRegisters)
++    LOADREG x15, 8, d6, L(fillRegisters)
++    LOADREG x15, 8, d7, L(fillRegisters)
++L(callFunction):
+ 
+     INVOKE_STUB_CALL_AND_RETURN
+ 
+@@ -874,10 +889,10 @@ ENTRY art_quick_invoke_static_stub
+     // Fill registers x/w1 to x/w7 and s/d0 to s/d7 with parameters.
+     // Parse the passed shorty to determine which register to load.
+     // Load addresses for routines that load WXSD registers.
+-    adr  x11, .LstoreW1_2
+-    adr  x12, .LstoreX1_2
+-    adr  x13, .LstoreS0_2
+-    adr  x14, .LstoreD0_2
++    adr  x11, L(storeW1_2)
++    adr  x12, L(storeX1_2)
++    adr  x13, L(storeS0_2)
++    adr  x14, L(storeD0_2)
+ 
+     // Initialize routine offsets to 0 for integers and floats.
+     // x8 for integers, x15 for floating point.
+@@ -887,98 +902,93 @@ ENTRY art_quick_invoke_static_stub
+     add x10, x5, #1     // Load shorty address, plus one to skip return value.
+ 
+     // Loop to fill registers.
+-.LfillRegisters2:
++L(fillRegisters2):
+     ldrb w17, [x10], #1         // Load next character in signature, and increment.
+-    cbz w17, .LcallFunction2    // Exit at end of signature. Shorty 0 terminated.
++    cbz w17, L(callFunction2)    // Exit at end of signature. Shorty 0 terminated.
+ 
+     cmp  w17, #'F'          // is this a float?
+-    bne .LisDouble2
++    bne L(isDouble2)
+ 
+     cmp x15, # 8*12         // Skip this load if all registers full.
+-    beq .Ladvance4_2
++    beq L(advance4_2)
+ 
+     add x17, x13, x15       // Calculate subroutine to jump to.
+     br  x17
+ 
+-.LisDouble2:
++L(isDouble2):
+     cmp w17, #'D'           // is this a double?
+-    bne .LisLong2
++    bne L(isLong2)
+ 
+     cmp x15, # 8*12         // Skip this load if all registers full.
+-    beq .Ladvance8_2
++    beq L(advance8_2)
+ 
+     add x17, x14, x15       // Calculate subroutine to jump to.
+     br x17
+ 
+-.LisLong2:
++L(isLong2):
+     cmp w17, #'J'           // is this a long?
+-    bne .LisOther2
++    bne L(isOther2)
+ 
+     cmp x8, # 7*12          // Skip this load if all registers full.
+-    beq .Ladvance8_2
++    beq L(advance8_2)
+ 
+     add x17, x12, x8        // Calculate subroutine to jump to.
+     br x17
+ 
+-.LisOther2:                 // Everything else takes one vReg.
++L(isOther2):                 // Everything else takes one vReg.
+     cmp x8, # 7*12          // Skip this load if all registers full.
+-    beq .Ladvance4_2
++    beq L(advance4_2)
+ 
+     add x17, x11, x8        // Calculate subroutine to jump to.
+     br x17
+ 
+-.Ladvance4_2:
++L(advance4_2):
+     add x9, x9, #4
+-    b .LfillRegisters2
++    b L(fillRegisters2)
+ 
+-.Ladvance8_2:
++L(advance8_2):
+     add x9, x9, #8
+-    b .LfillRegisters2
++    b L(fillRegisters2)
+ 
+ // Store ints.
+-.LstoreW1_2:
+-    LOADREG x8 4 w1 .LfillRegisters2
+-    LOADREG x8 4 w2 .LfillRegisters2
+-    LOADREG x8 4 w3 .LfillRegisters2
+-    LOADREG x8 4 w4 .LfillRegisters2
+-    LOADREG x8 4 w5 .LfillRegisters2
+-    LOADREG x8 4 w6 .LfillRegisters2
+-    LOADREG x8 4 w7 .LfillRegisters2
+-
++L(storeW1_2):
++    LOADREG x8, 4, w1, L(fillRegisters2)
++    LOADREG x8, 4, w2, L(fillRegisters2)
++    LOADREG x8, 4, w3, L(fillRegisters2)
++    LOADREG x8, 4, w4, L(fillRegisters2)
++    LOADREG x8, 4, w5, L(fillRegisters2)
++    LOADREG x8, 4, w6, L(fillRegisters2)
++    LOADREG x8, 4, w7, L(fillRegisters2)
+ // Store longs.
+-.LstoreX1_2:
+-    LOADREG x8 8 x1 .LfillRegisters2
+-    LOADREG x8 8 x2 .LfillRegisters2
+-    LOADREG x8 8 x3 .LfillRegisters2
+-    LOADREG x8 8 x4 .LfillRegisters2
+-    LOADREG x8 8 x5 .LfillRegisters2
+-    LOADREG x8 8 x6 .LfillRegisters2
+-    LOADREG x8 8 x7 .LfillRegisters2
+-
++L(storeX1_2):
++    LOADREG x8, 8, x1, L(fillRegisters2)
++    LOADREG x8, 8, x2, L(fillRegisters2)
++    LOADREG x8, 8, x3, L(fillRegisters2)
++    LOADREG x8, 8, x4, L(fillRegisters2)
++    LOADREG x8, 8, x5, L(fillRegisters2)
++    LOADREG x8, 8, x6, L(fillRegisters2)
++    LOADREG x8, 8, x7, L(fillRegisters2)
+ // Store singles.
+-.LstoreS0_2:
+-    LOADREG x15 4 s0 .LfillRegisters2
+-    LOADREG x15 4 s1 .LfillRegisters2
+-    LOADREG x15 4 s2 .LfillRegisters2
+-    LOADREG x15 4 s3 .LfillRegisters2
+-    LOADREG x15 4 s4 .LfillRegisters2
+-    LOADREG x15 4 s5 .LfillRegisters2
+-    LOADREG x15 4 s6 .LfillRegisters2
+-    LOADREG x15 4 s7 .LfillRegisters2
+-
++L(storeS0_2):
++    LOADREG x15, 4, s0, L(fillRegisters2)
++    LOADREG x15, 4, s1, L(fillRegisters2)
++    LOADREG x15, 4, s2, L(fillRegisters2)
++    LOADREG x15, 4, s3, L(fillRegisters2)
++    LOADREG x15, 4, s4, L(fillRegisters2)
++    LOADREG x15, 4, s5, L(fillRegisters2)
++    LOADREG x15, 4, s6, L(fillRegisters2)
++    LOADREG x15, 4, s7, L(fillRegisters2)
+ // Store doubles.
+-.LstoreD0_2:
+-    LOADREG x15 8 d0 .LfillRegisters2
+-    LOADREG x15 8 d1 .LfillRegisters2
+-    LOADREG x15 8 d2 .LfillRegisters2
+-    LOADREG x15 8 d3 .LfillRegisters2
+-    LOADREG x15 8 d4 .LfillRegisters2
+-    LOADREG x15 8 d5 .LfillRegisters2
+-    LOADREG x15 8 d6 .LfillRegisters2
+-    LOADREG x15 8 d7 .LfillRegisters2
+-
+-
+-.LcallFunction2:
++L(storeD0_2):
++    LOADREG x15, 8, d0, L(fillRegisters2)
++    LOADREG x15, 8, d1, L(fillRegisters2)
++    LOADREG x15, 8, d2, L(fillRegisters2)
++    LOADREG x15, 8, d3, L(fillRegisters2)
++    LOADREG x15, 8, d4, L(fillRegisters2)
++    LOADREG x15, 8, d5, L(fillRegisters2)
++    LOADREG x15, 8, d6, L(fillRegisters2)
++    LOADREG x15, 8, d7, L(fillRegisters2)
++L(callFunction2):
+ 
+     INVOKE_STUB_CALL_AND_RETURN
+ 
+@@ -1013,7 +1023,7 @@ ENTRY art_quick_osr_stub
+     INCREASE_FRAME 16
+     str xzr, [sp]                         // Store null for ArtMethod* slot
+     // Branch to stub.
+-    bl .Losr_entry
++    bl L(osr_entry)
+     .cfi_remember_state
+     DECREASE_FRAME 16
+ 
+@@ -1037,25 +1047,25 @@ ENTRY art_quick_osr_stub
+ 
+     // Don't set anything for a void type.
+     cmp w10, #'V'
+-    beq .Losr_exit
++    beq L(osr_exit)
+     // Is it a double?
+     cmp w10, #'D'
+-    beq .Losr_return_double
++    beq L(osr_return_double)
+     // Is it a float?
+     cmp w10, #'F'
+-    beq .Losr_return_float
++    beq L(osr_return_float)
+     // Just store x0. Doesn't matter if it is 64 or 32 bits.
+     str x0, [x3]
+-.Losr_exit:
++L(osr_exit):
+     ret
+-.Losr_return_double:
++L(osr_return_double):
+     str d0, [x3]
+     ret
+-.Losr_return_float:
++L(osr_return_float):
+     str s0, [x3]
+     ret
+ 
+-.Losr_entry:
++L(osr_entry):
+     .cfi_restore_state                     // Reset unwind info so following code unwinds.
+     .cfi_def_cfa_offset (SAVE_SIZE+16)     // workaround for clang bug: 31975598
+ 
+@@ -1076,14 +1086,14 @@ ENTRY art_quick_osr_stub
+     // W1 - args length
+     // SP - destination address.
+     // W10 - temporary
+-.Losr_loop_entry:
+-    cbz w1, .Losr_loop_exit
++L(osr_loop_entry):
++    cbz w1, L(osr_loop_exit)
+     sub w1, w1, #4
+     ldr w10, [x0, x1]
+     str w10, [sp, x1]
+-    b .Losr_loop_entry
++    b L(osr_loop_entry)
+ 
+-.Losr_loop_exit:
++L(osr_loop_exit):
+     // Branch to the OSR entry point.
+     br x2
+ 
+@@ -1158,19 +1168,19 @@ ENTRY art_quick_lock_object
+     cbz    w0, art_quick_lock_object_no_inline
+                                       // Exclusive load/store has no immediate anymore.
+     add    x4, x0, #MIRROR_OBJECT_LOCK_WORD_OFFSET
+-.Lretry_lock:
++L(retry_lock):
+     ldaxr  w2, [x4]                   // Acquire needed only in most common case.
+     eor    w3, w2, w1                 // Prepare the value to store if unlocked
+                                       //   (thread id, count of 0 and preserved read barrier bits),
+                                       // or prepare to compare thread id for recursive lock check
+                                       //   (lock_word.ThreadId() ^ self->ThreadId()).
+     tst    w2, #LOCK_WORD_GC_STATE_MASK_SHIFTED_TOGGLED  // Test the non-gc bits.
+-    b.ne   .Lnot_unlocked             // Check if unlocked.
++    b.ne   L(not_unlocked)             // Check if unlocked.
+     // unlocked case - store w3: original lock word plus thread id, preserved read barrier bits.
+     stxr   w2, w3, [x4]
+-    cbnz   w2, .Lretry_lock           // If the store failed, retry.
++    cbnz   w2, L(retry_lock)           // If the store failed, retry.
+     ret
+-.Lnot_unlocked:  // w2: original lock word, w1: thread id, w3: w2 ^ w1
++L(not_unlocked):  // w2: original lock word, w1: thread id, w3: w2 ^ w1
+                                       // Check lock word state and thread id together,
+     tst    w3, #(LOCK_WORD_STATE_MASK_SHIFTED | LOCK_WORD_THIN_LOCK_OWNER_MASK_SHIFTED)
+     b.ne   art_quick_lock_object_no_inline
+@@ -1178,7 +1188,7 @@ ENTRY art_quick_lock_object
+     tst    w3, #LOCK_WORD_THIN_LOCK_COUNT_MASK_SHIFTED  // Test the new thin lock count.
+     b.eq   art_quick_lock_object_no_inline  // Zero as the new count indicates overflow, go slow path.
+     stxr   w2, w3, [x4]
+-    cbnz   w2, .Lretry_lock           // If the store failed, retry.
++    cbnz   w2, L(retry_lock)           // If the store failed, retry.
+     ret
+ END art_quick_lock_object
+ 
+@@ -1204,7 +1214,7 @@ ENTRY art_quick_unlock_object
+     cbz    x0, art_quick_unlock_object_no_inline
+                                       // Exclusive load/store has no immediate anymore.
+     add    x4, x0, #MIRROR_OBJECT_LOCK_WORD_OFFSET
+-.Lretry_unlock:
++L(retry_unlock):
+ #ifndef USE_READ_BARRIER
+     ldr    w2, [x4]
+ #else
+@@ -1215,16 +1225,16 @@ ENTRY art_quick_unlock_object
+                                       // or prepare to compare thread id for recursive lock check
+                                       //   (lock_word.ThreadId() ^ self->ThreadId()).
+     tst    w3, #LOCK_WORD_GC_STATE_MASK_SHIFTED_TOGGLED  // Test the non-gc bits.
+-    b.ne   .Lnot_simply_locked        // Locked recursively or by other thread?
++    b.ne   L(not_simply_locked)        // Locked recursively or by other thread?
+     // Transition to unlocked.
+ #ifndef USE_READ_BARRIER
+     stlr   w3, [x4]
+ #else
+     stlxr  w2, w3, [x4]               // Need to use atomic instructions for read barrier.
+-    cbnz   w2, .Lretry_unlock         // If the store failed, retry.
++    cbnz   w2, L(retry_unlock)         // If the store failed, retry.
+ #endif
+     ret
+-.Lnot_simply_locked:
++L(not_simply_locked):
+                                       // Check lock word state and thread id together,
+     tst    w3, #(LOCK_WORD_STATE_MASK_SHIFTED | LOCK_WORD_THIN_LOCK_OWNER_MASK_SHIFTED)
+     b.ne   art_quick_unlock_object_no_inline
+@@ -1233,7 +1243,7 @@ ENTRY art_quick_unlock_object
+     str    w3, [x4]
+ #else
+     stxr   w2, w3, [x4]               // Need to use atomic instructions for read barrier.
+-    cbnz   w2, .Lretry_unlock         // If the store failed, retry.
++    cbnz   w2, L(retry_unlock)         // If the store failed, retry.
+ #endif
+     ret
+ END art_quick_unlock_object
+@@ -1256,7 +1266,7 @@ END art_quick_unlock_object_no_inline
+     .extern artThrowClassCastExceptionForObject
+ ENTRY art_quick_check_instance_of
+     // Type check using the bit string passes null as the target class. In that case just throw.
+-    cbz x1, .Lthrow_class_cast_exception_for_bitstring_check
++    cbz x1, L(throw_class_cast_exception_for_bitstring_check)
+ 
+     // Store arguments and link register
+     // Stack needs to be 16B aligned on calls.
+@@ -1270,7 +1280,7 @@ ENTRY art_quick_check_instance_of
+     RESTORE_REG xLR, 24
+ 
+     // Check for exception
+-    cbz x0, .Lthrow_class_cast_exception
++    cbz x0, L(throw_class_cast_exception)
+ 
+     // Restore and return
+     .cfi_remember_state
+@@ -1279,11 +1289,11 @@ ENTRY art_quick_check_instance_of
+     .cfi_restore_state                // Reset unwind info so following code unwinds.
+     .cfi_def_cfa_offset 32            // workaround for clang bug: 31975598
+ 
+-.Lthrow_class_cast_exception:
++L(throw_class_cast_exception):
+     // Restore
+     RESTORE_TWO_REGS_DECREASE_FRAME x0, x1, 32
+ 
+-.Lthrow_class_cast_exception_for_bitstring_check:
++L(throw_class_cast_exception_for_bitstring_check):
+     SETUP_SAVE_ALL_CALLEE_SAVES_FRAME // save all registers as basis for long jump context
+     mov x2, xSELF                     // pass Thread::Current
+     bl artThrowClassCastExceptionForObject     // (Object*, Class*, Thread*)
+@@ -1325,14 +1335,14 @@ END art_quick_check_instance_of
+ #ifdef USE_READ_BARRIER
+ # ifdef USE_BAKER_READ_BARRIER
+     ldr \wTemp, [\xObj, #MIRROR_OBJECT_LOCK_WORD_OFFSET]
+-    tbnz \wTemp, #LOCK_WORD_READ_BARRIER_STATE_SHIFT, .Lrb_slowpath\number
++    tbnz \wTemp, #LOCK_WORD_READ_BARRIER_STATE_SHIFT, L(rb_slowpath\number)
+     // False dependency to avoid needing load/load fence.
+     add \xObj, \xObj, \xTemp, lsr #32
+     ldr \wDest, [\xObj, #\offset]   // Heap reference = 32b. This also zero-extends to \xDest.
+     UNPOISON_HEAP_REF \wDest
+-    b .Lrb_exit\number
++    b L(rb_exit\number)
+ # endif  // USE_BAKER_READ_BARRIER
+-.Lrb_slowpath\number:
++L(rb_slowpath\number):
+     // Store registers used in art_quick_aput_obj (x0-x4, LR), stack is 16B aligned.
+     SAVE_TWO_REGS_INCREASE_FRAME x0, x1, 48
+     SAVE_TWO_REGS x2, x3, 16
+@@ -1357,7 +1367,7 @@ END art_quick_check_instance_of
+     POP_REG_NE x4, 32, \xDest
+     RESTORE_REG xLR, 40
+     DECREASE_FRAME 48
+-.Lrb_exit\number:
++L(rb_exit\number):
+ #else
+     ldr \wDest, [\xObj, #\offset]   // Heap reference = 32b. This also zero-extends to \xDest.
+     UNPOISON_HEAP_REF \wDest
+@@ -1368,7 +1378,7 @@ END art_quick_check_instance_of
+     .extern artReadBarrierSlow
+ #endif
+ ENTRY art_quick_aput_obj
+-    cbz x2, .Ldo_aput_null
++    cbz x2, L(do_aput_null)
+     READ_BARRIER x3, w3, x0, x3, w3, MIRROR_OBJECT_CLASS_OFFSET, 0  // Heap reference = 32b
+                                                                     // This also zero-extends to x3
+     READ_BARRIER x3, w3, x3, x4, w4, MIRROR_CLASS_COMPONENT_TYPE_OFFSET, 1 // Heap reference = 32b
+@@ -1376,8 +1386,8 @@ ENTRY art_quick_aput_obj
+     READ_BARRIER x4, w4, x2, x4, w4, MIRROR_OBJECT_CLASS_OFFSET, 2  // Heap reference = 32b
+                                                                     // This also zero-extends to x4
+     cmp w3, w4  // value's type == array's component type - trivial assignability
+-    bne .Lcheck_assignability
+-.Ldo_aput:
++    bne L(check_assignability)
++L(do_aput):
+     add x3, x0, #MIRROR_OBJECT_ARRAY_DATA_OFFSET
+                                                          // "Compress" = do nothing
+     POISON_HEAP_REF w2
+@@ -1386,12 +1396,12 @@ ENTRY art_quick_aput_obj
+     lsr x0, x0, #CARD_TABLE_CARD_SHIFT
+     strb w3, [x3, x0]
+     ret
+-.Ldo_aput_null:
++L(do_aput_null):
+     add x3, x0, #MIRROR_OBJECT_ARRAY_DATA_OFFSET
+                                                          // "Compress" = do nothing
+     str w2, [x3, x1, lsl #2]                             // Heap reference = 32b
+     ret
+-.Lcheck_assignability:
++L(check_assignability):
+     // Store arguments and link register
+     SAVE_TWO_REGS_INCREASE_FRAME x0, x1, 32
+     SAVE_TWO_REGS x2, xLR, 16
+@@ -1402,7 +1412,7 @@ ENTRY art_quick_aput_obj
+     bl artIsAssignableFromCode
+ 
+     // Check for exception
+-    cbz x0, .Lthrow_array_store_exception
++    cbz x0, L(throw_array_store_exception)
+ 
+     // Restore
+     .cfi_remember_state
+@@ -1419,7 +1429,7 @@ ENTRY art_quick_aput_obj
+     ret
+     .cfi_restore_state            // Reset unwind info so following code unwinds.
+     .cfi_def_cfa_offset 32        // workaround for clang bug: 31975598
+-.Lthrow_array_store_exception:
++L(throw_array_store_exception):
+     RESTORE_TWO_REGS x2, xLR, 16
+     RESTORE_TWO_REGS_DECREASE_FRAME x0, x1, 32
+ 
+@@ -1642,7 +1652,7 @@ ENTRY \c_name
+                                                               // ldp won't work due to large offset.
+     ldr    x4, [xSELF, #THREAD_LOCAL_ALLOC_STACK_END_OFFSET]
+     cmp    x3, x4
+-    bhs    .Lslow_path\c_name
++    bhs    L(slow_path\c_name)
+     ldr    w3, [x0, #MIRROR_CLASS_OBJECT_SIZE_ALLOC_FAST_PATH_OFFSET]  // Load the object size (x3)
+     cmp    x3, #ROSALLOC_MAX_THREAD_LOCAL_BRACKET_SIZE        // Check if the size is for a thread
+                                                               // local allocation. Also does the
+@@ -1653,7 +1663,7 @@ ENTRY \c_name
+     // below to be taken.
+     //
+     // See InitializeClassVisitors in class-inl.h for more details.
+-    bhs    .Lslow_path\c_name
++    bhs    L(slow_path\c_name)
+                                                               // Compute the rosalloc bracket index
+                                                               // from the size. Since the size is
+                                                               // already aligned we can combine the
+@@ -1666,7 +1676,7 @@ ENTRY \c_name
+                                                               // Load the free list head (x3). This
+                                                               // will be the return val.
+     ldr    x3, [x4, #(ROSALLOC_RUN_FREE_LIST_OFFSET + ROSALLOC_RUN_FREE_LIST_HEAD_OFFSET)]
+-    cbz    x3, .Lslow_path\c_name
++    cbz    x3, L(slow_path\c_name)
+     // "Point of no slow path". Won't go to the slow path from here on. OK to clobber x0 and x1.
+     ldr    x1, [x3, #ROSALLOC_SLOT_NEXT_OFFSET]               // Load the next pointer of the head
+                                                               // and update the list head with the
+@@ -1734,7 +1744,7 @@ ENTRY \c_name
+     // a new observably-initialized class state.
+ .endif
+     ret
+-.Lslow_path\c_name:
++L(slow_path\c_name):
+     SETUP_SAVE_REFS_ONLY_FRAME                      // save callee saves in case of GC
+     mov    x1, xSELF                                // pass Thread::Current
+     bl     \cxx_name
+@@ -1797,8 +1807,8 @@ ENTRY \name
+     // Fast path region tlab allocation.
+     // x0: type, xSELF(x19): Thread::Current
+     // x1-x7: free.
+-    ALLOC_OBJECT_TLAB_FAST_PATH_RESOLVED .Lslow_path\name, \isInitialized
+-.Lslow_path\name:
++    ALLOC_OBJECT_TLAB_FAST_PATH_RESOLVED L(slow_path\name), \isInitialized
++L(slow_path\name):
+     SETUP_SAVE_REFS_ONLY_FRAME                 // Save callee saves in case of GC.
+     mov    x1, xSELF                           // Pass Thread::Current.
+     bl     \entrypoint                         // (mirror::Class*, Thread*)
+@@ -1867,8 +1877,8 @@ ENTRY \name
+     // x2-x7: free.
+     mov    x3, x0
+     \size_setup x3, w3, x1, w1, x4, w4, x5, w5, x6, w6
+-    ALLOC_ARRAY_TLAB_FAST_PATH_RESOLVED_WITH_SIZE .Lslow_path\name, x3, w3, x1, w1, x4, w4, x5, w5, x6, w6
+-.Lslow_path\name:
++    ALLOC_ARRAY_TLAB_FAST_PATH_RESOLVED_WITH_SIZE L(slow_path\name), x3, w3, x1, w1, x4, w4, x5, w5, x6, w6
++L(slow_path\name):
+     // x0: mirror::Class* klass
+     // x1: int32_t component_count
+     // x2: Thread* self
+@@ -1974,12 +1984,12 @@ ENTRY art_quick_proxy_invoke_handler
+     mov     x3, sp                      // pass SP
+     bl      artQuickProxyInvokeHandler  // (Method* proxy method, receiver, Thread*, SP)
+     ldr     x2, [xSELF, THREAD_EXCEPTION_OFFSET]
+-    cbnz    x2, .Lexception_in_proxy    // success if no exception is pending
++    cbnz    x2, L(exception_in_proxy)    // success if no exception is pending
+     RESTORE_SAVE_REFS_AND_ARGS_FRAME    // Restore frame
+     REFRESH_MARKING_REGISTER
+     fmov    d0, x0                      // Store result in d0 in case it was float or double
+     ret                                 // return on success
+-.Lexception_in_proxy:
++L(exception_in_proxy):
+     RESTORE_SAVE_REFS_AND_ARGS_FRAME
+     DELIVER_PENDING_EXCEPTION
+ END art_quick_proxy_invoke_handler
+@@ -2001,7 +2011,7 @@ ENTRY art_quick_imt_conflict_trampoline
+ #endif
+     ldp wIP0, w15, [xIP0, #ART_METHOD_DECLARING_CLASS_OFFSET]
+     // If the method is obsolete, just go through the dex cache miss slow path.
+-    tbnz x15, #ACC_OBSOLETE_METHOD_SHIFT, .Limt_conflict_trampoline_dex_cache_miss
++    tbnz x15, #ACC_OBSOLETE_METHOD_SHIFT, L(imt_conflict_trampoline_dex_cache_miss)
+     ldr wIP0, [xIP0, #MIRROR_CLASS_DEX_CACHE_OFFSET]  // Load the DexCache (without read barrier).
+     UNPOISON_HEAP_REF wIP0
+     ubfx x15, xIP1, #0, #METHOD_DEX_CACHE_HASH_BITS  // Calculate DexCache method slot index.
+@@ -2009,37 +2019,37 @@ ENTRY art_quick_imt_conflict_trampoline
+     add xIP0, xIP0, x15, lsl #(POINTER_SIZE_SHIFT + 1)  // Load DexCache method slot address.
+ 
+     // Relaxed atomic load x14:x15 from the dex cache slot.
+-.Limt_conflict_trampoline_retry_load:
++L(imt_conflict_trampoline_retry_load):
+     ldxp x14, x15, [xIP0]
+     stxp w13, x14, x15, [xIP0]
+-    cbnz w13, .Limt_conflict_trampoline_retry_load
++    cbnz w13, L(imt_conflict_trampoline_retry_load)
+ 
+     cmp x15, xIP1       // Compare method index to see if we had a DexCache method hit.
+-    bne .Limt_conflict_trampoline_dex_cache_miss
+-.Limt_conflict_trampoline_have_interface_method:
++    bne L(imt_conflict_trampoline_dex_cache_miss)
++L(imt_conflict_trampoline_have_interface_method):
+     ldr xIP1, [x0, #ART_METHOD_JNI_OFFSET_64]  // Load ImtConflictTable
+     ldr x0, [xIP1]  // Load first entry in ImtConflictTable.
+-.Limt_table_iterate:
++L(imt_table_iterate):
+     cmp x0, x14
+     // Branch if found. Benchmarks have shown doing a branch here is better.
+-    beq .Limt_table_found
++    beq L(imt_table_found)
+     // If the entry is null, the interface method is not in the ImtConflictTable.
+-    cbz x0, .Lconflict_trampoline
++    cbz x0, L(conflict_trampoline)
+     // Iterate over the entries of the ImtConflictTable.
+     ldr x0, [xIP1, #(2 * __SIZEOF_POINTER__)]!
+-    b .Limt_table_iterate
+-.Limt_table_found:
++    b L(imt_table_iterate)
++L(imt_table_found):
+     // We successfully hit an entry in the table. Load the target method
+     // and jump to it.
+     ldr x0, [xIP1, #__SIZEOF_POINTER__]
+     ldr xIP0, [x0, #ART_METHOD_QUICK_CODE_OFFSET_64]
+     br xIP0
+-.Lconflict_trampoline:
++L(conflict_trampoline):
+     // Call the runtime stub to populate the ImtConflictTable and jump to the
+     // resolved method.
+     mov x0, x14  // Load interface method
+     INVOKE_TRAMPOLINE_BODY artInvokeInterfaceTrampoline
+-.Limt_conflict_trampoline_dex_cache_miss:
++L(imt_conflict_trampoline_dex_cache_miss):
+     // We're not creating a proper runtime method frame here,
+     // artLookupResolvedMethod() is not allowed to walk the stack.
+ 
+@@ -2075,8 +2085,8 @@ ENTRY art_quick_imt_conflict_trampoline
+     RESTORE_TWO_REGS_DECREASE_FRAME x0, x1, (8 * 8 + 8 * 8 + 8 + 8)
+ 
+     // If the method wasn't resolved, skip the lookup and go to artInvokeInterfaceTrampoline().
+-    cbz x14, .Lconflict_trampoline
+-    b .Limt_conflict_trampoline_have_interface_method
++    cbz x14, L(conflict_trampoline)
++    b L(imt_conflict_trampoline_have_interface_method)
+ END art_quick_imt_conflict_trampoline
+ 
+ ENTRY art_quick_resolution_trampoline
+@@ -2179,7 +2189,7 @@ ENTRY art_quick_generic_jni_trampoline
+     // x1: pointer to the bottom of the used area of the alloca, can restore stack till there.
+ 
+     // Check for error = 0.
+-    cbz x0, .Lexception_in_native
++    cbz x0, L(exception_in_native)
+ 
+     // Release part of the alloca.
+     mov sp, x1
+@@ -2216,7 +2226,7 @@ ENTRY art_quick_generic_jni_trampoline
+ 
+     // Pending exceptions possible.
+     ldr x2, [xSELF, THREAD_EXCEPTION_OFFSET]
+-    cbnz x2, .Lexception_in_native
++    cbnz x2, L(exception_in_native)
+ 
+     // Tear down the alloca.
+     mov sp, x28
+@@ -2230,7 +2240,7 @@ ENTRY art_quick_generic_jni_trampoline
+     fmov d0, x0
+     ret
+ 
+-.Lexception_in_native:
++L(exception_in_native):
+     // Move to x1 then sp to please assembler.
+     ldr x1, [xSELF, # THREAD_TOP_QUICK_FRAME_OFFSET]
+     add sp, x1, #-1  // Remove the GenericJNI tag.
+@@ -2307,18 +2317,18 @@ ENTRY art_quick_instrumentation_exit
+     mov   x0, xSELF           // Pass Thread.
+     bl   artInstrumentationMethodExitFromCode    // (Thread*, SP, gpr_res*, fpr_res*)
+ 
+-    cbz   x0, .Ldo_deliver_instrumentation_exception
++    cbz   x0, L(do_deliver_instrumentation_exception)
+                               // Handle error
+-    cbnz  x1, .Ldeoptimize
++    cbnz  x1, L(deoptimize)
+     // Normal return.
+     str   x0, [sp, #FRAME_SIZE_SAVE_EVERYTHING - 8]
+                               // Set return pc.
+     RESTORE_SAVE_EVERYTHING_FRAME
+     REFRESH_MARKING_REGISTER
+     br    lr
+-.Ldo_deliver_instrumentation_exception:
++L(do_deliver_instrumentation_exception):
+     DELIVER_PENDING_EXCEPTION_FRAME_READY
+-.Ldeoptimize:
++L(deoptimize):
+     str   x1, [sp, #FRAME_SIZE_SAVE_EVERYTHING - 8]
+                               // Set return pc.
+     RESTORE_SAVE_EVERYTHING_FRAME
+@@ -2381,7 +2391,7 @@ ENTRY art_quick_indexof
+     mov   x5, x0
+ 
+ #if (STRING_COMPRESSION_FEATURE)
+-    tbz   w4, #0, .Lstring_indexof_compressed
++    tbz   w4, #0, L(string_indexof_compressed)
+ #endif
+     /* Build pointer to start of data to compare and pre-bias */
+     add   x0, x0, x2, lsl #1
+@@ -2398,55 +2408,55 @@ ENTRY art_quick_indexof
+      */
+ 
+     subs  w2, w2, #4
+-    b.lt  .Lindexof_remainder
++    b.lt  L(indexof_remainder)
+ 
+-.Lindexof_loop4:
++L(indexof_loop4):
+     ldrh  w6, [x0, #2]!
+     ldrh  w7, [x0, #2]!
+     ldrh  wIP0, [x0, #2]!
+     ldrh  wIP1, [x0, #2]!
+     cmp   w6, w1
+-    b.eq  .Lmatch_0
++    b.eq  L(match_0)
+     cmp   w7, w1
+-    b.eq  .Lmatch_1
++    b.eq  L(match_1)
+     cmp   wIP0, w1
+-    b.eq  .Lmatch_2
++    b.eq  L(match_2)
+     cmp   wIP1, w1
+-    b.eq  .Lmatch_3
++    b.eq  L(match_3)
+     subs  w2, w2, #4
+-    b.ge  .Lindexof_loop4
++    b.ge  L(indexof_loop4)
+ 
+-.Lindexof_remainder:
++L(indexof_remainder):
+     adds  w2, w2, #4
+-    b.eq  .Lindexof_nomatch
++    b.eq  L(indexof_nomatch)
+ 
+-.Lindexof_loop1:
++L(indexof_loop1):
+     ldrh  w6, [x0, #2]!
+     cmp   w6, w1
+-    b.eq  .Lmatch_3
++    b.eq  L(match_3)
+     subs  w2, w2, #1
+-    b.ne  .Lindexof_loop1
++    b.ne  L(indexof_loop1)
+ 
+-.Lindexof_nomatch:
++L(indexof_nomatch):
+     mov   x0, #-1
+     ret
+ 
+-.Lmatch_0:
++L(match_0):
+     sub   x0, x0, #6
+     sub   x0, x0, x5
+     asr   x0, x0, #1
+     ret
+-.Lmatch_1:
++L(match_1):
+     sub   x0, x0, #4
+     sub   x0, x0, x5
+     asr   x0, x0, #1
+     ret
+-.Lmatch_2:
++L(match_2):
+     sub   x0, x0, #2
+     sub   x0, x0, x5
+     asr   x0, x0, #1
+     ret
+-.Lmatch_3:
++L(match_3):
+     sub   x0, x0, x5
+     asr   x0, x0, #1
+     ret
+@@ -2455,18 +2465,18 @@ ENTRY art_quick_indexof
+     * Comparing compressed string character-per-character with
+     * input character
+     */
+-.Lstring_indexof_compressed:
++L(string_indexof_compressed):
+     add   x0, x0, x2
+     sub   x0, x0, #1
+     sub   w2, w3, w2
+-.Lstring_indexof_compressed_loop:
++L(string_indexof_compressed_loop):
+     subs  w2, w2, #1
+-    b.lt  .Lindexof_nomatch
++    b.lt  L(indexof_nomatch)
+     ldrb  w6, [x0, #1]!
+     cmp   w6, w1
+-    b.eq  .Lstring_indexof_compressed_matched
+-    b     .Lstring_indexof_compressed_loop
+-.Lstring_indexof_compressed_matched:
++    b.eq  L(string_indexof_compressed_matched)
++    b     L(string_indexof_compressed_loop)
++L(string_indexof_compressed_matched):
+     sub   x0, x0, x5
+     ret
+ #endif
+@@ -2491,17 +2501,17 @@ END art_quick_indexof
+ .macro READ_BARRIER_MARK_REG name, wreg, xreg
+ ENTRY \name
+     // Reference is null, no work to do at all.
+-    cbz \wreg, .Lret_rb_\name
++    cbz \wreg, L(ret_rb_\name)
+     // Use wIP0 as temp and check the mark bit of the reference. wIP0 is not used by the compiler.
+     ldr   wIP0, [\xreg, #MIRROR_OBJECT_LOCK_WORD_OFFSET]
+-    tbz   wIP0, #LOCK_WORD_MARK_BIT_SHIFT, .Lnot_marked_rb_\name
+-.Lret_rb_\name:
++    tbz   wIP0, #LOCK_WORD_MARK_BIT_SHIFT, L(not_marked_rb_\name)
++L(ret_rb_\name):
+     ret
+-.Lnot_marked_rb_\name:
++L(not_marked_rb_\name):
+     // Check if the top two bits are one, if this is the case it is a forwarding address.
+     tst   wIP0, wIP0, lsl #1
+-    bmi   .Lret_forwarding_address\name
+-.Lslow_rb_\name:
++    bmi   L(ret_forwarding_address\name)
++L(slow_rb_\name):
+     /*
+      * Allocate 44 stack slots * 8 = 352 bytes:
+      * - 19 slots for core registers X0-15, X17, X19, LR
+@@ -2571,7 +2581,7 @@ ENTRY \name
+     // Remove frame and return.
+     DECREASE_FRAME 352
+     ret
+-.Lret_forwarding_address\name:
++L(ret_forwarding_address\name):
+     // Shift left by the forwarding address shift. This clears out the state bits since they are
+     // in the top 2 bits of the lock word.
+     lsl   \wreg, wIP0, #LOCK_WORD_STATE_FORWARDING_ADDRESS_SHIFT
+@@ -2741,7 +2751,7 @@ READ_BARRIER_MARK_REG art_quick_read_barrier_mark_reg29, w29, x29
+     ldp   d30, d31, [sp, #320]
+ 
+     ldr   x0, [lr, #\ldr_offset]      // Load the instruction.
+-    adr   xIP1, .Lmark_introspection_return_switch
++    adr   xIP1, L(mark_introspection_return_switch)
+     bfi   xIP1, x0, #3, #5            // Calculate switch case address.
+     RESTORE_TWO_REGS_DECREASE_FRAME x0, x1, 336
+     br    xIP1
+@@ -2797,7 +2807,7 @@ READ_BARRIER_MARK_REG art_quick_read_barrier_mark_reg29, w29, x29
+      *     Padding to 256 bytes if needed.
+      *   art_quick_read_barrier_mark_introspection_arrays:
+      *     Exactly 256 bytes for array load switch cases (32x2 instructions).
+-     *   .Lmark_introspection_return_switch:
++     *   L(mark_introspection_return_switch):
+      *     Exactly 256 bytes for return switch cases (32x2 instructions).
+      *   art_quick_read_barrier_mark_introspection_gc_roots:
+      *     GC root entrypoint code.
+@@ -2808,44 +2818,60 @@ ENTRY art_quick_read_barrier_mark_introspection
+     // For heap poisoning, the reference is poisoned, so unpoison it first.
+     UNPOISON_HEAP_REF wIP0
+     // If reference is null, just return it in the right register.
+-    cbz   wIP0, .Lmark_introspection_return
++    cbz   wIP0, L(mark_introspection_return)
+     // Use wIP1 as temp and check the mark bit of the reference.
+     ldr   wIP1, [xIP0, #MIRROR_OBJECT_LOCK_WORD_OFFSET]
+-    tbz   wIP1, #LOCK_WORD_MARK_BIT_SHIFT, .Lmark_introspection_unmarked
+-.Lmark_introspection_return:
++    tbz   wIP1, #LOCK_WORD_MARK_BIT_SHIFT, L(mark_introspection_unmarked)
++L(mark_introspection_return):
+     // Without an extra register for the return switch case address calculation,
+     // we exploit the high word of the xIP0 to temporarily store the ref_reg*8,
+     // so the return switch below must move wIP0 instead of xIP0 to the register.
+     ldr   wIP1, [lr, #BAKER_MARK_INTROSPECTION_FIELD_LDR_OFFSET]  // Load the instruction.
+     bfi   xIP0, xIP1, #(32 + 3), #5   // Extract ref_reg*8 to high word in xIP0.
+-    adr   xIP1, .Lmark_introspection_return_switch
++    adr   xIP1, L(mark_introspection_return_switch)
+     bfxil xIP1, xIP0, #32, #8         // Calculate return switch case address.
+     br    xIP1
+-.Lmark_introspection_unmarked:
++L(mark_introspection_unmarked):
+     // Check if the top two bits are one, if this is the case it is a forwarding address.
+     tst   wIP1, wIP1, lsl #1
+-    bmi   .Lmark_introspection_forwarding_address
++    bmi   L(mark_introspection_forwarding_address)
+     READ_BARRIER_MARK_INTROSPECTION_SLOW_PATH BAKER_MARK_INTROSPECTION_FIELD_LDR_OFFSET
+ 
+-.Lmark_introspection_forwarding_address:
++L(mark_introspection_forwarding_address):
+     // Shift left by the forwarding address shift. This clears out the state bits since they are
+     // in the top 2 bits of the lock word.
+     lsl   wIP0, wIP1, #LOCK_WORD_STATE_FORWARDING_ADDRESS_SHIFT
+-    b .Lmark_introspection_return
++    b L(mark_introspection_return)
+ 
+     // We're very close to the alloted 256B for the entrypoint code before the
+     // array switch cases. Should we go a little bit over the limit, we can
+     // move some code after the array switch cases and return switch cases.
+     .balign 256
++#if defined(__APPLE__)
++    // Labels inside a CFI range must be assembler-temporary on Mach-O; export
++    // the switch-case addresses as aliases, which do not start a new atom.
++L(art_quick_read_barrier_mark_introspection_arrays):
++    .private_extern _art_quick_read_barrier_mark_introspection_arrays
++    .globl _art_quick_read_barrier_mark_introspection_arrays
++    .set _art_quick_read_barrier_mark_introspection_arrays, L(art_quick_read_barrier_mark_introspection_arrays)
++#else
+     .hidden art_quick_read_barrier_mark_introspection_arrays
+     .global art_quick_read_barrier_mark_introspection_arrays
+ art_quick_read_barrier_mark_introspection_arrays:
++#endif
+     FOR_XREGISTERS INTROSPECTION_ARRAY_LOAD, BRK0_BRK0
+-.Lmark_introspection_return_switch:
++L(mark_introspection_return_switch):
+     FOR_WREGISTERS MOV_WIP0_TO_WREG_AND_BL_LR, BRK0_BRK0
++#if defined(__APPLE__)
++L(art_quick_read_barrier_mark_introspection_gc_roots):
++    .private_extern _art_quick_read_barrier_mark_introspection_gc_roots
++    .globl _art_quick_read_barrier_mark_introspection_gc_roots
++    .set _art_quick_read_barrier_mark_introspection_gc_roots, L(art_quick_read_barrier_mark_introspection_gc_roots)
++#else
+     .hidden art_quick_read_barrier_mark_introspection_gc_roots
+     .global art_quick_read_barrier_mark_introspection_gc_roots
+ art_quick_read_barrier_mark_introspection_gc_roots:
++#endif
+     READ_BARRIER_MARK_INTROSPECTION_SLOW_PATH BAKER_MARK_INTROSPECTION_GC_ROOT_LDR_OFFSET
+ END art_quick_read_barrier_mark_introspection
+ 
+diff --git a/art/runtime/interpreter/mterp/arm64/control_flow.S b/art/runtime/interpreter/mterp/arm64/control_flow.S
+index d248878db0962365bf0d2a006a8b6cb6805215fe..2751bcbaab447c6d599b383cde5945a3713d4dc8 100644
+--- a/art/runtime/interpreter/mterp/arm64/control_flow.S
++++ b/art/runtime/interpreter/mterp/arm64/control_flow.S
+@@ -14,7 +14,7 @@
+     cmp     w2, w3                      // compare (vA, vB)
+     b.${condition} MterpCommonTakenBranchNoFlags
+     cmp     wPROFILE, #JIT_CHECK_OSR    // possible OSR re-entry?
+-    b.eq    .L_check_not_taken_osr
++    b.eq    L(_check_not_taken_osr)
+     FETCH_ADVANCE_INST 2
+     GET_INST_OPCODE ip                  // extract opcode from wINST
+     GOTO_OPCODE ip                      // jump to next instruction
+@@ -35,7 +35,7 @@
+     .endif
+     ${branch} MterpCommonTakenBranchNoFlags
+     cmp     wPROFILE, #JIT_CHECK_OSR    // possible OSR re-entry?
+-    b.eq    .L_check_not_taken_osr
++    b.eq    L(_check_not_taken_osr)
+     FETCH_ADVANCE_INST 2
+     GET_INST_OPCODE ip                  // extract opcode from wINST
+     GOTO_OPCODE ip                      // jump to next instruction
+@@ -149,14 +149,14 @@
+     ldr     w7, [xSELF, #THREAD_FLAGS_OFFSET]
+     mov     x0, xSELF
+     ands    w7, w7, #THREAD_SUSPEND_OR_CHECKPOINT_REQUEST
+-    b.ne    .L${opcode}_check
+-.L${opcode}_return:
++    b.ne    L(${opcode}_check)
++L(${opcode}_return):
+     lsr     w2, wINST, #8               // r2<- AA
+     GET_VREG w0, w2                     // r0<- vAA
+     b       MterpReturn
+-.L${opcode}_check:
++L(${opcode}_check):
+     bl      MterpSuspendCheck           // (self)
+-    b       .L${opcode}_return
++    b       L(${opcode}_return)
+ 
+ %def op_return_object():
+ %  op_return()
+@@ -167,25 +167,25 @@
+     ldr     w7, [xSELF, #THREAD_FLAGS_OFFSET]
+     mov     x0, xSELF
+     ands    w7, w7, #THREAD_SUSPEND_OR_CHECKPOINT_REQUEST
+-    b.ne    .L${opcode}_check
+-.L${opcode}_return:
++    b.ne    L(${opcode}_check)
++L(${opcode}_return):
+     mov     x0, #0
+     b       MterpReturn
+-.L${opcode}_check:
++L(${opcode}_check):
+     bl      MterpSuspendCheck           // (self)
+-    b       .L${opcode}_return
++    b       L(${opcode}_return)
+ 
+ %def op_return_void_no_barrier():
+     ldr     w7, [xSELF, #THREAD_FLAGS_OFFSET]
+     mov     x0, xSELF
+     ands    w7, w7, #THREAD_SUSPEND_OR_CHECKPOINT_REQUEST
+-    b.ne    .L${opcode}_check
+-.L${opcode}_return:
++    b.ne    L(${opcode}_check)
++L(${opcode}_return):
+     mov     x0, #0
+     b       MterpReturn
+-.L${opcode}_check:
++L(${opcode}_check):
+     bl      MterpSuspendCheck           // (self)
+-    b       .L${opcode}_return
++    b       L(${opcode}_return)
+ 
+ %def op_return_wide():
+     /*
+@@ -198,14 +198,14 @@
+     ldr     w7, [xSELF, #THREAD_FLAGS_OFFSET]
+     mov     x0, xSELF
+     ands    w7, w7, #THREAD_SUSPEND_OR_CHECKPOINT_REQUEST
+-    b.ne    .L${opcode}_check
+-.L${opcode}_return:
++    b.ne    L(${opcode}_check)
++L(${opcode}_return):
+     lsr     w2, wINST, #8               // w2<- AA
+     GET_VREG_WIDE x0, x2                // x0<- vAA
+     b       MterpReturn
+-.L${opcode}_check:
++L(${opcode}_check):
+     bl      MterpSuspendCheck           // (self)
+-    b       .L${opcode}_return
++    b       L(${opcode}_return)
+ 
+ %def op_sparse_switch():
+ %  op_packed_switch(func="MterpDoSparseSwitch")
+diff --git a/art/runtime/interpreter/mterp/arm64/main.S b/art/runtime/interpreter/mterp/arm64/main.S
+index ebbfc73c367916e1804e5649deaf804992dba1bd..4ccba73ce24e236e75df3bd0235124ee6bb2e394 100644
+--- a/art/runtime/interpreter/mterp/arm64/main.S
++++ b/art/runtime/interpreter/mterp/arm64/main.S
+@@ -90,6 +90,44 @@ codes.
+ #include "asm_support.h"
+ #include "interpreter/cfi_asm_support.h"
+ 
++#if defined(__APPLE__)
++/*
++ * Mach-O (darwin-arm64). The whole interpreter, from ExecuteMterpImpl to the
++ * end of MterpHelpers, is one CFI range. On arm64 Mach-O every non-temporary
++ * label starts a new atom and the assembler cannot resolve a CFI advance
++ * across atoms, so every label inside the range must be assembler-temporary
++ * ("L" prefix). Only ExecuteMterpImpl and the artMterpAsmInstruction{Start,End}
++ * aliases are exported, with the Mach-O leading underscore.
++ */
++// Function-local label: assembler-temporary on both object formats.
++#define L(name) L ## name
++// Internal labels that are plain local symbols on ELF.
++#define common_errDivideByZero Lcommon_errDivideByZero
++#define common_errArrayIndex Lcommon_errArrayIndex
++#define common_errNegativeArraySize Lcommon_errNegativeArraySize
++#define common_errNoSuchMethod Lcommon_errNoSuchMethod
++#define common_errNullObject Lcommon_errNullObject
++#define common_exceptionThrown Lcommon_exceptionThrown
++#define MterpSuspendFallback LMterpSuspendFallback
++#define MterpPossibleException LMterpPossibleException
++#define MterpException LMterpException
++#define MterpCommonTakenBranchNoFlags LMterpCommonTakenBranchNoFlags
++#define MterpCheckSuspendAndContinue LMterpCheckSuspendAndContinue
++#define check1 Lcheck1
++#define MterpOnStackReplacement LMterpOnStackReplacement
++#define MterpFallback LMterpFallback
++#define MterpCommonFallback LMterpCommonFallback
++#define MterpExceptionReturn LMterpExceptionReturn
++#define MterpReturn LMterpReturn
++#define MterpDone LMterpDone
++#define MterpProfileActive LMterpProfileActive
++// Unprefixed asm-to-C references resolve through `.set name, _name`.
++#include "interpreter/mterp/darwin_symbol_aliases_arm64.S"
++#else
++// Function-local label: assembler-temporary on both object formats.
++#define L(name) .L ## name
++#endif  // defined(__APPLE__)
++
+ #define MTERP_PROFILE_BRANCHES 1
+ #define MTERP_LOGGING 0
+ 
+@@ -357,6 +395,20 @@ codes.
+ /*
+  * function support macros.
+  */
++#if defined(__APPLE__)
++// Handlers and helpers: an assembler-temporary label, plus a local alias with
++// the plain name for references and symbolization. An alias is not a label,
++// so it does not start a new atom.
++.macro ENTRY name
++    /* Cache alignment for function entry */
++    .balign 16
++L\name:
++    .set \name, L\name
++.endm
++
++.macro END name
++.endm
++#else
+ .macro ENTRY name
+     .type \name, #function
+     .hidden \name  // Hide this as a global symbol, so we do not incur plt calls.
+@@ -369,6 +421,7 @@ codes.
+ .macro END name
+     .size \name, .-\name
+ .endm
++#endif  // defined(__APPLE__)
+ 
+ // Macro to unpoison (negate) the reference for heap poisoning.
+ .macro UNPOISON_HEAP_REF rRef
+@@ -405,7 +458,15 @@ codes.
+  *  x3  JValue* result_register
+  *
+  */
++#if defined(__APPLE__)
++    .private_extern _ExecuteMterpImpl
++    .globl _ExecuteMterpImpl
++    /* Cache alignment for function entry */
++    .balign 16
++_ExecuteMterpImpl:
++#else
+ ENTRY ExecuteMterpImpl
++#endif
+     .cfi_startproc
+     SAVE_TWO_REGS_INCREASE_FRAME xPROFILE, x27, 80
+     SAVE_TWO_REGS                xIBASE, xREFS, 16
+@@ -605,21 +666,21 @@ MterpException:
+  */
+ MterpCommonTakenBranchNoFlags:
+     cmp     wINST, #0
+-    b.gt    .L_forward_branch           // don't add forward branches to hotness
+-    tbnz    wPROFILE, #31, .L_no_count_backwards  // go if negative
++    b.gt    L(_forward_branch)           // don't add forward branches to hotness
++    tbnz    wPROFILE, #31, L(_no_count_backwards)  // go if negative
+     subs    wPROFILE, wPROFILE, #1      // countdown
+-    b.eq    .L_add_batch                // counted down to zero - report
+-.L_resume_backward_branch:
++    b.eq    L(_add_batch)                // counted down to zero - report
++L(_resume_backward_branch):
+     ldr     lr, [xSELF, #THREAD_FLAGS_OFFSET]
+     add     w2, wINST, wINST            // w2<- byte offset
+     FETCH_ADVANCE_INST_RB w2            // update rPC, load wINST
+     REFRESH_IBASE
+     ands    lr, lr, #THREAD_SUSPEND_OR_CHECKPOINT_REQUEST
+-    b.ne    .L_suspend_request_pending
++    b.ne    L(_suspend_request_pending)
+     GET_INST_OPCODE ip                  // extract opcode from wINST
+     GOTO_OPCODE ip                      // jump to next instruction
+ 
+-.L_suspend_request_pending:
++L(_suspend_request_pending):
+     EXPORT_PC
+     mov     x0, xSELF
+     bl      MterpSuspendCheck           // (self)
+@@ -628,49 +689,49 @@ MterpCommonTakenBranchNoFlags:
+     GET_INST_OPCODE ip                  // extract opcode from wINST
+     GOTO_OPCODE ip                      // jump to next instruction
+ 
+-.L_no_count_backwards:
++L(_no_count_backwards):
+     cmp     wPROFILE, #JIT_CHECK_OSR    // possible OSR re-entry?
+-    b.ne    .L_resume_backward_branch
++    b.ne    L(_resume_backward_branch)
+     mov     x0, xSELF
+     add     x1, xFP, #OFF_FP_SHADOWFRAME
+     mov     x2, xINST
+     EXPORT_PC
+     bl      MterpMaybeDoOnStackReplacement  // (self, shadow_frame, offset)
+     cbnz    x0, MterpOnStackReplacement
+-    b       .L_resume_backward_branch
++    b       L(_resume_backward_branch)
+ 
+-.L_forward_branch:
++L(_forward_branch):
+     cmp     wPROFILE, #JIT_CHECK_OSR    // possible OSR re-entry?
+-    b.eq    .L_check_osr_forward
+-.L_resume_forward_branch:
++    b.eq    L(_check_osr_forward)
++L(_resume_forward_branch):
+     add     w2, wINST, wINST            // w2<- byte offset
+     FETCH_ADVANCE_INST_RB w2            // update rPC, load wINST
+     GET_INST_OPCODE ip                  // extract opcode from wINST
+     GOTO_OPCODE ip                      // jump to next instruction
+ 
+-.L_check_osr_forward:
++L(_check_osr_forward):
+     mov     x0, xSELF
+     add     x1, xFP, #OFF_FP_SHADOWFRAME
+     mov     x2, xINST
+     EXPORT_PC
+     bl      MterpMaybeDoOnStackReplacement  // (self, shadow_frame, offset)
+     cbnz    x0, MterpOnStackReplacement
+-    b       .L_resume_forward_branch
++    b       L(_resume_forward_branch)
+ 
+-.L_add_batch:
++L(_add_batch):
+     add     x1, xFP, #OFF_FP_SHADOWFRAME
+     strh    wPROFILE, [x1, #SHADOWFRAME_HOTNESS_COUNTDOWN_OFFSET]
+     ldr     x0, [xFP, #OFF_FP_METHOD]
+     mov     x2, xSELF
+     bl      MterpAddHotnessBatch        // (method, shadow_frame, self)
+     mov     wPROFILE, w0                // restore new hotness countdown to wPROFILE
+-    b       .L_no_count_backwards
++    b       L(_no_count_backwards)
+ 
+ /*
+  * Entered from the conditional branch handlers when OSR check request active on
+  * not-taken path.  All Dalvik not-taken conditional branch offsets are 2.
+  */
+-.L_check_not_taken_osr:
++L(_check_not_taken_osr):
+     mov     x0, xSELF
+     add     x1, xFP, #OFF_FP_SHADOWFRAME
+     mov     x2, #2
+@@ -780,17 +841,30 @@ MterpProfileActive:
+ 
+ %def instruction_end():
+ 
++#if defined(__APPLE__)
++L(artMterpAsmInstructionEnd):
++    .private_extern _artMterpAsmInstructionEnd
++    .globl _artMterpAsmInstructionEnd
++_artMterpAsmInstructionEnd = L(artMterpAsmInstructionEnd)
++#else
+     .type artMterpAsmInstructionEnd, #object
+     .hidden artMterpAsmInstructionEnd
+     .global artMterpAsmInstructionEnd
+ artMterpAsmInstructionEnd:
++#endif
+ 
+ %def instruction_start():
+ 
++#if defined(__APPLE__)
++    .private_extern _artMterpAsmInstructionStart
++    .globl _artMterpAsmInstructionStart
++_artMterpAsmInstructionStart = L(_op_nop)
++#else
+     .type artMterpAsmInstructionStart, #object
+     .hidden artMterpAsmInstructionStart
+     .global artMterpAsmInstructionStart
+-artMterpAsmInstructionStart = .L_op_nop
++artMterpAsmInstructionStart = L(_op_nop)
++#endif
+     .text
+ 
+ %def opcode_start():
+@@ -801,3 +875,7 @@ artMterpAsmInstructionStart = .L_op_nop
+     ENTRY ${name}
+ %def helper_end(name):
+     END ${name}
++
++%def opcode_label(name):
++%  # Handler label, expanded by the C pre-processor (see L() in header()).
++%  return "L(_" + name + ")"
+diff --git a/art/runtime/interpreter/mterp/arm64/object.S b/art/runtime/interpreter/mterp/arm64/object.S
+index 03744e5482bcf57e1772a6566ec9a47ef3703279..cdf553764326e4d8189df48fb135fbbe1c807a5b 100644
+--- a/art/runtime/interpreter/mterp/arm64/object.S
++++ b/art/runtime/interpreter/mterp/arm64/object.S
+@@ -54,8 +54,8 @@
+ #if defined(USE_READ_BARRIER)
+ # if defined(USE_BAKER_READ_BARRIER)
+      ldr    w1, [xSELF, #THREAD_IS_GC_MARKING_OFFSET]
+-     cbnz   w1, .L_${opcode}_mark         // GC is active.
+-.L_${opcode}_marked:
++     cbnz   w1, L(_${opcode}_mark)         // GC is active.
++L(_${opcode}_marked):
+ # else
+      bl artReadBarrierMark                // x0 <- artReadBarrierMark(x0)
+ # endif
+@@ -74,9 +74,9 @@
+    GOTO_OPCODE ip                         // jump to next instruction
+ %  if is_object:
+ #if defined(USE_READ_BARRIER) && defined(USE_BAKER_READ_BARRIER)
+-.L_${opcode}_mark:
++L(_${opcode}_mark):
+      bl artReadBarrierMark                // x0 <- artReadBarrierMark(x0)
+-     b .L_${opcode}_marked
++     b L(_${opcode}_marked)
+ #endif
+ %  #endif
+ 
+diff --git a/art/runtime/interpreter/mterp/common/gen_setup.py b/art/runtime/interpreter/mterp/common/gen_setup.py
+index ac0606b4c694100a72e93afe54b8c0a9caacc63e..e9b17150db757692b793af2fa549777cff521115 100644
+--- a/art/runtime/interpreter/mterp/common/gen_setup.py
++++ b/art/runtime/interpreter/mterp/common/gen_setup.py
+@@ -33,12 +33,17 @@ def write_line(line):
+ def balign():
+   write_line("    .balign {}".format(handler_size_bytes))
+ 
++# Label of the handler for the given opcode. An arch template may redefine
++# this (for example to emit a pre-processor macro) after this file is loaded.
++def opcode_label(name):
++  return ".L_" + name
++
+ def write_opcode(num, name, write_method):
+   global opnum, opcode
+   opnum, opcode = str(num), name
+   write_line("/* ------------------------------ */")
+   balign()
+-  write_line(".L_{1}: /* {0:#04x} */".format(num, name))
++  write_line("{1}: /* {0:#04x} */".format(num, opcode_label(name)))
+   opcode_start()
+   opcode_pre()
+   write_method()
+diff --git a/art/runtime/interpreter/mterp/darwin_symbol_aliases_arm64.S b/art/runtime/interpreter/mterp/darwin_symbol_aliases_arm64.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..1796219d3cb34ef16b024b61933db655224e4bb4
+--- /dev/null
++++ b/art/runtime/interpreter/mterp/darwin_symbol_aliases_arm64.S
+@@ -0,0 +1,117 @@
++/*
++ * Copyright (C) 2026 The Shiraz Authors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++// Mach-O (darwin-arm64) only; included by the generated mterp_arm64.S
++// (interpreter/mterp/arm64/main.S header) under __APPLE__. It lives outside
++// arm64/ because gen_mterp.py takes every arm64/*.S file as a template.
++//
++// The arm64 mterp handlers refer to C/C++ functions by their unprefixed C
++// names, while Mach-O gives every C symbol a leading underscore. Each line
++// makes the unprefixed name an alias of the real Mach-O symbol.
++//
++// This is a static, checked-in list; the build never regenerates it. It is
++// the union of `nm -u` over mterp_arm64.o assembled with the libart darwin
++// flags, with and without ART_USE_READ_BARRIER (Baker), USE_HEAP_POISONING
++// and NDEBUG. Regenerate after adding a new asm-to-C reference: assemble
++// with this file emptied, then
++//   nm -u mterp_arm64.o | grep -v '^_' | grep -v -e ':$' -e '^$' |
++//     sort -u | sed 's/.*/    .set &, _&/'
++// and check that `nm -u` of the reassembled object lists only "_" names.
++// An unused alias still adds an undefined "_name" reference to the object;
++// every listed name is defined in libart itself.
++
++#ifndef ART_RUNTIME_INTERPRETER_MTERP_DARWIN_SYMBOL_ALIASES_ARM64_S_
++#define ART_RUNTIME_INTERPRETER_MTERP_DARWIN_SYMBOL_ALIASES_ARM64_S_
++
++#if defined(__APPLE__)
++
++    .set MterpAddHotnessBatch, _MterpAddHotnessBatch
++    .set MterpAputObject, _MterpAputObject
++    .set MterpCheckBefore, _MterpCheckBefore
++    .set MterpCheckCast, _MterpCheckCast
++    .set MterpConstClass, _MterpConstClass
++    .set MterpConstMethodHandle, _MterpConstMethodHandle
++    .set MterpConstMethodType, _MterpConstMethodType
++    .set MterpConstString, _MterpConstString
++    .set MterpDoPackedSwitch, _MterpDoPackedSwitch
++    .set MterpDoSparseSwitch, _MterpDoSparseSwitch
++    .set MterpFillArrayData, _MterpFillArrayData
++    .set MterpFilledNewArray, _MterpFilledNewArray
++    .set MterpFilledNewArrayRange, _MterpFilledNewArrayRange
++    .set MterpHandleException, _MterpHandleException
++    .set MterpIGetI16, _MterpIGetI16
++    .set MterpIGetI8, _MterpIGetI8
++    .set MterpIGetObj, _MterpIGetObj
++    .set MterpIGetU16, _MterpIGetU16
++    .set MterpIGetU32, _MterpIGetU32
++    .set MterpIGetU64, _MterpIGetU64
++    .set MterpIGetU8, _MterpIGetU8
++    .set MterpIPutI16, _MterpIPutI16
++    .set MterpIPutI8, _MterpIPutI8
++    .set MterpIPutObj, _MterpIPutObj
++    .set MterpIPutU16, _MterpIPutU16
++    .set MterpIPutU32, _MterpIPutU32
++    .set MterpIPutU64, _MterpIPutU64
++    .set MterpIPutU8, _MterpIPutU8
++    .set MterpInstanceOf, _MterpInstanceOf
++    .set MterpInvokeCustom, _MterpInvokeCustom
++    .set MterpInvokeCustomRange, _MterpInvokeCustomRange
++    .set MterpInvokeDirect, _MterpInvokeDirect
++    .set MterpInvokeDirectRange, _MterpInvokeDirectRange
++    .set MterpInvokeInterface, _MterpInvokeInterface
++    .set MterpInvokeInterfaceRange, _MterpInvokeInterfaceRange
++    .set MterpInvokePolymorphic, _MterpInvokePolymorphic
++    .set MterpInvokePolymorphicRange, _MterpInvokePolymorphicRange
++    .set MterpInvokeStatic, _MterpInvokeStatic
++    .set MterpInvokeStaticRange, _MterpInvokeStaticRange
++    .set MterpInvokeSuper, _MterpInvokeSuper
++    .set MterpInvokeSuperRange, _MterpInvokeSuperRange
++    .set MterpInvokeVirtual, _MterpInvokeVirtual
++    .set MterpInvokeVirtualQuick, _MterpInvokeVirtualQuick
++    .set MterpInvokeVirtualQuickRange, _MterpInvokeVirtualQuickRange
++    .set MterpInvokeVirtualRange, _MterpInvokeVirtualRange
++    .set MterpIputObjectQuick, _MterpIputObjectQuick
++    .set MterpMaybeDoOnStackReplacement, _MterpMaybeDoOnStackReplacement
++    .set MterpNewArray, _MterpNewArray
++    .set MterpNewInstance, _MterpNewInstance
++    .set MterpSGetI16, _MterpSGetI16
++    .set MterpSGetI8, _MterpSGetI8
++    .set MterpSGetObj, _MterpSGetObj
++    .set MterpSGetU16, _MterpSGetU16
++    .set MterpSGetU32, _MterpSGetU32
++    .set MterpSGetU64, _MterpSGetU64
++    .set MterpSGetU8, _MterpSGetU8
++    .set MterpSPutI16, _MterpSPutI16
++    .set MterpSPutI8, _MterpSPutI8
++    .set MterpSPutObj, _MterpSPutObj
++    .set MterpSPutU16, _MterpSPutU16
++    .set MterpSPutU32, _MterpSPutU32
++    .set MterpSPutU64, _MterpSPutU64
++    .set MterpSPutU8, _MterpSPutU8
++    .set MterpSetUpHotnessCountdown, _MterpSetUpHotnessCountdown
++    .set MterpSuspendCheck, _MterpSuspendCheck
++    .set MterpThreadFenceForConstructor, _MterpThreadFenceForConstructor
++    .set artAGetObjectFromMterp, _artAGetObjectFromMterp
++    .set artIGetObjectFromMterp, _artIGetObjectFromMterp
++    .set artLockObjectFromCode, _artLockObjectFromCode
++    .set artReadBarrierMark, _artReadBarrierMark
++    .set artUnlockObjectFromCode, _artUnlockObjectFromCode
++    .set fmod, _fmod
++    .set fmodf, _fmodf
++
++#endif  // defined(__APPLE__)
++
++#endif  // ART_RUNTIME_INTERPRETER_MTERP_DARWIN_SYMBOL_ALIASES_ARM64_S_

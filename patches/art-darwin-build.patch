@@ -1,0 +1,634 @@
+diff --git a/art/build/Android.common_build.mk b/art/build/Android.common_build.mk
+index 3cb740294fe4ae7358ef33c639adaf21442dc375..c26f18ab68de9d9d578828ad651ab3eb820a7676 100644
+--- a/art/build/Android.common_build.mk
++++ b/art/build/Android.common_build.mk
+@@ -196,6 +196,20 @@ ifneq ($(C_INCLUDE_PATH),)
+   art_cflags += -I$(C_INCLUDE_PATH)/vixl
+ endif
+ 
++# Native macOS on Apple Silicon (Shiraz darwin-arm64 port).
++ifeq ($(HOST_OS)-$(HOST_ARCH),darwin-arm64)
++  # 16 KiB pages: every stack overflow gap must be a multiple of kPageSize, and
++  # instruction_set.cc static_asserts all of them, not only the host ISA's.
++  art_cflags := $(filter-out -DART_STACK_OVERFLOW_GAP_%,$(art_cflags))
++  art_cflags += -DART_STACK_OVERFLOW_GAP_arm=16384 -DART_STACK_OVERFLOW_GAP_arm64=16384 \
++    -DART_STACK_OVERFLOW_GAP_mips=16384 -DART_STACK_OVERFLOW_GAP_mips64=16384 \
++    -DART_STACK_OVERFLOW_GAP_x86=16384 -DART_STACK_OVERFLOW_GAP_x86_64=16384
++  # Only the C++ switch interpreter runs; mterp is assembled and linked but never entered.
++  art_cflags += -DART_USE_CXX_INTERPRETER=1
++  # Vendored musl <elf.h> (MIT, see art/darwin/include/LICENSE.musl); the SDK has none.
++  art_cflags += -Iart/darwin/include
++endif
++
+ # The architectures the compiled tools are able to run on. Setting this to 'all' will cause all
+ # architectures to be included.
+ ART_HOST_CODEGEN_ARCHS ?= $(HOST_ARCH)
+diff --git a/art/dalvikvm/Android.mk b/art/dalvikvm/Android.mk
+index 3f20e405a84380a940201d1eca461c5e48ad9e99..a96117ecc5b909bff90a18abf1ba799a3db4bff2 100644
+--- a/art/dalvikvm/Android.mk
++++ b/art/dalvikvm/Android.mk
+@@ -9,10 +9,30 @@ LOCAL_CFLAGS   =  \
+         $(ART_HOST_CFLAGS) \
+         -Wall \
+         -Wextra
++ifeq ($(HOST_OS),darwin)
++LOCAL_LDFLAGS  = -Wl,-export_dynamic
++else
+ LOCAL_LDFLAGS  = -Wl,--export-dynamic
++endif
+ LOCAL_SRC_FILES = dalvikvm.cc
+ LOCAL_SHARED_LIBRARIES = libnativehelper
++ifeq ($(HOST_OS),darwin)
++# Darwin: one libsigchain only, the dylib that libart links, so that there is
++# a single chain state (a copy whole-linked into dalvikvm would keep a second,
++# separate one). Note that libsigchain's sigaction/signal/sigprocmask
++# interposition is inert on Darwin: with two-level namespaces a plain
++# sigaction()/signal() call, in libart or in a JNI/host library, binds to
++# libSystem, not to libsigchain. Only explicit sigchain_* callers (e.g.
++# sigchain_sigaction in InitPlatformSignalHandlers, AddSpecialSignalHandlerFn)
++# go through the chain, and a library that installs its own SIGSEGV/SIGBUS
++# handler replaces ART's instead of being chained behind it. That is harmless
++# while the fault manager is off on Darwin; enabling it needs DYLD_INTERPOSE
++# entries (resolving the real functions from libSystem, not RTLD_NEXT) or
++# explicit sigchain_* routing first.
++LOCAL_SHARED_LIBRARIES += libsigchain
++else
+ LOCAL_WHOLE_STATIC_LIBRARIES = libsigchain
++endif
+ LOCAL_C_INCLUDES = $(ART_C_INCLUDES)
+ LOCAL_CPP_EXTENSION = .cc
+ include $(BUILD_HOST_EXECUTABLE)
+diff --git a/art/libartpalette/Android.mk b/art/libartpalette/Android.mk
+index 97aef3b255f6810e01bdb8be35641736307cfa80..5fed7128b548b9d09df4207b892a2814adaf0bc2 100644
+--- a/art/libartpalette/Android.mk
++++ b/art/libartpalette/Android.mk
+@@ -93,7 +93,10 @@ LOCAL_LDLIBS   = $(libartpalette_defaults_LDLIBS)
+ LOCAL_SRC_FILES =  \
+         $(libartpalette_defaults_SRCS) \
+         system/palette_fake.cc
+-LOCAL_SHARED_LIBRARIES = $(libartpalette_defaults_SHARED_LIBS)
++# palette_fake.cc includes <android-base/logging.h>, exported by libbase.
++LOCAL_SHARED_LIBRARIES =  \
++        libbase \
++        $(libartpalette_defaults_SHARED_LIBS)
+ LOCAL_EXPORT_C_INCLUDE_DIRS = $(libartpalette_defaults_EXPORT_INCLUDE_DIRS)
+ LOCAL_C_INCLUDES =  \
+         $(libartpalette_defaults_INCLUDE_DIRS) \
+diff --git a/art/runtime/Android.mk b/art/runtime/Android.mk
+index 9b13aaa811c4c55b622cd3a2ffaec0a939e4a17e..dd2d734405a7325fa9b43b021aec20bf21df37a9 100644
+--- a/art/runtime/Android.mk
++++ b/art/runtime/Android.mk
+@@ -202,11 +202,20 @@ LOCAL_GENERATED_SOURCES += $$(GENERATED_SRC_DIR)/asm_defines.h
+ LOCAL_ADDITIONAL_DEPENDENCIES += $$(GENERATED_SRC_DIR)/asm_defines.h
+ endef
+ libart_defaults_CFLAGS   = -DBUILDING_LIBART=1
++ifeq ($(HOST_OS),darwin)
++# Darwin: atomics live in libSystem (no -latomic), and bionic_translation's
++# libdl_bio is replaced by a dyld-based shim compiled into libart
++# (darwin/dl_bio_darwin.cc, appended to libart_defaults_SRCS below).
++libart_defaults_LDLIBS   =  \
++        -lz \
++        -llz4
++else
+ libart_defaults_LDLIBS   =  \
+         $(libart_defaults_$(HOST_ARCH)_HOST_LDLIBS) \
+         -lz \
+         -ldl_bio \
+         -llz4
++endif
+ libart_defaults_SHARED_LIBS =  \
+         libartpalette \
+         libnativebridge \
+@@ -433,6 +442,9 @@ libart_defaults_SRCS     =  \
+         entrypoints/quick/quick_thread_entrypoints.cc \
+         entrypoints/quick/quick_throw_entrypoints.cc \
+         entrypoints/quick/quick_trampoline_entrypoints.cc
++ifeq ($(HOST_OS),darwin)
++libart_defaults_SRCS += darwin/dl_bio_darwin.cc
++endif
+ libart_defaults_INCLUDE_DIRS =  \
+         art/sigchainlib \
+         external/zlib \
+@@ -537,6 +549,9 @@ LOCAL_CPP_EXTENSION = .cc
+ $(eval $(libart_defaults_GENERATED_SOURCES))
+ include $(BUILD_HOST_SHARED_LIBRARY)
+ 
++ifneq ($(HOST_OS),darwin)
++# Darwin builds only the shared libart: `make libart` would otherwise compile
++# every libart source a second time for an unused static archive.
+ # link libart static library
+ include $(CLEAR_VARS)
+ LOCAL_MODULE := libart
+@@ -562,6 +577,7 @@ LOCAL_C_INCLUDES =  \
+ LOCAL_CPP_EXTENSION = .cc
+ $(eval $(libart_defaults_GENERATED_SOURCES))
+ include $(BUILD_HOST_STATIC_LIBRARY)
++endif # HOST_OS != darwin
+ 
+ include art/build/Android.common_build.mk
+ # link libartd shared library
+diff --git a/build/core/combo/HOST_darwin-arm64.mk b/build/core/combo/HOST_darwin-arm64.mk
+new file mode 100644
+index 0000000000000000000000000000000000000000..e5869de64888050c4abca3638fe000379b4a98bf
+--- /dev/null
++++ b/build/core/combo/HOST_darwin-arm64.mk
+@@ -0,0 +1,107 @@
++#
++# Copyright (C) 2006 The Android Open Source Project
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#      http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++
++# Configuration for native macOS on Apple Silicon (darwin-arm64), Shiraz port.
++# Included by combo/select.mk.
++#
++# WITHOUT_CLANG=true keeps the "gcc" rule path of this build system; HOST_CC
++# and HOST_CXX simply point at Apple clang from the active Xcode toolchain.
++# Libraries are Mach-O dylibs that keep the ".so" file name so that
++# System.loadLibrary (JNI_LIB_SUFFIX ".so") and the install rules are unchanged.
++# mac_version.mk is intentionally not included: it only knows x86 SDKs.
++
++mac_sdk_root := $(shell xcrun --sdk macosx --show-sdk-path)
++mac_sdk_version := 15.0
++
++HOST_CC  := $(shell xcrun -f clang)
++HOST_CXX := $(shell xcrun -f clang++)
++HOST_AR  := $(shell xcrun -f ar)
++
++HOST_GLOBAL_CFLAGS += -arch arm64 -isysroot $(mac_sdk_root) -mmacosx-version-min=$(mac_sdk_version)
++HOST_GLOBAL_CFLAGS += -fPIC -funwind-tables
++HOST_GLOBAL_CFLAGS += -Werror=unguarded-availability-new
++# Workaround differences in inttypes.h between host and target (bug 12708004).
++HOST_GLOBAL_CFLAGS += -D__STDC_FORMAT_MACROS -D__STDC_CONSTANT_MACROS
++# Expose the BSD/Darwin extensions even where a source defines _POSIX_C_SOURCE.
++HOST_GLOBAL_CFLAGS += -D_DARWIN_C_SOURCE
++HOST_GLOBAL_CFLAGS += -include $(call select-android-config-h,darwin-arm64)
++HOST_GLOBAL_CPPFLAGS += -stdlib=libc++
++HOST_GLOBAL_LDFLAGS += -arch arm64 -isysroot $(mac_sdk_root) -mmacosx-version-min=$(mac_sdk_version) -stdlib=libc++
++
++# In-tree third-party dependencies (ICU4C 78.x dylibs with @rpath install
++# names, static liblz4.a and liblzma.a) are installed into $(____PREFIX) by
++# Shiraz's bootstrap. zlib and expat come from the SDK (.tbd). Nothing is taken
++# from Homebrew. ____PREFIX is set by the top-level Makefile (default
++# /usr/local); Shiraz passes ____PREFIX=<repo>/.local.
++ifneq ($(strip $(____PREFIX)),)
++HOST_DARWIN_DEPS_PREFIX := $(____PREFIX)
++HOST_GLOBAL_CFLAGS += -isystem $(HOST_DARWIN_DEPS_PREFIX)/include
++HOST_GLOBAL_LD_DIRS += -L$(HOST_DARWIN_DEPS_PREFIX)/lib
++endif
++
++HOST_NO_UNDEFINED_LDFLAGS := -Wl,-undefined,error
++HOST_SHLIB_SUFFIX := .so
++HOST_JNILIB_SUFFIX := .so
++HOST_GLOBAL_ARFLAGS := crs
++
++# Linux-only libraries that some module makefiles still name. On Darwin their
++# functions live in libSystem (librt, libatomic), so they are dropped at link
++# time instead of failing with "library not found".
++HOST_DARWIN_DROPPED_LDLIBS := -lrt -latomic
++# ld64 ignores -pie (all arm64 Mach-O executables are PIE); clang warns about it.
++HOST_DARWIN_DROPPED_LDFLAGS := -pie
++
++HOST_CUSTOM_LD_COMMAND := true
++
++# Dylibs: install name @rpath/<file>, find sibling dylibs via @loader_path.
++define transform-host-o-to-shared-lib-inner
++$(hide) $(PRIVATE_CXX) \
++        -dynamiclib \
++        -install_name @rpath/$(notdir $@) \
++        -Wl,-headerpad_max_install_names \
++        $(HOST_NO_UNDEFINED_LDFLAGS) \
++        $(HOST_GLOBAL_LD_DIRS) \
++        $(if $(PRIVATE_NO_DEFAULT_COMPILER_FLAGS),, $(PRIVATE_HOST_GLOBAL_LDFLAGS)) \
++        $(PRIVATE_ALL_OBJECTS) \
++        $(addprefix -Wl$(comma)-force_load$(comma), $(PRIVATE_ALL_WHOLE_STATIC_LIBRARIES)) \
++        $(call normalize-host-libraries,$(PRIVATE_ALL_STATIC_LIBRARIES)) \
++        $(call normalize-host-libraries,$(PRIVATE_ALL_SHARED_LIBRARIES)) \
++        $(filter-out $(HOST_DARWIN_DROPPED_LDLIBS),$(PRIVATE_LDLIBS)) \
++        -o $@ \
++        -Wl,-rpath,@loader_path \
++        $(filter-out $(HOST_DARWIN_DROPPED_LDFLAGS),$(PRIVATE_LDFLAGS))
++endef
++
++# Executables in <root>/bin find their dylibs in <root>/lib64.
++define transform-host-o-to-executable-inner
++$(hide) $(PRIVATE_CXX) \
++        -Wl,-rpath,@loader_path/../lib64 \
++        -Wl,-headerpad_max_install_names \
++        $(HOST_NO_UNDEFINED_LDFLAGS) \
++        -o $@ \
++        $(HOST_GLOBAL_LD_DIRS) \
++        $(if $(PRIVATE_NO_DEFAULT_COMPILER_FLAGS),, $(PRIVATE_HOST_GLOBAL_LDFLAGS)) \
++        $(PRIVATE_ALL_OBJECTS) \
++        $(addprefix -Wl$(comma)-force_load$(comma), $(PRIVATE_ALL_WHOLE_STATIC_LIBRARIES)) \
++        $(call normalize-host-libraries,$(PRIVATE_ALL_STATIC_LIBRARIES)) \
++        $(call normalize-host-libraries,$(PRIVATE_ALL_SHARED_LIBRARIES)) \
++        $(filter-out $(HOST_DARWIN_DROPPED_LDFLAGS),$(PRIVATE_LDFLAGS)) \
++        $(filter-out $(HOST_DARWIN_DROPPED_LDLIBS),$(PRIVATE_LDLIBS))
++endef
++
++define get-file-size
++stat -f "%z" $(1)
++endef
+diff --git a/build/core/combo/include/arch/darwin-arm64/AndroidConfig.h b/build/core/combo/include/arch/darwin-arm64/AndroidConfig.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ab5ebedb28aebbca67e6a05301137d41304b8fe
+--- /dev/null
++++ b/build/core/combo/include/arch/darwin-arm64/AndroidConfig.h
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (C) 2005 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/*
++ * Android config -- "Darwin arm64".  Used for native macOS on Apple Silicon
++ * (Shiraz port). Derived from linux-any/AndroidConfig.h: macOS has
++ * <sys/uio.h> and pthreads, but no <malloc.h>, no off64_t and no LFS64
++ * interfaces (off_t is always 64 bits).
++ */
++#ifndef _ANDROID_CONFIG_H
++#define _ANDROID_CONFIG_H
++
++/*
++ * ===========================================================================
++ *                              !!! IMPORTANT !!!
++ * ===========================================================================
++ *
++ * This file is included by ALL C/C++ source files.  Don't put anything in
++ * here unless you are absolutely certain it can't go anywhere else.
++ *
++ * Any C++ stuff must be wrapped with "#ifdef __cplusplus".  Do not use "//"
++ * comments.
++ */
++
++/* <sys/uio.h> provides struct iovec, readv and writev. */
++#define HAVE_SYS_UIO_H 1
++
++#define HAVE_PTHREADS 1
++
++/*
++ * off_t is 64 bits on macOS; there is no off64_t and no _LARGEFILE64_SOURCE.
++ * HAVE_OFF64_T is therefore left undefined.
++ */
++#define _FILE_OFFSET_BITS 64
++#define _LARGEFILE_SOURCE 1
++
++/* There is no <malloc.h> on macOS (use <malloc/malloc.h>). HAVE_MALLOC_H is undefined. */
++
++/*
++ * The default path separator for the platform
++ */
++#define OS_PATH_SEPARATOR '/'
++
++/*
++ * Define if <stdint.h> exists.
++ */
++#define HAVE_STDINT_H 1
++
++#endif /*_ANDROID_CONFIG_H*/
+diff --git a/build/core/envsetup.mk b/build/core/envsetup.mk
+index fa7da6cd70be939e729dbed8a0c8d3f0af74991e..5f0262625f245ebdf4386665dce18748542513fb 100644
+--- a/build/core/envsetup.mk
++++ b/build/core/envsetup.mk
+@@ -84,7 +84,7 @@ ifneq (,$(findstring x86,$(ARCH))$(findstring i386,$(ARCH))$(findstring i686,$(A
+   HOST_ARCH := x86
+   HOST_IS_64_BIT := false
+ else
+-ifneq (,$(findstring aarch64,$(ARCH)))
++ifneq (,$(findstring aarch64,$(ARCH))$(findstring arm64,$(ARCH)))
+   HOST_ARCH := arm64
+ #  HOST_2ND_ARCH := arm
+   HOST_IS_64_BIT := true
+diff --git a/build/core/host_dalvik_java_library.mk b/build/core/host_dalvik_java_library.mk
+index 4814d7087568c793cb27bf42dc2ec11fa78d6552..6791f88eb223fdb89cc4e50d50d297b57a74011b 100644
+--- a/build/core/host_dalvik_java_library.mk
++++ b/build/core/host_dalvik_java_library.mk
+@@ -20,7 +20,7 @@
+ # They will be compiled against libcore and not the host JRE.
+ #
+ 
+-ifeq ($(HOST_OS),linux)
++ifneq (,$(filter linux darwin,$(HOST_OS)))
+ USE_CORE_LIB_BOOTCLASSPATH := true
+ 
+ #######################################
+diff --git a/build/core/host_dalvik_static_java_library.mk b/build/core/host_dalvik_static_java_library.mk
+index 90bcc12df017709186e994dea4e248f2ba23aadb..ff8d5cecac179681b18b89b178e96622ce06c861 100644
+--- a/build/core/host_dalvik_static_java_library.mk
++++ b/build/core/host_dalvik_static_java_library.mk
+@@ -19,7 +19,7 @@
+ # These libraries will be compiled against libcore and not the host
+ # JRE.
+ #
+-ifeq ($(HOST_OS),linux)
++ifneq (,$(filter linux darwin,$(HOST_OS)))
+ 
+ LOCAL_UNINSTALLABLE_MODULE := true
+ LOCAL_IS_STATIC_JAVA_LIBRARY := true
+diff --git a/build/core/product_config.mk b/build/core/product_config.mk
+index 5240ae7bd2f1beedbdee8af5b250beccbf20b794..5d1ae12d6629ee4307d1b06f28fb60067ab3fead 100644
+--- a/build/core/product_config.mk
++++ b/build/core/product_config.mk
+@@ -163,7 +163,7 @@ $(unbundled_goals): $(MAKECMDGOALS)
+ endif # unbundled_goals
+ 
+ # Default to building dalvikvm on hosts that support it...
+-ifeq ($(HOST_OS),linux)
++ifneq (,$(filter linux darwin,$(HOST_OS)))
+ # ... or if the if the option is already set
+ ifeq ($(WITH_HOST_DALVIK),)
+   WITH_HOST_DALVIK := true
+diff --git a/external/fdlibm/Android.mk b/external/fdlibm/Android.mk
+index 9e84bc3a3ccbed7c810daa114c65b72ed8fce0c8..deb42979574ff53639a459dfd21f212b62d58269 100644
+--- a/external/fdlibm/Android.mk
++++ b/external/fdlibm/Android.mk
+@@ -88,6 +88,15 @@ ifeq ($(WITH_HOST_DALVIK),true)
+         # See similar section above.
+         LOCAL_CFLAGS += "-D__LITTLE_ENDIAN"
+     endif
++    ifeq ($(HOST_OS),darwin)
++        # macOS hosts are little-endian (arm64; HOST_ARCH is arm64 there).
++        # Without this fdlibm reads the wrong double halves and StrictMath
++        # returns wrong results.
++        LOCAL_CFLAGS += "-D__LITTLE_ENDIAN"
++        # clang contracts a*b+c into fused multiply-adds on arm64 by default,
++        # which changes results; StrictMath needs plain IEEE operations.
++        LOCAL_CFLAGS += -ffp-contract=off
++    endif
+ 
+     LOCAL_MODULE := libfdlibm
+     LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+diff --git a/libbase/Android.mk b/libbase/Android.mk
+index 5c264d46c3f95b5e7864924994dcda9d0c990945..a35ccb3b0fbfb4cd32f2aaee5fdaf0cc5ea5bc48 100644
+--- a/libbase/Android.mk
++++ b/libbase/Android.mk
+@@ -3,8 +3,13 @@ libbase_cflags_defaults_CFLAGS   =  \
+         -Wall \
+         -Wextra
+ 
++ifeq ($(HOST_OS),darwin)
++# Darwin's libSystem already provides the BSD functions that libbsd supplies on Linux.
++libbase_cflags_defaults_LDLIBS =
++else
+ libbase_cflags_defaults_LDLIBS = \
+         -lbsd
++endif
+ 
+ libbase_defaults_CXXFLAGS =  \
+         $(libbase_cflags_defaults_CXXFLAGS) \
+diff --git a/libcore/JavaLibrary.mk b/libcore/JavaLibrary.mk
+index 6528dba6f84296ca21cebadb7b6902e7b433e6db..59e59f5fe180752e681a5901d056d00ee17fecbe 100644
+--- a/libcore/JavaLibrary.mk
++++ b/libcore/JavaLibrary.mk
+@@ -94,7 +94,7 @@ android_icu4j_resource_dirs := $(android_icu4j_root)/resources
+ # Build for the host.
+ #
+ 
+-ifeq ($(HOST_OS),linux)
++ifneq (,$(filter linux darwin,$(HOST_OS)))
+ 
+ include $(CLEAR_VARS)
+ LOCAL_SRC_FILES := $(non_openjdk_java_files) $(openjdk_java_files) $(android_icu4j_src_files) $(openjdk_lambda_stub_files)
+diff --git a/libcore/NativeCode.mk b/libcore/NativeCode.mk
+index cf2ecd23c760698f7b69bf94d62140baff1d1db5..db6b13ba27d863e76f2b80671303e50cb2c6e806 100644
+--- a/libcore/NativeCode.mk
++++ b/libcore/NativeCode.mk
+@@ -102,7 +102,33 @@ core_test_files := \
+ # Build for the host.
+ #
+ 
+-ifeq ($(HOST_OS),linux)
++ifneq (,$(filter linux darwin,$(HOST_OS)))
++
++ifeq ($(HOST_OS),darwin)
++# Darwin (macOS) host. ICU4C comes from the in-tree build installed under
++# $(____PREFIX), never from the system libicucore (its C++ ABI differs from
++# upstream) or Homebrew. ICU is linked into libjavacore only; libopenjdk
++# (Character.cpp) resolves its ICU symbols through libjavacore so one copy of
++# ICU state and data exists in the process, and only that copy is initialised
++# by libjavacore's JNI_OnLoad (udata_setFileAccess/u_init).
++darwin_icu_libdir := $(____PREFIX)/$(____LIBDIR)
++darwin_icu_cflags := -isystem $(____PREFIX)/include
++SHIRAZ_ICU_LINKAGE ?= $(if $(wildcard $(darwin_icu_libdir)/libicuuc.dylib),shared,static)
++ifeq ($(SHIRAZ_ICU_LINKAGE),shared)
++darwin_icu_javacore_ldlibs := -L$(darwin_icu_libdir) -licui18n -licuuc
++darwin_icu_openjdk_ldlibs := -L$(darwin_icu_libdir) -licuuc
++else
++# Static ICU: force-load common and i18n so every ICU entry point is exported
++# from libjavacore (libopenjdk binds to it), plus the static data archive.
++darwin_icu_javacore_ldlibs := \
++    -Wl,-force_load,$(darwin_icu_libdir)/libicui18n.a \
++    -Wl,-force_load,$(darwin_icu_libdir)/libicuuc.a \
++    $(darwin_icu_libdir)/libicudata.a
++darwin_icu_openjdk_ldlibs :=
++endif
++# OpenJDK's own BSD/macOS configuration instead of the glibc one.
++darwin_openjdk_cflags := -D_ALLBSD_SOURCE -DMACOSX -D_DARWIN_C_SOURCE -D__LITTLE_ENDIAN
++endif
+ 
+ include $(CLEAR_VARS)
+ LOCAL_CLANG := true
+@@ -110,7 +136,12 @@ LOCAL_SRC_FILES += $(core_src_files)
+ LOCAL_CFLAGS += $(libart_cflags)
+ LOCAL_C_INCLUDES += $(core_c_includes)
+ LOCAL_CPPFLAGS += $(core_cppflags)
++ifeq ($(HOST_OS),darwin)
++LOCAL_CFLAGS += $(darwin_icu_cflags)
++LOCAL_LDLIBS += -lz -lexpat $(darwin_icu_javacore_ldlibs)
++else
+ LOCAL_LDLIBS += -ldl -lpthread -lexpat -lz -licuuc -licui18n
++endif
+ ifeq ($(HOST_OS),linux)
+ LOCAL_LDLIBS += -lrt
+ endif
+@@ -123,6 +154,8 @@ LOCAL_MULTILIB := both
+ include $(BUILD_HOST_SHARED_LIBRARY)
+ 
+ # Debug version of libopenjdk (host). Depends on libopenjdkjvmd.
++# Not built on Darwin: the macOS port is release-only (no libartd/libopenjdkjvmd).
++ifneq ($(HOST_OS),darwin)
+ include $(CLEAR_VARS)
+ LOCAL_SRC_FILES := $(openjdk_core_src_files)
+ LOCAL_C_INCLUDES := $(core_c_includes)
+@@ -137,18 +170,32 @@ LOCAL_MODULE := libopenjdkd
+ LOCAL_NOTICE_FILE := $(LOCAL_PATH)/ojluni/NOTICE
+ LOCAL_MULTILIB := both
+ include $(BUILD_HOST_SHARED_LIBRARY)
++endif # HOST_OS != darwin
+ 
+ include $(CLEAR_VARS)
+ LOCAL_SRC_FILES := $(openjdk_core_src_files)
+ LOCAL_C_INCLUDES := $(core_c_includes)
++ifeq ($(HOST_OS),darwin)
++LOCAL_CFLAGS := $(darwin_openjdk_cflags) $(darwin_icu_cflags)
++else
+ LOCAL_CFLAGS := -D_LARGEFILE64_SOURCE -D_GNU_SOURCE -DLINUX -D__GLIBC__ # Sigh.
++endif
+ LOCAL_CFLAGS += $(openjdk_cflags)
+ LOCAL_SHARED_LIBRARIES := $(core_shared_libraries) libbase
+ LOCAL_SHARED_LIBRARIES += libopenjdkjvm libnativehelper
++ifeq ($(HOST_OS),darwin)
++# libjavacore carries ICU (see above); libart exports art_sigsegv_fault,
++# which System.c passes to dladdr. ld64 runs with -undefined error.
++LOCAL_SHARED_LIBRARIES += libjavacore libart
++endif
+ LOCAL_STATIC_LIBRARIES := libfdlibm
+ #LOCAL_STATIC_LIBRARIES := $(core_static_libraries) libfdlibm
+ LOCAL_MODULE_TAGS := optional
++ifeq ($(HOST_OS),darwin)
++LOCAL_LDLIBS += -lz -framework CoreFoundation $(darwin_icu_openjdk_ldlibs)
++else
+ LOCAL_LDLIBS += -ldl -lpthread -lrt -licuuc -lcrypto -lz
++endif
+ LOCAL_MODULE := libopenjdk
+ LOCAL_NOTICE_FILE := $(LOCAL_PATH)/ojluni/NOTICE
+ LOCAL_MULTILIB := both
+@@ -161,7 +208,9 @@ ifeq ($(LIBCORE_SKIP_TESTS),)
+     LOCAL_CFLAGS += $(libart_cflags)
+     LOCAL_C_INCLUDES += libcore/include
+     LOCAL_CPPFLAGS += $(core_cppflags)
++    ifneq ($(HOST_OS),darwin)
+     LOCAL_LDLIBS += -ldl -lpthread
++    endif
+     LOCAL_MODULE_TAGS := optional
+     LOCAL_MODULE := libjavacoretests
+     LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/NativeCode.mk
+@@ -171,4 +220,4 @@ ifeq ($(LIBCORE_SKIP_TESTS),)
+     include $(BUILD_HOST_SHARED_LIBRARY)
+ endif # LIBCORE_SKIP_TESTS
+ 
+-endif # HOST_OS == linux
++endif # HOST_OS is linux or darwin
+diff --git a/libcore/luni/src/main/native/sub.mk b/libcore/luni/src/main/native/sub.mk
+index c43caae2f426852947dadbb3acc4f4a40e3b471a..c85746f0d80572a6342cbe09bc9532ad55fc92f8 100644
+--- a/libcore/luni/src/main/native/sub.mk
++++ b/libcore/luni/src/main/native/sub.mk
+@@ -35,5 +35,10 @@ LOCAL_SHARED_LIBRARIES += \
+     liblog \
+     libnativehelper \
+ 
++# -l:NAME is GNU ld syntax (ld64 rejects it); nothing in libjavacore uses
++# OpenSSL symbols, so Darwin does not link it.
++ifneq ($(HOST_OS),darwin)
+ LOCAL_LDLIBS += \
+     -l:libssl.so.3 \
++
++endif
+diff --git a/libnativehelper/Android.mk b/libnativehelper/Android.mk
+index d015635e6b21b028798d7f650d5fa346754e0ace..66b9382e84939b6dc0df35dca4261cdd011daaa1 100644
+--- a/libnativehelper/Android.mk
++++ b/libnativehelper/Android.mk
+@@ -31,7 +31,7 @@ LOCAL_CLANG := true
+ LOCAL_SRC_FILES := \
+     $(local_src_files) \
+     JniInvocation.cpp
+-ifeq ($(HOST_OS),linux)
++ifneq (,$(filter linux darwin,$(HOST_OS)))
+ LOCAL_SRC_FILES += AsynchronousCloseMonitor.cpp
+ endif
+ LOCAL_CFLAGS := -Werror -fvisibility=protected
+diff --git a/system/core/libbacktrace/Android.mk b/system/core/libbacktrace/Android.mk
+index b08d6b4aac46307bd20236e77864b3d12c895258..771ee00cddb8206ee9d0a4f157ef07817b8d3fe0 100644
+--- a/system/core/libbacktrace/Android.mk
++++ b/system/core/libbacktrace/Android.mk
+@@ -35,7 +35,9 @@ ifeq ($(HOST_ARCH),$(filter $(HOST_ARCH),x86 x86_64))
+ build_host := true
+ endif
+ endif
++ifneq ($(HOST_OS),darwin)
+ build_host := true
++endif
+ 
+ #-------------------------------------------------------------------------
+ # The libbacktrace library.
+@@ -147,6 +149,9 @@ LOCAL_MODULE_TAGS := optional
+ LOCAL_SRC_FILES := \
+ 	BacktraceMap.cpp \
+ 
++# ALOGV in BacktraceMap.cpp; with -undefined error every reference must resolve.
++LOCAL_SHARED_LIBRARIES := liblog
++
+ LOCAL_MULTILIB := both
+ 
+ include $(BUILD_HOST_SHARED_LIBRARY)
+diff --git a/system/core/libcutils/Android.mk b/system/core/libcutils/Android.mk
+index 3413d8911cab53c7e9e4165ce35ff5809611d1a0..fb8d2d6e0ba7568ee01ce6c3fbb18cb59024bc07 100644
+--- a/system/core/libcutils/Android.mk
++++ b/system/core/libcutils/Android.mk
+@@ -73,7 +73,14 @@ endif
+ include $(CLEAR_VARS)
+ LOCAL_MODULE := libcutils
+ LOCAL_SRC_FILES := $(commonSources) $(commonHostSources) dlmalloc_stubs.c
++ifeq ($(HOST_OS),darwin)
++# ld64 refuses undefined symbols, so the libcutils <-> libutils cycle is cut:
++# libutils links libcutils, and libcutils only needs libutils' headers.
++LOCAL_SHARED_LIBRARIES := liblog
++LOCAL_C_INCLUDES += system/core/libutils/include
++else
+ LOCAL_SHARED_LIBRARIES := libutils liblog
++endif
+ ifneq ($(HOST_OS),windows)
+ LOCAL_CFLAGS += 
+ endif
+diff --git a/system/core/libnativebridge/Android.mk b/system/core/libnativebridge/Android.mk
+index 8137cd2236cbfb7d65879876bd9c8cba0d02591e..4510f224e6304a7fd2b9c418ce85fb54f54a1543 100644
+--- a/system/core/libnativebridge/Android.mk
++++ b/system/core/libnativebridge/Android.mk
+@@ -17,5 +17,9 @@ LOCAL_CPPFLAGS := -std=gnu++11 -fvisibility=protected
+ LOCAL_LDFLAGS := -ldl
+ LOCAL_SHARED_LIBRARIES := liblog
+ LOCAL_C_INCLUDES := $(LOCAL_PATH)/include
++ifeq ($(HOST_OS),darwin)
++# <elf.h>: vendored musl header (art/darwin/include); the macOS SDK has none.
++LOCAL_C_INCLUDES += art/darwin/include
++endif
+ 
+ include $(BUILD_HOST_SHARED_LIBRARY)
+diff --git a/system/core/libutils/Android.mk b/system/core/libutils/Android.mk
+index 3df4add7ad477c187f92e9df270af32d554c0ffe..f0881ec5fc797c6ee489d059b17c8a56a2b9dfeb 100644
+--- a/system/core/libutils/Android.mk
++++ b/system/core/libutils/Android.mk
+@@ -24,6 +24,10 @@ libutils_impl_defaults_LDFLAGS  = $(libutils_defaults_LDFLAGS)
+ libutils_impl_defaults_LDLIBS   = $(libutils_defaults_LDLIBS)
+ libutils_impl_defaults_SHARED_LIBS = \
+         libbase
++ifeq ($(HOST_OS),darwin)
++# With -undefined error every libcutils/liblog reference must resolve at link time.
++libutils_impl_defaults_SHARED_LIBS += libcutils liblog
++endif
+ libutils_impl_defaults_SRCS     =  \
+         $(libutils_defaults_SRCS) \
+         Looper.cpp \
+@@ -38,6 +42,10 @@ libutils_impl_defaults_SRCS     =  \
+         Timers.cpp \
+         Tokenizer.cpp \
+         misc.cpp
++ifeq ($(HOST_OS),darwin)
++# As in AOSP's Android.bp, Looper (epoll) is Linux-only.
++libutils_impl_defaults_SRCS := $(filter-out Looper.cpp,$(libutils_impl_defaults_SRCS))
++endif
+ libutils_impl_defaults_INCLUDE_DIRS = $(libutils_defaults_INCLUDE_DIRS)
+ libutils_impl_defaults_EXPORT_INCLUDE_DIRS = $(libutils_defaults_EXPORT_INCLUDE_DIRS)
+ libutils_impl_defaults_GENERATED_SOURCES = $(libutils_defaults_GENERATED_SOURCES)
