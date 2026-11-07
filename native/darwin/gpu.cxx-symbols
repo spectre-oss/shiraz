@@ -1,0 +1,7 @@
+# C++ entry points of include/shiraz/gpu.hpp (native/gpu.cpp) that libshiraz-jni, shiraz-preview and the presentation tests link against.
+__ZN6shiraz14gpu_initializeEPFPvPKcE
+__ZN6shiraz12gpu_shutdownEv
+__ZN6shiraz11gpu_prepareEv
+__ZN6shiraz12gpu_revisionEv
+__ZN6shiraz11gpu_presentEiiPKjii
+__ZN6shiraz18gpu_software_frameEv

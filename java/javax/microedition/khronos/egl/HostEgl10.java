@@ -10,7 +10,20 @@ final class HostEgl10 implements EGL11 {
         private final shiraz.runtime.HostGL10 gl = new shiraz.runtime.HostGL10();
         int version=1;
         long handle;
+        HostContext share; // eglCreateContext's share_context, created first (below)
         public GL getGL() { return gl; }
+        /** The native context, created on first use; a share context is created before this one. */
+        long handle() {
+            HostContext parent = share;
+            long parentHandle = parent == null ? 0 : parent.handle();
+            synchronized (this) {
+                if (handle == 0) {
+                    if (parent != null && parentHandle == 0) return 0;
+                    handle = android.view.Surface.shirazEglCreateContext(version, parentHandle);
+                }
+                return handle;
+            }
+        }
     }
     static final class NoDisplay extends EGLDisplay {}
     static final class NoSurface extends EGLSurface {}
@@ -99,6 +112,8 @@ final class HostEgl10 implements EGL11 {
         HostContext context=new HostContext();
         if(attribs!=null)for(int i=0;i+1<attribs.length&&attribs[i]!=EGL_NONE;i+=2)if(attribs[i]==0x3098)context.version=attribs[i+1];
         if(context.version<1||context.version>3){error=EGL_BAD_ATTRIBUTE;return EGL_NO_CONTEXT;}
+        if (share instanceof HostContext) context.share = (HostContext) share;
+        else if (share != null && share != EGL_NO_CONTEXT) { error = EGL_BAD_CONTEXT; return EGL_NO_CONTEXT; }
         error = EGL_SUCCESS; return context;
     }
     public EGLSurface eglCreatePbufferSurface(EGLDisplay target, EGLConfig config, int[] attribs) {
@@ -152,11 +167,7 @@ final class HostEgl10 implements EGL11 {
             if (currentContext.get() != EGL_NO_CONTEXT) android.view.Surface.shirazEglRelease();
         } else {
             HostContext host = (HostContext) context;
-            long handle;
-            synchronized (host) {
-                if (host.handle == 0) host.handle = android.view.Surface.shirazEglCreateContext(host.version);
-                handle = host.handle;
-            }
+            long handle = host.handle();
             if (handle == 0 || !((WindowSurface) draw).holder.shirazEglMakeCurrent(handle)) { error = EGL_BAD_ACCESS; return false; }
         }
         currentDraw.set(draw); currentContext.set(context); error = EGL_SUCCESS; return true;

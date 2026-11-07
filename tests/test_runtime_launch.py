@@ -175,7 +175,53 @@ class LaunchCommandTests(unittest.TestCase):
         _, _, output = self.launch('Darwin', host, {})
         line = next(item for item in output.splitlines() if item.startswith('SHIRAZ_HOST_UNAVAILABLE libraries='))
         self.assertNotIn('libshiraz-sqlite.so', line)
-        self.assertIn('libshiraz-gles2.so', line)
+        self.assertIn('libshiraz-video.so', line)
+        # GLES has its own line naming the fallback.
+        self.assertNotIn('gles', line)
+
+    def test_darwin_without_angle_keeps_metal_and_software_canvas(self):
+        host = self.tree('Darwin', (self.root / 'build/macos/libGLESv2.dylib',))
+        _, env, output = self.launch('Darwin', host, {'SHIRAZ_EGL_LIBRARY': '/x/libEGL.dylib'})
+        line = next(item for item in output.splitlines() if item.startswith('SHIRAZ_HOST_UNAVAILABLE gles '))
+        self.assertEqual(line, 'SHIRAZ_HOST_UNAVAILABLE gles libraries=libEGL.dylib,libGLESv1_CM.dylib,'
+                         'libshiraz-gles1.so,libshiraz-gles2.so reason=angle-not-built-for-macos'
+                         ' fallback=renderer-metal,canvas-software,reqGlEsVersion-0 first-use=UnsatisfiedLinkError')
+        # An inherited EGL library must not reach the shim either.
+        for key in ('SHIRAZ_EGL_LIBRARY', 'SHIRAZ_HOST_SDL_RENDER_DRIVER', 'SDL_VIDEO_EGL_DRIVER', 'SDL_VIDEO_GL_DRIVER'):
+            self.assertNotIn(key, env)
+
+    def angle_tree(self):
+        return self.tree('Darwin', tuple(self.root / 'build/macos' / name for name in runtime.DARWIN_GLES))
+
+    def test_darwin_with_angle_selects_the_gles2_renderer_for_a_window(self):
+        host = self.angle_tree()
+        _, env, output = self.launch('Darwin', host, {})
+        self.assertNotIn('SHIRAZ_HOST_UNAVAILABLE gles', output)
+        libraries = self.root / 'build/macos'
+        self.assertEqual({key: env.get(key) for key in ('SHIRAZ_EGL_LIBRARY', 'SHIRAZ_HOST_SDL_RENDER_DRIVER',
+                                                        'SDL_VIDEO_EGL_DRIVER', 'SDL_VIDEO_GL_DRIVER')},
+                         {'SHIRAZ_EGL_LIBRARY': str(libraries / 'libEGL.dylib'),
+                          'SHIRAZ_HOST_SDL_RENDER_DRIVER': 'opengles2',
+                          'SDL_VIDEO_EGL_DRIVER': str(libraries / 'libEGL.dylib'),
+                          'SDL_VIDEO_GL_DRIVER': str(libraries / 'libGLESv2.dylib')})
+        self.assertNotIn('SDL_RENDER_DRIVER', env)
+        # The shim on macOS loads SHIRAZ_EGL_LIBRARY only as an absolute path and has no leaf-name fallback
+        # (dyld would search the cwd, the app's writable data directory); without ANGLE the variable is unset.
+        self.assertTrue(Path(env['SHIRAZ_EGL_LIBRARY']).is_absolute())
+
+    def test_darwin_with_angle_keeps_an_explicit_renderer_and_headless_drivers(self):
+        host = self.angle_tree()
+        libraries = self.root / 'build/macos'
+        for environ, renderer in (({'SDL_RENDER_DRIVER': 'metal'}, 'metal'),
+                                  ({'SDL_VIDEODRIVER': 'dummy', 'SDL_RENDER_DRIVER': 'software'}, 'software'),
+                                  ({'SDL_VIDEODRIVER': 'dummy'}, None)):
+            with self.subTest(environ=environ):
+                _, env, _ = self.launch('Darwin', host, environ)
+                self.assertEqual(env.get('SHIRAZ_HOST_SDL_RENDER_DRIVER'), renderer)
+                # App EGL contexts (libEGL_shim) still use ANGLE; SDL is not pointed at it.
+                self.assertEqual(env['SHIRAZ_EGL_LIBRARY'], str(libraries / 'libEGL.dylib'))
+                self.assertNotIn('SDL_VIDEO_EGL_DRIVER', env)
+                self.assertNotIn('SDL_VIDEO_GL_DRIVER', env)
 
     def test_darwin_missing_inputs_name_only_frame_critical_files(self):
         with patch.object(runtime, 'ROOT', self.root), patch.object(runtime, 'HOST', self.root / 'context/art_standalone/out/host/darwin-x86'), \
@@ -188,11 +234,13 @@ class LaunchCommandTests(unittest.TestCase):
                      'framework-res.apk', 'build/macos/libandroid.so', 'build/macos/libshiraz-jni.so',
                      'build/macos/libshiraz-gpu.so', 'build/macos/libshiraz-host.so', 'build/macos/libshiraz-bitmap.so',
                      'build/macos/libshiraz-resources.so', 'lib64/libandroidfw.so',
-                     'build/macos/libshiraz-text.so', '.local/share/shiraz/fonts/NotoSans-Regular.ttf',
+                     'build/macos/libshiraz-text.so', 'build/macos/libEGL_shim.so',
+                     '.local/share/shiraz/fonts/NotoSans-Regular.ttf',
                      '.local/share/shiraz/fonts/NotoSansArabic-Regular.ttf',
                      '.local/share/shiraz/fonts/NotoNaskhArabic-Regular.ttf', '.local/etc/fonts/fonts.conf'):
             self.assertIn(name, message)
-        for name in ('wolfssl', 'okhttp', 'sqlite', 'espeak', 'gles', 'libEGL', 'libshiraz-path', 'libshiraz-image'):
+        for name in ('wolfssl', 'okhttp', 'sqlite', 'espeak', 'gles', 'libEGL.dylib', 'libGLES', 'libshiraz-path',
+                     'libshiraz-image'):
             self.assertNotIn(name, message)
 
     def test_darwin_rejects_unusable_fonts_conf_before_launch(self):

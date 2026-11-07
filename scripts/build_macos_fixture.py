@@ -7,6 +7,8 @@ one Activity whose content is a solid View, no resources beyond the manifest.
 --fixture graphics (tests/macos-apk-graphics -> build/macos-apk/graphics.apk):
 text, paths and PNG/WebP/JPEG assets generated at build time by
 scripts/macos_graphics_images.py, so no image binary is kept in git.
+--fixture gles (tests/macos-apk-gles -> build/macos-apk/gles.apk): ES 2/3 and
+ES 1 GLSurfaceViews beside a coloured View and a TextView; no assets.
 Both have no lib/ directory and an uncompressed, 4-byte aligned classes.dex.
 The result is checked with shiraz.apk.inspect_apk before it is moved into
 place, so a malformed or native-code APK is never published.
@@ -42,6 +44,7 @@ FIXTURES = {
     'minimal': (ROOT / 'tests/macos-apk', ROOT / 'build/macos-apk/minimal.apk', ROOT / 'build/macos-apk/work', None),
     'graphics': (ROOT / 'tests/macos-apk-graphics', ROOT / 'build/macos-apk/graphics.apk',
                  ROOT / 'build/macos-apk/graphics-work', graphics_assets),
+    'gles': (ROOT / 'tests/macos-apk-gles', ROOT / 'build/macos-apk/gles.apk', ROOT / 'build/macos-apk/gles-work', None),
 }
 
 

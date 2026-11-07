@@ -1,0 +1,78 @@
+Shiraz modification of Chromium's build/ directory, as fetched for ANGLE.
+
+Upstream: https://chromium.googlesource.com/chromium/src/build.git at
+7a1d4e33658adb6757b77323b1fcb77acf534195 (the revision ANGLE chromium/8127,
+1f6526a566c27c7c33aa73a78517450a4a2a1714, pins in its DEPS). The patched files
+are Copyright The Chromium Authors and remain under Chromium's BSD-3-Clause
+license (their headers point to the LICENSE file of chromium/src; build.git has
+no LICENSE file of its own); this patch is offered under the same license. It is applied by scripts/bootstrap_angle.py inside the ignored
+.deps/angle/build checkout and never vendored into the Shiraz tree.
+
+Change: a new gn argument shiraz_apple_clang (default false). When true, the
+build drops three driver flags that only Chromium's own clang accepts and
+Xcode's Apple clang rejects: -fdiagnostics-show-inlining-chain,
+-fno-lifetime-dse and -fsanitize-ignore-for-ubsan-feature=. sanitizers.gni
+imports clang.gni so the argument is visible there.
+
+diff --git a/config/clang/clang.gni b/config/clang/clang.gni
+index 1e5dc57..1708014 100644
+--- a/config/clang/clang.gni
++++ b/config/clang/clang.gni
+@@ -60,6 +60,9 @@ _raw_ptr_plugin_default =
+     (!is_castos && !is_cast_android && !is_fuchsia)
+ 
+ declare_args() {
++  # Shiraz: Apple (Xcode) clang lacks some Chromium-clang-only driver flags.
++  shiraz_apple_clang = false
++
+   # Indicates if the build should use the Chrome-specific plugins for enforcing
+   # coding guidelines, etc. Only used when compiling with Chromium's Clang.
+   # Setting this enables all of the functionality of the plugin.
+diff --git a/config/compiler/BUILD.gn b/config/compiler/BUILD.gn
+index c267546..02aa84c 100644
+--- a/config/compiler/BUILD.gn
++++ b/config/compiler/BUILD.gn
+@@ -595,8 +595,9 @@ config("compiler") {
+     # Flags for diagnostics.
+     cflags += [ "-fcolor-diagnostics" ]
+     if (!is_wasm) {
+-      if (!is_win) {
++      if (!is_win && !shiraz_apple_clang) {
+         cflags += [ "-fdiagnostics-show-inlining-chain" ]
++      } else if (shiraz_apple_clang) {
+       } else {
+         # Combine after https://github.com/llvm/llvm-project/pull/192241
+         cflags += [ "/clang:-fdiagnostics-show-inlining-chain" ]
+@@ -635,7 +636,7 @@ config("compiler") {
+     # The performance improvement does not seem worth the risk. See
+     # https://crbug.com/484082200 for background and https://crrev.com/c/7593035
+     # for discussion.
+-    if (!is_wasm) {
++    if (!is_wasm && !shiraz_apple_clang) {
+       cflags += [ "-fno-lifetime-dse" ]
+     }
+ 
+diff --git a/config/sanitizers/sanitizers.gni b/config/sanitizers/sanitizers.gni
+index fd208b7..6efbd73 100644
+--- a/config/sanitizers/sanitizers.gni
++++ b/config/sanitizers/sanitizers.gni
+@@ -3,6 +3,7 @@
+ # found in the LICENSE file.
+ 
+ import("//build/config/cast.gni")
++import("//build/config/clang/clang.gni")
+ import("//build/config/chrome_build.gni")
+ import("//build/config/chromeos/args.gni")
+ import("//build/config/profiling/profiling.gni")
+@@ -541,8 +542,10 @@ template("ubsan_hardening") {
+         # be usable even in release builds, i.e. as widely as possible.
+         # It's important not to have full-on UBSan workarounds activate
+         # just because we built support for a specific sanitizer.
+-        "-fsanitize-ignore-for-ubsan-feature=${invoker.sanitizer}",
+       ]
++      if (!shiraz_apple_clang) {
++        cflags += [ "-fsanitize-ignore-for-ubsan-feature=${invoker.sanitizer}" ]
++      }
+       if (defined(invoker.cflags)) {
+         cflags += invoker.cflags
+       }

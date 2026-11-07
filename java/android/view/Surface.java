@@ -33,6 +33,17 @@ public class Surface implements android.os.Parcelable {
  private static native void nativeEglForgetWindow(long window);
  public static long shirazEglCreateContext() { return nativeEglCreateContext(); }
  public static long shirazEglCreateContext(int version) { return nativeEglCreateContextVersion(version); }
+ private static native long nativeEglCreateSharedContext(int version, long share);
+ /**
+  * A context sharing objects with SHARE (an app's eglCreateContext share_context). macOS creates app contexts unshared
+  * (native/from_surface.cpp), so the share must be explicit there. Linux has no such entry point: every ES 2/3
+  * context already shares the backend's root context, so the share group the app asked for exists.
+  */
+ public static long shirazEglCreateContext(int version, long share) {
+  if (share == 0) return nativeEglCreateContextVersion(version);
+  try { return nativeEglCreateSharedContext(version, share); }
+  catch (UnsatisfiedLinkError linux) { return nativeEglCreateContextVersion(version); }
+ }
  public static void shirazEglDestroyContext(long context) { if (context != 0) nativeEglDestroyContext(context); }
  public static boolean shirazEglRelease() { return nativeEglMakeCurrent(0, 0); }
  public boolean shirazEglMakeCurrent(long context) { long window = shirazNativeWindow(); return window != 0 && context != 0 && nativeEglMakeCurrent(window, context); }

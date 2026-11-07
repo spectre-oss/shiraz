@@ -93,9 +93,21 @@ DARWIN_TLS_PROPERTY = '-Dshiraz.tls=unavailable'
 DARWIN_LIBRARIES = 'build/macos'
 # Without one of these the first frame cannot be produced.
 # libshiraz-text and the bundled fonts are required as on Linux: text.cpp adds
-# the font directory to fontconfig and fails without it.
+# the font directory to fontconfig and fails without it. libshiraz-host links
+# libEGL_shim (its reqGlEsVersion probe), which loads without ANGLE.
 DARWIN_FRAME_CRITICAL = ('libandroid.so', 'libshiraz-jni.so', 'libshiraz-gpu.so', 'libshiraz-host.so',
-                         'libshiraz-bitmap.so', 'libshiraz-resources.so', 'libshiraz-text.so')
+                         'libshiraz-bitmap.so', 'libshiraz-resources.so', 'libshiraz-text.so', 'libEGL_shim.so')
+# OpenGL ES (make macos-gpu-deps, then make macos-build): ANGLE's Metal EGL and
+# GLES libraries copied into build/macos, and the GLES JNI bridges linked to
+# them. With all of them present the launcher points libEGL_shim
+# (SHIRAZ_EGL_LIBRARY) and SDL (SDL_VIDEO_EGL_DRIVER, SDL_VIDEO_GL_DRIVER) at
+# ANGLE and selects SDL's opengles2 renderer for a Cocoa window, so
+# presentation and the Skia canvas run on ANGLE. Otherwise the run keeps the
+# Metal renderer and the software canvas, reqGlEsVersion is 0, and GLES20/GL10
+# fail with UnsatisfiedLinkError at first use.
+DARWIN_ANGLE = ('libEGL.dylib', 'libGLESv2.dylib', 'libGLESv1_CM.dylib')
+DARWIN_GLES = (*DARWIN_ANGLE, 'libshiraz-gles1.so', 'libshiraz-gles2.so')
+DARWIN_GL_RENDERER = 'opengles2'
 BUNDLED_FONTS = ('NotoSansArabic-Regular.ttf', 'NotoSansArabic-Bold.ttf', 'NotoSansHebrew-Regular.ttf',
                  'NotoSansHebrew-Bold.ttf', 'NotoSans-Regular.ttf', 'NotoSans-Bold.ttf',
                  'NotoColorEmoji.ttf', 'LICENSE', 'NotoEmoji-OFL.txt')
@@ -110,7 +122,7 @@ DARWIN_SYSTEM_FONT_DIRS = ('/System/Library/Fonts', '/Library/Fonts')
 # at first use. No empty-success stand-ins are built for them.
 DARWIN_OPTIONAL = ('libshiraz-sqlite.so', 'libshiraz-image.so', 'libshiraz-path.so',
                    'libshiraz-audio.so', 'libshiraz-playback.so', 'libshiraz-capture.so', 'libshiraz-speech.so',
-                   'libshiraz-notifications.so', 'libshiraz-video.so', 'libshiraz-gles1.so', 'libshiraz-gles2.so')
+                   'libshiraz-notifications.so', 'libshiraz-video.so')
 # Linux dynamic-loader and Bionic/Berberis variables have no meaning under dyld,
 # and inherited DYLD_* (for example DYLD_INSERT_LIBRARIES) must not reach ART.
 # Inherited FONTCONFIG_* could point fontconfig at host configuration or caches.
@@ -558,7 +570,7 @@ def profile_environment(env, profile_values, version):
 
 def launch_command(system, *, root, host, environ, vm, classpath, framework_resources, work, data, app_lib,
                    metadata, package, app, activity, width, height, frames, snapshot, log_level,
-                   execution_options, device_profile, profile_values, digitalis, version):
+                   execution_options, device_profile, profile_values, digitalis, version, gles=False):
     """Build the ART command line and environment without touching the filesystem."""
     darwin = system == 'Darwin'
     boot = ':'.join(str(host / 'framework' / name) for name in (DARWIN_JARS if darwin else JARS))
@@ -583,6 +595,8 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
     for key in ('SDL_VIDEODRIVER', 'SDL_RENDER_DRIVER'):
         if key in env:
             env.setdefault('SHIRAZ_HOST_' + key, env.pop(key))
+    if darwin:
+        darwin_gles_environment(env, root, gles)
     if digitalis:
         env['LD_LIBRARY_PATH'] = str(digitalis.parent) + ':' + env['LD_LIBRARY_PATH']
         # Digitalis strips host loader variables and unmangles this prefix
@@ -632,6 +646,29 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
         command = [loader, '--library-path', library_path,
                    *(['--preload', preload] if preload else []), *command]
     return command, env
+
+
+def darwin_gles_environment(env, root, gles):
+    """Point EGL and SDL at the in-tree ANGLE when DARWIN_GLES is built (see there)."""
+    if not gles:
+        env.pop('SHIRAZ_EGL_LIBRARY', None)
+        return
+    libraries = (root / DARWIN_LIBRARIES).resolve()
+    # Absolute: the macOS shim (native/egl_shim.cpp) loads only an absolute
+    # SHIRAZ_EGL_LIBRARY; dyld would search the cwd (the app's data directory)
+    # for a relative or leaf name.
+    env['SHIRAZ_EGL_LIBRARY'] = str(libraries / 'libEGL.dylib')
+    # A Cocoa window gets the GL renderer by default; an explicit
+    # SDL_RENDER_DRIVER wins, and SDL's dummy/offscreen drivers on macOS have
+    # no GL (headless runs present in software; app EGL contexts still use ANGLE).
+    if 'SHIRAZ_HOST_SDL_RENDER_DRIVER' not in env and env.get('SHIRAZ_HOST_SDL_VIDEODRIVER', 'cocoa') == 'cocoa':
+        env['SHIRAZ_HOST_SDL_RENDER_DRIVER'] = DARWIN_GL_RENDERER
+    if env.get('SHIRAZ_HOST_SDL_RENDER_DRIVER') == DARWIN_GL_RENDERER:
+        # Read by SDL itself (SDL_getenv), not as hints. Only for opengles2:
+        # SDL's desktop-GL (CGL) path would load SDL_VIDEO_GL_DRIVER as well.
+        # SDL's GLES2 renderer requests the ES profile, which makes Cocoa use EGL.
+        env['SDL_VIDEO_EGL_DRIVER'] = str(libraries / 'libEGL.dylib')
+        env['SDL_VIDEO_GL_DRIVER'] = str(libraries / 'libGLESv2.dylib')
 
 
 def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=None, timeout=None, log_level='INFO', device_profile=None, native_split=None):
@@ -720,6 +757,10 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         if unavailable:
             print('SHIRAZ_HOST_UNAVAILABLE libraries=' + ','.join(unavailable)
                   + ' reason=not-built-for-macos first-use=UnsatisfiedLinkError', flush=True)
+        if gles_missing := [name for name in DARWIN_GLES if not (ROOT / DARWIN_LIBRARIES / name).is_file()]:
+            print('SHIRAZ_HOST_UNAVAILABLE gles libraries=' + ','.join(gles_missing)
+                  + ' reason=angle-not-built-for-macos fallback=renderer-metal,canvas-software,reqGlEsVersion-0'
+                  + ' first-use=UnsatisfiedLinkError', flush=True)
     device_profile = selected_device_profile(package, device_profile or os.environ.get('SHIRAZ_DEVICE_PROFILE_TEMPLATE'))
     if snapshot:
         snapshot = local_path(snapshot, 'build')
@@ -762,7 +803,8 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
             package=package, app=app, activity=activity, width=width, height=height, frames=frames,
             snapshot=snapshot, log_level=log_level, execution_options=execution_options,
             device_profile=device_profile, profile_values=profile_values, digitalis=digitalis,
-            version=(ROOT / 'VERSION').read_text(encoding='ascii').strip())
+            version=(ROOT / 'VERSION').read_text(encoding='ascii').strip(),
+            gles=darwin and not gles_missing)
         print(f'Launching experimental activity {activity}; logs: {work.relative_to(ROOT)}', flush=True)
         try:
             result = run_with_live_logs(command, data, env, work, timeout)

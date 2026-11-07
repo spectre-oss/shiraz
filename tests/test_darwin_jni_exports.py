@@ -63,12 +63,72 @@ class DarwinJniExportsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("missing ['_Java_p_A_g']", result.stderr)
 
+    def test_c_definitions_forwards_and_extra_symbols(self):
+        source = self.dir / 'shim.cpp'
+        source.write_text("""#define FORWARD(name, ret) extern "C" ret name() { return ret(); }
+            // extern "C" void commented() {}
+            extern "C" int declared_only(int x);
+            extern "C" JNIEXPORT void* shim_a(const char* name, int (*cb)(int)) { return nullptr; }
+            extern "C" unsigned int
+            shim_b(void) {
+                return 0;
+            }
+            FORWARD(eglGetError, int)
+            static int helper() { return 1; }""", encoding='utf-8')
+        self.assertEqual(exports.c_symbols(source), ['_shim_a', '_shim_b', '_eglGetError'])
+        extra = self.dir / 'extra'
+        extra.write_text('# C++ entry points\n__ZN6shiraz3fooEv\n\n')
+        java = self.java('A.java', 'package p; class A { static native void f(); }')
+        result = self.run_script('--c-source', source, '--extra', extra, java)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(),
+                         sorted(['_Java_p_A_f', '_shim_a', '_shim_b', '_eglGetError', '__ZN6shiraz3fooEv']))
+        twice = self.dir / 'twice.cpp'
+        twice.write_text('extern "C" void f() {}\nextern "C" void f() {}\n', encoding='utf-8')
+        with self.assertRaisesRegex(SystemExit, 'defined twice: f'):
+            exports.c_symbols(twice)
+        self.assertNotEqual(self.run_script().returncode, 0)
+
+    def test_c_source_is_read_as_compiled_for_macos(self):
+        source = self.dir / 'conditional.cpp'
+        source.write_text("""#define FORWARD(name, ret) extern "C" ret name() { return ret(); }
+            #if defined(__APPLE__)
+            extern "C" int destroy() { return 1; }
+            #  if FEATURE
+            extern "C" void feature() {}
+            #  else
+            extern "C" void no_feature() {}
+            #  endif
+            #else
+            FORWARD(destroy, int)
+            extern "C" void linux_only() {}
+            #endif
+            #ifndef __APPLE__
+            extern "C" void also_linux() {}
+            #else
+            extern "C" void darwin_else() {}
+            #endif
+            FORWARD(shared, int)""", encoding='utf-8')
+        self.assertEqual(exports.c_symbols(source), ['_destroy', '_feature', '_no_feature', '_darwin_else', '_shared'])
+        broken = self.dir / 'broken.cpp'
+        broken.write_text('#if defined(__APPLE__)\nextern "C" void f() {}\n', encoding='utf-8')
+        with self.assertRaisesRegex(SystemExit, 'unterminated'):
+            exports.c_symbols(broken)
+        broken.write_text('#if defined(__APPLE__)\n#elif X\n#endif\nextern "C" void f() {}\n', encoding='utf-8')
+        with self.assertRaisesRegex(SystemExit, '#elif after an __APPLE__'):
+            exports.c_symbols(broken)
+
     def test_repository_lists_match_java_declarations(self):
         for name, sources in (('text', ('java/shiraz/runtime/NativeText.java', 'java/android/graphics/FontFamily.java')),
                               ('path', ('java/shiraz/runtime/NativePath.java',)),
-                              ('image', ('java/shiraz/runtime/NativeImage.java',))):
+                              ('image', ('java/shiraz/runtime/NativeImage.java',)),
+                              ('gpu', ('--extra', 'native/darwin/gpu.cxx-symbols', 'java/shiraz/runtime/NativeGpu.java')),
+                              ('gles1', ('java/shiraz/runtime/HostGL10.java', 'java/android/opengl/GLUtils.java')),
+                              ('gles2', ('java/android/opengl/GLES20.java', 'java/android/opengl/GLES30.java')),
+                              ('egl_shim', ('--c-source', 'native/egl_shim.cpp'))):
             with self.subTest(name):
-                result = self.run_script('--check', ROOT / f'native/darwin/{name}.exports', *(ROOT / s for s in sources))
+                result = self.run_script('--check', ROOT / f'native/darwin/{name}.exports',
+                                         *(s if s.startswith('--') else ROOT / s for s in sources))
                 self.assertEqual(result.returncode, 0, result.stderr)
 
 

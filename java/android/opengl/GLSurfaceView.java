@@ -19,6 +19,8 @@ import javax.microedition.khronos.opengles.GL10;
  */
 public class GLSurfaceView extends SurfaceView implements SurfaceHolder.Callback2 {
     private static final String TAG = "GLSurfaceView";
+    private static final long STOP_TIMEOUT_MS = 2000;
+    private Throwable threadFailure;
     private static final int EGL_CONTEXT_CLIENT_VERSION = 0x3098, EGL_OPENGL_ES2_BIT = 4;
     public static final int RENDERMODE_WHEN_DIRTY = 0, RENDERMODE_CONTINUOUSLY = 1;
     public static final int DEBUG_CHECK_GL_ERROR = 1, DEBUG_LOG_GL_CALLS = 2;
@@ -132,12 +134,36 @@ public class GLSurfaceView extends SurfaceView implements SurfaceHolder.Callback
         Thread thread;
         synchronized (lock) { thread = glThread; glThread = null; exit = true; lock.notifyAll(); }
         if (thread != null && thread != Thread.currentThread()) {
-            try { thread.join(2000); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            try { thread.join(STOP_TIMEOUT_MS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            // Android waits for its GLThread to exit. One still running here is stuck in a GL or EGL
+            // call (two ANGLE Metal contexts of one share group deadlocked this way), and as a daemon
+            // it would let the process exit 0 with no frame drawn: fail the run, showing where it is.
+            if (thread.isAlive() && !Thread.currentThread().isInterrupted()) {
+                IllegalStateException hung = new IllegalStateException("GLThread did not exit within " + STOP_TIMEOUT_MS
+                        + " ms of being stopped; its stack follows");
+                hung.setStackTrace(thread.getStackTrace());
+                throw hung;
+            }
         }
+        rethrowThreadFailure();
     }
     private void guardedRun() {
         try { run(); }
-        catch (Throwable failure) { Log.e(TAG, "GL thread failed", failure); }
+        catch (InterruptedException interrupted) { /* stopped, as Android's GLThread */ }
+        catch (Throwable failure) {
+            Log.e(TAG, "GL thread failed", failure);
+            // Android's GLThread has no handler, so this exception would end the app process. Rethrow it
+            // on the main thread (the run then fails in shiraz.runtime.DedicatedProcess) rather than keep
+            // going with a dead renderer; stopThread() rethrows it if the main loop has already ended.
+            synchronized (lock) { threadFailure = failure; }
+            android.os.Looper main = android.os.Looper.getMainLooper();
+            if (main != null) new android.os.Handler(main).post(new Runnable() { public void run() { rethrowThreadFailure(); } });
+        }
+    }
+    private void rethrowThreadFailure() {
+        Throwable failure;
+        synchronized (lock) { failure = threadFailure; threadFailure = null; }
+        if (failure != null) throw new RuntimeException("GL thread failed", failure);
     }
     private void run() throws InterruptedException {
         EGL10 egl = (EGL10) EGLContext.getEGL();

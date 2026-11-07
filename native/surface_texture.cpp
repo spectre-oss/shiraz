@@ -19,9 +19,12 @@
 
 namespace {
 #if defined(__APPLE__)
-// ANGLE-Metal EGL/GLES arrives with milestone M4 (docs/macos_final_goal.md). Until then no
-// EGL context can be current, so every GL-dependent entry point takes the Linux failure
-// for a missing EGL library: IllegalStateException, no GL objects. Bookkeeping stays.
+// The Linux path wraps each frame's texture in an EGLImage (EGL_KHR_gl_texture_2D_image)
+// bound to a GL_TEXTURE_EXTERNAL_OES name (GL_OES_EGL_image_external). ANGLE Metal
+// (chromium/8127) exposes neither: eglCreateImageKHR(EGL_GL_TEXTURE_2D_KHR) fails with
+// EGL_BAD_PARAMETER and binding GL_TEXTURE_EXTERNAL_OES gives GL_INVALID_ENUM
+// (build/macos/m4/fix/surface-texture/ext_probe.out). So every GL-dependent entry point
+// fails explicitly with IllegalStateException and creates no GL objects. Bookkeeping stays.
 typedef unsigned int GLuint;
 struct Texture {
  GLuint name=0;bool attached;
@@ -59,8 +62,8 @@ void fail(JNIEnv* env,const char* message){jclass cls=env->FindClass("java/lang/
 #if defined(__APPLE__)
 bool current(JNIEnv* env,Texture*){
  static std::atomic<bool> reported{false};
- if(!reported.exchange(true))std::fprintf(stderr,"SHIRAZ_UNSUPPORTED egl-pending-angle SurfaceTexture needs ANGLE-Metal EGL/GLES\n");
- errno=ENOSYS;fail(env,"SurfaceTexture requires a current EGL context");return false;
+ if(!reported.exchange(true))std::fprintf(stderr,"SHIRAZ_UNSUPPORTED surface-texture ANGLE Metal has no GL_OES_EGL_image_external or EGL_KHR_gl_texture_2D_image\n");
+ errno=ENOSYS;fail(env,"SurfaceTexture is unsupported on macOS: ANGLE Metal has no GL_OES_EGL_image_external");return false;
 }
 #else
 bool current(JNIEnv* env,Texture* t){
@@ -79,7 +82,7 @@ extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeAtt
 }
 extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeDetach(JNIEnv* env,jclass,jlong value){
  auto* t=reinterpret_cast<Texture*>(value);if(!t->attached){fail(env,"SurfaceTexture is already detached");return;}
- // No EGL context ever becomes current, so no GL objects exist to release.
+ // current() never succeeds here, so no GL objects exist to release.
  t->name=0;t->attached=false;
 }
 extern "C" JNIEXPORT jboolean JNICALL Java_android_graphics_SurfaceTexture_nativeUpdate(JNIEnv* env,jclass,jlong value,jlong){

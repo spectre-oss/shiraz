@@ -1,0 +1,48 @@
+macOS OpenGL ES and GPU canvas libraries (not vendored in the source tree)
+
+On macOS arm64, make macos-gpu-deps builds two pinned upstream trees in the
+ignored .deps directory and installs the results in the ignored .local
+directory. Nothing is installed into the host system. Each install also writes
+the upstream license files and a PROVENANCE file (pins, URLs, gn args, the
+python3 used as gn's script executable); any redistribution of the dylibs or
+of binaries linked from the Skia archives must carry those files with them.
+
+ANGLE (scripts/bootstrap_angle.py)
+  https://chromium.googlesource.com/angle/angle, branch chromium/8127,
+  commit 1f6526a566c27c7c33aa73a78517450a4a2a1714, built for its Metal
+  backend as .local/lib/angle/lib{EGL,GLESv2,GLESv1_CM}.dylib.
+  Licenses and PROVENANCE: .local/share/licenses/angle/.
+  - ANGLE: BSD-3-Clause (LICENSE). This includes src/common/base/anglebase,
+    Chromium base code under BSD-3-Clause whose license file is ANGLE's
+    LICENSE (src/common/base/README.chromium).
+  - Abseil (third_party/abseil-cpp @9a0a43cb): Apache-2.0
+    (abseil-cpp.LICENSE). The pinned tree has no NOTICE file.
+  - Chromium zlib (third_party/zlib @9f9f52c6): Zlib license (zlib.LICENSE).
+  - Chromium zlib/google (compression_utils_portable): the Chromium Authors'
+    BSD-3-Clause license (chromium.LICENSE, copied from the pinned
+    buildtools checkout @2f41b66d, since chromium/src is not fetched).
+  - xxHash (src/common/third_party/xxhash): BSD-2-Clause (xxhash.LICENSE).
+  - Khronos headers installed in .local/include/angle (EGL, GLES, GLES2,
+    GLES3, KHR): their own Apache-2.0 (SPDX) and Khronos MIT-style notices,
+    kept in the header files.
+  - Chromium build/ @7a1d4e33 is modified for Apple clang by
+    patches/angle-build-apple-clang.patch (BSD-3-Clause, see its header);
+    it is build configuration only. ANGLE's own sources are unmodified.
+  - The dylibs are linked by Xcode's clang, which adds its libclang_rt.osx.a
+    (LLVM compiler-rt builtins; upstream license Apache-2.0 WITH
+    LLVM-exception, whose exception covers object code embedded by
+    compilation).
+
+Skia (scripts/bootstrap_skia.py, main_darwin)
+  https://skia.googlesource.com/skia, commit
+  5db0949ba318d248ebc3d33c73ad1251bf95c243 (chrome/m140), built unmodified as
+  the static archives libskia.a and libpathkit.a in .deps/skia/out/shiraz-darwin
+  and linked into the GPU canvas (Ganesh GL on ANGLE).
+  License and PROVENANCE: .local/share/licenses/skia/.
+  - Skia: BSD-3-Clause (LICENSE), Google Inc. This also covers skcms
+    (modules/skcms), whose sources point at the same LICENSE file.
+  - On macOS no FreeType, fontconfig, CoreText, codec or system OpenGL code is
+    compiled into these archives (see the DARWIN_ARGS comment in the script).
+
+Shiraz's original bridge code is GPL-3.0-only. LICENSES/SKIA-NOTICE.txt covers
+the Linux Skia build.

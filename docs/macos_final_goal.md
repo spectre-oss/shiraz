@@ -102,18 +102,18 @@ symbol lookup are reusable; the host-facing layer is new.
 
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
-| [~] | Window and layer | `native/presentation.cpp` | SDL Cocoa window, Metal renderer (`SDL_HINT_RENDER_DRIVER=metal`), `SDL_RenderGetMetalLayer` / `SDL_Metal_GetLayer` → `CAMetalLayer` | M |
+| [~] | Window and layer | `native/presentation.cpp`, `patches/sdl-cocoa-gles-layer-scale.patch` | SDL Cocoa window. With ANGLE built, a Cocoa window uses SDL's `opengles2` renderer (Cocoa EGL on ANGLE Metal); without it, the `metal` renderer. The SDL patch sets the GL view layer's `contentsScale` from the window's backing scale; without it a 1x display kept a stale 2.0, so ANGLE's drawable was 720x1280 under a 360x640 SDL output and the frame filled one quarter of the window. Under `__APPLE__` the presenter logs `SHIRAZ_EGL_SURFACE` (SDL output vs EGL surface size), which the windowed smokes require equal. Metal-layer handle and live resize still open | M |
 | [ ] | GPU capability probe | `native/presentation.cpp` | `MTLCreateSystemDefaultDevice().name` instead of `glGetString`; Metal-device gate instead of GL-context gate | L |
 | [ ] | Live resize | `native/presentation.cpp` | Render from an `SDL_AddEventWatch` callback during Cocoa live resize, or `presentsWithTransaction`; relayout on every size change | M |
-| [ ] | GPU canvas | `native/gpu.cpp`, `include/shiraz/gpu.hpp`, `scripts/bootstrap_skia.py` | Skia Ganesh-Metal (`GrDirectContexts::MakeMetal`, `SkSurfaces::WrapCAMetalLayer`); no `resetContext` | M |
-| [ ] | Symbol exports | `native/gpu.exports` | ld64 `-exported_symbols_list` | L |
-| [ ] | EGL display | `native/egl_shim.cpp`, `native/gles_version.cpp`, `native/from_surface.cpp` | ANGLE `EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE`, `EGL_KHR_surfaceless_context`, `EGL_KHR_no_config_context`; report GLES 3.0 maximum | M |
+| [x] | GPU canvas | `native/gpu.cpp`, `include/shiraz/gpu.hpp`, `scripts/bootstrap_skia.py` | M4a: unchanged `native/gpu.cpp`, Skia Ganesh GL on SDL's ANGLE Metal context (`SHIRAZ_CANVAS backend=skia-ganesh`, no fallback, checked by the opengles2 window smokes). Ganesh-Metal is not used (see GLES and GPU canvas (M4a)) | M |
+| [x] | Symbol exports | `native/gpu.exports`, `native/darwin/*.exports`, `native/darwin/gpu.cxx-symbols` | ld64 `-exported_symbols_list`; each list is generated and checked by `scripts/darwin_jni_exports.py` against the sources before linking and against `nm -gU` after | L |
+| [x] | EGL display | `native/egl_shim.cpp`, `native/gles_version.cpp`, `native/from_surface.cpp` | ANGLE Metal; reqGlEsVersion 3.0. The shim loads only an absolute `SHIRAZ_EGL_LIBRARY` on macOS (dyld would search the cwd for a leaf name) and stays loadable without ANGLE (weak libGLESv2, `make macos-egl-shim-no-angle-test`). `from_surface.cpp` uses its own keyed ANGLE display (`EGL_PLATFORM_ANGLE_DISPLAY_KEY_ANGLE`) that SDL's `eglTerminate` at teardown cannot end, and app contexts are unshared on macOS (two ANGLE contexts of one share group on two threads deadlocked in `glReadPixels`) | M |
 | [ ] | EGL window surfaces (zero copy) | `native/egl_shim.cpp` | IOSurface pbuffers (`EGL_ANGLE_iosurface_client_buffer`) sampled by Metal; remove the `glReadPixels` readback and the two following CPU copies | H |
-| [ ] | GLES 1/2/3 | `native/gles1_jni.cpp`, `native/gles2_jni.cpp` | ANGLE `libGLESv1_CM`/`libGLESv2` dylibs; detect and report ANGLE-Metal GLES1 gaps (logic op, paletted textures, smooth lines, two-sided lighting, matrix palette) | L |
+| [~] | GLES 1/2/3 | `native/gles1_jni.cpp`, `native/gles2_jni.cpp` | ANGLE `libGLESv1_CM`/`libGLESv2` dylibs, unchanged JNI sources. The gles fixture renders an ES 2/3 view (shader triangle, VAO) beside an ES 1 view (GL10, GLUtils texture), or two ES 2 views (`--gles-lower es2`), headless and windowed; frames still reach the window by `glReadPixels` readback. Still open: detect and report ANGLE-Metal GLES1 gaps (logic op, paletted textures, smooth lines, two-sided lighting, matrix palette) | L |
 | [~] | AHardwareBuffer | `native/hardware_buffer.cpp`, `include/shiraz/hardware_buffer.h` | `IOSurfaceCreate`, `IOSurfaceLock`/`GetBaseAddress`/`GetBytesPerRow`; cross-process via `IOSurfaceCreateMachPort` / `IOSurfaceLookupFromMachPort`; Metal import with `newTextureWithDescriptor:iosurface:plane:` | H |
 | [ ] | EGLImage from native buffer | `native/egl_shim.cpp` | `EGL_NATIVE_BUFFER_ANDROID` → IOSurface / `EGL_METAL_TEXTURE_ANGLE` | M |
 | [~] | Sync fences | `native/sync_fence.cpp` | Shiraz-owned pollable fd (pipe) signalled from `MTLSharedEvent` listener; `EGL_ANGLE_metal_shared_event_sync`; emulate `EGL_ANDROID_native_fence_sync` and `sync_merge` | H |
-| [ ] | SurfaceTexture | `native/surface_texture.cpp` | IOSurface → external texture (`GL_OES_EGL_image_external` on ANGLE, verified) | M |
+| [ ] | SurfaceTexture | `native/surface_texture.cpp` | Fails explicitly on macOS (`SHIRAZ_UNSUPPORTED surface-texture`, `IllegalStateException`): ANGLE chromium/8127 Metal exposes neither `GL_OES_EGL_image_external` nor `EGL_KHR_gl_texture_2D_image` (probe in build/macos/m4/fix/surface-texture). Needs an IOSurface path (`EGL_ANGLE_iosurface_client_buffer`) in M4b | M |
 | [~] | ImageReader | `native/image_reader.cpp` | Pooled IOSurface buffers; `eventfd` → pipe | M |
 | [x] | Shared window frames | `native/shared_frame.cpp`, `native/native_window.cpp` | Unlinked `shm_open` (no seals) or IOSurface pixels; robust mutex → seqlock or `os_sync_wait_on_address` (shared) with owner-PID recovery | M |
 | [ ] | Frame pacing / Choreographer vsync | `native/choreographer.cpp` | `NSView`/`NSWindow` `displayLink` (CADisplayLink); ProMotion rates; `CVDisplayLink` not used | M |
@@ -182,7 +182,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
 | [~] | Makefile platform split | `Makefile` | `include/darwin` JNI headers; `-dynamiclib -install_name @rpath/...`; `-Wl,-rpath,@loader_path` instead of `$ORIGIN`; ld64 default `-undefined error` instead of `-z,defs`; no `--wrap` (test seams instead); `-exported_symbols_list` | M |
-| [ ] | In-tree dependencies | `scripts/bootstrap_sdl.py`, `bootstrap_skia.py`, new ANGLE bootstrap | Pinned SDL with Cocoa/Metal; Skia `skia_use_metal=true`; ANGLE Metal-backend dylibs; no Homebrew runtime dependency | M |
+| [~] | In-tree dependencies | `scripts/bootstrap_sdl.py`, `bootstrap_skia.py`, `bootstrap_angle.py` | Pinned SDL with Cocoa/Metal/EGL; ANGLE chromium/8127 Metal dylibs and Skia Ganesh-GL archives (`skia_use_metal=false`) built in-tree by `make macos-gpu-deps` from clean, pinned checkouts, reused only by build record or a `ninja -n` "no work to do"; no Homebrew runtime dependency. Metal's shader caches live outside the checkout, per user (see GLES and GPU canvas (M4a)) | M |
 | [ ] | Host ABI detection | `src/shiraz/architecture.py` | `arm64` → `arm64-v8a`; flag `p_align < 16384` libraries for copy-load | L |
 | [ ] | `.app` bundle builder | new `scripts/build_macos_app.py` | `Contents/MacOS`, `Contents/Frameworks`, `Info.plist` (`CFBundleIdentifier`, usage strings), `.icns` from the APK icon, `otool -L` closure, `install_name_tool` | M |
 | [ ] | Code signing | builder | Ad-hoc `codesign -s -` locally; Developer ID + `notarytool` optional; hardened runtime with `com.apple.security.cs.allow-jit` (one `MAP_JIT` region) | M |
@@ -198,6 +198,9 @@ Every vendored or bundled component keeps its original notices: ANGLE
 (zlib), KosmicKrisp (MIT) or MoltenVK (Apache-2.0), AOSP sources (Apache-2.0),
 the Linux `KEY_*` table (GPL-2.0 WITH Linux-syscall-note), and rcodesign
 (MPL-2.0) if used as a tool. Apple SDK headers are never vendored.
+The macOS ANGLE and Skia builds are listed, with their pins and licenses, in
+`LICENSES/MACOS-GPU-NOTICE.txt`; the install writes the license files and a
+PROVENANCE file to `.local/share/licenses/{angle,skia}`.
 
 ## Verified on macOS
 
@@ -487,6 +490,82 @@ Not done yet:
 - The 720x1280 at density 320 case has not run on a real render.
 - Bidi and shaping are checked by ink profiles and by eye, not by glyph IDs.
 
+### GLES and GPU canvas (M4a)
+
+OpenGL ES and the GPU canvas run on ANGLE's Metal backend. `native/gpu.cpp`,
+`egl_shim.cpp`, `gles1_jni.cpp`, `gles2_jni.cpp` and `presentation.cpp`
+compile from the Linux sources; macOS-only code is under `#if
+defined(__APPLE__)` or in `native/darwin/`, and `scripts/darwin_linux_guard.py`
+checks that the Linux text is unchanged.
+
+Build order (after the text/path/image steps above):
+
+1. `make macos-gpu-deps`: `scripts/bootstrap_angle.py` fetches ANGLE
+   chromium/8127 and its DEPS-pinned checkouts with plain git, builds gn from
+   source and ninja-builds `libEGL`, `libGLESv2` and `libGLESv1_CM` with Xcode
+   clang into `.local/lib/angle`; then `scripts/bootstrap_skia.py` builds the
+   Skia archives in `.deps/skia/out/shiraz-darwin`. Needs python3 3.11+.
+   Checkouts must be clean at their pins (Chromium `build/` must equal its pin
+   plus `patches/angle-build-apple-clang.patch`). A tree is reused only when
+   its build record matches (pins, gn args, patch, clang, SDK, python3) or,
+   with no record, when `ninja -n` prints "no work to do".
+2. `make macos-gpu-deps-check` runs `tests/darwin/gles/angle_probe.c` on the
+   installed dylibs.
+3. `make macos-build`, `make macos-runtime-libs`, `make macos-apk-gles-fixture`.
+4. Smokes: `make macos-smoke-gles2` (preview on opengles2),
+   `macos-runtime-gles-smoke`, `macos-runtime-gles-window-smoke`,
+   `macos-runtime-gles-es2-pair-smoke`, `macos-runtime-gles-es2-pair-window-smoke`,
+   `macos-runtime-gles2-window-smoke`, `macos-runtime-graphics-gles2-window-smoke`,
+   and the JVM GLES smokes (`make macos-gles-jvm-smokes`,
+   `make macos-gpu-canvas-smoke`). `make macos-egl-shim-test` includes the
+   no-ANGLE shim test.
+
+Verified on the reference Mac (M2 Pro, 1x Odyssey G93SC main display):
+- the gles fixture's ES 2 and ES 1 frames match the app's own `glReadPixels`
+  results and the frame checks, headless and in a window; the text region
+  has the "Shiraz GLES" ink shape;
+- every windowed opengles2 run reports `accelerated=1`, an ANGLE Metal
+  device, `SHIRAZ_CANVAS backend=skia-ganesh` without fallback, and
+  `SHIRAZ_EGL_SURFACE ... match=1`. With an SDL built without
+  `patches/sdl-cocoa-gles-layer-scale.patch` the same check fails
+  (`output=360x640 ... egl=720x1280 match=0`; build/macos/m4/fix/f1);
+- two ES 2 GL threads at once (`--gles-lower es2`): 10 of 10 headless and 10
+  of 10 windowed runs pass after the contexts were unshared; before, 3 of 6
+  headless runs hung in `glReadPixels` (build/macos/m4/fix/f2). A GL thread
+  that throws or does not stop within 2 s now fails the app
+  (`SHIRAZ_RUNTIME_FATAL`) instead of leaving a black view;
+- `from_surface.cpp` contexts stay usable after SDL's renderer, window and
+  video subsystem are torn down (build/macos/m4/fix/pa5).
+
+Design choice: Ganesh-GL on ANGLE-Metal, not Ganesh-Metal. The canvas then
+shares SDL's GL context and the Linux `native/gpu.cpp`, so the same Skia
+code, flags and readback paths are tested on both hosts, and app GLES
+frames, the canvas and the presenter all go through one ANGLE device. A
+Ganesh-Metal canvas would need a second, macOS-only GPU backend
+(`GrDirectContexts::MakeMetal`, a `CAMetalLayer` drawable) and a separate
+composition path with the GLES frames, for no gain while app GLES frames
+still come back by readback.
+
+Metal caches: ANGLE compiles Metal shaders at run time, and Metal stores
+compiled functions and libraries per user under `getconf
+DARWIN_USER_CACHE_DIR`, outside the checkout: `com.apple.metal/` for
+unbundled processes (preview, dalvikvm) and
+`net.java.openjdk.java/com.apple.metal/` for the JVM smokes. They survive
+`make clean` and rebuilds, so a cold-launch time must state whether this
+cache was warm.
+
+Not done yet:
+- IOSurface zero-copy for app GLES frames (M4b); frames still go through
+  `glReadPixels` and two CPU copies.
+- `EGL_ANDROID_native_fence_sync` / `MTLSharedEvent` fences.
+- SurfaceTexture and EGLImage from native buffers (no
+  `GL_OES_EGL_image_external` on ANGLE Metal; fail explicitly).
+- GLES1 gap reporting for ANGLE-Metal.
+- Live resize of the GL window and the Metal-layer handle.
+- A GL window that moves between displays of different backing scale was
+  checked only with a standalone SDL/ANGLE probe (build/macos/m4/hidpi), not
+  with a running app.
+
 ## Acceptance on macOS
 
 All of the following, on Apple Silicon, with retained evidence:
@@ -509,7 +588,7 @@ All of the following, on Apple Silicon, with retained evidence:
 | M1 Host layer foundation | Makefile builds host targets on macOS; preview demo presents through Metal with live resize and correct pointer mapping; native unit tests pass on macOS |
 | M2 Platform primitives | libandroid looper, choreographer, shared memory, shared frames, image reader, fences and hardware buffers implemented on kqueue/shm/IOSurface with tests |
 | M3 ART on darwin-arm64 | `dalvikvm -Xint` runs a hello-world DEX with the heap above 4 GB; then the Shiraz framework boots a pure-Java fixture APK in a Metal window |
-| M4 GPU path | Skia Ganesh-Metal canvas; ANGLE-Metal EGL/GLES with IOSurface zero-copy; GLES fixture APKs render |
+| M4 GPU path | M4a: Skia Ganesh-GL canvas and EGL/GLES on ANGLE-Metal, GLES fixture APKs render headless and windowed with `glReadPixels` readback. M4b: IOSurface zero-copy for app GLES frames, native fence sync, SurfaceTexture |
 | M5 Native libraries | Guest ELF loader runs arm64-v8a JNI libraries, including TLS rewriting and variadic thunks; NDK fixtures pass |
 | M6 OsmAnd+ | Full acceptance above |
 | M7 Distribution | Signed `.app` per APK, Builder support, CI |

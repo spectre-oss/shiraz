@@ -28,10 +28,20 @@ EGLClientBuffer nativeClientBuffer(const AHardwareBuffer* buffer) {
 void* mesa() {
     static void* const handle=[]() -> void* {
         void* library=nullptr;
+#if defined(__APPLE__)
+        // ANGLE's libEGL by absolute path only. There is no Mesa to fall back
+        // to, and dyld searches the current directory for a leaf name: under
+        // `shiraz run` that is the app's writable data directory, so a planted
+        // libEGL_mesa_host.so.1 there would load into the runtime process.
+        const char* path=std::getenv("SHIRAZ_EGL_LIBRARY");
+        if(path&&path[0]=='/')library=dlopen(path,RTLD_NOW|RTLD_LOCAL);
+        return library;
+#else
         if(const char* path=std::getenv("SHIRAZ_EGL_LIBRARY"))library=dlopen(path,RTLD_NOW|RTLD_LOCAL);
         if(!library)library=dlopen("libEGL_mesa_host.so.1",RTLD_NOW|RTLD_LOCAL);
         if(!library)library=dlopen("/usr/lib/libEGL.so.1",RTLD_NOW|RTLD_LOCAL);
         return library;
+#endif
     }();
     return handle;
 }
@@ -70,12 +80,22 @@ struct Draw {
     std::unordered_map<EGLContext, GLuint> framebuffers;
     std::vector<uint32_t> read, argb;
     bool rgbaOnly = false;
+#if defined(__APPLE__)
+    // Context whose namespace holds color/depth. App contexts are unshared on
+    // macOS (native/from_surface.cpp), so another context cannot use them.
+    EGLContext owner = EGL_NO_CONTEXT;
+#endif
 };
 std::mutex drawsMutex;
 std::unordered_map<EGLSurface, Draw*> draws;
 thread_local EGLSurface currentWindow = EGL_NO_SURFACE;
 thread_local EGLContext currentContext = EGL_NO_CONTEXT;
 thread_local GLuint currentFramebuffer = 0;
+#if defined(__APPLE__)
+// ANGLE: OES framebuffer entry points while an ES 1 context is current.
+#include "darwin/egl_shim_gles1.inc"
+#include "darwin/egl_shim_contexts.inc"
+#endif
 Draw* findDraw(EGLSurface surface) {
     std::lock_guard<std::mutex> guard(drawsMutex);
     auto found = draws.find(surface);
@@ -83,6 +103,9 @@ Draw* findDraw(EGLSurface surface) {
 }
 using BindFramebuffer = void (*)(GLenum, GLuint);
 BindFramebuffer realBindFramebuffer() {
+#if defined(__APPLE__)
+    if (darwinEs1Current()) return darwinOesBindFramebuffer();
+#endif
     static BindFramebuffer bind = reinterpret_cast<BindFramebuffer>(dlsym(RTLD_NEXT, "glBindFramebuffer"));
     return bind;
 }
@@ -94,6 +117,12 @@ bool prepare(Draw& draw, EGLContext context) {
         std::lock_guard<std::mutex> guard(drawsMutex);
         int width=ANativeWindow_getWidth(draw.window),height=ANativeWindow_getHeight(draw.window);
         if(width<1||height<1)return false;
+#if defined(__APPLE__)
+        // A new owner starts from fresh names in its own namespace. The old
+        // owner's renderbuffers and framebuffer die with it (or are leaked
+        // while it lives: only a surface bound by two live contexts in turn).
+        if (draw.owner != context) { draw.color = draw.depth = 0; draw.framebuffers.clear(); draw.owner = context; }
+#endif
         if (!draw.color || width!=draw.width || height!=draw.height) {
             GLint previousRenderbuffer=0;glGetIntegerv(GL_RENDERBUFFER_BINDING,&previousRenderbuffer);
             draw.width=width;draw.height=height;
@@ -201,6 +230,12 @@ EGLBoolean swapBuffers(EGLDisplay display, EGLSurface surface) {
     glGetIntegerv(GL_PACK_ALIGNMENT, &packAlignment);
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
+#if defined(__APPLE__)
+    // ANGLE (Metal): while another context renders on another thread,
+    // glReadPixels can return zeros with no GL error unless this context's
+    // work has completed first (build/macos/m4/race/).
+    glFinish();
+#endif
     while (glGetError() != GL_NO_ERROR) {}
     GLenum readError = GL_INVALID_OPERATION;
     bool bgra = false;
@@ -362,7 +397,17 @@ extern "C" EGLBoolean eglChooseConfig(EGLDisplay d,const EGLint* a,EGLConfig* c,
     mapped[used]=EGL_NONE;return fn(d,mapped,c,n,count);
 }
 FORWARD(eglCreateContext, EGLContext, (EGLDisplay d, EGLConfig c, EGLContext s, const EGLint* a), (d, c, s, a))
+#if defined(__APPLE__)
+extern "C" EGLBoolean eglDestroyContext(EGLDisplay d, EGLContext c) {
+    using Fn = EGLBoolean (*)(EGLDisplay, EGLContext);
+    auto fn = reinterpret_cast<Fn>(symbol("eglDestroyContext"));
+    if (!fn) return EGL_FALSE;
+    darwinForgetContext(c); // before the handle can be handed out again
+    return fn(d, c);
+}
+#else
 FORWARD(eglDestroyContext, EGLBoolean, (EGLDisplay d, EGLContext c), (d, c))
+#endif
 extern "C" EGLDisplay eglGetDisplay(EGLNativeDisplayType display) {
     // Android's default EGL display does not refer to an X11 connection. Our
     // window adapter owns presentation, so its contexts use Mesa's headless

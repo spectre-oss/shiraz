@@ -113,6 +113,10 @@ documented in [LICENSES](LICENSES):
   cairo (LGPL-2.1), libwebp (BSD-3-Clause and patent grant) and libjpeg-turbo
   (IJG, BSD-3-Clause, zlib). This software is based in part on the work of the
   Independent JPEG Group.
+- [macOS OpenGL ES and GPU canvas libraries](LICENSES/MACOS-GPU-NOTICE.txt):
+  ANGLE (BSD-3-Clause) with Abseil (Apache-2.0), Chromium zlib (Zlib),
+  Chromium zlib/google and anglebase (BSD-3-Clause) and xxHash (BSD-2-Clause);
+  Skia with skcms (BSD-3-Clause).
 
 These are acknowledgments, not a complete license inventory for every build.
 Redistributed components must retain their applicable license texts and notices.

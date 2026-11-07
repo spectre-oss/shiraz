@@ -66,6 +66,33 @@ struct Video {
     }
     ~Video() { SDL_EnableScreenSaver(); SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS); }
 };
+#if defined(__APPLE__)
+// SDL's Cocoa EGL renderer (opengles2 on ANGLE Metal): ANGLE sizes the window
+// surface from its CAMetalLayer (bounds x contentsScale) while SDL sets its
+// viewport from the window's backing scale. When the two disagree the frame
+// fills only part of the window, and a glReadPixels of SDL's output rectangle
+// (SHIRAZ_PRESENT_SNAPSHOT) still looks right (build/macos/m4/hidpi). Report
+// both sizes whenever either changes so window smokes can require them equal.
+struct EglSurfaceReport {
+    int outputWidth=-1,outputHeight=-1,surfaceWidth=-1,surfaceHeight=-1;
+    void sample(SDL_Renderer* renderer){
+        if(!SDL_GL_GetCurrentContext())return; // metal/software: no EGL surface
+        using CurrentDisplay=void*(*)();using CurrentSurface=void*(*)(int);using Query=unsigned(*)(void*,void*,int,int*);
+        auto display=reinterpret_cast<CurrentDisplay>(SDL_GL_GetProcAddress("eglGetCurrentDisplay"));
+        auto surface=reinterpret_cast<CurrentSurface>(SDL_GL_GetProcAddress("eglGetCurrentSurface"));
+        auto query=reinterpret_cast<Query>(SDL_GL_GetProcAddress("eglQuerySurface"));
+        int ow=0,oh=0,sw=-1,sh=-1;
+        if(SDL_GetRendererOutputSize(renderer,&ow,&oh))return;
+        void* current=surface&&display?surface(0x3059/*EGL_DRAW*/):nullptr;
+        if(!current||!query||!query(display(),current,0x3057/*EGL_WIDTH*/,&sw)||!query(display(),current,0x3056/*EGL_HEIGHT*/,&sh))sw=sh=-1;
+        if(ow==outputWidth&&oh==outputHeight&&sw==surfaceWidth&&sh==surfaceHeight)return;
+        outputWidth=ow;outputHeight=oh;surfaceWidth=sw;surfaceHeight=sh;
+        int dw=0,dh=0;SDL_GL_GetDrawableSize(SDL_RenderGetWindow(renderer),&dw,&dh);
+        std::cerr<<"SHIRAZ_EGL_SURFACE output="<<ow<<"x"<<oh<<" drawable="<<dw<<"x"<<dh<<" egl="<<sw<<"x"<<sh
+                 <<" match="<<(ow==sw&&oh==sh)<<"\n";
+    }
+};
+#endif
 std::unique_lock<std::mutex> acquirePresentation() {
     std::unique_lock<std::mutex> lock(presentation_mutex,std::try_to_lock);
     if(!lock.owns_lock())throw std::runtime_error("Another presentation is already active");
@@ -247,6 +274,9 @@ void present(const Surface& initial, const std::string& title, int frames, const
     const char* canvasMode=std::getenv("SHIRAZ_CANVAS");
     if(canvasMode&&std::string(canvasMode)=="gpu"&&!gpuCanvas)throw std::runtime_error("GPU Canvas requested but unavailable");
     if(!gpuCanvas)std::cerr<<"SHIRAZ_CANVAS backend=software gpu=0\n";
+#if defined(__APPLE__)
+    EglSurfaceReport eglSurfaceReport;
+#endif
     uint64_t gpuRevision=gpu_revision();
     std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(
         SDL_CreateTexture(renderer.get(), SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, image.width, image.height), SDL_DestroyTexture);
@@ -503,6 +533,9 @@ void present(const Surface& initial, const std::string& title, int frames, const
                 checked(SDL_RenderCopy(renderer.get(), texture.get(), nullptr, &rect));
             }
             checked(SDL_RenderFlush(renderer.get()));
+#if defined(__APPLE__)
+            eglSurfaceReport.sample(renderer.get());
+#endif
             // Opt-in app-surface observation reads the actual renderer output,
             // including GPU sampling, rather than only the CPU Canvas buffer.
             const char* capture=std::getenv("SHIRAZ_PRESENT_SNAPSHOT");
