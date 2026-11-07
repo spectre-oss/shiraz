@@ -411,10 +411,17 @@ Not done yet:
 - Resize and input on macOS.
 - Cold-start timing.
 - Linux `make check` on these changes.
-- A from-pin `bootstrap_runtime.py art` failed once in dx for core-oj-hostdex
-  (`trouble writing output: excess write of 8`) and passed on retry. Six
-  concurrent dx runs on the same input were identical, so the flake has not
-  reproduced.
+- Cold ART builds are flaky on this host. In five from-pin
+  `bootstrap_runtime.py art` runs (`checkout -- . && clean -fdx -e out`) there
+  were three transient failures, and each one passed on rerun:
+  - one dx failure for core-oj-hostdex (`trouble writing output: excess write
+    of 8`);
+  - two clang failures in different libart files (`'android-base/logging.h'
+    file not found`), although the header exists and `import_includes` lists
+    `libbase/include`.
+
+  Six concurrent dx runs on the same input produced identical output. The
+  cause is unknown.
 
 ## Acceptance on macOS
 
