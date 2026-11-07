@@ -1,0 +1,5 @@
+Arad by the Arad Project Authors
+https://github.com/MohamadDarvishi/Arad
+Revision: ae7c35e3fa28eca3b1bdcce932205006186c905e
+SIL Open Font License 1.1: https://github.com/MohamadDarvishi/Arad/blob/ae7c35e3fa28eca3b1bdcce932205006186c905e/OFL.txt
+Regular WOFF2 loaded from jsDelivr; font binary is not vendored.

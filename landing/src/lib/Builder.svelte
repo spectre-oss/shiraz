@@ -119,12 +119,17 @@
 </script>
 
 <section class="builder" id="builder" aria-labelledby="builder-title">
-  <header class="builder-heading"><p class="eyebrow">Shiraz Builder</p><h2 id="builder-title">Your APK.<br><span>A Linux app.</span></h2><p>Package a supported Android app into an AppImage, right here.<br>Your APK stays on your device.</p></header>
+  <header class="builder-heading"><p class="eyebrow">Don’t believe it? Try it now!</p><h2 id="builder-title">Your APK.<br><span>A Linux app.</span></h2><p>Package a supported Android app into an AppImage, right here.<br>Your APK stays on your device.</p></header>
   <form class="builder-panel" onsubmit={(event) => { event.preventDefault(); assemble(); }} aria-busy={busy}>
     <fieldset disabled={busy}>
       <legend class="visually-hidden">AppImage build options</legend>
-      <label for="architecture">Linux device architecture</label>
-      <select id="architecture" bind:value={architecture} onchange={loadRelease}><option value="x86_64">x86_64 — Intel / AMD</option><option value="aarch64">ARM64 — Linux phones / ARM computers (experimental)</option></select>
+      <fieldset class="architecture-options">
+        <legend>Linux device architecture</legend>
+        <div class="architecture-cards">
+          <label class="architecture-card"><input type="radio" name="architecture" value="x86_64" bind:group={architecture} onchange={loadRelease} /><span><strong>x86_64</strong><small>Intel / AMD</small></span></label>
+          <label class="architecture-card"><input type="radio" name="architecture" value="aarch64" bind:group={architecture} onchange={loadRelease} /><span><strong>ARM64</strong><small>Linux phones / ARM computers</small><em>Experimental</em></span></label>
+        </div>
+      </fieldset>
       <div class="builder-base"><strong>{releaseVersion}</strong><p>{releaseDetail}</p></div>
       <details><summary>Use a local base AppImage</summary><label for="base">Shiraz browser base</label><input id="base" type="file" accept=".AppImage" bind:files={baseFile} /></details>
       <label for="apk">Android APK</label><input id="apk" type="file" accept=".apk" bind:files={apkFile} />

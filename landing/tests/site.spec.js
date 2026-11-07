@@ -44,3 +44,15 @@ test('reduced motion leaves the decorative shapes static', async ({page}) => {
   await page.goto('/');
   expect(await page.locator('.tonal-shape').evaluateAll(shapes => shapes.every(shape => shape.getAnimations().length === 0))).toBe(true);
 });
+
+test('architecture cards support radio keyboard selection and refresh the runtime', async ({page}) => {
+  await page.route('**/release.json', route => route.fulfill({json:{version:'1.2.3',architectures:Object.fromEntries(['x86_64','aarch64'].map(arch => [arch,{base_file:`base/Shiraz-Browser-Base-1.2.3-${arch}.AppImage`,base_size:4,base_sha256:'0'.repeat(64)}]))}}));
+  await page.goto('/');
+  const intel = page.getByRole('radio', {name:'x86_64 Intel / AMD'});
+  const arm = page.getByRole('radio', {name:/ARM64 Linux phones/});
+  await expect(intel).toBeChecked();
+  await intel.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(arm).toBeChecked();
+  await expect(page.locator('.builder-base p')).toContainText('aarch64');
+});

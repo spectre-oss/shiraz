@@ -283,3 +283,61 @@ h1 { font-size: clamp(3rem,6.2vw,5.6rem); line-height: 1.1; letter-spacing: -.06
 .builder-status { font: 12px/1.8 ui-monospace,monospace; overflow-wrap: anywhere; margin-block: 24px 12px; }
 .builder-status[data-state=error] { color: #ffb4ab; }.builder-status[data-state=success] { color: var(--md-sys-color-primary); }
 @media(max-width:700px) { .builder { padding-block: 56px; } }
+
+/* One viewport, one packaging equation. */
+.packaging-path { min-height: 100vh; min-height: 100svh; max-width: none; margin: 0; padding-block: 48px; border: 0; display: grid; place-items: center; }
+.packaging-path p { margin: 0; align-items: center; font-size: clamp(1.5rem,3.8vw,3.4rem); letter-spacing: -.035em; gap: clamp(12px,2vw,28px); }
+.packaging-path .icon { width: clamp(20px,3vw,36px); height: clamp(20px,3vw,36px); }
+@media(max-width:700px) { .packaging-path p { max-width: 320px; font-size: 1.6rem; gap: 16px; }.packaging-path p > span:last-of-type { flex-basis: 100%; justify-content: center; }.packaging-path p > span:last-of-type .icon { transform: rotate(90deg); } }
+
+/* A quiet closing verse, with a responsive, lazy-loaded photographic backdrop. */
+.poem-section { position: relative; isolation: isolate; min-height: max(400px,50vh); margin-top: 72px; padding: 40px 24px 64px; display: grid; place-items: center; text-align: center; background: #161a16; color: #faf3e7; }
+.poem-background { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; z-index: -2; }
+.poem-section::before { content: ""; position: absolute; inset: 0; background: #080d09bd; z-index: -1; }
+.poem-content { max-width: 100%; }
+.poem-content blockquote { margin: 0; font-family: 'Arad',Tahoma,sans-serif; font-size: clamp(22px,2.5vw,32px); line-height: 2; }
+.poem-content p { margin: 0; }
+.poem-content cite { display: block; margin-top: 12px; font-size: 14px; font-style: normal; }
+.poem-content cite a { display: inline-flex; align-items: center; min-height: 44px; }
+.photo-credit { position: absolute; bottom: 12px; inset-inline: 20px; width: fit-content; max-width: calc(100% - 40px); margin-inline: auto; padding-block: 8px; color: #dedbd3; font-size: 10px; line-height: 1.6; }
+.photo-credit:hover,.poem-content cite a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.poem-section + .site-footer { margin-top: 0; border-top: 0; }
+
+/* Arad Regular, SIL OFL-1.1; pinned upstream webfont, not a bundled binary. */
+@font-face { font-family: 'Arad'; font-style: normal; font-weight: 400; font-display: swap; src: url('https://cdn.jsdelivr.net/gh/MohamadDarvishi/Arad@ae7c35e3fa28eca3b1bdcce932205006186c905e/Fonts/Main_Fonts/Static_Webfont/Arad-Regular.woff2') format('woff2'); }
+
+.builder-panel .architecture-options { margin-bottom: 24px; }
+.architecture-options legend { padding: 0; margin-bottom: 12px; font-size: 13px; }
+.architecture-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.builder-panel .architecture-card { display: flex; align-items: flex-start; gap: 12px; margin: 0; padding: 18px 16px; border: 1px solid #626c5e; border-radius: 12px; background: var(--md-sys-color-surface); cursor: pointer; }
+.architecture-card:has(:checked) { border-color: var(--md-sys-color-primary); box-shadow: inset 0 0 0 1px var(--md-sys-color-primary); background: #263024; }
+.architecture-card:has(:focus-visible) { outline: 2px solid var(--md-sys-color-primary); outline-offset: 4px; }
+.builder-panel .architecture-card input { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; padding: 0; accent-color: var(--md-sys-color-primary); }
+.architecture-card strong { display: block; font-size: 15px; font-weight: 550; }
+.architecture-card small { display: block; margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--md-sys-color-on-surface-variant); }
+.architecture-card em { display: block; margin-top: 7px; font-size: 10px; font-style: normal; color: var(--md-sys-color-primary); }
+@media(max-width:450px) { .architecture-cards { grid-template-columns: 1fr; } }
+
+/* Footer navigation above the rule; only legal credits below it. */
+.footer-bottom { border-top: 0; padding-top: 0; padding-bottom: 20px; }
+.footer-notices { max-width: none; border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: 22px; }
+.footer-notices p { max-width: 760px; margin-inline: auto; }
+
+.footer-notices p { max-width: 560px; }
+
+/* Soft repeating wave cuts blend the photo into the surrounding surface. */
+.poem-wave { position: absolute; inset-inline: 0; width: 100%; height: 24px; fill: var(--md-sys-color-surface); pointer-events: none; z-index: 1; }
+.poem-wave-top { top: -1px; }
+.poem-wave-bottom { bottom: -1px; transform: rotate(180deg); }
+.poem-section { padding-top: 56px; padding-bottom: 76px; }
+.photo-credit { bottom: 26px; }
+@media(max-width:700px) { .poem-wave { height: 16px; } }
+
+.footer-notices { width: min(100%,420px); margin-inline: auto; }
+.footer-notices p { max-width: 100%; }
+
+/* Each path repeats twice across its viewport for a seamless moving edge. */
+.motion-enabled .poem-wave path { transform-box: view-box; animation: poem-wave-flow 14s linear infinite; }
+.motion-enabled .poem-wave-bottom path { animation-duration: 18s; animation-direction: reverse; }
+@keyframes poem-wave-flow { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@media(prefers-reduced-motion:reduce) { .poem-wave path { animation: none !important; } }
