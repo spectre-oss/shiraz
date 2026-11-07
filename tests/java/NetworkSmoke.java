@@ -31,6 +31,7 @@ public final class NetworkSmoke {
   }
  }
  public static void main(String[] args)throws Exception{
+  Class.forName("shiraz.runtime.HostTlsProvider").getMethod("install").invoke(null);
   check(hex(MessageDigest.getInstance("MD5").digest("abc".getBytes("UTF-8"))).equals("900150983cd24fb0d6963f7d28e17f72"),"MD5 vector");
   check(hex(MessageDigest.getInstance("SHA-256").digest("abc".getBytes("UTF-8"))).equals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),"SHA256 vector");
   try{MessageDigest.getInstance("missing-digest");throw new AssertionError("unknown algorithm accepted");}catch(NoSuchAlgorithmException expected){}

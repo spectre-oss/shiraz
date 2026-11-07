@@ -81,15 +81,8 @@ def run_with_live_logs(command, cwd, env, work, timeout):
 ROOT = Path(__file__).resolve().parents[2]
 HOST = host_out_dir(ROOT / 'context/art_standalone')
 JARS = ('core-oj-hostdex.jar', 'core-libart-hostdex.jar', 'okhttp-hostdex.jar', 'bouncycastle-hostdex.jar', 'wolfssljni-hostdex.jar')
-# macOS (docs/macos_final_goal.md): okhttp, Bouncy Castle and wolfJSSE are not
-# ported yet, so only the two core jars boot. HostTlsProvider reads shiraz.tls
-# and leaves SSLContext/SSLSocketFactory failing explicitly. The darwin libcore
-# (patches/art-darwin-url-handlers.patch) resolves http/https to
-# shiraz.net.http(s).Handler when com.android.okhttp is absent, so
-# openConnection throws IOException. java.protocol.handler.pkgs is not passed:
-# a command-line -D property cannot be changed by the app.
-DARWIN_JARS = JARS[:2]
-DARWIN_TLS_PROPERTY = '-Dshiraz.tls=unavailable'
+# Both hosts use the same pinned HTTP/crypto/TLS boot modules.
+DARWIN_JARS = JARS
 DARWIN_LIBRARIES = 'build/macos'
 # Without one of these the first frame cannot be produced.
 # libshiraz-text and the bundled fonts are required as on Linux: text.cpp adds
@@ -493,7 +486,8 @@ def runtime_inputs(system, root, host, execution_mode):
         required = [vm, *(host / 'framework' / jar for jar in DARWIN_JARS), framework, framework_resources,
                     *(root / DARWIN_LIBRARIES / name for name in DARWIN_FRAME_CRITICAL), host / 'lib64/libandroidfw.so',
                     *(root / '.local/share/shiraz/fonts' / name for name in (*BUNDLED_FONTS, *DARWIN_PREFERRED_FONTS)),
-                    root / DARWIN_FONTCONFIG_FILE]
+                    root / DARWIN_FONTCONFIG_FILE, root / DARWIN_LIBRARIES / 'libshiraz-trust.so',
+                    host / 'lib64/libwolfssljni.so']
         optional = [root / DARWIN_LIBRARIES / name for name in DARWIN_OPTIONAL]
         return vm, framework, framework_resources, required, optional
     vm = host / 'bin/dalvikvm64'
@@ -619,7 +613,7 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
                    '-Dlog.tag=' + log_level, *trust_store,
                    '-Djava.library.path=' + ':'.join((str(root / DARWIN_LIBRARIES), str(host / 'lib64'))),
-                   DARWIN_TLS_PROPERTY, *tail]
+                   *tail]
         return command, env
     compat = root / 'build/libshiraz-android-process.so'
     # NDK libraries resolve platform symbols through the process-wide scope.
@@ -761,7 +755,6 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         if failure := darwin_fontconfig_failure(ROOT):
             raise FormatError('Runtime is not configured for macOS: ' + failure)
         unavailable = [path.name for path in optional if not path.is_file()]
-        print('SHIRAZ_HOST_UNAVAILABLE tls http reason=okhttp,bouncycastle,wolfjsse-not-ported-to-macos', flush=True)
         if unavailable:
             print('SHIRAZ_HOST_UNAVAILABLE libraries=' + ','.join(unavailable)
                   + ' reason=not-built-for-macos first-use=UnsatisfiedLinkError', flush=True)

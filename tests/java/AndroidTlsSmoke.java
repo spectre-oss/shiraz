@@ -23,6 +23,7 @@ public final class AndroidTlsSmoke {
   finally{loader.loadClass("okhttp3.Response").getMethod("close").invoke(response);}
  }
  public static void main(String[] args)throws Exception{
+  if(shiraz.runtime.HostOs.darwin())shiraz.runtime.HostTrustProvider.install();
   if(args.length==1&&args[0].equals("custom")){
    SSLContext custom=SSLContext.getInstance("TLS","wolfJSSE");custom.init(null,null,null);SSLContext.setDefault(custom);SSLSocketFactory customFactory=custom.getSocketFactory();HttpsURLConnection.setDefaultSSLSocketFactory(customFactory);
    shiraz.runtime.HostTlsProvider.install();check(SSLContext.getDefault()==custom&&HttpsURLConnection.getDefaultSSLSocketFactory()==customFactory,"explicit custom defaults preserved");System.out.println("CUSTOM_TLS_DEFAULTS_PRESERVED");return;

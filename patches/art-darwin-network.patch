@@ -1,0 +1,38 @@
+diff --git a/external/okhttp/Android.mk b/external/okhttp/Android.mk
+index b0a0f5df..94b48340 100644
+--- a/external/okhttp/Android.mk
++++ b/external/okhttp/Android.mk
+@@ -75,7 +75,7 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+ LOCAL_JAVA_LANGUAGE_VERSION := 1.7
+ include $(BUILD_STATIC_JAVA_LIBRARY)
+ 
+-ifeq ($(HOST_OS),linux)
++ifneq (,$(filter linux darwin,$(HOST_OS)))
+ include $(CLEAR_VARS)
+ LOCAL_MODULE := okhttp-hostdex
+ LOCAL_MODULE_TAGS := optional
+diff --git a/external/wolfssljni/Android.mk b/external/wolfssljni/Android.mk
+index 24a328d8..a96c282a 100644
+--- a/external/wolfssljni/Android.mk
++++ b/external/wolfssljni/Android.mk
+@@ -33,6 +33,10 @@ include $(CLEAR_VARS)
+ LOCAL_CFLAGS += $(native_cflags)
+ # __ANDROID__ must be defined in order to rely on libcore implementation details instead of jdk implementation details
+ LOCAL_CFLAGS:= -D__ANDROID__ -DHAVE_FFDHE_2048 -DWOLFSSL_TLS13 -DHAVE_TLS_EXTENSIONS -DHAVE_SUPPORTED_CURVES -DTFM_TIMING_RESISTANT -DECC_TIMING_RESISTANT -DWC_RSA_BLINDING -DHAVE_AESGCM -DWOLFSSL_SHA512 -DWOLFSSL_SHA384 -DHAVE_HKDF -DNO_DSA -DHAVE_ECC -DTFM_ECC256 -DECC_SHAMIR -DWC_RSA_PSS -DWOLFSSL_BASE64_ENCODE -DNO_RC4 -DWOLFSSL_SHA224 -DWOLFSSL_SHA3 -DHAVE_POLY1305 -DHAVE_ONE_TIME_AUTH -DHAVE_CHACHA -DHAVE_HASHDRBG -DHAVE_TLS_EXTENSIONS -DHAVE_SUPPORTED_CURVES -DHAVE_EXTENDED_MASTER -DHAVE_SNI -DHAVE_ALPN -DWOLFSSL_JNI -DWOLFSSL_DTLS -DOPENSSL_EXTRA -DOPENSSL_ALL -DHAVE_EX_DATA -DHAVE_CRL -DHAVE_OCSP -DHAVE_CRL_MONITOR -DPERSIST_SESSION_CACHE -DPERSIST_CERT_CACHE -DATOMIC_USER -DHAVE_PK_CALLBACKS -DWOLFSSL_CERT_EXT -DWOLFSSL_CERT_GEN -DHAVE_ENCRYPT_THEN_MAC -DNO_MD4 -DWOLFSSL_ENCRYPTED_KEYS -DNO_DES3 -DKEEP_PEER_CERT -DSESSION_CERTS -DHAVE_SESSION_TICKET -DSIZEOF_LONG=4 -DSIZEOF_LONG_LONG=8 -Os -fomit-frame-pointer
++ifeq ($(HOST_OS),darwin)
++# Use the actual pinned wolfSSL configuration, rather than Linux ABI guesses.
++LOCAL_CFLAGS := -D__ANDROID__ -include $(____PREFIX)/include/wolfssl/options.h
++endif
+ LOCAL_SRC_FILES := \
+     native/com_wolfssl_wolfcrypt_ECC.c \
+     native/com_wolfssl_wolfcrypt_EccKey.c \
+@@ -48,6 +52,9 @@ LOCAL_C_INCLUDES := \
+     external/wolfssl
+ LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/native
+ LOCAL_LDLIBS := -lwolfssl
++ifeq ($(HOST_OS),darwin)
++LOCAL_SHARED_LIBRARIES := liblog
++endif
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE := libwolfssljni
+ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk

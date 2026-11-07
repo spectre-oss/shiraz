@@ -10,7 +10,7 @@ import ssl
 import tempfile
 import threading
 import time
-from art_smoke import HOST, JARS, ROOT, environment
+from art_smoke import HOST, JARS, NATIVE, ROOT, environment
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -68,7 +68,7 @@ server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 try:
-    command = [str(vm), '-Xbootclasspath:'+':'.join(str(HOST/'framework'/name) for name in JARS), '-Xint', '-Xusejit:false', '-Xnoimage-dex2oat', '-Xcompiler:'+str(HOST/'bin/dex2oat'), '-Djava.library.path='+str(HOST/'lib64'), '-cp', str(jar), 'NetworkSmoke', f'http://127.0.0.1:{server.server_port}', f'https://localhost:{tls_server.server_port}', str(cert)]
+    command = [str(vm), '-Xbootclasspath:'+':'.join(str(HOST/'framework'/name) for name in JARS), '-Xint', '-Xusejit:false', '-Xnoimage-dex2oat', '-Xcompiler:'+str(HOST/'bin/dex2oat'), '-Djava.library.path='+str(NATIVE)+':'+str(HOST/'lib64'), '-cp', str(ROOT/'build/shiraz-framework.jar')+':'+str(jar), 'NetworkSmoke', f'http://127.0.0.1:{server.server_port}', f'https://localhost:{tls_server.server_port}', str(cert)]
     result = subprocess.run(command, env=environment(work), capture_output=True, text=True, timeout=90)
     (work/'stdout.log').write_text(result.stdout)
     (work/'stderr.log').write_text(result.stderr)

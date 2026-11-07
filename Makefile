@@ -1598,3 +1598,5 @@ digitalis-platform-smoke:
 ifeq ($(shell uname -s),Darwin)
 include mk/darwin.mk
 endif
+
+include mk/network.mk

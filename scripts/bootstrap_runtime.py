@@ -108,6 +108,9 @@ PATCHES = {
         ('art-tls-stream-lifetime.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java': '06338beb576fff593cc422c1600aa852fafecde8d3f64d400cfe3ba4122d34e9',
         }),
+        ('art-tls-eof.patch', {
+            'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java': 'd956fb49de6ad1628a38dfd9159d2e2c63115ab3276f6bc9309624f08cb62656',
+        }),
         ('art-host-unload.patch', {
             'libcore/luni/src/main/native/Register.cpp':
                 '1baba7f2fb38514ba57955287d7a28ca9478a985d3fd9bce411111837d36b9de',
@@ -140,6 +143,10 @@ PATCHES = {
 # unaffected). Same (patch, {file: final sha256}) chain format as PATCHES.
 PATCHES_DARWIN = {
     'art_standalone': [
+        ('art-darwin-network.patch', {
+            'external/okhttp/Android.mk': 'afc052111dca4ee147393c7b2463a974716f8b19b8bb8036fb44113abac6df36',
+            'external/wolfssljni/Android.mk': 'a05aef517f6250f94656d85c62ec324567049fd92eb6d72c938e3a8eaa0aa9ca',
+        }),
         ('art-darwin-build.patch', {  # 27156 bytes
             'art/build/Android.common_build.mk': '5e00dd05b95a1a716200ad7f276a82c5f675b566c1301fc61a8e92698aa48e0e',
             'art/dalvikvm/Android.mk': 'ff48dc36f8b850d976ab2bd93ec0e070ce6a204d86afb77335e6073704921fe8',

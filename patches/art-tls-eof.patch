@@ -1,0 +1,11 @@
+--- a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java
++++ b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java
+@@ -1782,7 +1782,7 @@
+                 throw new IndexOutOfBoundsException(ioe.toString());
+             }
+ 
+-            return (data[0] & 0xFF);
++            return ret == -1 ? -1 : (data[0] & 0xFF);
+         }
+ 
+         public int read(byte[] b) throws NullPointerException, IOException {

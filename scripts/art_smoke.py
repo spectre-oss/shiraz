@@ -21,10 +21,6 @@ DARWIN = platform.system() == 'Darwin'
 ART = ROOT / 'context/art_standalone'
 HOST = host_out_dir(ART)  # out/host/linux-x86, or out/host/darwin-x86 on macOS
 JARS = ('core-oj-hostdex.jar', 'core-libart-hostdex.jar', 'okhttp-hostdex.jar', 'bouncycastle-hostdex.jar', 'wolfssljni-hostdex.jar')
-# macOS builds the two desugared core boot jars only; the network stage
-# (okhttp, bouncycastle, wolfssljni) is not ported yet.
-if DARWIN:
-    JARS = JARS[:2]
 # Shiraz JNI libraries: build/ on Linux, build/macos/ (Mach-O, .so names) on macOS.
 NATIVE = ROOT / 'build/macos' if DARWIN else ROOT / 'build'
 

@@ -137,3 +137,26 @@ updates it. Push only when authorized.
 Session logs are private workspace files, outside the Git checkout. In the
 `codes/shiraz` workspace layout, use `../../docs/jobs/`. They are not part of the
 public development guide or release artifacts.
+
+## Networking on macOS
+
+Build the pinned HTTP, crypto and TLS boot modules with `make macos-network`,
+then rebuild the framework with `make macos-framework`. The macOS launcher now
+requires OkHttp, Bouncy Castle, wolfJSSE and the native trust bridge.
+`make network-probe-smoke` executes the networking assertions on ART; it reports
+each failure and writes its result under `build/network-probe-runtime/`.
+Supply `--apk /path/to/api-probe.apk` to execute the assertions packaged in a
+prebuilt API test APK.
+The optional `--url https://f-droid.org/repo/entry.json` adds a public HTTPS
+fetch, whose success is reported separately from the controlled loopback tests.
+
+The default trust provider imports public system anchors through
+Security.framework and validates chains with wolfJSSE. Caller-supplied trust
+stores and per-connection TLS factories remain supported. There is no trust-all
+fallback. User keychain trust overrides and platform revocation policy are not
+yet modeled. SSLEngine remains explicitly unsupported by the Android TLS bridge;
+its test must not be treated as passed merely because socket-based HTTPS works.
+The fixture certificate and key are generated only under `build/`, expire after
+two days, and are regenerated when building the probe. Never commit those files
+or the resulting APK. Host JVM checks validate the assertions; ART checks and
+real-app UI acceptance are separate evidence.

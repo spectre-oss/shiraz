@@ -16,6 +16,7 @@ public final class HostTlsProvider extends Provider {
         if(Security.getProvider("ShirazTLS")!=null)return;
         if(unavailable())return;
         if(Security.getProvider("wolfJSSE")==null)throw new NoSuchProviderException("Pinned wolfJSSE provider is unavailable");
+        if(HostOs.darwin())HostTrustProvider.install();
         SSLContext oldContext=SSLContext.getDefault();
         SSLSocketFactory oldSocket=(SSLSocketFactory)SSLSocketFactory.getDefault();
         SSLSocketFactory oldHttps=HttpsURLConnection.getDefaultSSLSocketFactory();
@@ -33,8 +34,8 @@ public final class HostTlsProvider extends Provider {
             Security.removeProvider(provider.getName());throw failure;
         }
     }
-    // A host without the pinned wolfJSSE stack (the darwin launcher sets shiraz.tls=unavailable
-    // until a Security.framework trust store lands) boots without TLS. Nothing is installed:
+    // An explicitly selected host without the pinned wolfJSSE stack boots without
+    // TLS. Normal launchers require the backend. Nothing is installed in this mode:
     // SSLContext lookups throw NoSuchAlgorithmException and the default SSL socket factories
     // throw SocketException. There is no trust-all manager and no plaintext fallback.
     // Linux without wolfJSSE still fails in install(), as before.
@@ -70,7 +71,7 @@ public final class HostTlsProvider extends Provider {
         private X509TrustManager trust;
         Context(String protocol){try{delegate=SSLContext.getInstance(protocol,"wolfJSSE");}catch(GeneralSecurityException failure){throw new IllegalStateException("Pinned TLS backend unavailable",failure);}}
         protected void engineInit(KeyManager[] keys,TrustManager[] managers,SecureRandom random)throws KeyManagementException{
-            if(managers==null){try{TrustManagerFactory factory=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm(),"wolfJSSE");factory.init((KeyStore)null);managers=factory.getTrustManagers();}catch(GeneralSecurityException failure){throw new KeyManagementException("Default trust initialization failed",failure);}}
+            if(managers==null){try{TrustManagerFactory factory=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());factory.init((KeyStore)null);managers=factory.getTrustManagers();}catch(GeneralSecurityException failure){throw new KeyManagementException("Default trust initialization failed",failure);}}
             X509TrustManager next=null;for(TrustManager manager:managers)if(manager instanceof X509TrustManager){next=(X509TrustManager)manager;break;}
             delegate.init(keys,managers,random);
             // Pinned wolfJSSE SessionStore(0) evicts every entry. Its host+port-only

@@ -43,11 +43,10 @@ LINUX_ENV = [
     ('LD_PRELOAD', '<ROOT>/build/libshiraz-android-process.so:<ROOT>/build/libandroid.so:'
      '<ROOT>/build/libshiraz-resources.so:<ROOT>/build/libshiraz-android-fonts.so')]
 
-DARWIN_BOOT = '<HOST>/framework/core-oj-hostdex.jar:<HOST>/framework/core-libart-hostdex.jar'
+DARWIN_BOOT = ':'.join('<HOST>/framework/' + name for name in runtime.JARS)
 DARWIN_COMMAND = [
     '<HOST>/bin/dalvikvm', '-Xbootclasspath:' + DARWIN_BOOT, '-Xnoimage-dex2oat', '-Xint', '-Xusejit:false',
     '-Xcheck:jni', '-Dlog.tag=INFO', '-Djava.library.path=<ROOT>/build/macos:<HOST>/lib64',
-    '-Dshiraz.tls=unavailable',
     '-Dshiraz.frameworkResources=<ROOT>/build/framework-res/framework-res.apk',
     '-Dshiraz.speechData=<ROOT>/.local/share',
     f'-Djava.io.tmpdir=<ROOT>/{RUN}/tmp', f'-Duser.home=<ROOT>/{RUN}/home',
@@ -160,7 +159,7 @@ class LaunchCommandTests(unittest.TestCase):
         # Command-line -D properties are unchangeable in libcore; apps must keep
         # being able to set java.protocol.handler.pkgs themselves.
         self.assertFalse(any(item.startswith('-Djava.protocol.handler.pkgs') for item in command))
-        self.assertIn('SHIRAZ_HOST_UNAVAILABLE tls http', output)
+        self.assertNotIn('SHIRAZ_HOST_UNAVAILABLE tls http', output)
         line = next(item for item in output.splitlines() if item.startswith('SHIRAZ_HOST_UNAVAILABLE libraries='))
         self.assertIn('libshiraz-sqlite.so', line)
         self.assertIn('libshiraz-path.so', line)
@@ -239,7 +238,7 @@ class LaunchCommandTests(unittest.TestCase):
                      '.local/share/shiraz/fonts/NotoSansArabic-Regular.ttf',
                      '.local/share/shiraz/fonts/NotoNaskhArabic-Regular.ttf', '.local/etc/fonts/fonts.conf'):
             self.assertIn(name, message)
-        for name in ('wolfssl', 'okhttp', 'sqlite', 'espeak', 'gles', 'libEGL.dylib', 'libGLES', 'libshiraz-path',
+        for name in ('sqlite', 'espeak', 'gles', 'libEGL.dylib', 'libGLES', 'libshiraz-path',
                      'libshiraz-image'):
             self.assertNotIn(name, message)
 
