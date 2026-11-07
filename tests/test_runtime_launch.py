@@ -76,7 +76,22 @@ class LaunchCommandTests(unittest.TestCase):
         for path in [*required, *extra]:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
+        if system == 'Darwin':
+            self.write_fonts_conf()
         return host
+
+    def write_fonts_conf(self, root=None, cache=None, extra=''):
+        """A fonts.conf shaped like the one scripts/bootstrap_darwin_graphics.py writes."""
+        root = root or self.root
+        cache = cache or root / '.local/var/cache/fontconfig'
+        (self.root / '.local/var/cache/fontconfig').mkdir(parents=True, exist_ok=True)
+        conf = self.root / '.local/etc/fonts/fonts.conf'
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        conf.write_text('<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n'
+                        f'<fontconfig>\n  <dir>{root}/.local/share/shiraz/fonts</dir>\n'
+                        '  <dir>/System/Library/Fonts</dir>\n  <dir>/Library/Fonts</dir>\n'
+                        f'  <cachedir>{cache}</cachedir>\n{extra}'
+                        f'  <include ignore_missing="yes">{root}/.local/etc/fonts/conf.d</include>\n</fontconfig>\n')
 
     def launch(self, system, host, environ, **kwargs):
         captured = {}
@@ -125,10 +140,16 @@ class LaunchCommandTests(unittest.TestCase):
         self.assertEqual(host, self.root / 'context/art_standalone/out/host/darwin-x86')
         inherited = {'LD_PRELOAD': '/x/pre.so', 'LD_LIBRARY_PATH': '/x', 'DYLD_INSERT_LIBRARIES': '/x/i.dylib',
                      'DYLD_LIBRARY_PATH': '/x', 'BIONIC_LD_LIBRARY_PATH': '/x', 'BERBERIS_GUEST_LD_LIBRARY_PATH': '/x',
-                     'SDL_VIDEODRIVER': 'dummy', 'SHIRAZ_DIGITALIS_LIBRARY': '/x/bridge.so'}
+                     'SDL_VIDEODRIVER': 'dummy', 'SHIRAZ_DIGITALIS_LIBRARY': '/x/bridge.so',
+                     'FONTCONFIG_FILE': '/x/fonts.conf', 'FONTCONFIG_PATH': '/x', 'FONTCONFIG_SYSROOT': '/x'}
         command, env, output = self.launch('Darwin', host, inherited, width=96, height=160, frames=30)
         self.assertEqual(command, [self.expand(item, host) for item in DARWIN_COMMAND])
         self.assertFalse([key for key in env if key.startswith(('LD_', 'DYLD_', 'BIONIC_', 'BERBERIS_'))])
+        # fontconfig reads only the in-tree configuration, never an inherited one.
+        self.assertEqual({key: value for key, value in env.items() if key.startswith('FONTCONFIG_')},
+                         {'FONTCONFIG_FILE': str(self.root / '.local/etc/fonts/fonts.conf'),
+                          'FONTCONFIG_PATH': str(self.root / '.local/etc/fonts')})
+        self.assertEqual(env['SHIRAZ_FONT_DIR'], str(self.root / '.local/share/shiraz/fonts'))
         self.assertEqual(env['BOOTCLASSPATH'], self.expand(DARWIN_BOOT, host))
         self.assertEqual(env['ANDROID_ROOT'], str(host))
         self.assertEqual(env['ANDROID_DATA'], str(self.root / RUN / 'android-data'))
@@ -140,8 +161,12 @@ class LaunchCommandTests(unittest.TestCase):
         # being able to set java.protocol.handler.pkgs themselves.
         self.assertFalse(any(item.startswith('-Djava.protocol.handler.pkgs') for item in command))
         self.assertIn('SHIRAZ_HOST_UNAVAILABLE tls http', output)
-        self.assertIn('libshiraz-sqlite.so', output)
-        self.assertIn('libshiraz-text.so', output)
+        line = next(item for item in output.splitlines() if item.startswith('SHIRAZ_HOST_UNAVAILABLE libraries='))
+        self.assertIn('libshiraz-sqlite.so', line)
+        self.assertIn('libshiraz-path.so', line)
+        self.assertIn('libshiraz-image.so', line)
+        # Frame-critical, so never reported as an unavailable optional library.
+        self.assertNotIn('libshiraz-text.so', line)
         self.assertTrue((self.root / RUN / 'android-data/dalvik-cache').is_dir())
 
     def test_darwin_reports_only_unbuilt_optional_libraries(self):
@@ -162,10 +187,42 @@ class LaunchCommandTests(unittest.TestCase):
         for name in ('bin/dalvikvm', 'core-oj-hostdex.jar', 'core-libart-hostdex.jar', 'build/shiraz-framework.jar',
                      'framework-res.apk', 'build/macos/libandroid.so', 'build/macos/libshiraz-jni.so',
                      'build/macos/libshiraz-gpu.so', 'build/macos/libshiraz-host.so', 'build/macos/libshiraz-bitmap.so',
-                     'build/macos/libshiraz-resources.so', 'lib64/libandroidfw.so'):
+                     'build/macos/libshiraz-resources.so', 'lib64/libandroidfw.so',
+                     'build/macos/libshiraz-text.so', '.local/share/shiraz/fonts/NotoSans-Regular.ttf',
+                     '.local/share/shiraz/fonts/NotoSansArabic-Regular.ttf',
+                     '.local/share/shiraz/fonts/NotoNaskhArabic-Regular.ttf', '.local/etc/fonts/fonts.conf'):
             self.assertIn(name, message)
-        for name in ('wolfssl', 'okhttp', 'sqlite', 'espeak', 'fonts', 'gles', 'libEGL'):
+        for name in ('wolfssl', 'okhttp', 'sqlite', 'espeak', 'gles', 'libEGL', 'libshiraz-path', 'libshiraz-image'):
             self.assertNotIn(name, message)
+
+    def test_darwin_rejects_unusable_fonts_conf_before_launch(self):
+        """fontconfig's silent fallback and a fonts.conf from another checkout never reach ART."""
+        host = self.tree('Darwin')
+        other = self.root.parent / 'moved-checkout'
+        cases = {
+            'malformed': lambda: (self.root / '.local/etc/fonts/fonts.conf').write_text('<fontconfig><dir>'),
+            'empty': lambda: (self.root / '.local/etc/fonts/fonts.conf').write_text(''),
+            'moved checkout': lambda: self.write_fonts_conf(root=other),
+            'cache outside checkout': lambda: self.write_fonts_conf(cache=other / 'cache'),
+            'second cachedir': lambda: self.write_fonts_conf(extra='  <cachedir prefix="xdg">fontconfig</cachedir>\n'),
+            'per-user dir': lambda: self.write_fonts_conf(extra='  <dir>~/.fonts</dir>\n'),
+            'host dir': lambda: self.write_fonts_conf(extra='  <dir>/opt/homebrew/share/fonts</dir>\n'),
+        }
+        for name, damage in cases.items():
+            with self.subTest(name):
+                self.write_fonts_conf()
+                damage()
+                with patch.object(runtime, 'ROOT', self.root), patch.object(runtime, 'HOST', host), \
+                        patch.object(runtime, 'host_system', return_value='Darwin'), \
+                        patch.object(runtime, 'run_with_live_logs', side_effect=AssertionError('must not launch')), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaisesRegex(FormatError, 'rerun make macos-graphics-deps'):
+                        runtime.run_activity(self.root / 'app.apk', self.report)
+        self.write_fonts_conf()
+        (self.root / '.local/var/cache/fontconfig').rmdir()
+        self.assertIn('not writable', runtime.darwin_fontconfig_failure(self.root))
+        self.write_fonts_conf()
+        self.assertIsNone(runtime.darwin_fontconfig_failure(self.root))
 
     def test_darwin_rejects_native_jni_libraries_before_launch(self):
         for abis in (['arm64-v8a'], ['x86_64'], ['arm64-v8a', 'armeabi-v7a']):

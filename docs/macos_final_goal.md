@@ -169,7 +169,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | [ ] | Notifications | `native/notifications.cpp` | `UNUserNotificationCenter` (bundle required); urgency → `interruptionLevel`; no timeout | M |
 | [ ] | Location | `LocationManager.java` | `CLLocationManager`; Info.plist `NSLocationUsageDescription`; Android fine/coarse → accuracy | M |
 | [x] | System fonts | `native/system_fonts.cpp` | CoreText enumeration (`CTFontManagerCopyAvailableFontURLs`, `.ttc` face index); bundled Android fonts first | M |
-| [ ] | Text shaping | `native/text.cpp` | In-tree FreeType, HarfBuzz and ICU (system ICU has no public headers) | M |
+| [x] | Text shaping | `native/text.cpp` | In-tree FreeType, HarfBuzz, fontconfig and ICU (system ICU has no public headers); in-tree `fonts.conf` prefers the bundled Noto fonts | M |
 | [ ] | Connectivity | `HostConnectivity.java` | `getifaddrs`, `NWPathMonitor`; no `/proc/net`, `/sys/class/net`, `/etc/resolv.conf` assumptions | L |
 | [ ] | Open URL / external apps | `ExternalLauncher.java` | `/usr/bin/open` or `NSWorkspace openURL:` | L |
 | [ ] | Document picker | `HostContentPicker.java` | `NSOpenPanel` / `NSSavePanel` | L |
@@ -385,9 +385,9 @@ What it needs and what it shows:
     Apps can still set `java.protocol.handler.pkgs`.
   - `SSLContext` has no provider.
   - `MemoryFile` throws `IOException`.
-- **Optional libraries not built yet:** libshiraz-text (FreeType/HarfBuzz),
-  -path (Cairo), -image, -audio and the others. They are reported at launch with
-  `SHIRAZ_HOST_UNAVAILABLE` and would fail on first use with
+- **Optional libraries not built yet:** -audio, -video, -gles1/-gles2 and the
+  others (text, path and image are built since the next section). They are
+  reported at launch with `SHIRAZ_HOST_UNAVAILABLE` and fail on first use with
   `UnsatisfiedLinkError`.
 - **Runs, on a warm page cache:**
   - 10 of 10 headless runs exit 0, median 0.33 s.
@@ -404,7 +404,8 @@ What it needs and what it shows:
   place.
 
 Not done yet:
-- Text, paths, images, audio and the rest of the optional libraries.
+- Audio and the rest of the optional libraries (text, paths and images are done;
+  see below).
 - TLS and HTTP.
 - An arm64 device profile: the shipped profile is the x86_64 emulator identity,
   so macOS rejects it.
@@ -422,6 +423,68 @@ Not done yet:
 
   Six concurrent dx runs on the same input produced identical output. The
   cause is unknown.
+
+### Text, paths and images
+
+`libshiraz-text`, `libshiraz-path` and `libshiraz-image` build on macOS from the
+unchanged `native/text.cpp`, `path.cpp`, `ripple.cpp` and `image.cpp`. An APK
+draws Latin, Persian and Hebrew text, vector paths and decoded PNG, JPEG and
+WebP images through the Activity/View path, headless and in a Metal window.
+
+Build order after the steps above (python3 3.12+ is required for the tarball
+filter):
+
+1. `make fonts macos-graphics-deps` builds pinned FreeType 2.14.3, HarfBuzz
+   15.1.0, fontconfig 2.18.3, pixman 0.46.4, cairo 1.18.6, libwebp 1.6.0 and
+   libjpeg-turbo 3.2.1 as static arm64 archives in `.local` (Meson and Ninja in an
+   in-tree venv). zlib and expat come from the SDK; libpng and ICU come from
+   `make macos-art-deps`. Pins and licenses are in
+   `LICENSES/MACOS-GRAPHICS-NOTICE.txt`.
+2. `make macos-graphics-deps-check` links and runs one small C test per library.
+3. `make macos-graphics-libs` (also a prerequisite of `macos-runtime-libs`) links
+   the three dylibs. Each exports only the `Java_*` symbols that the Java
+   classes declare (`native/darwin/{text,path,image}.exports`, checked by
+   `scripts/darwin_jni_exports.py` before and after linking).
+4. `make macos-apk-graphics-fixture`, then `make macos-runtime-graphics-smoke`
+   and `make macos-runtime-graphics-window-smoke`.
+
+fontconfig stays inside the checkout:
+- `scripts/bootstrap_darwin_graphics.py` writes `.local/etc/fonts/fonts.conf`.
+  It lists the bundled font directory and, as read-only fallback,
+  `/System/Library/Fonts` and `/Library/Fonts`. Its cache is
+  `.local/var/cache/fontconfig`.
+- Strong aliases make sans-serif prefer Noto Sans, Noto Naskh Arabic and Noto
+  Sans Hebrew (the bundled `android-fonts.xml` order). Without them the host's
+  Supplemental Arial won for Arabic and Hebrew.
+- The launcher strips inherited `FONTCONFIG_*`, sets `FONTCONFIG_FILE` and
+  `FONTCONFIG_PATH` to the in-tree config, and refuses to start if that config
+  is unreadable, lists per-user or relative paths, or points into another
+  checkout.
+- `~/.cache/fontconfig`, `~/.fontconfig`, `~/.config/fontconfig` and
+  `~/Library/Caches/fontconfig` stay absent after the runs.
+
+The graphics smoke (`tests/macos-apk-graphics/`) checks:
+- exact pixels for the background, circle, round-rect stroke, PNG and WebP
+  quadrants and the PNG/WebP round trips, and the JPEG within 8 per channel;
+- the measured widths of the three strings against the bundled-font values,
+  within 1.5 %;
+- per-region ink bounding boxes and column/row ink profiles, which reject
+  notdef boxes and reversed glyph order.
+
+The windowed smoke checks the CPU-composited snapshot and that `renderer=metal`
+was selected. It does not read back what Metal presented.
+
+Runs on a warm page cache: 10 of 10 headless runs exit 0 (median 0.37 s) and
+10 of 10 windowed Metal runs exit 0 (median 0.83 s).
+
+The Android API probe (`make api-probe-apk`), which crashed at
+`TextView.onMeasure` with `UnsatisfiedLinkError` for `libshiraz-text.so`,
+now draws its controller UI headless and in a Metal window.
+
+Not done yet:
+- Upstream test suites of the pinned libraries are not run.
+- The 720x1280 at density 320 case has not run on a real render.
+- Bidi and shaping are checked by ink profiles and by eye, not by glyph IDs.
 
 ## Acceptance on macOS
 

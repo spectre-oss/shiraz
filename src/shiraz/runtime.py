@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import tempfile
+import xml.etree.ElementTree as ElementTree
 import zipfile
 from .architecture import native_abi, supports_native_abis
 from .apk import FormatError, inspect_apk
@@ -91,16 +92,29 @@ DARWIN_JARS = JARS[:2]
 DARWIN_TLS_PROPERTY = '-Dshiraz.tls=unavailable'
 DARWIN_LIBRARIES = 'build/macos'
 # Without one of these the first frame cannot be produced.
+# libshiraz-text and the bundled fonts are required as on Linux: text.cpp adds
+# the font directory to fontconfig and fails without it.
 DARWIN_FRAME_CRITICAL = ('libandroid.so', 'libshiraz-jni.so', 'libshiraz-gpu.so', 'libshiraz-host.so',
-                         'libshiraz-bitmap.so', 'libshiraz-resources.so')
+                         'libshiraz-bitmap.so', 'libshiraz-resources.so', 'libshiraz-text.so')
+BUNDLED_FONTS = ('NotoSansArabic-Regular.ttf', 'NotoSansArabic-Bold.ttf', 'NotoSansHebrew-Regular.ttf',
+                 'NotoSansHebrew-Bold.ttf', 'NotoSans-Regular.ttf', 'NotoSans-Bold.ttf',
+                 'NotoColorEmoji.ttf', 'LICENSE', 'NotoEmoji-OFL.txt')
+# Written by scripts/bootstrap_darwin_graphics.py; libshiraz-text reads it.
+DARWIN_FONTCONFIG_FILE = '.local/etc/fonts/fonts.conf'
+# fonts.conf prefers Noto Naskh Arabic for Arabic script (the bundled
+# android-fonts.xml order), so on macOS it is frame-critical as well.
+DARWIN_PREFERRED_FONTS = ('NotoNaskhArabic-Regular.ttf', 'NotoNaskhArabic-Bold.ttf')
+# The only host font directories that fonts.conf may list (read-only).
+DARWIN_SYSTEM_FONT_DIRS = ('/System/Library/Fonts', '/Library/Fonts')
 # Loaded lazily by the framework: a missing one surfaces as UnsatisfiedLinkError
 # at first use. No empty-success stand-ins are built for them.
-DARWIN_OPTIONAL = ('libshiraz-sqlite.so', 'libshiraz-text.so', 'libshiraz-image.so', 'libshiraz-path.so',
+DARWIN_OPTIONAL = ('libshiraz-sqlite.so', 'libshiraz-image.so', 'libshiraz-path.so',
                    'libshiraz-audio.so', 'libshiraz-playback.so', 'libshiraz-capture.so', 'libshiraz-speech.so',
                    'libshiraz-notifications.so', 'libshiraz-video.so', 'libshiraz-gles1.so', 'libshiraz-gles2.so')
 # Linux dynamic-loader and Bionic/Berberis variables have no meaning under dyld,
 # and inherited DYLD_* (for example DYLD_INSERT_LIBRARIES) must not reach ART.
-DARWIN_STRIPPED_ENV = ('LD_', 'DYLD_', 'BIONIC_', 'BERBERIS_')
+# Inherited FONTCONFIG_* could point fontconfig at host configuration or caches.
+DARWIN_STRIPPED_ENV = ('LD_', 'DYLD_', 'BIONIC_', 'BERBERIS_', 'FONTCONFIG_')
 NAME = re.compile(r'[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\Z')
 PROFILE_KEYS = frozenset(('build.model', 'build.manufacturer', 'build.brand', 'build.device', 'build.product',
     'build.hardware', 'build.board', 'build.bootloader', 'build.serial', 'build.host', 'build.user', 'build.time',
@@ -465,7 +479,9 @@ def runtime_inputs(system, root, host, execution_mode):
     if system == 'Darwin':
         vm = host / 'bin/dalvikvm'
         required = [vm, *(host / 'framework' / jar for jar in DARWIN_JARS), framework, framework_resources,
-                    *(root / DARWIN_LIBRARIES / name for name in DARWIN_FRAME_CRITICAL), host / 'lib64/libandroidfw.so']
+                    *(root / DARWIN_LIBRARIES / name for name in DARWIN_FRAME_CRITICAL), host / 'lib64/libandroidfw.so',
+                    *(root / '.local/share/shiraz/fonts' / name for name in (*BUNDLED_FONTS, *DARWIN_PREFERRED_FONTS)),
+                    root / DARWIN_FONTCONFIG_FILE]
         optional = [root / DARWIN_LIBRARIES / name for name in DARWIN_OPTIONAL]
         return vm, framework, framework_resources, required, optional
     vm = host / 'bin/dalvikvm64'
@@ -475,13 +491,48 @@ def runtime_inputs(system, root, host, execution_mode):
                 *(host / 'framework' / jar for jar in JARS)]
     required.append(root / 'build/libshiraz-gles1.so')
     required.append(root / 'build/libshiraz-gles2.so')
-    required.extend(root / '.local/share/shiraz/fonts' / name for name in (
-        'NotoSansArabic-Regular.ttf', 'NotoSansArabic-Bold.ttf', 'NotoSansHebrew-Regular.ttf',
-        'NotoSansHebrew-Bold.ttf', 'NotoSans-Regular.ttf', 'NotoSans-Bold.ttf',
-        'NotoColorEmoji.ttf', 'LICENSE', 'NotoEmoji-OFL.txt'))
+    required.extend(root / '.local/share/shiraz/fonts' / name for name in BUNDLED_FONTS)
     if execution_mode == 'jit':
         required.append(host / 'lib64/libart-compiler.so')
     return vm, framework, framework_resources, required, []
+
+
+def darwin_fontconfig_failure(root):
+    """Why ROOT's in-tree fonts.conf is unusable, or None.
+
+    fontconfig falls back silently to its compiled-in configuration, which reads
+    per-user (xdg) and /usr/local font and cache directories, when the file
+    cannot be loaded; a fonts.conf from another checkout path points cache
+    writes and fonts at that tree. Both are rejected before launch.
+    """
+    path = root / DARWIN_FONTCONFIG_FILE
+    rerun = '; rerun make macos-graphics-deps'
+    try:
+        tree = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError) as error:
+        return f'{DARWIN_FONTCONFIG_FILE} cannot be read as fontconfig XML ({error}){rerun}'
+    if tree.tag != 'fontconfig':
+        return f'{DARWIN_FONTCONFIG_FILE} has root <{tree.tag}>, not <fontconfig>{rerun}'
+    for element in tree.iter():
+        if element.get('prefix') in ('xdg', 'cwd', 'default', 'relative') or (element.text or '').strip().startswith('~'):
+            return f'{DARWIN_FONTCONFIG_FILE} <{element.tag}> reads per-user or relative host state{rerun}'
+    caches = [(element.text or '').strip() for element in tree.findall('cachedir')]
+    cache = root / '.local/var/cache/fontconfig'
+    if caches != [str(cache)]:
+        return f'{DARWIN_FONTCONFIG_FILE} cache directories {caches} are not exactly {cache}{rerun}'
+    if not cache.is_dir() or not os.access(cache, os.W_OK | os.X_OK):
+        return f'fontconfig cache directory {cache} is missing or not writable{rerun}'
+    fonts = root / '.local/share/shiraz/fonts'
+    for element in tree.findall('dir') + tree.findall('include'):
+        value = Path((element.text or '').strip())
+        allowed = value.is_absolute() and (value.is_relative_to(root) or (
+            element.tag == 'dir' and str(value) in DARWIN_SYSTEM_FONT_DIRS))
+        if not allowed:
+            return (f'{DARWIN_FONTCONFIG_FILE} <{element.tag}> {value} is neither inside this checkout ({root}) '
+                    f'nor a read-only system font directory{rerun}')
+    if str(fonts) not in [(element.text or '').strip() for element in tree.findall('dir')]:
+        return f'{DARWIN_FONTCONFIG_FILE} does not list the bundled font directory {fonts}{rerun}'
+    return None
 
 
 def profile_environment(env, profile_values, version):
@@ -516,6 +567,10 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
         env.update({'ANDROID_ROOT': str(host), 'ANDROID_DATA': str(work / 'android-data'),
                     'XDG_CACHE_HOME': str(work / 'cache'), 'BOOTCLASSPATH': boot,
                     'SHIRAZ_FONT_DIR': str(root / '.local/share/shiraz/fonts'),
+                    # The in-tree fonts.conf (make macos-graphics-deps): bundled
+                    # fonts plus read-only system font directories, cache in .local.
+                    'FONTCONFIG_FILE': str(root / DARWIN_FONTCONFIG_FILE),
+                    'FONTCONFIG_PATH': str((root / DARWIN_FONTCONFIG_FILE).parent),
                     'XDG_DATA_DIRS': str(root / '.local/share') + ':/usr/share'})
     else:
         env = {**environ, 'ANDROID_ROOT': str(host), 'ANDROID_DATA': str(work / 'android-data'),
@@ -658,6 +713,8 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
             raise FormatError('Runtime is not built for macOS; frame-critical inputs missing: ' + ', '.join(missing))
         raise FormatError('Runtime is not built; run make runtime-art build framework. Missing: ' + ', '.join(missing))
     if darwin:
+        if failure := darwin_fontconfig_failure(ROOT):
+            raise FormatError('Runtime is not configured for macOS: ' + failure)
         unavailable = [path.name for path in optional if not path.is_file()]
         print('SHIRAZ_HOST_UNAVAILABLE tls http reason=okhttp,bouncycastle,wolfjsse-not-ported-to-macos', flush=True)
         if unavailable:

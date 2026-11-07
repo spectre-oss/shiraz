@@ -108,6 +108,11 @@ documented in [LICENSES](LICENSES):
 - [Skia](LICENSES/SKIA-NOTICE.txt) — BSD-3-Clause;
   [libsndfile](LICENSES/SNDFILE-NOTICE.txt) — LGPL-2.1-or-later.
 - [Noto fonts](LICENSES/NOTO-FONTS.txt) — SIL Open Font License 1.1.
+- [macOS text, path and image libraries](LICENSES/MACOS-GRAPHICS-NOTICE.txt):
+  FreeType (FreeType License), HarfBuzz, fontconfig and pixman (MIT-style),
+  cairo (LGPL-2.1), libwebp (BSD-3-Clause and patent grant) and libjpeg-turbo
+  (IJG, BSD-3-Clause, zlib). This software is based in part on the work of the
+  Independent JPEG Group.
 
 These are acknowledgments, not a complete license inventory for every build.
 Redistributed components must retain their applicable license texts and notices.

@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Build the minimal pure-Java macOS fixture APK with the host aapt2 and dx.
+"""Build the pure-Java macOS fixture APKs with the host aapt2 and dx.
 
-The APK holds one Activity whose content is a solid View. It has no resources
-beyond the manifest, no lib/ directory and an uncompressed, 4-byte aligned
-classes.dex. The result is checked with shiraz.apk.inspect_apk before it is
-moved into place, so a malformed or native-code APK is never published.
+--fixture minimal (default, tests/macos-apk -> build/macos-apk/minimal.apk):
+one Activity whose content is a solid View, no resources beyond the manifest.
+--fixture graphics (tests/macos-apk-graphics -> build/macos-apk/graphics.apk):
+text, paths and PNG/WebP/JPEG assets generated at build time by
+scripts/macos_graphics_images.py, so no image binary is kept in git.
+Both have no lib/ directory and an uncompressed, 4-byte aligned classes.dex.
+The result is checked with shiraz.apk.inspect_apk before it is moved into
+place, so a malformed or native-code APK is never published.
 """
 import argparse
 import hashlib
@@ -24,8 +28,21 @@ from build_apk_fixture import TOOLS, aapt2_jar, tools  # noqa: E402
 from shiraz.apk import inspect_apk  # noqa: E402
 from shiraz.host_layout import host_out_dir  # noqa: E402
 
-SOURCE = ROOT / 'tests/macos-apk'
 ART = ROOT / 'context/art_standalone'
+
+
+def graphics_assets(directory):
+    # Imported here so the minimal fixture build does not depend on it.
+    import macos_graphics_images
+    return macos_graphics_images.write(directory)
+
+
+# name: (source tree, default output, work directory, asset generator or None)
+FIXTURES = {
+    'minimal': (ROOT / 'tests/macos-apk', ROOT / 'build/macos-apk/minimal.apk', ROOT / 'build/macos-apk/work', None),
+    'graphics': (ROOT / 'tests/macos-apk-graphics', ROOT / 'build/macos-apk/graphics.apk',
+                 ROOT / 'build/macos-apk/graphics-work', graphics_assets),
+}
 
 
 def append_aligned_dex(apk, dex):
@@ -49,28 +66,34 @@ def append_aligned_dex(apk, dex):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'build/macos-apk/minimal.apk')
+    parser.add_argument('--fixture', choices=sorted(FIXTURES), default='minimal')
+    parser.add_argument('--output', type=Path, help='default: build/macos-apk/<fixture>.apk')
     args = parser.parse_args()
+    source, default_output, work, generate_assets = FIXTURES[args.fixture]
+    args.output = args.output or default_output
     tools()
     dx = host_out_dir(ART) / 'bin/dx'
     if not dx.is_file():
         raise SystemExit(f'missing host dx: {dx} (build ART first)')
-    work = ROOT / 'build/macos-apk/work'
     if work.exists():
         shutil.rmtree(work)
     classes = work / 'classes'
     classes.mkdir(parents=True)
     android_jar = TOOLS / 'android.jar'
     subprocess.run(['javac', '--release', '8', '-Xlint:-options', '-cp', str(android_jar), '-d', str(classes),
-                    *map(str, sorted(SOURCE.rglob('*.java')))], check=True, timeout=300)
+                    *map(str, sorted(source.rglob('*.java')))], check=True, timeout=300)
     dex = work / 'classes.dex'
     # dx is a JVM tool; keep its temporary files in the work tree.
     env = {**os.environ, 'TMPDIR': str(work)}
     subprocess.run([str(dx), '--dex', '--min-sdk-version=27', '--output=' + str(dex), str(classes)],
                    check=True, timeout=300, env=env)
-    pending = work / 'minimal.pending.apk'
-    subprocess.run([str(TOOLS / 'aapt2'), 'link', '-o', str(pending), '--manifest', str(SOURCE / 'AndroidManifest.xml'),
-                    '-I', str(android_jar)], check=True, timeout=120)
+    pending = work / (args.fixture + '.pending.apk')
+    assets = []
+    if generate_assets:
+        asset_dir = work / 'assets'
+        assets = [path.name for path in generate_assets(asset_dir)]
+    subprocess.run([str(TOOLS / 'aapt2'), 'link', '-o', str(pending), '--manifest', str(source / 'AndroidManifest.xml'),
+                    '-I', str(android_jar), *(['-A', str(asset_dir)] if assets else [])], check=True, timeout=120)
     dex_offset = append_aligned_dex(pending, dex)
     report = inspect_apk(pending)
     with zipfile.ZipFile(pending) as archive:
@@ -79,6 +102,9 @@ def main():
         raise SystemExit('macOS fixture must not contain lib/ native code')
     if [item['name'] for item in report['dex']] != ['classes.dex']:
         raise SystemExit('macOS fixture must contain exactly one classes.dex')
+    missing = [name for name in assets if 'assets/' + name not in names]
+    if missing:
+        raise SystemExit('macOS fixture is missing generated assets: ' + ', '.join(missing))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     pending.replace(args.output)
     data = args.output.read_bytes()

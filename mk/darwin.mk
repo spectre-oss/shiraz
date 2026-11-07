@@ -6,13 +6,22 @@
 # Outputs go to build/macos/. Shared libraries keep Android's .so names (Mach-O
 # inside) so APK-facing names stay stable; they are linked by explicit path.
 #
-# Cold order on a new Mac: make macos-deps (SDL2), make macos-build and
+# Cold order on a new Mac: make macos-deps (SDL2), make macos-graphics-deps
+# (text/path/image libraries; needs a python3 with tarfile extraction filters,
+# 3.12+, not the OS python3 3.9), make macos-build and
 # make macos-check (no ART needed), then make runtime-art (alias macos-art:
-# clones the pinned sources, applies the darwin patch chain and builds the
-# darwin-x86 ART host tree), then make macos-runtime-libs,
-# macos-framework-resources, macos-apk-fixture and macos-runtime-smoke.
+# builds the ICU/libpng deps stage, clones the pinned sources, applies the
+# darwin patch chain and builds the darwin-x86 ART host tree), then
+# make macos-runtime-libs (which also builds libshiraz-text/-path/-image, so it
+# needs make macos-graphics-deps, fonts and the ICU/libpng deps stage; make
+# macos-art-deps builds that stage alone), macos-framework-resources,
+# macos-apk-fixture and macos-runtime-smoke. make macos-graphics-deps-check
+# also needs fonts and that deps stage (its libpng test).
 
 MACOS_OUT := build/macos
+# Written by python3 scripts/bootstrap_darwin.py deps (make macos-art-deps,
+# also run by make runtime-art): ICU 78.3, lz4, liblzma and libpng16 in .local.
+MACOS_ART_DEPS_STAMP := $(MACOS_OUT)/deps/deps.stamp
 MACOS_JAVA_HOME := $(shell /usr/libexec/java_home 2>/dev/null)
 MACOS_JNI_CFLAGS := -I$(MACOS_JAVA_HOME)/include -I$(MACOS_JAVA_HOME)/include/darwin
 MACOS_SDL_CONFIG := .local/bin/sdl2-config
@@ -57,11 +66,23 @@ MACOS_PRESENTATION_HEADERS := include/shiraz/presentation.hpp include/shiraz/key
 MACOS_TESTS := test-compositor test-pointer test-keyboard test-archive-path test-native-window test-shared-frame test-choreographer test-sensors test-shared-memory test-image-reader test-hardware-buffer test-system-fonts test-media-crypto test-media-ndk test-ipc-channel test-sync-fence
 MACOS_SDL_TESTS := test-presentation test-live-input
 
-.PHONY: macos-deps macos-art macos-runtime-libs macos-framework-missing macos-build macos-test macos-check macos-preview macos-smoke macos-framework macos-runtime-jni-smoke macos-runtime-jni-window-smoke macos-androidfw-lib-dir-check macos-framework-resources macos-apk-fixture macos-runtime-smoke macos-runtime-window-smoke
+.PHONY: macos-deps macos-graphics-deps macos-graphics-deps-check macos-art macos-art-depsmacos-runtime-libs macos-framework-missing macos-build macos-test macos-check macos-preview macos-smoke macos-framework macos-runtime-jni-smoke macos-runtime-jni-window-smoke macos-androidfw-lib-dir-check macos-framework-resources macos-apk-fixture macos-runtime-smoke macos-runtime-window-smoke
 macos-deps:
 	python3 scripts/bootstrap_sdl.py
+# Static FreeType, HarfBuzz, fontconfig, pixman, cairo, libwebp and libjpeg-turbo
+# in .local for libshiraz-text/-path/-image (a stamp makes reruns no-ops). Its
+# own stage, so it never invalidates the ICU/ART dependency stamp.
+macos-graphics-deps:
+	python3 scripts/bootstrap_darwin_graphics.py
+# Links tests/darwin/graphics statically against .local and runs them.
+macos-graphics-deps-check: macos-graphics-deps fonts $(MACOS_ART_DEPS_STAMP)
+	python3 scripts/bootstrap_darwin_graphics.py check
 # Same stage as make runtime-art; named here so the macOS cold path is discoverable.
 macos-art: runtime-art
+# Only the ICU 78.3, lz4, liblzma and libpng16 stage of make runtime-art (its
+# stamp makes reruns no-ops); libshiraz-text and -image build against it.
+macos-art-deps:
+	python3 scripts/bootstrap_darwin.py deps
 
 $(MACOS_OUT)/.dir:
 	@mkdir -p $(MACOS_OUT)
@@ -97,6 +118,94 @@ $(MACOS_OUT)/androidfw-lib-dir.txt: macos-androidfw-lib-dir-check $(MACOS_OUT)/.
 macos-androidfw-lib-dir-check:
 $(MACOS_OUT)/libshiraz-resources.so: native/resources.cpp native/resource_colors.hpp include/shiraz/archive_path.hpp mk/darwin.mk $(MACOS_OUT)/androidfw-lib-dir.txt $(MACOS_ANDROIDFW_HEADER) $(MACOS_ANDROIDFW_LIB_DIR)/libandroidfw.so $(MACOS_OUT)/.dir
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -isystem $(MACOS_ANDROIDFW_INCLUDE) -fPIC $(MACOS_DYLIB) native/resources.cpp -o $@ -L$(MACOS_ANDROIDFW_LIB_DIR) -landroidfw -Wl,-rpath,$(MACOS_ANDROIDFW_LIB_DIR) $(MACOS_RPATH) -pthread
+
+# libshiraz-text (native/text.cpp), -path (native/path.cpp, native/ripple.cpp)
+# and -image (native/image.cpp), compiled from the Linux sources unchanged and
+# linked against the static FreeType, HarfBuzz, fontconfig, pixman, cairo,
+# libwebp, libjpeg-turbo and libpng archives in .local (make macos-graphics-deps)
+# plus the SDK's libz and libexpat. Flags come only from the in-tree .pc files:
+# PKG_CONFIG_LIBDIR replaces the default search path, so no Homebrew .pc file is
+# read (pkg-config itself, Homebrew pkgconf on this host, is only a build tool).
+# Each dylib exports exactly the JNI entry points its Java classes declare
+# (native/darwin/*.exports, generated by scripts/darwin_jni_exports.py), so its
+# private libpng/zlib/FreeType copies never interpose on libandroidfw's hidden
+# libpng or anything else in the process. The recipe checks the list against
+# the Java sources before linking and nm -gU against the list after linking,
+# and deletes the dylib on a mismatch.
+MACOS_GRAPHICS_STAMP := $(MACOS_OUT)/deps/graphics.stamp
+MACOS_PKG_CONFIG = env -u PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_LIBDIR=$(CURDIR)/.local/lib/pkgconfig PKG_CONFIG_PATH= pkg-config
+MACOS_TEXT_PACKAGES := freetype2 harfbuzz fontconfig
+MACOS_PATH_PACKAGES := cairo
+MACOS_IMAGE_PACKAGES := libpng zlib libwebp libjpeg
+# libpng16 comes from the bootstrap_darwin.py deps stage, everything else in
+# these lists from make macos-graphics-deps (zlib.pc describes the SDK libz).
+MACOS_PKG_STAGE = $(if $(filter libpng,$(1)),make macos-art-deps (libpng16) and make macos-graphics-deps,make macos-graphics-deps)
+MACOS_PKG_MISSING = command -v pkg-config >/dev/null || { echo 'pkg-config is required as a build tool and is not on PATH.'; exit 1; }; for package in $(1); do $(MACOS_PKG_CONFIG) --exists $$package || { echo "Missing in-tree $$package (.local/lib/pkgconfig). Run $(MACOS_PKG_STAGE)."; exit 1; }; done
+# ICU 78.3 from bootstrap_darwin.py has no .pc file; .local/include holds its
+# full (symbol-renamed) headers, ahead of the SDK's partial libicucore set.
+# make runtime-art stages byte-identical copies next to libjavacore in the ART
+# host lib64; the rpath names that directory first and .local/lib (the link
+# input) second, for use outside ART (ctypes, tests). dyld reuses an already
+# loaded image with the same install name for @rpath/libicuuc.78.dylib (checked
+# with ctypes on macOS 27.2), so an ART process keeps the one ICU that
+# libjavacore loaded. The @loader_path paths assume the dylib sits in build/macos.
+MACOS_ICU_CFLAGS := -I$(CURDIR)/.local/include
+MACOS_ICU_LIBS := -L$(CURDIR)/.local/lib -licuuc
+ifeq ($(MACOS_ANDROIDFW_TREE),$(CURDIR)/context/art_standalone)
+MACOS_ICU_RPATH := -Wl,-rpath,@loader_path/../../context/art_standalone/out/host/darwin-x86/lib64
+else
+MACOS_ICU_RPATH := -Wl,-rpath,$(MACOS_ANDROIDFW_LIB_DIR)
+endif
+MACOS_ICU_RPATH += -Wl,-rpath,@loader_path/../../.local/lib
+MACOS_TEXT_CFLAGS = $(shell $(MACOS_PKG_CONFIG) --static --cflags $(MACOS_TEXT_PACKAGES) 2>/dev/null) $(MACOS_ICU_CFLAGS)
+MACOS_TEXT_LIBS = $(shell $(MACOS_PKG_CONFIG) --static --libs $(MACOS_TEXT_PACKAGES) 2>/dev/null) $(MACOS_ICU_LIBS)
+MACOS_PATH_CFLAGS = $(shell $(MACOS_PKG_CONFIG) --static --cflags $(MACOS_PATH_PACKAGES) 2>/dev/null)
+MACOS_PATH_LIBS = $(shell $(MACOS_PKG_CONFIG) --static --libs $(MACOS_PATH_PACKAGES) 2>/dev/null)
+MACOS_IMAGE_CFLAGS = $(shell $(MACOS_PKG_CONFIG) --static --cflags $(MACOS_IMAGE_PACKAGES) 2>/dev/null)
+MACOS_IMAGE_LIBS = $(shell $(MACOS_PKG_CONFIG) --static --libs $(MACOS_IMAGE_PACKAGES) 2>/dev/null)
+MACOS_TEXT_JAVA := java/shiraz/runtime/NativeText.java java/android/graphics/FontFamily.java
+MACOS_PATH_JAVA := java/shiraz/runtime/NativePath.java
+MACOS_IMAGE_JAVA := java/shiraz/runtime/NativeImage.java
+MACOS_GRAPHICS_LIB_DEPS := scripts/darwin_jni_exports.py mk/darwin.mk $(MACOS_GRAPHICS_STAMP) $(MACOS_OUT)/.dir
+# libshiraz-image embeds libpng16.a and libshiraz-text compiles against the ICU
+# headers, both from the bootstrap_darwin.py deps stage: relink when it reruns.
+MACOS_TEXT_ART_DEPS := $(MACOS_ART_DEPS_STAMP) .local/include/unicode/ubidi.h
+MACOS_IMAGE_ART_DEPS := $(MACOS_ART_DEPS_STAMP) .local/lib/libpng16.a
+# The checkout path is baked into libshiraz-text (-DSHIRAZ_FONT_DIR) and into
+# .local/etc/fonts/fonts.conf. The file changes only when the checkout moves,
+# which relinks; the recipe then rejects a fonts.conf from another checkout.
+MACOS_GRAPHICS_ROOT := $(MACOS_OUT)/graphics-root.txt
+MACOS_FONTS_CONF_ROOT_CHECK = grep -Fq '<cachedir>$(CURDIR)/.local/var/cache/fontconfig</cachedir>' .local/etc/fonts/fonts.conf || { echo '.local/etc/fonts/fonts.conf is missing or belongs to another checkout path. Run make macos-graphics-deps.'; exit 1; }
+# $(1) exports list, $(2) Java sources. -dead_strip drops the archive code no
+# exported entry point reaches.
+MACOS_EXPORTS_FLAGS = -Wl,-exported_symbols_list,$(1) -Wl,-dead_strip
+MACOS_EXPORTS_PRECHECK = python3 scripts/darwin_jni_exports.py --check $(1) $(2)
+MACOS_EXPORTS_CHECK = nm -gU $@ > $@.nm && python3 scripts/darwin_jni_exports.py --check $(1) --symbols $@.nm $(2) || { rm -f $@ $@.nm; exit 1; }; rm -f $@.nm
+$(MACOS_GRAPHICS_STAMP):
+	@echo 'Graphics dependencies missing ($@). Run make macos-graphics-deps (pinned in-tree FreeType, HarfBuzz, fontconfig, pixman, cairo, libwebp, libjpeg-turbo).'; exit 1
+$(MACOS_ART_DEPS_STAMP) .local/lib/libpng16.a .local/include/unicode/ubidi.h:
+	@echo 'ICU/libpng dependencies missing ($@). Run make macos-art-deps (python3 scripts/bootstrap_darwin.py deps; make runtime-art also runs it).'; exit 1
+$(MACOS_GRAPHICS_ROOT): macos-androidfw-lib-dir-check $(MACOS_OUT)/.dir
+	@echo '$(CURDIR)' | cmp -s - $@ || echo '$(CURDIR)' > $@
+
+$(MACOS_OUT)/libshiraz-text.so: native/text.cpp include/shiraz/compositor.hpp native/darwin/text.exports $(MACOS_TEXT_JAVA) $(MACOS_GRAPHICS_LIB_DEPS) $(MACOS_TEXT_ART_DEPS) $(MACOS_GRAPHICS_ROOT) | fonts
+	@$(call MACOS_PKG_MISSING,$(MACOS_TEXT_PACKAGES))
+	@$(MACOS_FONTS_CONF_ROOT_CHECK)
+	@$(call MACOS_EXPORTS_PRECHECK,native/darwin/text.exports,$(MACOS_TEXT_JAVA))
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) $(MACOS_TEXT_CFLAGS) -DSHIRAZ_FONT_DIR='"$(CURDIR)/.local/share/shiraz/fonts"' -fPIC $(MACOS_DYLIB) $(call MACOS_EXPORTS_FLAGS,native/darwin/text.exports) native/text.cpp -o $@ $(MACOS_TEXT_LIBS) $(MACOS_ICU_RPATH) -pthread
+	@$(call MACOS_EXPORTS_CHECK,native/darwin/text.exports,$(MACOS_TEXT_JAVA))
+
+$(MACOS_OUT)/libshiraz-path.so: native/path.cpp native/ripple.cpp include/shiraz/compositor.hpp include/shiraz/color_filter.hpp native/darwin/path.exports $(MACOS_PATH_JAVA) $(MACOS_GRAPHICS_LIB_DEPS)
+	@$(call MACOS_PKG_MISSING,$(MACOS_PATH_PACKAGES))
+	@$(call MACOS_EXPORTS_PRECHECK,native/darwin/path.exports,$(MACOS_PATH_JAVA))
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) $(MACOS_PATH_CFLAGS) -fPIC $(MACOS_DYLIB) $(call MACOS_EXPORTS_FLAGS,native/darwin/path.exports) native/path.cpp native/ripple.cpp -o $@ $(MACOS_PATH_LIBS)
+	@$(call MACOS_EXPORTS_CHECK,native/darwin/path.exports,$(MACOS_PATH_JAVA))
+
+$(MACOS_OUT)/libshiraz-image.so: native/image.cpp native/darwin/image.exports $(MACOS_IMAGE_JAVA) $(MACOS_GRAPHICS_LIB_DEPS) $(MACOS_IMAGE_ART_DEPS)
+	@$(call MACOS_PKG_MISSING,$(MACOS_IMAGE_PACKAGES))
+	@$(call MACOS_EXPORTS_PRECHECK,native/darwin/image.exports,$(MACOS_IMAGE_JAVA))
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) $(MACOS_IMAGE_CFLAGS) -fPIC $(MACOS_DYLIB) $(call MACOS_EXPORTS_FLAGS,native/darwin/image.exports) native/image.cpp -o $@ $(MACOS_IMAGE_LIBS)
+	@$(call MACOS_EXPORTS_CHECK,native/darwin/image.exports,$(MACOS_IMAGE_JAVA))
 
 $(MACOS_OUT)/shiraz-preview: native/main.cpp native/presentation.cpp native/darwin/gpu_unavailable.cpp $(MACOS_PRESENTATION_HEADERS) build/version.hpp $(MACOS_OUT)/libandroid.so $(MACOS_SDL_CONFIG)
 	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) native/main.cpp native/presentation.cpp native/darwin/gpu_unavailable.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) $(MACOS_SDL_LIBS)
@@ -163,6 +272,10 @@ MACOS_RUNTIME_SMOKE_DEPS := macos-runtime-libs macos-framework macos-framework-r
 macos-runtime-smoke: $(MACOS_RUNTIME_SMOKE_DEPS)
 	python3 scripts/macos_runtime_smoke.py
 # Same on the Cocoa driver; requires the Metal renderer and opens a window briefly.
+# The frame checks of both window smokes read ActivityRunner's snapshot, the
+# framework's CPU-composited frame: they prove what Shiraz drew, while Metal is
+# asserted only through SHIRAZ_PRESENTATION renderer=metal. What Metal put on
+# screen (texture upload, channel order, stride) is not read back here.
 macos-runtime-window-smoke: $(MACOS_RUNTIME_SMOKE_DEPS)
 	python3 scripts/macos_runtime_smoke.py --windowed --snapshot $(MACOS_OUT)/runtime-window-smoke/frame.ppm
 
@@ -205,10 +318,15 @@ $(MACOS_OUT)/test-live-input: tests/live_input.cpp native/presentation.cpp nativ
 
 # macos-build (and so macos-check) needs SDL only. libshiraz-resources links
 # libandroidfw from the ART host tree, so it is built by macos-runtime-libs.
+# The text/path/image libraries need make macos-graphics-deps; they are part of
+# macos-runtime-libs because libshiraz-text is frame-critical (as on Linux,
+# where build/libshiraz-text.so and the bundled fonts are required inputs).
 MACOS_LIBRARIES := libandroid.so libshiraz-host.so libshiraz-bitmap.so libshiraz-sqlite.so libshiraz-gpu.so libshiraz-jni.so libshiraz-test-input.so
+MACOS_GRAPHICS_LIBRARIES := libshiraz-text.so libshiraz-path.so libshiraz-image.so
 MACOS_RUNTIME_LIBRARIES := libshiraz-resources.so
 macos-build: $(MACOS_OUT)/shiraz-preview $(addprefix $(MACOS_OUT)/,$(MACOS_LIBRARIES))
-macos-runtime-libs: macos-build $(addprefix $(MACOS_OUT)/,$(MACOS_RUNTIME_LIBRARIES))
+macos-graphics-libs: $(addprefix $(MACOS_OUT)/,$(MACOS_GRAPHICS_LIBRARIES))
+macos-runtime-libs: macos-build macos-graphics-libs $(addprefix $(MACOS_OUT)/,$(MACOS_RUNTIME_LIBRARIES))
 
 # SDL tests run headless like their Linux smokes (dummy video, software renderer).
 macos-test: $(addprefix $(MACOS_OUT)/,$(MACOS_TESTS) $(MACOS_SDL_TESTS)) $(MACOS_OUT)/libshiraz-host.so
@@ -230,3 +348,20 @@ macos-check: macos-test macos-smoke
 	python3 scripts/darwin_linux_guard.py
 	python3 scripts/version.py --check
 	python3 scripts/commit_guard.py
+
+# Graphics fixture APK (tests/macos-apk-graphics): text, vector paths and
+# PNG/WebP/JPEG assets that scripts/macos_graphics_images.py generates at build
+# time, plus Bitmap.compress round trips. The graphics smokes need
+# libshiraz-text, -path and -image (macos-graphics-libs); a missing one fails
+# the run with UnsatisfiedLinkError, which the smoke reports.
+.PHONY: macos-apk-graphics-fixture macos-graphics-libs macos-runtime-graphics-smoke macos-runtime-graphics-window-smoke
+MACOS_APK_GRAPHICS_SOURCES := tests/macos-apk-graphics/AndroidManifest.xml $(shell find tests/macos-apk-graphics -name '*.java')
+build/macos-apk/graphics.apk: $(MACOS_APK_GRAPHICS_SOURCES) scripts/build_macos_fixture.py scripts/macos_graphics_images.py scripts/build_apk_fixture.py scripts/fixture_images.py src/shiraz/apk.py src/shiraz/host_layout.py $(MACOS_ART_HOST)/bin/dx
+	python3 scripts/build_macos_fixture.py --fixture graphics
+macos-apk-graphics-fixture: build/macos-apk/graphics.apk
+MACOS_RUNTIME_GRAPHICS_SMOKE_DEPS := macos-runtime-libs macos-graphics-libs macos-framework macos-framework-resources macos-apk-graphics-fixture
+macos-runtime-graphics-smoke: $(MACOS_RUNTIME_GRAPHICS_SMOKE_DEPS)
+	python3 scripts/macos_runtime_smoke.py --profile graphics
+# Windowed: frame checks on the framework snapshot, as for macos-runtime-window-smoke.
+macos-runtime-graphics-window-smoke: $(MACOS_RUNTIME_GRAPHICS_SMOKE_DEPS)
+	python3 scripts/macos_runtime_smoke.py --profile graphics --windowed --snapshot $(MACOS_OUT)/runtime-graphics-window-smoke/frame.ppm
