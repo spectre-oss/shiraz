@@ -212,6 +212,19 @@ jobs:
         with:
           pattern: shiraz-browser-kit-${{ needs.version.outputs.version }}-*
           merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
+      - name: Build SvelteKit landing and integrated builder
+        env:
+          BASE_PATH: /shiraz
+          SHIRAZ_PREBUILT_WASM: '1'
+        run: |
+          npm ci --prefix landing
+          npm --prefix landing run check
+          npm --prefix landing run build
       - name: Package both architectures for Pages and releases
         run: python3 scripts/package_browser_site.py
       - name: Publish prerelease

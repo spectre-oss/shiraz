@@ -25,6 +25,26 @@ the current Shiraz runtime supports.
 
 ## Build an AppImage in the browser
 
+The [Shiraz site](https://spectre-oss.github.io/shiraz/#builder) includes the
+SvelteKit builder directly on the page. Select the Linux architecture and an APK,
+then choose **Build AppImage**. The published runtime is checked against its size
+and SHA-256 before assembly. APK data stays in the browser.
+
+For the complete site locally, install Node 24+, npm and Go, then run from the
+repository root:
+
+```sh
+npm ci --prefix landing
+make landing-dev
+```
+
+`make landing-check` checks the Svelte components; `make landing-build` generates
+the static site. See [frontend development](../landing/README.md) for browser tests
+and GitHub Pages base-path configuration.
+
+The standalone offline builder remains available in the release ZIP. To run its
+original Go demo directly:
+
 ```sh
 cd go-wasm
 python3 bootstrap_font.py
@@ -36,8 +56,8 @@ python3 -m http.server 8000
 Open `http://localhost:8000/demo.html`, select the versioned base AppImage under
 "Use a local base AppImage", choose the matching Linux device architecture, and select an APK, then download the result. On the deployed
 GitHub Pages site, the matching base loads automatically from the site when you
-build. The browser checks the latest prerelease version through the GitHub
-Releases API. Your APK is never uploaded. On Linux:
+build. The integrated site uses its published release manifest; the standalone demo also
+checks the latest prerelease through the GitHub Releases API. Your APK is never uploaded. On Linux:
 
 ```sh
 chmod +x APK-Shiraz-VERSION-x86_64.AppImage

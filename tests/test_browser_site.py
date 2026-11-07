@@ -24,6 +24,8 @@ class BrowserSiteTests(unittest.TestCase):
             file = root/'go-wasm'/name
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(b'fixture')
+        (root/'landing/build').mkdir(parents=True)
+        (root/'landing/build/index.html').write_text('SvelteKit fixture')
         (root/'dist').mkdir()
         for arch, machine in (('x86_64', 62), ('aarch64', 183)):
             self.base(root, arch, machine)
@@ -43,6 +45,7 @@ class BrowserSiteTests(unittest.TestCase):
             self.prepare(root)
             with patch.object(site, 'ROOT', root):
                 site.main()
+            self.assertEqual((root/'build/pages-site/index.html').read_text(), 'SvelteKit fixture')
             manifest = json.loads((root/'build/pages-site/release.json').read_text())
             self.assertEqual(set(manifest['architectures']), {'x86_64', 'aarch64'})
             for arch, entry in manifest['architectures'].items():

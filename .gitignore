@@ -75,3 +75,10 @@ __pycache__/
 
 !/docs/experiments/arc/README.md
 !/docs/experiments/arc/MINDUSTRY.md
+/landing/node_modules/
+/landing/.svelte-kit/
+/landing/build/
+/landing/static/shiraz-assemble.wasm
+/landing/static/wasm_exec.js
+/landing/test-results/
+/landing/playwright-report/

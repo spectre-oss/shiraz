@@ -11,14 +11,14 @@
 [Shiraz](https://www.openstreetmap.org/node/26082452) is an experimental compatibility layer that brings Android apps to the
 Linux desktop. The long-term goal is to bring the same experience to Linux phones.
 
-[Try Builder](https://spectre-oss.github.io/shiraz/) · [Set up Web](docs/WEB.md) · [License](LICENSE)
+[Try Builder](https://spectre-oss.github.io/shiraz/#builder) · [Set up Web](docs/WEB.md) · [License](LICENSE)
 
 ## One runtime, three ways to use it
 
 | Part | What it does | Use it to… |
 | --- | --- | --- |
 | **Shiraz** | The core runtime that runs supported Android apps on Linux. | Run apps on your desktop and develop Android compatibility. |
-| **[Shiraz Builder](https://spectre-oss.github.io/shiraz/)** | Packages an APK with the runtime into a Linux AppImage, locally in your browser. Your APK is not uploaded. | Turn a supported APK into a standalone Linux application. |
+| **[Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder)** | Packages an APK with the runtime into a Linux AppImage, locally in your browser. Your APK is not uploaded. | Turn a supported APK into a standalone Linux application. |
 | **[Shiraz Web](docs/WEB.md)** | Runs an APK on a Linux host and streams its screen and controls to your browser over WebRTC. | Try and interact with apps through a browser, locally or on a configured remote host. |
 
 Builder creates an application you run on Linux. Web runs the application on
@@ -42,7 +42,7 @@ Linux phone support is a future goal.
 
 ## Get started
 
-Use the [APK builder](https://spectre-oss.github.io/shiraz/) to package an APK
+Use the [APK builder](https://spectre-oss.github.io/shiraz/#builder) to package an APK
 as an AppImage, or follow the [Web setup guide](docs/WEB.md) to run apps
 through your browser.
 

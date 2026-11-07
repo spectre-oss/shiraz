@@ -1,0 +1,10 @@
+Heroicons Animated
+https://www.heroicons-animated.com/
+https://github.com/Aniket-508/heroicons-animated
+Revision: ba066ec2c2838e2e5af924db874a136715c57d3d
+
+Selected SVG paths from packages/react/src/icons/ and animation variants adapted
+to the Web Animations API for the SvelteKit frontend. React/Motion wrappers are not
+vendored. Original licenses retained alongside this file.
+
+Selected icons: arrow-right, arrow-up-right, clipboard-document, check, pause, play, plus, arrow-down, arrow-turn-down-right.

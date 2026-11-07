@@ -1575,3 +1575,12 @@ bionic-elf-exports-smoke:
 	@mkdir -p build
 	$(CC) -Wall -Wextra -Werror tests/bionic_elf_exports.c -o build/test-bionic-elf-exports -ldl
 	LD_LIBRARY_PATH="$(CURDIR)/.local/lib" build/test-bionic-elf-exports "$(CURDIR)/.local/lib/libc_bio.so.0"
+
+# Static SvelteKit site and integrated browser builder; Go/WASM output stays local.
+.PHONY: landing-dev landing-build landing-check
+landing-dev:
+	npm --prefix landing run dev
+landing-build:
+	npm --prefix landing run build
+landing-check:
+	npm --prefix landing run check

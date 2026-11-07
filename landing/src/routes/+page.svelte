@@ -1,0 +1,103 @@
+<script>
+  import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
+  const base = resolve('/').replace(/\/$/, '');
+  import Builder from '#lib/Builder.svelte';
+  import { initIcons } from '#lib/icons.js';
+  import { initInteractions } from '#lib/interactions.js';
+  import '../styles.css';
+  const version = __SHIRAZ_VERSION__;
+  onMount(() => {
+    const stopIcons = initIcons();
+    const stopInteractions = initInteractions();
+    return () => { stopInteractions(); stopIcons(); };
+  });
+</script>
+<svelte:head>
+  <title>Shiraz — Android apps on Linux.</title>
+  <meta name="description" content="Supported Android apps on Linux. Build an AppImage locally in your browser with Shiraz." />
+</svelte:head>
+
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header id="top" class="site-header wrap">
+    <a class="brand" href="#top" aria-label="Shiraz home"><img src="{base}/spectre.svg" width="42" height="42" alt="Spectre"><span>shiraz</span></a>
+    <nav aria-label="Main navigation"><a href="#approach">How it works</a><a href="https://github.com/spectre-oss/shiraz">GitHub <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></nav>
+  </header>
+  <main id="main">
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-atmosphere" aria-hidden="true"><span class="tonal-shape shape-orbit"></span><span class="tonal-shape shape-petal"></span><span class="tonal-shape shape-disc"></span></div>
+      <div class="hero-content">
+      <h1 id="title">Your apps.<br><span>A little more at home.</span></h1>
+      <p class="intro">Bring supported Android apps to your Linux desktop.<br class="desktop-break"> No virtual machine. No full Android system.</p>
+      <div class="actions"><a class="button primary" href="#builder">Open the builder <svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a><a class="button secondary" href="https://github.com/spectre-oss/shiraz">Explore the source <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></div>
+      <a class="hero-release" href={`https://github.com/spectre-oss/shiraz/releases/tag/v${version}`}><span class="release-dot" aria-hidden="true"></span>Latest release <strong>v{version}</strong><span class="release-status">Preview</span><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a>
+      <p class="local-note">Package your APK locally. Your files stay with you.</p>
+      </div>
+    </section>
+    <section class="experimental-notice" aria-labelledby="experimental-title">
+      <div class="experimental-inner"><h2 id="experimental-title">Still experimental.</h2><p>Shiraz is an experimental project. App compatibility is growing, and some features may be incomplete or unsupported.</p><p class="experimental-security">Run only APKs you trust. Apps run with your user’s permissions, without an Android-style sandbox.</p></div>
+    </section>
+    <Builder />
+    <section class="shiraz-web" id="web" aria-labelledby="web-title">
+      <div class="web-heading"><p class="eyebrow">Shiraz Web</p><h2 id="web-title">Built for<br><span>Linux mobile.</span></h2></div>
+      <div class="web-description"><p>Your Android apps, a browser away. Shiraz Web runs supported APKs on a Linux host and streams the app to your browser over WebRTC.</p><p>Designed with Linux phones in mind, with touch and keyboard controls. The app runs on the host; your browser is the window.</p><a class="button secondary web-link" href="https://github.com/spectre-oss/shiraz/blob/main/docs/WEB.md">Set up Shiraz Web <svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a><small>Experimental · App compatibility is still growing.</small></div>
+    </section>
+    <section class="architecture" id="approach" aria-labelledby="architecture-title">
+      <header class="architecture-heading"><p class="eyebrow">Under the surface</p><h2 id="architecture-title">Android on the inside.<br><span>Linux underneath.</span></h2><p>Keep the app. Translate what it needs.<br>Scroll through the pieces that make it possible.</p></header>
+      <div class="stack-story">
+        <figure class="stack-figure" aria-labelledby="stack-caption">
+          <figcaption id="stack-caption">The Shiraz stack <span aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></figcaption>
+          <ol class="stack-diagram">
+            <li data-layer="0"><span class="layer-number">01</span><span>Your APK<small>App code · resources · native libraries</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
+            <li data-layer="1"><span class="layer-number">02</span><span>ART<small>Android Runtime</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
+            <li data-layer="2"><span class="layer-number">03</span><span>Android API layer<small>Framework · resources · services</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
+            <li data-layer="3"><span class="layer-number">04</span><span>Native bridges<small>JNI · Bionic compatibility · SDL · EGL/GLES</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
+            <li data-layer="4"><span class="layer-number">05</span><span>Your Linux desktop<small>Windows · graphics · input · files</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="turn" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m16.49 12 3.75 3.75m0 0-3.75 3.75m3.75-3.75H3.74V4.499"/></svg></span></li>
+          </ol>
+          <p class="stack-footnote">A simplified view of responsibilities,<br>not a separate Android system.</p>
+        </figure>
+        <div class="stack-explanations">
+          <article class="stack-step" data-step="0"><span class="step-index">01 / The app</span><h3>Start with an APK.</h3><p>An Android package carries the app’s code, assets, and sometimes native libraries. Shiraz starts with that original package.</p><a href="https://github.com/spectre-oss/shiraz/tree/main/src/shiraz">Package handling <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></article>
+          <article class="stack-step" data-step="1"><span class="step-index">02 / Execution</span><h3>ART runs the code.</h3><p>ART is Android’s runtime. Its standalone Linux build executes the app’s DEX bytecode, with ahead-of-time compilation where supported.</p><a href="https://github.com/spectre-oss/shiraz/blob/main/scripts/bootstrap_runtime.py">Runtime setup <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></article>
+          <article class="stack-step" data-step="2"><span class="step-index">03 / Compatibility</span><h3>Speak the app’s language.</h3><p>Apps expect Android APIs for views, resources, and services. Shiraz implements a growing subset of those APIs, so supported app code can keep making familiar calls.</p><a href="https://github.com/spectre-oss/shiraz/tree/main/java/android">Java framework code <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></article>
+          <article class="stack-step" data-step="3"><span class="step-index">04 / Translation</span><h3>Connect it to Linux.</h3><p>JNI connects Java code to native C/C++ bridges. Bionic compatibility helps Android native libraries run; SDL and EGL/GLES provide window, input, and graphics paths.</p><a href="https://github.com/spectre-oss/shiraz/tree/main/native">Native bridge code <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></article>
+          <article class="stack-step" data-step="4"><span class="step-index">05 / At home</span><h3>A window on your desktop.</h3><p>Linux supplies the host environment. The app gets a desktop window and host input, without booting an Android image or running a virtual machine.</p><a href="https://github.com/spectre-oss/shiraz/blob/main/native/presentation.cpp">Window presentation <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></article>
+        </div>
+      </div>
+      <div class="packaging-path"><span>For distribution</span><p>APK <span aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span> Shiraz runtime <span aria-hidden="true"><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></span> Linux AppImage</p><small>The builder bundles the pieces. Compatibility still depends on the app.</small></div>
+    </section>
+    <section class="comparison" id="compare" aria-labelledby="comparison-title">
+      <header class="comparison-heading"><p class="eyebrow">Different paths to Android apps</p><h2 id="comparison-title">Choose the approach<br><span>that fits your Linux.</span></h2><p>A translation layer, a container, or a virtual device.<br>Each makes a different tradeoff.</p></header>
+      <p class="table-hint" id="comparison-hint">Swipe or scroll sideways to see the full comparison.</p>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to horizontally scrollable table) -->
+      <div class="comparison-scroll" role="region" aria-labelledby="comparison-title" aria-describedby="comparison-hint" tabindex="0">
+        <table class="comparison-table"><caption class="visually-hidden">Android app execution approaches compared</caption><thead><tr><th scope="col">Project</th><th scope="col">Approach</th><th scope="col">Android environment</th><th scope="col">What to keep in mind</th></tr></thead><tbody>
+          <tr class="shiraz-row"><th scope="row"><a href="https://github.com/spectre-oss/shiraz">Shiraz</a><small>This project</small></th><td>API translation<small>ART + native Linux bridges</small></td><td>No full Android image<small>SDL / EGL / GLES</small></td><td>AppImage packaging and browser access. Experimental API coverage; no Android-style app sandbox.</td></tr>
+          <tr><th scope="row"><a href="https://docs.waydro.id/">Waydroid <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></th><td>Container<small>Shares the Linux kernel</small></td><td>Full Android system<small>LineageOS-based image</small></td><td>A full Android environment integrated with Linux. Requires container setup and suitable host support.</td></tr>
+          <tr><th scope="row"><a href="https://gitlab.com/android_translation_layer/android_translation_layer">ATL <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a><small>Android Translation Layer</small></th><td>API translation<small>Shiraz’s architectural starting point</small></td><td>Android APIs on Linux<small>App-focused compatibility</small></td><td>A related translation approach. Check its project documentation for supported apps and build requirements.</td></tr>
+          <tr><th scope="row"><a href="https://developer.android.com/studio/run/emulator">Android Emulator <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></th><td>Virtual device<small>Simulated Android hardware</small></td><td>Android system image<small>Configured through an AVD</small></td><td>Designed for development and testing across device profiles, Android versions, and simulated sensors.</td></tr>
+          <tr><th scope="row"><a href="https://github.com/anbox/anbox">Anbox <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a><small>Archived project</small></th><td>Container<small>Shares the Linux kernel</small></td><td>Full Android system</td><td>A historical container approach. The original repository is archived; distinct from Anbox Cloud.</td></tr>
+        </tbody></table>
+      </div>
+      <p class="comparison-note">Architecture comparison, not a performance ranking. Compatibility depends on the app, device, and configuration. Project names link to their own documentation.</p>
+    </section>
+    <section class="project-info" aria-label="About Shiraz">
+      <div class="principles"><span>Linux native</span><span>GTK-free</span><span>Open source · GPLv3</span></div>
+      <details class="source-build"><summary>Build from source<span class="disclosure-icon" aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span></summary><div class="build-content"><p>With the runtime dependencies prepared:</p><div class="code-area"><pre id="build-command"><code>make build
+make appimage APK=/path/to/app.apk</code></pre><button class="copy-button" type="button" aria-label="Copy build commands"><svg class="icon" data-icon="copy" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.25 7.5V6.10822C8.25 4.97324 9.09499 4.01015 10.2261 3.91627C10.5994 3.88529 10.9739 3.85858 11.3495 3.83619M15.75 18H18C19.2426 18 20.25 16.9926 20.25 15.75V6.10822C20.25 4.97324 19.405 4.01015 18.2739 3.91627C17.9006 3.88529 17.5261 3.85858 17.1505 3.83619M17.1505 3.83619C16.8672 2.91757 16.0116 2.25 15 2.25H13.5C12.4884 2.25 11.6328 2.91757 11.3495 3.83619M17.1505 3.83619C17.2152 4.04602 17.25 4.26894 17.25 4.5V5.25H11.25V4.5C11.25 4.26894 11.2848 4.04602 11.3495 3.83619"/><path d="M6.75 7.5H4.875C4.25368 7.5 3.75 8.00368 3.75 8.625V20.625C3.75 21.2463 4.25368 21.75 4.875 21.75H14.625C15.2463 21.75 15.75 21.2463 15.75 20.625V16.5C15.75 11.5294 11.7206 7.5 6.75 7.5Z"/><path d="M15.75 18.75V16.875C15.75 15.011 14.239 13.5 12.375 13.5H10.875C10.2537 13.5 9.75 12.9963 9.75 12.375V10.875C9.75 9.01104 8.23896 7.5 6.375 7.5H5.25"/></svg></button></div><a class="guide-link" href="https://github.com/spectre-oss/shiraz/blob/main/docs/DEVELOPMENT.md">Development guide <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a><p class="copy-status" role="status" aria-live="polite"></p></div></details>
+    </section>
+  </main>
+  <footer class="site-footer wrap">
+    <div class="footer-main">
+      <div class="footer-identity"><a class="brand" href="#top" aria-label="Shiraz home"><img src="{base}/spectre.svg" width="42" height="42" alt=""><span>shiraz</span></a><p>Android apps.<br>A little more at home on Linux.</p></div>
+      <nav class="footer-links" aria-label="Footer navigation">
+        <div><h2>Explore</h2><a href="#approach">How it works</a><a href="#web">Shiraz Web</a><a href="#compare">Compare approaches</a></div>
+        <div><h2>Build with us</h2><a href="https://github.com/spectre-oss/shiraz">Source code</a><a href="https://github.com/spectre-oss/shiraz/releases">Releases</a><a href="https://github.com/spectre-oss/shiraz/issues">Report an issue</a></div>
+      </nav>
+    </div>
+    <div class="footer-bottom"><a href="https://github.com/spectre-oss">A spectre-oss project <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a><a href="https://github.com/spectre-oss/shiraz/blob/main/LICENSE">Open source · GPLv3</a><a class="back-to-top" href="#top">Back to top <svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a></div>
+    <div class="footer-notices">
+      <p><a href="https://developer.android.com/legal">Android is a trademark of Google LLC.</a> Other product names and trademarks belong to their respective owners. Shiraz is an independent project; references to other projects or companies do not imply affiliation or endorsement.</p>
+      <p>Shiraz’s original code is GPL-3.0-only. Third-party code, libraries, and fonts retain their own licenses and copyright notices. <a href="https://github.com/spectre-oss/shiraz/tree/main/LICENSES">Third-party notices</a> · <a href="https://github.com/spectre-oss/shiraz#credits--license">Credits &amp; acknowledgments</a></p>
+    </div>
+  </footer>

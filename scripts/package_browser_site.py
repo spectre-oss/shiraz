@@ -24,8 +24,13 @@ def main():
     site = ROOT / 'build/pages-site'
     if site.exists():
         shutil.rmtree(site)
-    site.mkdir(parents=True)
+    frontend = ROOT / 'landing/build'
+    if not (frontend / 'index.html').is_file():
+        raise RuntimeError('Build the SvelteKit frontend first: make landing-build')
+    shutil.copytree(frontend, site)
     for name, source in sources.items():
+        if name == 'index.html':
+            continue  # Pages uses SvelteKit; the offline ZIP retains the standalone builder.
         target = site / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
