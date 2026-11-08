@@ -61,9 +61,9 @@ public final class ConnectivityManager {
     }
     public Network[] getAllNetworks(){Network network=getActiveNetwork();return network==null?new Network[0]:new Network[]{network};}
     public Network getActiveNetwork() { return connected() == null ? null : HOST_NETWORK; }
-    public NetworkInfo getNetworkInfo(Network network) { return network == null ? null : connected(); }
+    public NetworkInfo getNetworkInfo(Network network) { return !HOST_NETWORK.equals(network) ? null : connected(); }
     public NetworkCapabilities getNetworkCapabilities(Network network) {
-        NetworkInfo info = network == null ? null : connected();
+        NetworkInfo info = !HOST_NETWORK.equals(network) ? null : connected();
         if (info == null) return null;
         return NetworkCapabilities.shirazHost(info.getType() == TYPE_WIFI ? NetworkCapabilities.TRANSPORT_WIFI : info.getType() == TYPE_MOBILE ? NetworkCapabilities.TRANSPORT_CELLULAR : NetworkCapabilities.TRANSPORT_ETHERNET);
     }

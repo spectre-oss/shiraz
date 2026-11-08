@@ -19,14 +19,22 @@ public final class NetworkRuntimeMain {
         "http_post", "http_redirect", "http_read_timeout", "tls_socket_factory", "trust_manager",
         "tls_verified", "tls_untrusted", "tls_hostname", "tls_handshake",
              "tls_engine_verified", "tls_engine_untrusted", "tls_engine_hostname",
-             "local_stream", "local_timeout", "local_rebind", "local_close_read", "local_close_accept"};
+             "local_stream", "local_timeout", "local_rebind", "local_close_read", "local_close_accept",
+             "network_identity", "network_dns", "network_socket", "network_http", "network_bind", "network_unknown", "network_https"};
     int failed = 0;
     for (String name : cases) {
       String id = "network." + name;
       try {
-        String detail = name.startsWith("local_") ? LocalSocketChecks.run(id) : name.startsWith("tls_") && !name.equals("tls_socket_factory")
-            ? TlsNetworkChecks.run(id, asset -> new FileInputStream(new File(args[0], asset)))
-            : NetworkChecks.run(id);
+        String detail;
+        if (name.equals("network_https"))
+          detail = NetworkApiChecks.runTls(android.net.ConnectivityManager.shirazForHost(),
+              asset -> new FileInputStream(new File(args[0], asset)));
+        else if (name.startsWith("network_"))
+          detail = NetworkApiChecks.run(id, android.net.ConnectivityManager.shirazForHost());
+        else if (name.startsWith("local_")) detail = LocalSocketChecks.run(id);
+        else if (name.startsWith("tls_") && !name.equals("tls_socket_factory"))
+          detail = TlsNetworkChecks.run(id, asset -> new FileInputStream(new File(args[0], asset)));
+        else detail = NetworkChecks.run(id);
         System.out.println("NETWORK_RESULT\t" + id + "\tPASS\t" + detail);
       } catch (Throwable error) {
         failed++;

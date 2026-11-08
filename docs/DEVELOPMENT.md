@@ -161,6 +161,11 @@ directory while Linux uses its native abstract namespace. Descriptor passing,
 Darwin reserved socket services, seqpacket on macOS, and custom TLS SNI/algorithm
 constraints still fail explicitly. Passing the tested subset does not establish
 support for every Android networking API.
+The public `Network` adapter exposes only the host's current default network.
+Its DNS, socket factory and HTTP/HTTPS methods use that route; unknown network
+IDs fail without falling back to it. Handles and Parcelable identity round-trip.
+Socket binding validates unconnected IP sockets against this default adapter;
+it does not create Android netd or independent per-interface/process routing.
 The fixture certificate and key are generated only under `build/`, expire after
 two days, and are regenerated when building the probe. Never commit those files
 or the resulting APK. Host JVM checks validate the assertions; ART checks and

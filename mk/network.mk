@@ -14,3 +14,8 @@ network-probe-smoke: framework
 endif
 network-probe-smoke:
 	uv run --no-project python scripts/network_probe_smoke.py
+
+ifeq ($(shell uname -s),Darwin)
+# A completed network bootstrap must also supply the default trust bridge.
+macos-network: build/macos/libshiraz-trust.so
+endif

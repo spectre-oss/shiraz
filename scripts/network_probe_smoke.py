@@ -29,12 +29,14 @@ def main():
     assets = work / 'assets'
     tls_fixtures(assets)
     framework = ROOT / 'build/shiraz-framework.jar'
+    interfaces = HOST.parent / 'common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar'
     source = ROOT / 'tests/api-probe-host/NetworkRuntimeMain.java'
-    subprocess.run(['javac', '--release', '8', '-cp', str(ROOT / 'build/framework/classes'), '-d', str(classes), str(source),
+    subprocess.run(['javac', '--release', '8', '-cp', str(ROOT / 'build/framework/classes') + ':' + str(interfaces), '-d', str(classes), str(source),
                     str(ROOT / 'tests/api-probe/NetworkChecks.java'),
                     str(ROOT / 'tests/api-probe/TlsNetworkChecks.java'),
                     str(ROOT / 'tests/api-probe/TlsEngineChecks.java'),
-                    str(ROOT / 'tests/api-probe/LocalSocketChecks.java')], check=True, timeout=30)
+                    str(ROOT / 'tests/api-probe/LocalSocketChecks.java'),
+                    str(ROOT / 'tests/api-probe/NetworkApiChecks.java')], check=True, timeout=30)
     jar = work / 'runner.jar'
     subprocess.run(['jar', 'cf', str(jar), '-C', str(classes), '.'], check=True, timeout=30)
     dex = work / 'runner-dex.jar'
@@ -75,7 +77,7 @@ def main():
     (work / 'result.json').write_text(json.dumps({'runtime': 'art',
         'apk': str(apk) if apk else None, 'internet_url': args.url,
         'internet_pass': 'NETWORK_INTERNET_PASS ' in result.stdout, 'returncode': result.returncode, 'cases': cases}, indent=2) + '\n')
-    if result.returncode or len(cases) != 21 or any(c['status'] != 'PASS' for c in cases):
+    if result.returncode or len(cases) != 28 or any(c['status'] != 'PASS' for c in cases):
         raise SystemExit('ART network probe failed; inspect build/network-probe-runtime/')
     for line in result.stdout.splitlines():
         if line.startswith('NETWORK_INTERNET_PASS '):

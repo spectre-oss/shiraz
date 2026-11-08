@@ -12,6 +12,7 @@ import javax.net.ssl.*;
 /** Disposable build-generated credentials; no global trust or TLS defaults are modified. */
 final class TlsNetworkChecks {
   interface Assets { InputStream open(String name) throws IOException; }
+  interface Connections { URLConnection open(URL url) throws IOException; }
   static byte[] bytes(InputStream in) throws IOException {
     try (InputStream input = in) {
       ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -29,10 +30,13 @@ final class TlsNetworkChecks {
     return context;
   }
   static String run(String id, Assets assets) throws Exception {
+    return run(id, assets, url -> url.openConnection(Proxy.NO_PROXY));
+  }
+  static String run(String id, Assets assets, Connections connections) throws Exception {
     if (id.equals("network.tls_handshake")) {
-      run("network.tls_verified", assets);
-      run("network.tls_untrusted", assets);
-      run("network.tls_hostname", assets);
+      run("network.tls_verified", assets, connections);
+      run("network.tls_untrusted", assets, connections);
+      run("network.tls_hostname", assets, connections);
       return "Controlled TLS accepts trusted peer and rejects untrusted or wrong-host certificates";
     }
     if (!java.util.Arrays.asList("network.tls_verified", "network.tls_untrusted", "network.tls_hostname",
@@ -92,7 +96,7 @@ final class TlsNetworkChecks {
       try {
         String hostname = mismatch ? "127.0.0.1" : "localhost";
         URL url = new URL("https://" + hostname + ":" + server.getLocalPort() + "/probe");
-        connection = (HttpsURLConnection) url.openConnection(Proxy.NO_PROXY);
+        connection = (HttpsURLConnection) connections.open(url);
         connection.setSSLSocketFactory(clientContext.getSocketFactory());
         connection.setConnectTimeout(1500);
         connection.setReadTimeout(1500);
