@@ -1,0 +1,1436 @@
+[
+  {
+    "id": "runtime.reflection",
+    "category": "Runtime",
+    "expected": "Reflection invokes a method and accesses a field",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.exceptions",
+    "category": "Runtime",
+    "expected": "Thrown exception retains cause",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.thread",
+    "category": "Runtime",
+    "expected": "Thread starts, joins and publishes state",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.executor",
+    "category": "Runtime",
+    "expected": "Executor Future returns expected value",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.classloader",
+    "category": "Runtime",
+    "expected": "App class loads through its classloader",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.bytebuffer",
+    "category": "Runtime",
+    "expected": "Direct buffer preserves little-endian integer",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.utf8",
+    "category": "Runtime",
+    "expected": "Persian and emoji survive UTF-8 round trip",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.zip",
+    "category": "Runtime",
+    "expected": "ZIP entry round trip preserves bytes",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.regex",
+    "category": "Runtime",
+    "expected": "Unicode regex finds expected text",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.json",
+    "category": "Runtime",
+    "expected": "JSON round trip preserves typed values",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.clock",
+    "category": "Runtime",
+    "expected": "Monotonic clocks advance after sleep",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.process",
+    "category": "Runtime",
+    "expected": "Process identity is positive",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.handler",
+    "category": "Runtime",
+    "expected": "Main Handler delivers callback on main looper",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.handler_thread",
+    "category": "Runtime",
+    "expected": "HandlerThread posts and delivers a callback",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.bundle",
+    "category": "IPC",
+    "expected": "Bundle retains primitive and nested values",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.parcel",
+    "category": "IPC",
+    "expected": "Parcel marshals integer and Unicode string",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.intent",
+    "category": "IPC",
+    "expected": "Intent retains component action data and extras",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.binder_local",
+    "category": "IPC",
+    "expected": "Local Binder transaction returns expected payload",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.messenger",
+    "category": "IPC",
+    "expected": "Messenger delivers message through Handler",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.broadcast",
+    "category": "IPC",
+    "expected": "Registered receiver receives app-scoped broadcast",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.strings",
+    "category": "Resources",
+    "expected": "Compiled string resolves Unicode",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.typed_values",
+    "category": "Resources",
+    "expected": "Integer boolean color and dimension resolve",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.array",
+    "category": "Resources",
+    "expected": "Compiled string array preserves values",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.identifier",
+    "category": "Resources",
+    "expected": "Resource lookup resolves declared name",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.metrics",
+    "category": "Resources",
+    "expected": "Display density and size are positive",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.configuration",
+    "category": "Resources",
+    "expected": "Configuration exposes width and locale",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.locale_context",
+    "category": "Resources",
+    "expected": "Configuration context retains requested locale",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.assets",
+    "category": "Resources",
+    "expected": "Asset contents match packaged fixture",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.asset_list",
+    "category": "Resources",
+    "expected": "Asset listing includes fixture",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.xml",
+    "category": "Resources",
+    "expected": "Compiled layout XML exposes TextView tag",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.drawable",
+    "category": "Resources",
+    "expected": "XML drawable produces expected pixels",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.files",
+    "category": "Storage",
+    "expected": "Private file round trip and deletion succeed",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.directories",
+    "category": "Storage",
+    "expected": "Private data/cache directories are writable",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.preferences",
+    "category": "Storage",
+    "expected": "Preferences commit and reopen preserve all types",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.preference_listener",
+    "category": "Storage",
+    "expected": "Preference listener observes committed key",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.random_access",
+    "category": "Storage",
+    "expected": "RandomAccessFile seek updates exact byte",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.file_descriptor",
+    "category": "Storage",
+    "expected": "ParcelFileDescriptor preserves writable file",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.statfs",
+    "category": "Storage",
+    "expected": "StatFs reports positive block size and total bytes",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.query",
+    "category": "Database",
+    "expected": "Bound SQLite query returns expected Unicode row",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.rollback",
+    "category": "Database",
+    "expected": "Uncommitted SQLite transaction rolls back",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.statement",
+    "category": "Database",
+    "expected": "Compiled statement binds and queries integer",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.blob",
+    "category": "Database",
+    "expected": "SQLite blob survives insert and retrieval",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.matrix_cursor",
+    "category": "Database",
+    "expected": "MatrixCursor resolves column and row",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.canvas_color",
+    "category": "Graphics",
+    "expected": "Canvas color fills bitmap",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.rect_clip",
+    "category": "Graphics",
+    "expected": "Canvas clipping preserves outside pixels",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.path",
+    "category": "Graphics",
+    "expected": "Filled Path covers interior pixel",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.matrix",
+    "category": "Graphics",
+    "expected": "Matrix translation maps coordinates",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.png",
+    "category": "Graphics",
+    "expected": "Bitmap PNG encode/decode preserves pixels",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.text_metrics",
+    "category": "Graphics",
+    "expected": "Typeface and Paint expose positive text metrics",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.text_pixels",
+    "category": "Graphics",
+    "expected": "Canvas text rasterization changes pixels",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.gradient",
+    "category": "Graphics",
+    "expected": "LinearGradient produces different endpoint colors",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.region",
+    "category": "Graphics",
+    "expected": "Region difference excludes removed rectangle",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.egl_gles",
+    "category": "Graphics",
+    "expected": "EGL pbuffer clears and reads back red pixel",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.inflate",
+    "category": "UI",
+    "expected": "LayoutInflater creates declared TextView",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.measure_layout",
+    "category": "UI",
+    "expected": "LinearLayout measures and positions child",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.click",
+    "category": "UI",
+    "expected": "Button performClick dispatches listener",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.edit_text",
+    "category": "UI",
+    "expected": "EditText selection replacement changes text",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.checkbox",
+    "category": "UI",
+    "expected": "CheckBox toggles and dispatches checked callback",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.motion_event",
+    "category": "UI",
+    "expected": "MotionEvent retains coordinates and action",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.key_event",
+    "category": "UI",
+    "expected": "KeyEvent retains action and key code",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.velocity",
+    "category": "UI",
+    "expected": "VelocityTracker estimates moving pointer",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.spans",
+    "category": "UI",
+    "expected": "Spannable retains style span range",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.text_layout",
+    "category": "UI",
+    "expected": "StaticLayout wraps long text into multiple lines",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.rtl",
+    "category": "UI",
+    "expected": "RTL heuristic recognizes Persian",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.view_state",
+    "category": "UI",
+    "expected": "View hierarchy stores and restores checked state",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.scroller",
+    "category": "UI",
+    "expected": "Scroller reaches final scroll position",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.choreographer",
+    "category": "UI",
+    "expected": "Choreographer delivers frame callback",
+    "mode": "automatic"
+  },
+  {
+    "id": "packages.self",
+    "category": "Packages",
+    "expected": "PackageManager resolves own package version and activities",
+    "mode": "automatic"
+  },
+  {
+    "id": "packages.launch_intent",
+    "category": "Packages",
+    "expected": "PackageManager returns own launch intent",
+    "mode": "automatic"
+  },
+  {
+    "id": "packages.permission",
+    "category": "Packages",
+    "expected": "Declared Internet permission is granted",
+    "mode": "automatic"
+  },
+  {
+    "id": "packages.service_manifest",
+    "category": "Packages",
+    "expected": "Manifest retains remote worker process name",
+    "mode": "automatic"
+  },
+  {
+    "id": "system.activity_manager",
+    "category": "System",
+    "expected": "ActivityManager returns positive memory class",
+    "mode": "automatic"
+  },
+  {
+    "id": "system.power",
+    "category": "System",
+    "expected": "PowerManager creates a non-held wake lock",
+    "mode": "automatic"
+  },
+  {
+    "id": "system.alarm",
+    "category": "System",
+    "expected": "AlarmManager service is available",
+    "mode": "automatic"
+  },
+  {
+    "id": "system.notification",
+    "category": "System",
+    "expected": "Notification channel can be created and retrieved",
+    "mode": "automatic"
+  },
+  {
+    "id": "system.pending_intent",
+    "category": "System",
+    "expected": "PendingIntent retains creator package",
+    "mode": "automatic"
+  },
+  {
+    "id": "system.content_resolver",
+    "category": "System",
+    "expected": "ContentResolver is available and resolves the content scheme constant",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.uri",
+    "category": "Network",
+    "expected": "URI encoding and query decoding preserve Unicode",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.loopback",
+    "category": "Network",
+    "expected": "Local TCP socket exchanges byte without Internet",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.http",
+    "category": "Network",
+    "expected": "HttpURLConnection reads local HTTP response",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_context",
+    "category": "Network",
+    "expected": "TLS context creates client SSLEngine",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.https_handler",
+    "category": "Network",
+    "expected": "HTTPS URL creates an HTTPS connection object",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.connectivity",
+    "category": "Network",
+    "expected": "ConnectivityManager service responds to network enumeration",
+    "mode": "automatic"
+  },
+  {
+    "id": "crypto.sha256",
+    "category": "Crypto",
+    "expected": "SHA-256 matches known abc digest",
+    "mode": "automatic"
+  },
+  {
+    "id": "crypto.aes",
+    "category": "Crypto",
+    "expected": "AES-GCM encrypt/decrypt round trip",
+    "mode": "automatic"
+  },
+  {
+    "id": "crypto.random",
+    "category": "Crypto",
+    "expected": "SecureRandom fills requested buffer",
+    "mode": "automatic"
+  },
+  {
+    "id": "hardware.location_math",
+    "category": "Hardware",
+    "expected": "Location computes plausible distance without permission",
+    "mode": "automatic"
+  },
+  {
+    "id": "hardware.sensors",
+    "category": "Hardware",
+    "expected": "SensorManager enumerates sensors; absence is skipped",
+    "mode": "automatic"
+  },
+  {
+    "id": "hardware.camera_inventory",
+    "category": "Hardware",
+    "expected": "CameraManager enumerates advertised camera ids",
+    "mode": "automatic"
+  },
+  {
+    "id": "hardware.vibrator",
+    "category": "Hardware",
+    "expected": "Vibrator reports capability without vibrating",
+    "mode": "automatic"
+  },
+  {
+    "id": "media.codecs",
+    "category": "Media",
+    "expected": "MediaCodecList enumerates valid codec names",
+    "mode": "automatic"
+  },
+  {
+    "id": "media.audio_config",
+    "category": "Media",
+    "expected": "AudioTrack exposes valid PCM minimum buffer size",
+    "mode": "automatic"
+  },
+  {
+    "id": "media.audio_manager",
+    "category": "Media",
+    "expected": "AudioManager exposes stream volume bounds",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.jni",
+    "category": "Native",
+    "expected": "JNI arithmetic, Java string and direct-buffer round trips",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.looper",
+    "category": "Native",
+    "expected": "NDK ALooper dispatches a readable pipe",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.window",
+    "category": "Native",
+    "expected": "ANativeWindow exposes Surface dimensions",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.bitmap",
+    "category": "Native",
+    "expected": "AndroidBitmap locks and updates bitmap pixels",
+    "mode": "automatic"
+  },
+  {
+    "id": "lifecycle.activity_result",
+    "category": "Lifecycle",
+    "expected": "Open child screen, tap Return; verify result payload reaches parent",
+    "mode": "manual"
+  },
+  {
+    "id": "lifecycle.restart",
+    "category": "Lifecycle",
+    "expected": "Run tests, close and relaunch app; verify saved report and creation counter survive",
+    "mode": "manual"
+  },
+  {
+    "id": "lifecycle.rotation",
+    "category": "Lifecycle",
+    "expected": "Rotate portrait/landscape repeatedly; verify configuration, relayout and retained selection/results",
+    "mode": "manual"
+  },
+  {
+    "id": "ui.pointer",
+    "category": "UI",
+    "expected": "Tap targets at all four corners after each resize; verify correct target and local coordinates",
+    "mode": "manual"
+  },
+  {
+    "id": "ui.keyboard",
+    "category": "UI",
+    "expected": "Type Persian/English text, edit selection, hide/reopen keyboard; verify text and focus",
+    "mode": "manual"
+  },
+  {
+    "id": "ui.scroll",
+    "category": "UI",
+    "expected": "Scroll a long report both ways; verify clipping and input remain correct",
+    "mode": "manual"
+  },
+  {
+    "id": "graphics.surface",
+    "category": "Graphics",
+    "expected": "Exercise SurfaceView/TextureView lifecycle, resize and frame updates",
+    "mode": "manual"
+  },
+  {
+    "id": "graphics.gles_window",
+    "category": "Graphics",
+    "expected": "Render continuously to a window Surface; resize without stale frame or coordinate drift",
+    "mode": "manual"
+  },
+  {
+    "id": "hardware.location_updates",
+    "category": "Hardware",
+    "expected": "Grant location permission and verify real location updates, denial and revocation",
+    "mode": "manual"
+  },
+  {
+    "id": "hardware.sensor_events",
+    "category": "Hardware",
+    "expected": "Verify advertised sensors deliver timestamped events and unregister stops delivery",
+    "mode": "manual"
+  },
+  {
+    "id": "hardware.camera_capture",
+    "category": "Hardware",
+    "expected": "Grant camera permission; preview, capture, rotate, release and deny permission",
+    "mode": "manual"
+  },
+  {
+    "id": "media.playback",
+    "category": "Media",
+    "expected": "Play known audio/video; verify output, pause, seek, completion and release",
+    "mode": "manual"
+  },
+  {
+    "id": "network.tls_handshake",
+    "category": "Network",
+    "expected": "Connect to a controlled TLS endpoint; verify certificate success and rejection of invalid certificates",
+    "mode": "automatic"
+  },
+  {
+    "id": "system.permission_denial",
+    "category": "System",
+    "expected": "Request runtime permission; deny, grant and revoke; observe callbacks and enforcement",
+    "mode": "manual"
+  },
+  {
+    "id": "system.alarm_delivery",
+    "category": "System",
+    "expected": "Schedule alarm and verify delivery, cancellation and restart behavior",
+    "mode": "manual"
+  },
+  {
+    "id": "system.notification_delivery",
+    "category": "System",
+    "expected": "Post notification and verify presentation, action and dismissal",
+    "mode": "manual"
+  },
+  {
+    "id": "ipc.provider",
+    "category": "IPC",
+    "expected": "Exercise a declared ContentProvider CRUD, observer notifications and permission denial",
+    "mode": "manual"
+  },
+  {
+    "id": "ipc.bound_service",
+    "category": "IPC",
+    "expected": "Bind across processes; verify Binder payloads, death notification and reconnect",
+    "mode": "manual"
+  },
+  {
+    "id": "graphics.bitmap_copy",
+    "category": "Graphics",
+    "expected": "Bitmap copy preserves pixels and dimensions",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.bitmap_scale",
+    "category": "Graphics",
+    "expected": "Bitmap scaling produces requested dimensions",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.bitmap_crop",
+    "category": "Graphics",
+    "expected": "Bitmap cropping preserves selected pixel",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.bitmap_buffer",
+    "category": "Graphics",
+    "expected": "Bitmap pixel buffer copy round trip",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.decode_bounds",
+    "category": "Graphics",
+    "expected": "BitmapFactory bounds decode avoids bitmap allocation",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.jpeg",
+    "category": "Graphics",
+    "expected": "JPEG encode/decode returns correct dimensions",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.canvas_save_restore",
+    "category": "Graphics",
+    "expected": "Canvas save restore restores translation",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.canvas_alpha",
+    "category": "Graphics",
+    "expected": "Canvas alpha blends source over opaque destination",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.canvas_circle",
+    "category": "Graphics",
+    "expected": "Circle covers center and leaves corner empty",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.path_measure",
+    "category": "Graphics",
+    "expected": "PathMeasure reports straight path length",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.matrix_inverse",
+    "category": "Graphics",
+    "expected": "Matrix inverse reverses scale and translation",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.color_parse",
+    "category": "Graphics",
+    "expected": "Color parsing and HSV conversion retain red",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.picture",
+    "category": "Graphics",
+    "expected": "Picture records and replays Canvas commands",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.dash_effect",
+    "category": "Graphics",
+    "expected": "DashPathEffect accepts intervals and Paint retains effect",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.mapped_file",
+    "category": "Storage",
+    "expected": "Mapped file writes survive force and reopen",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.file_lock",
+    "category": "Storage",
+    "expected": "FileChannel obtains exclusive file lock",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.atomic_file",
+    "category": "Storage",
+    "expected": "AtomicFile commits then rolls back failed write",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.preferences_remove",
+    "category": "Storage",
+    "expected": "Preferences remove and clear eliminate keys",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.preferences_set",
+    "category": "Storage",
+    "expected": "Preferences retain string set values",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.file_rename",
+    "category": "Storage",
+    "expected": "Rename preserves data and removes original pathname",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.os_stat",
+    "category": "Storage",
+    "expected": "android.system.Os stat reports file size",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.os_pipe",
+    "category": "Storage",
+    "expected": "android.system.Os pipe exchanges bytes",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.commit",
+    "category": "Database",
+    "expected": "Committed SQLite transaction persists row",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.constraint",
+    "category": "Database",
+    "expected": "SQLite unique constraint rejects duplicate",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.update_delete",
+    "category": "Database",
+    "expected": "SQLite update and delete report affected rows",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.reopen",
+    "category": "Database",
+    "expected": "SQLite disk row survives close and reopen",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.wal",
+    "category": "Database",
+    "expected": "SQLite accepts WAL and exposes enabled state",
+    "mode": "automatic"
+  },
+  {
+    "id": "database.null",
+    "category": "Database",
+    "expected": "Cursor distinguishes SQL NULL from empty string",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.serialization",
+    "category": "Runtime",
+    "expected": "Object stream round trip preserves ArrayList",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.gzip",
+    "category": "Runtime",
+    "expected": "GZIP compression round trip preserves text",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.crc32",
+    "category": "Runtime",
+    "expected": "CRC32 matches canonical test vector",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.proxy",
+    "category": "Runtime",
+    "expected": "Dynamic Proxy dispatches interface method",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.array_reflection",
+    "category": "Runtime",
+    "expected": "Reflective array preserves component type and value",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.thread_local",
+    "category": "Runtime",
+    "expected": "ThreadLocal values remain isolated across threads",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.monitor",
+    "category": "Runtime",
+    "expected": "Object wait notify publishes condition",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.scheduled_executor",
+    "category": "Runtime",
+    "expected": "Scheduled executor invokes delayed task",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.semaphore",
+    "category": "Runtime",
+    "expected": "Semaphore acquire release tracks permits",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.interrupt",
+    "category": "Runtime",
+    "expected": "Thread interruption wakes sleeping thread",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.locale_format",
+    "category": "Runtime",
+    "expected": "Locale-specific number formatting parses its output",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.timezone",
+    "category": "Runtime",
+    "expected": "UTC GregorianCalendar resolves epoch correctly",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.base64",
+    "category": "Runtime",
+    "expected": "Android Base64 known vector round trip",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.xml_pull",
+    "category": "Runtime",
+    "expected": "XmlPullParser reads attribute and text",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.udp",
+    "category": "Network",
+    "expected": "Local UDP datagram preserves payload",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.socket_timeout",
+    "category": "Network",
+    "expected": "TCP read deadline raises SocketTimeoutException",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.inet_address",
+    "category": "Network",
+    "expected": "Numeric IPv4 and IPv6 addresses parse without DNS",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.interfaces",
+    "category": "Network",
+    "expected": "NetworkInterface enumerates at least one interface",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.url_encode",
+    "category": "Network",
+    "expected": "URL form encoding round trip preserves Persian and spaces",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.cookie",
+    "category": "Network",
+    "expected": "CookieManager accepts and returns matching HTTP cookie",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.local_socket",
+    "category": "Network",
+    "expected": "Android LocalSocket exchanges byte through abstract namespace",
+    "mode": "automatic"
+  },
+  {
+    "id": "crypto.hmac",
+    "category": "Crypto",
+    "expected": "HmacSHA256 produces canonical known digest",
+    "mode": "automatic"
+  },
+  {
+    "id": "crypto.rsa_signature",
+    "category": "Crypto",
+    "expected": "RSA signature verifies data and rejects changed payload",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.parcel_bundle",
+    "category": "IPC",
+    "expected": "Parcel round trip preserves Bundle contents",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.parcel_marshall",
+    "category": "IPC",
+    "expected": "Parcel marshall unmarshall preserves data",
+    "mode": "automatic"
+  },
+  {
+    "id": "ipc.intent_parcel",
+    "category": "IPC",
+    "expected": "Intent parcel round trip preserves extras and component",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.jni_array",
+    "category": "Native",
+    "expected": "JNI array region updates Java array",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.jni_exception",
+    "category": "Native",
+    "expected": "JNI-thrown exception reaches Java",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.jni_callback",
+    "category": "Native",
+    "expected": "JNI calls a Java static method",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.pthread",
+    "category": "Native",
+    "expected": "Native thread attaches to VM and calls Java",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.shared_memory",
+    "category": "Native",
+    "expected": "ASharedMemory maps shared bytes",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.hardware_buffer",
+    "category": "Native",
+    "expected": "AHardwareBuffer allocates describes and locks CPU buffer",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.dlopen",
+    "category": "Native",
+    "expected": "Bionic dlopen and dlsym resolve strlen",
+    "mode": "automatic"
+  },
+  {
+    "id": "native.clock",
+    "category": "Native",
+    "expected": "Native CLOCK_MONOTONIC returns positive timestamp",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.gles_shader",
+    "category": "Graphics",
+    "expected": "GLES compiles and links vertex and fragment shaders",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.gles_texture",
+    "category": "Graphics",
+    "expected": "GLES framebuffer reads uploaded texture pixel",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.gles_buffer",
+    "category": "Graphics",
+    "expected": "GLES buffer reports uploaded byte size",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.gles_scissor",
+    "category": "Graphics",
+    "expected": "GLES scissor limits clear to selected pixels",
+    "mode": "automatic"
+  },
+  {
+    "id": "graphics.gles_blend",
+    "category": "Graphics",
+    "expected": "GLES reports enabled blending and the source blend factor",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.spinner",
+    "category": "UI",
+    "expected": "Spinner retains adapter selection",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.seekbar",
+    "category": "UI",
+    "expected": "SeekBar clamps progress to configured maximum",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.progress",
+    "category": "UI",
+    "expected": "ProgressBar retains max and progress",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.image_view",
+    "category": "UI",
+    "expected": "ImageView retains bitmap drawable",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.radio_group",
+    "category": "UI",
+    "expected": "RadioGroup checks one radio button at a time",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.text_watcher",
+    "category": "UI",
+    "expected": "TextWatcher observes EditText change",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.input_filter",
+    "category": "UI",
+    "expected": "LengthFilter limits EditText content",
+    "mode": "automatic"
+  },
+  {
+    "id": "ui.html",
+    "category": "UI",
+    "expected": "Html parser yields styled text without markup",
+    "mode": "automatic"
+  },
+  {
+    "id": "storage.shared_memory",
+    "category": "Storage",
+    "expected": "Java SharedMemory read-write and read-only maps agree",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.theme",
+    "category": "Resources",
+    "expected": "Theme resolves text color attribute",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.plural_rules",
+    "category": "Resources",
+    "expected": "ICU plural rules classify English one and other",
+    "mode": "automatic"
+  },
+  {
+    "id": "resources.bidi",
+    "category": "Resources",
+    "expected": "ICU BiDi detects mixed-direction text",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.dex_file",
+    "category": "Runtime",
+    "expected": "DexFile enumerates own APK activity class",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.weak_reference",
+    "category": "Runtime",
+    "expected": "WeakReference retains strongly reachable object",
+    "mode": "automatic"
+  },
+  {
+    "id": "runtime.collections",
+    "category": "Runtime",
+    "expected": "TreeMap orders keys and concurrent map preserves updates",
+    "mode": "automatic"
+  },
+  {
+    "id": "crypto.gcm_reject",
+    "category": "Crypto",
+    "expected": "AES-GCM rejects modified ciphertext",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.nio_selector",
+    "category": "Network",
+    "expected": "Selector observes a readable pipe, wakes across threads and rejects use after close",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.ssl_parameters",
+    "category": "Network",
+    "expected": "SSLParameters retain protocol and endpoint identification",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.dns_localhost",
+    "category": "Network",
+    "expected": "Resolver returns loopback addresses for localhost; external DNS remains separate",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tcp_half_close",
+    "category": "Network",
+    "expected": "TCP connects, preserves socket options, sends EOF and receives reply after half-close",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.http_chunked",
+    "category": "Network",
+    "expected": "HTTP response headers and chunked response body decode correctly",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.http_error_body",
+    "category": "Network",
+    "expected": "HTTP 404 rejects success stream and exposes error response body",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.http_post",
+    "category": "Network",
+    "expected": "Fixed-length HTTP POST sends exact payload and reads response",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.http_redirect",
+    "category": "Network",
+    "expected": "Disabled redirect following preserves 302 and relative Location header",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.http_read_timeout",
+    "category": "Network",
+    "expected": "Silent HTTP response raises SocketTimeoutException",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_socket_factory",
+    "category": "Network",
+    "expected": "TLS socket factory exposes protocols, ciphers and HTTPS endpoint verification",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.trust_manager",
+    "category": "Network",
+    "expected": "Default X509 trust manager provides certificate authorities",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_verified",
+    "category": "Network",
+    "expected": "Verified loopback HTTPS returns body, cipher and peer certificates",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_untrusted",
+    "category": "Network",
+    "expected": "Default trust rejects generated self-signed certificate before any HTTP request",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_hostname",
+    "category": "Network",
+    "expected": "Trusted certificate for localhost rejects IP hostname before any HTTP request",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_engine_verified",
+    "category": "Network",
+    "expected": "TLS engines verify the peer and exchange encrypted request/reply in memory",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_engine_untrusted",
+    "category": "Network",
+    "expected": "TLS engine rejects untrusted certificate before application data",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_engine_hostname",
+    "category": "Network",
+    "expected": "TLS engine rejects wrong hostname before application data",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.local_stream",
+    "category": "Network",
+    "expected": "Local socket peer identity, buffers, half-close and reply work",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.local_timeout",
+    "category": "Network",
+    "expected": "Silent local socket peer triggers read timeout",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.local_rebind",
+    "category": "Network",
+    "expected": "Local name collision preserves original listener and close permits rebind",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.local_close_read",
+    "category": "Network",
+    "expected": "Closing local socket wakes a blocked reader",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.local_close_accept",
+    "category": "Network",
+    "expected": "Closing local listener wakes blocked accept",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_identity",
+    "category": "Network",
+    "expected": "Network handle/Parcel round trip and malformed handle rejection",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_dns",
+    "category": "Network",
+    "expected": "Network DNS resolves localhost and numeric addresses",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_socket",
+    "category": "Network",
+    "expected": "Network SocketFactory exchanges request/reply",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_http",
+    "category": "Network",
+    "expected": "Network openConnection overloads read HTTP and reject bad protocol/proxy",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_bind",
+    "category": "Network",
+    "expected": "Default Network binds unconnected sockets and rejects connected/closed sockets",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_unknown",
+    "category": "Network",
+    "expected": "Unavailable Network never falls back to default metadata, DNS, sockets or HTTP",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_https",
+    "category": "Network",
+    "expected": "Network HTTPS accepts trusted peer and rejects untrusted/wrong-host certificates",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_cleartext_policy",
+    "category": "Network",
+    "expected": "Public cleartext policy agrees with the application manifest flag",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.network_xml",
+    "category": "Network",
+    "expected": "Compiled network-security domain XML preserves text and independent cursors",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.android_trust_chain",
+    "category": "Network",
+    "expected": "Android trust-manager extension verifies a trusted chain and rejects empty trust or peer chains",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_stream_clean",
+    "category": "Network",
+    "expected": "TLS single/bulk reads preserve bytes, bounds and clean closure in TLS 1.2/1.3",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_stream_abrupt",
+    "category": "Network",
+    "expected": "TLS single/bulk reads preserve bytes, bounds and abrupt closure in TLS 1.2/1.3",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.tls_stream_timeout",
+    "category": "Network",
+    "expected": "TLS single/bulk reads preserve bytes, bounds and timeout closure in TLS 1.2/1.3",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.ipv6_tcp",
+    "category": "Network",
+    "expected": "IPv6 loopback TCP exchanges real data and verifies its transport contract",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.ipv6_udp",
+    "category": "Network",
+    "expected": "IPv6 loopback UDP exchanges real data and verifies its transport contract",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.ipv6_http",
+    "category": "Network",
+    "expected": "IPv6 loopback HTTP exchanges real data and verifies its transport contract",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.ipv6_tls",
+    "category": "Network",
+    "expected": "IPv6 loopback TLS exchanges real data and verifies its transport contract",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.nio_tcp",
+    "category": "Network",
+    "expected": "Nonblocking TCP channels exchange binary data through selectors and preserve EOF",
+    "mode": "automatic"
+  },
+  {
+    "id": "network.nio_udp",
+    "category": "Network",
+    "expected": "Datagram channels preserve payload, source identity and connected replies",
+    "mode": "automatic"
+  }
+]

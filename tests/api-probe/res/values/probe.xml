@@ -1,0 +1,9 @@
+<resources>
+ <string name="probe_text">Shiraz resource ✓</string>
+ <string name="app_name">Shiraz API Probe</string>
+ <integer name="probe_number">42</integer>
+ <bool name="probe_bool">true</bool>
+ <color name="probe_color">#ff123456</color>
+ <dimen name="probe_size">16dp</dimen>
+ <string-array name="probe_array"><item>alpha</item><item>بتا</item></string-array>
+</resources>

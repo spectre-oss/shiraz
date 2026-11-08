@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "apks": [
+    {
+      "file": "net.osmand.plus_541003.apk",
+      "package": "net.osmand.plus",
+      "url": "https://f-droid.org/repo/net.osmand.plus_541003.apk",
+      "bytes": 161855613,
+      "sha256": "ca05d8f4ec364f84bde1946738e898abfb392234905eef1dc0ec597d4580b112",
+      "name": "OsmAnd~",
+      "version": "5.4.10",
+      "versionCode": 541003,
+      "page": "https://f-droid.org/en/packages/net.osmand.plus/",
+      "maxBytes": 161855613
+    },
+    {
+      "file": "org.billthefarmer.editor_198.apk",
+      "package": "org.billthefarmer.editor",
+      "url": "https://f-droid.org/repo/org.billthefarmer.editor_198.apk",
+      "bytes": 269122,
+      "sha256": "343d17e11d0914e1a7708df2781580a0413e52501c0a41d91f7ef725d9615fe9",
+      "name": "Editor",
+      "version": "1.98",
+      "versionCode": 198,
+      "page": "https://f-droid.org/en/packages/org.billthefarmer.editor/",
+      "maxBytes": 269122
+    },
+    {
+      "file": "hpl.apps.android.math_2.apk",
+      "package": "hpl.apps.android.math",
+      "url": "https://f-droid.org/repo/hpl.apps.android.math_2.apk",
+      "bytes": 2227036,
+      "sha256": "2bc08df01ac6fb3ff482db03fd0db79dd868924d4456e8774b3f4929186a67d1",
+      "name": "Simple Calculator",
+      "version": "1.0.2",
+      "versionCode": 2,
+      "page": "https://f-droid.org/en/packages/hpl.apps.android.math/",
+      "maxBytes": 2227036
+    }
+  ]
+}

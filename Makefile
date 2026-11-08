@@ -1599,4 +1599,44 @@ ifeq ($(shell uname -s),Darwin)
 include mk/darwin.mk
 endif
 
+.PHONY: api-probe-apk
+api-probe-apk:
+	uv run --no-project python scripts/build_api_probe.py
+
+.PHONY: api-probe-check
+api-probe-check: api-probe-apk
+	uv run --no-project python -m unittest discover -s tests -p test_api_probe.py -v
+
+include mk/api-probe.mk
+
+.PHONY: bitmap-clear-smoke
+ifeq ($(shell uname -s),Darwin)
+bitmap-clear-smoke: macos-framework build/macos/libshiraz-bitmap.so
+else
+bitmap-clear-smoke: framework build/libshiraz-bitmap.so
+endif
+bitmap-clear-smoke:
+	uv run --no-project python scripts/bitmap_clear_smoke.py
+
+.PHONY: ui-performance-smoke
+ifeq ($(shell uname -s),Darwin)
+ui-performance-smoke: macos-framework macos-runtime-libs macos-graphics-libs macos-framework-resources
+else
+ui-performance-smoke: build framework framework-resources
+endif
+ui-performance-smoke:
+	uv run --no-project python scripts/ui_performance_smoke.py
+
+.PHONY: compatibility-apks
+compatibility-apks:
+	uv run --no-project python scripts/fetch_compatibility_apks.py
+
+.PHONY: probe-interaction-benchmark
+probe-interaction-benchmark: api-probe-ready
+	uv run --no-project python scripts/benchmark_probe_interaction.py
+
+.PHONY: launcher
+launcher:
+	cd go-server && task run
+
 include mk/network.mk
