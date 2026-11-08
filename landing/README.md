@@ -64,7 +64,8 @@ Keep host scope and verification level explicit; `Partial` does not certify
 an entire subsystem. Add evidence paths and update the review date when notes
 change. Do not put private logs, account data, payloads or APKs in either file.
 
-From the repository root, `make landing-compatibility-data` rebuilds the framework
+In the runtime development checkout containing `tests/api-probe`,
+`make landing-compatibility-data` rebuilds the framework
 and regenerates class-name presence against the checksum-pinned Android API 35
 SDK plus current planned probe counts. The runtime's advertised API 27 level is
 a separate fact. Class-name presence is not method, signature, behavior or CTS
@@ -83,3 +84,9 @@ catalog. Do not relabel historical or targeted results as a fresh full run.
 subsystem evidence paths and public snapshot schema. Run the compatibility-page
 browser tests after changing tracker controls. Updating source does not publish
 the site: the Pages workflow deploys `main` after its checks and build succeed.
+
+The website consumes committed snapshots and can build without the runtime probe
+source or SDK. Evidence for runtime code links to the recorded public source
+baseline; reports and website instructions link to `main`. Use `--source-ref` to
+record an already published baseline when the measured build includes local
+changes. Publish only reviewed aggregate data, never raw result details.

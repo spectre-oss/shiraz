@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "updated": "2026-11-08",
   "runtimeVersion": "0.338.0",
-  "sourceCommit": "abbdec12834cd2370b7a9459ae5286e6e84ba49f",
+  "sourceCommit": "ccd8c5d8bede4b584f4ced35d4a5297c8288ec9f",
   "scope": "Development snapshot; includes local framework changes. Android 8.1 / API 27 is the runtime's advertised level, not a certification.",
   "inventory": {
     "apiLevel": 35,

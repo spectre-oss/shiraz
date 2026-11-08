@@ -5,14 +5,33 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
+import re
 import subprocess
 import zipfile
 from pathlib import Path
 
-from compare_api_probe import load_report
-
 ROOT = Path(__file__).resolve().parents[1]
 STATUSES = ("PASS", "FAIL", "UNSUPPORTED", "SKIPPED", "TIMEOUT", "NOT_RUN")
+
+
+def load_report(path):
+    if path.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError("Probe report exceeds 2 MiB")
+    report = json.loads(path.read_bytes())
+    if not isinstance(report, dict) or report.get("schemaVersion") != 1 or not isinstance(report.get("results"), dict):
+        raise ValueError("Unsupported probe report schema")
+    for key, result in report["results"].items():
+        if not isinstance(result, dict):
+            raise ValueError("Invalid probe result")  # noqa: TRY004 - invalid report schema
+        duration = result.get("durationMs")
+        if key != result.get("id") or result.get("status") not in STATUSES[:-1]:
+            raise ValueError("Invalid probe result identity/status")
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0:
+            raise ValueError("Invalid result duration")
+        if result.get("mode") not in ("automatic", "manual") or not isinstance(result.get("expected"), str):
+            raise ValueError("Invalid assertion metadata")
+    return report
 
 
 def catalog(path):
@@ -103,11 +122,16 @@ def main():
     parser.add_argument("--android-jar", type=Path, default=ROOT / ".deps/android-sdk/android.jar")
     parser.add_argument("--classes", type=Path, default=ROOT / "build/framework/classes")
     parser.add_argument("--output", type=Path, default=ROOT / "landing/src/lib/android-inventory.json")
+    parser.add_argument("--source-ref", default="HEAD", help="Source baseline; local changes remain explicitly marked")
     parser.add_argument("--probe-report", type=Path)
     parser.add_argument("--probe-source", type=Path)
     args = parser.parse_args()
     if bool(args.probe_report) != bool(args.probe_source):
         parser.error("--probe-report requires --probe-source, and vice versa")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9/_.-]{0,199}", args.source_ref):
+        parser.error("Invalid source baseline reference")
+    if not (ROOT / "tests/api-probe/catalog.json").is_file():
+        parser.error("Regenerate in the runtime development checkout containing tests/api-probe")
     # Verify the API level instead of silently comparing against another SDK.
     pinned = ROOT / ".deps/android-sdk/platform-35_r02.zip"
     if not pinned.is_file() or hashlib.sha256(pinned.read_bytes()).hexdigest() != "0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0":
@@ -125,7 +149,7 @@ def main():
     result = {
         "schemaVersion": 1, "updated": datetime.datetime.now(datetime.timezone.utc).date().isoformat(),  # noqa: UP017 - Python 3.10
         "runtimeVersion": (ROOT / "VERSION").read_text().strip(),
-        "sourceCommit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "sourceCommit": subprocess.check_output(["git", "rev-parse", "--verify", args.source_ref + "^{commit}"], cwd=ROOT, text=True).strip(),
         "scope": "Development snapshot; includes local framework changes. Android 8.1 / API 27 is the runtime's advertised level, not a certification.",
         "inventory": class_inventory(args.android_jar, args.classes),
         "probeCatalog": {"total": len(cases), "categories": sorted(groups.values(), key=lambda row: row["name"])},

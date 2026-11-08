@@ -15,12 +15,12 @@
   const states = ['PASS','FAIL','UNSUPPORTED','SKIPPED','TIMEOUT','NOT_RUN'];
   const snapshot = inventory.probeSnapshot;
   const total = state => snapshot.categories.reduce((sum,row) => sum + row.counts[state],0);
-  const report = path => 'https://github.com/spectre-oss/shiraz/blob/main/' + path;
+  const report = path => 'https://github.com/spectre-oss/shiraz/blob/' + (path.startsWith('docs/') || path.startsWith('landing/') ? 'main' : inventory.sourceCommit) + '/' + path;
 </script>
 <section id="android-tracker" class="android-coverage" aria-labelledby="android-coverage-title">
   <h2 id="android-coverage-title">How much of Android works?</h2>
   <p class="coverage-intro">Android compatibility has more than one measure. Track the API surface, subsystem limits and recorded tests here. A class existing or a probe passing does not establish complete Android behavior.</p>
-  <p class="coverage-date">Development snapshot · {inventory.updated} UTC · runtime {inventory.runtimeVersion} · source <a href={'https://github.com/spectre-oss/shiraz/commit/' + inventory.sourceCommit}>{inventory.sourceCommit.slice(0,7)}</a>, with local changes</p>
+  <p class="coverage-date">Development snapshot · {inventory.updated} UTC · runtime {inventory.runtimeVersion} · source baseline <a href={'https://github.com/spectre-oss/shiraz/commit/' + inventory.sourceCommit}>{inventory.sourceCommit.slice(0,7)}</a>, with local changes</p>
 
   <h3>Subsystem support</h3>
   <p>{support.note}</p>
@@ -55,15 +55,15 @@
   </details>
 
   <h3>Behavioral probe tracker</h3>
-  <p>The current catalog defines <strong>{inventory.probeCatalog.total} assertions</strong>. A planned assertion has no result until it is run. The recorded snapshot below is separate from this current plan.</p>
-  <details class="coverage-details"><summary>Current planned assertions by category</summary><ul class="coverage-catalog">{#each inventory.probeCatalog.categories as item}<li><strong>{item.name}</strong><span>{item.automatic} automatic · {item.manual} manual</span></li>{/each}</ul></details>
+  <p>The recorded development catalog defines <strong>{inventory.probeCatalog.total} assertions</strong>. A planned assertion has no result until it is run. It is a versioned snapshot, not a live inventory of every branch. The behavioral run below is a separate measurement.</p>
+  <details class="coverage-details"><summary>Planned assertions by category</summary><ul class="coverage-catalog">{#each inventory.probeCatalog.categories as item}<li><strong>{item.name}</strong><span>{item.automatic} automatic · {item.manual} manual</span></li>{/each}</ul></details>
   {#if snapshot}
   <h4>{snapshot.label}</h4>
   <p>{snapshot.catalogSize}-case suite {snapshot.suiteVersion} · {snapshot.host}. {snapshot.note}</p>
   <ul class="coverage-totals" aria-label="Recorded probe status totals">{#each states as state}<li><strong>{total(state)}</strong> {state.replaceAll('_',' ')}</li>{/each}</ul>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to horizontally scrollable table) -->
   <div class="coverage-scroll" role="region" aria-describedby="android-table-hint" aria-label="Historical probe results" tabindex="0"><table class="coverage-table coverage-numbers"><caption class="visually-hidden">Historical assertion results, with unrun cases kept separate</caption><thead><tr><th scope="col">Category</th>{#each states as state}<th scope="col">{state.replaceAll('_',' ')}</th>{/each}</tr></thead><tbody>{#each snapshot.categories as item}<tr><th scope="row">{item.name}</th>{#each states as state}<td>{item.counts[state]}</td>{/each}</tr>{/each}</tbody></table></div>
-  <p class="coverage-caption">The import checks the report against its exact source fingerprint. It publishes only category totals, with no private result details. <a href={report('tests/api-probe/catalog.json')}>View current probe definitions</a>.</p>
+  <p class="coverage-caption">The import checks the report against its exact source fingerprint. It publishes only category totals, with no private result details. <a href={report('tests/api-probe/catalog.json')}>View probe source at the baseline</a>.</p>
   {:else}<p>No probe results have been imported. No behavioral pass rate is available.</p>{/if}
   <p class="coverage-caption">Maintainers: update <a href={report('landing/src/lib/android-support.json')}>subsystem notes</a> and regenerate inventories using <a href={report('landing/README.md')}>the tracker workflow</a> when support changes.</p>
 </section>
