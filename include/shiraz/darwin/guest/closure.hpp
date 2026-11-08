@@ -9,6 +9,9 @@ namespace shiraz::guest {
 struct Capture {
   CallFrame frame;
   const uint8_t *stack;
+  // Set by the real entry dispatcher in formerly unused tail padding.
+  // Zero for caller-owned synthetic argument buffers.
+  uintptr_t native_stack_remaining = 0;
 };
 // Process-lifetime entry points: callers may retain JNI pointers until VM exit.
 void *closure(std::function<void(Capture &)> handler);
@@ -28,8 +31,9 @@ uint64_t capture_boundary_token() noexcept;
 enum class Convention { Apple, Aapcs64 };
 class CallCursor {
 public:
-  CallCursor(const Capture &capture, Convention convention)
-      : capture_(capture), convention_(convention) {}
+  // Snapshot the starting address and validated native span. Synthetic
+  // captures over caller-owned buffers do not acquire native-stack metadata.
+  CallCursor(const Capture &capture, Convention convention);
   uint64_t next(unsigned size, bool floating);
   template <typename T> T read() {
     static_assert(std::is_pointer_v<T> || std::is_arithmetic_v<T> ||
@@ -46,6 +50,7 @@ private:
   Convention convention_;
   size_t stack_offset_ = 0;
   unsigned integer_ = 0, vector_ = 0;
+  uintptr_t stack_base_ = 0, native_remaining_ = 0, native_thread_ = 0;
 };
 template <typename T> void return_value(Capture &capture, T value) {
   if constexpr (std::is_floating_point_v<T>) {

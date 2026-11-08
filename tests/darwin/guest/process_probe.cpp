@@ -79,12 +79,36 @@ int main(int argc, char **argv) {
       std::vector<Argument> values;
       for (auto argument : arguments) values.push_back(Argument::integer(argument,ArgumentType::Int64));
       values.push_back(Argument::integer(number,ArgumentType::Int64));
+      uintptr_t sp;
+      __asm__ volatile("mov %0, sp" : "=r"(sp));
+      values.push_back(Argument::integer(sp,ArgumentType::Int64));
       auto result = call("__shiraz_linux_syscall", values);
       require(*guest_errno_location() == 73 && errno == 61, "raw SVC preserves both errno slots");
       return int64_t(result);
     };
     auto raw_syscall = [&](long number) { return raw_with(number,{}); };
     require(raw_syscall(172) == ::getpid(), "raw syscall returns actual pid");
+    int raw_rejected[2]; require(!pipe(raw_rejected), "raw SVC stack refusal pipe");
+    pid_t raw_child = fork(); require(raw_child >= 0, "raw SVC stack refusal child");
+    if (!raw_child) {
+      close(raw_rejected[0]);
+      if (dup2(raw_rejected[1], STDERR_FILENO) < 0) _exit(96);
+      close(raw_rejected[1]);
+      std::signal(SIGABRT, [](int) { _exit(97); });
+      std::vector<Argument> values(6, Argument::integer(0, ArgumentType::Int64));
+      values.push_back(Argument::integer(172, ArgumentType::Int64));
+      const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+      values.push_back(Argument::integer(high + 16, ArgumentType::Int64));
+      (void)call("__shiraz_linux_syscall", values);
+      _exit(98);
+    }
+    close(raw_rejected[1]);
+    auto raw_message = read_pipe(raw_rejected[0]); close(raw_rejected[0]);
+    int raw_status;
+    require(waitpid(raw_child, &raw_status, 0) == raw_child && WIFEXITED(raw_status) &&
+                WEXITSTATUS(raw_status) == 97 &&
+                raw_message == "SHIRAZ_GUEST_FATAL SVC SP outside prepared native stack extent\n",
+            "private SVC adapter refuses an aligned original SP beyond the native extent");
     require(raw_syscall(0x7fffffff) == -38, "raw syscall returns negative Linux ENOSYS");
     uint32_t futex_word = 7;
     uint64_t futex_address = uintptr_t(&futex_word);
@@ -192,5 +216,6 @@ int main(int argc, char **argv) {
         message.find("owned guest abort")!=std::string::npos && message.find("later message")==std::string::npos,
         "abort emits an owned copy of the first guest message then really aborts");
     std::cout << "M5_PROCESS_PASS syscall_ids=7 raw_svc=negative_errno raw_io=real getrandom=real futex=wait_wake_timeout_bitset_validation syslog=native_asl perror=1 abort=owned_first nonreturning_contract=1 exit_finalizers=1 fast_exit_finalizers=0 threads=4\n";
+    std::cout << "M5_SVC_STACK_PASS original_sp_rejected=1\n";
   } catch (const std::exception &failure) { std::cerr << "FAIL " << failure.what() << '\n'; return 1; }
 }

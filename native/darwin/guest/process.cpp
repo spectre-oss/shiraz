@@ -6,6 +6,7 @@
 #include "shiraz/darwin/guest/process.hpp"
 #include "shiraz/darwin/guest/format.hpp"
 #include "shiraz/darwin/guest/signals.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
 #include <algorithm>
 #include <array>
 #include <asl.h>
@@ -317,8 +318,15 @@ std::vector<ProviderExport> process_exports(std::shared_ptr<Lifecycle> lifecycle
   add("gettid",[state](Capture &capture){CallCursor cursor(capture,Convention::Aapcs64);HostErrno preserve;return_value(capture,state->syscall(178,cursor));});
   add("sigaltstack",[state](Capture &capture){CallCursor cursor(capture,Convention::Aapcs64);HostErrno preserve;return_value(capture,state->syscall(132,cursor));});
   add("__shiraz_linux_syscall", [state](Capture &capture) {
-    // Island supplies x0..x5 arguments and x8 syscall number in x6. Unlike
+    // Island supplies x0..x5 arguments, x8 syscall number in x6 and original
+    // guest SP in x7. Unlike
     // libc syscall(), Linux SVC returns negative errno and preserves TLS errno.
+    const auto original_sp = uintptr_t(capture.frame.integers[7]);
+    if ((original_sp & 15) || !prepared_guest_stack_contains(original_sp)) {
+      constexpr char message[] = "SHIRAZ_GUEST_FATAL SVC SP outside prepared native stack extent\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      std::abort();
+    }
     Capture arguments{};
     for (unsigned i = 0; i < 6; ++i) arguments.frame.integers[i] = capture.frame.integers[i];
     CallCursor cursor(arguments, Convention::Aapcs64);

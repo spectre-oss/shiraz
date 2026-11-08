@@ -189,12 +189,20 @@ bool guest_tls_prepared() noexcept {
   return false;
 }
 bool prepared_guest_stack_contains(uintptr_t pointer) noexcept {
+  return prepared_guest_stack_remaining(pointer) != 0;
+}
+uintptr_t prepared_guest_stack_remaining(uintptr_t pointer) noexcept {
   const auto current = pthread_self();
-  for (size_t i = 0; i < prepared_threads.size(); ++i)
-    if (prepared_threads[i].load(std::memory_order_acquire) == current)
-      return pointer >= prepared_stack_low[i].load(std::memory_order_relaxed) &&
-             pointer < prepared_stack_high[i].load(std::memory_order_relaxed);
-  return false;
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    if (prepared_threads[i].load(std::memory_order_acquire) != current) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    // A nested callback may release/reuse a readiness slot. Do not pair
+    // another owner's metadata with the first matching pthread observation.
+    if (prepared_threads[i].load(std::memory_order_acquire) != current) continue;
+    return pointer >= low && pointer < high ? high - pointer : 0;
+  }
+  return 0;
 }
 GuestThreadKeyHandle make_guest_thread_key(void *destructor) {
   return std::make_shared<GuestThreadKey>(destructor);

@@ -22,6 +22,9 @@ bool guest_tls_prepared() noexcept;
 // does not allocate or ask pthread for stack metadata on a signal path.
 // Membership is not proof of mapped pages or continuous guest SP residence.
 bool prepared_guest_stack_contains(uintptr_t pointer) noexcept;
+// Snapshot bytes remaining above pointer in this thread's prepared extent;
+// zero means unavailable/outside. The physical extent outlives TLS epochs.
+uintptr_t prepared_guest_stack_remaining(uintptr_t pointer) noexcept;
 // Handles have namespace-independent identity and stay alive while any thread
 // retains a value. Deletion suppresses future selections, never invokes a
 // destructor. A callback already selected during concurrent deletion may finish.

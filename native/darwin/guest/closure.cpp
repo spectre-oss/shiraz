@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/jit.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <libkern/OSCacheControl.h>
@@ -9,6 +10,7 @@
 #include <pthread.h>
 #include <stdexcept>
 #include <sys/mman.h>
+#include <unistd.h>
 
 namespace shiraz::guest {
 namespace {
@@ -26,10 +28,20 @@ CaptureBoundary::~CaptureBoundary() { boundary.current = previous_; }
 uint64_t capture_boundary_token() noexcept { return boundary.current; }
 extern "C" void shiraz_guest_closure_entry();
 static_assert(offsetof(Capture, stack) == 240);
+static_assert(offsetof(Capture, native_stack_remaining) == 248 && sizeof(Capture) == 256);
 extern "C" void
 shiraz_guest_closure_dispatch(std::function<void(Capture &)> *handler,
                               Capture *capture) noexcept {
   try {
+    if (!guest_tls_prepared()) prepare_guest_tls();
+    const auto incoming_sp = reinterpret_cast<uintptr_t>(capture->stack);
+    const auto remaining = prepared_guest_stack_remaining(incoming_sp);
+    if ((incoming_sp & 15) || !remaining) {
+      constexpr char message[] = "SHIRAZ_GUEST_FATAL provider SP outside prepared native stack extent\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      std::abort();
+    }
+    capture->native_stack_remaining = remaining;
     CaptureBoundary transition;
     (*handler)(*capture);
   } catch (const std::exception &error) {
@@ -86,6 +98,11 @@ void *closure(std::function<void(Capture &)> handler) {
   pool->used += 32;
   return code;
 }
+CallCursor::CallCursor(const Capture &capture, Convention convention)
+    : capture_(capture), convention_(convention),
+      stack_base_(reinterpret_cast<uintptr_t>(capture.stack)),
+      native_remaining_(capture.native_stack_remaining),
+      native_thread_(native_remaining_ ? reinterpret_cast<uintptr_t>(pthread_self()) : 0) {}
 uint64_t CallCursor::next(unsigned size, bool floating) {
   if (size != 1 && size != 2 && size != 4 && size != 8)
     throw std::invalid_argument("unsupported scalar ABI width");
@@ -96,11 +113,21 @@ uint64_t CallCursor::next(unsigned size, bool floating) {
     source = &capture_.frame.integers[integer_++];
   else {
     unsigned slot = convention_ == Convention::Apple ? size : 8;
-    stack_offset_ = (stack_offset_ + slot - 1) & ~(size_t(slot) - 1);
-    source = capture_.stack + stack_offset_;
-    stack_offset_ += slot;
     if (stack_offset_ > 4096)
       throw std::invalid_argument("guest callback stack limit");
+    const size_t offset = (stack_offset_ + slot - 1) & ~(size_t(slot) - 1);
+    if (offset > 4096 || slot > 4096 - offset)
+      throw std::invalid_argument("guest callback stack limit");
+    if (stack_base_ > UINTPTR_MAX - offset)
+      throw std::invalid_argument("guest callback stack address overflow");
+    const auto address = stack_base_ + offset;
+    if (address > UINTPTR_MAX - (size - 1))
+      throw std::invalid_argument("guest callback stack address overflow");
+    if (native_remaining_ && (native_thread_ != reinterpret_cast<uintptr_t>(pthread_self()) ||
+        offset > native_remaining_ || size > native_remaining_ - offset))
+      throw std::invalid_argument("guest callback stack read outside prepared native extent");
+    source = reinterpret_cast<const void *>(address);
+    stack_offset_ = offset + slot;
   }
   uint64_t value = 0;
   std::memcpy(&value, source, size);
