@@ -73,6 +73,7 @@ __pycache__/
 /credentials/
 /go-wasm/fonts/Manrope-wght.ttf
 /go-server/build/
+/pkg/
 
 !/docs/experiments/arc/README.md
 !/docs/experiments/arc/MINDUSTRY.md
