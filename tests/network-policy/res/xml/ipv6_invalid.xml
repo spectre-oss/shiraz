@@ -1,0 +1,2 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<network-security-config><domain-config><domain>localhost:443</domain></domain-config></network-security-config>

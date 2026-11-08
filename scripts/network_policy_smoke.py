@@ -4,6 +4,7 @@
 import fcntl
 import http.server
 import json
+import socket
 import subprocess
 import threading
 from typing import ClassVar
@@ -25,6 +26,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+
+class Ipv6Server(http.server.ThreadingHTTPServer):
+    address_family = socket.AF_INET6
 
 
 def main():
@@ -53,8 +58,14 @@ def main():
     subprocess.run(['java', '-cp', str(compiler(ROOT)), 'com.android.tools.r8.D8', '--min-api', '27',
                     '--output', str(dex), str(jar)], check=True, timeout=60)
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    try:
+        ipv6_server = Ipv6Server(('::1', 0), Handler)
+    except OSError:
+        server.server_close()
+        raise
+    threads = [threading.Thread(target=instance.serve_forever, daemon=True) for instance in (server, ipv6_server)]
+    for thread in threads:
+        thread.start()
     vm = HOST / 'bin/dalvikvm64'
     if not vm.is_file():
         vm = HOST / 'bin/dalvikvm'
@@ -62,20 +73,22 @@ def main():
                '-Xint', '-Xusejit:false', '-Xnoimage-dex2oat',
                '-Djava.library.path=' + str(NATIVE) + ':' + str(HOST / 'lib64'),
                '-cp', str(ROOT / 'build/shiraz-framework.jar') + ':' + str(dex),
-               'NetworkPolicySmoke', f'http://127.0.0.1:{server.server_port}', str(apk)]
+               'NetworkPolicySmoke', f'http://127.0.0.1:{server.server_port}', str(apk), f'http://[::1]:{ipv6_server.server_port}']
     try:
         result = subprocess.run(command, check=False, env=environment(work), text=True,
                                 capture_output=True, timeout=30)
         (work / 'stdout.log').write_text(result.stdout)
         (work / 'stderr.log').write_text(result.stderr)
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
+        for instance in (server, ipv6_server):
+            instance.shutdown()
+            instance.server_close()
+        for thread in threads:
+            thread.join()
     (work / 'result.json').write_text(json.dumps({'runtime': 'art', 'returncode': result.returncode,
         'requests': Handler.requests, 'passed': result.returncode == 0
-        and 'NETWORK_POLICY_VERIFIED' in result.stdout and Handler.requests == ['/body', '/xml-body']}, indent=2) + '\n')
-    if result.returncode or 'NETWORK_POLICY_VERIFIED' not in result.stdout or Handler.requests != ['/body', '/xml-body']:
+        and 'NETWORK_POLICY_VERIFIED' in result.stdout and Handler.requests == ['/body', '/xml-body', '/ipv6-body']}, indent=2) + '\n')
+    if result.returncode or 'NETWORK_POLICY_VERIFIED' not in result.stdout or Handler.requests != ['/body', '/xml-body', '/ipv6-body']:
         raise SystemExit('Network policy smoke failed; inspect build/network-policy-smoke/')
     print('NETWORK_POLICY_VERIFIED art (denied request never reached server)')
 

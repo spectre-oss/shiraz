@@ -39,7 +39,8 @@ def main():
                     str(ROOT / 'tests/api-probe/NetworkApiChecks.java'),
                     str(ROOT / 'tests/api-probe/NetworkXmlChecks.java'),
                     str(ROOT / 'tests/api-probe/TrustManagerChecks.java'),
-                    str(ROOT / 'tests/api-probe/TlsStreamChecks.java')], check=True, timeout=30)
+                    str(ROOT / 'tests/api-probe/TlsStreamChecks.java'),
+                    str(ROOT / 'tests/api-probe/Ipv6Checks.java')], check=True, timeout=30)
     jar = work / 'runner.jar'
     subprocess.run(['jar', 'cf', str(jar), '-C', str(classes), '.'], check=True, timeout=30)
     dex = work / 'runner-dex.jar'
@@ -81,7 +82,7 @@ def main():
     (work / 'result.json').write_text(json.dumps({'runtime': 'art',
         'apk': str(apk) if apk else None, 'internet_url': args.url,
         'internet_pass': 'NETWORK_INTERNET_PASS ' in result.stdout, 'returncode': result.returncode, 'cases': cases}, indent=2) + '\n')
-    if result.returncode or len(cases) != (34 if apk else 33) or any(c['status'] != 'PASS' for c in cases):
+    if result.returncode or len(cases) != (38 if apk else 37) or any(c['status'] != 'PASS' for c in cases):
         raise SystemExit('ART network probe failed; inspect build/network-probe-runtime/')
     for line in result.stdout.splitlines():
         if line.startswith('NETWORK_INTERNET_PASS '):

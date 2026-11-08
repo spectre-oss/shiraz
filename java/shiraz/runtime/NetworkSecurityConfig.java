@@ -94,7 +94,16 @@ public final class NetworkSecurityConfig {
                 for(Object content:child.content){if(!(content instanceof String))throw bad("Domain contains elements");if(text.length()+((String)content).length()>1024)throw bad("Domain text limit");text.append(content);}
                 String name=text.toString().trim().toLowerCase(Locale.US);
                 if(name.isEmpty()||name.length()>253||name.startsWith(".")||name.endsWith(".")||name.contains(".."))throw bad("Invalid domain");
-                for(int i=0;i<name.length();i++){char c=name.charAt(i);if(!(c>='a'&&c<='z'||c>='0'&&c<='9'||c=='.'||c=='-'))throw bad("Domain must be an ASCII hostname");}
+                if(name.indexOf(':')>=0){
+                    // Match Android's literal text (including brackets/scope),
+                    // but validate the numeric portion without DNS or requiring
+                    // a configured local interface during policy installation.
+                    String numeric=name;
+                    if(numeric.startsWith("[")&&numeric.endsWith("]"))numeric=numeric.substring(1,numeric.length()-1);
+                    int scope=numeric.indexOf('%');
+                    if(scope>=0){String zone=numeric.substring(scope+1);if(zone.isEmpty()||!zone.matches("[a-z0-9_.-]+"))throw bad("Invalid IPv6 scope");numeric=numeric.substring(0,scope);}
+                    if(libcore.io.Libcore.os.inet_pton(android.system.OsConstants.AF_INET6,numeric)==null)throw bad("Invalid IPv6 domain");
+                }else for(int i=0;i<name.length();i++){char c=name.charAt(i);if(!(c>='a'&&c<='z'||c>='0'&&c<='9'||c=='.'||c=='-'))throw bad("Domain must be an ASCII hostname");}
                 if(!names.add(name))throw bad("Duplicate domain");if(domains.size()>=1024)throw bad("Domain count limit");
                 domains.add(new Domain(name,Boolean.TRUE.equals(bool(child,"includeSubdomains")),rule));count++;
             }else if(child.name.equals("domain-config"))domainConfig(child,rule,depth+1);

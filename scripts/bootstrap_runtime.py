@@ -124,6 +124,12 @@ PATCHES = {
         ('art-tls-stream-reads.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java': '13f4f126d86c40e12aa7e5e5462de59191660b115e505fcea96b87bed4d1a973',
         }),
+        ('art-tls-ip-addresses.patch', {
+            'external/okhttp/okhttp/src/main/java/com/squareup/okhttp/internal/tls/OkHostnameVerifier.java': '411bdc96937ff7988f42020519bf18873736b08b7a4aefb752dd0114fde3da4f',
+        }),
+        ('art-tls-darwin-sigpipe.patch', {
+            'external/wolfssljni/native/com_wolfssl_WolfSSLSession.c': '4f75324e6fa86d31b4535937b83f0a871d4c4ce9aa30770347a1e74d9548c356',
+        }),
         ('art-host-unload.patch', {
             'libcore/luni/src/main/native/Register.cpp':
                 '1baba7f2fb38514ba57955287d7a28ca9478a985d3fd9bce411111837d36b9de',

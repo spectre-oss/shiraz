@@ -14,7 +14,7 @@ public final class NetworkConfigSmoke {
         if(config!=null)facts.setProperty("networkSecurityConfig",config);return facts;
     }
     static void host(String name,boolean expected){check(NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(name)==expected,"domain policy: "+name);}
-    public static void run(String apk,String url)throws Exception{
+    public static void run(String apk,String url,String ipv6Url)throws Exception{
         Properties domains=facts(apk,"@xml/domains");HostNetworkPolicy.install(domains);
         check(!NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(),"global policy must account for domain denial");
         host("example.com",true);host("www.example.com",true);host("EXAMPLE.COM.",true);
@@ -62,6 +62,14 @@ public final class NetworkConfigSmoke {
         try{try{denied.getResponseCode();throw new AssertionError("XML denied HTTP reached server");}catch(IOException expected){check(expected.getMessage().toLowerCase(Locale.US).contains("cleartext"),"XML denial reason");}}finally{denied.disconnect();}
         HttpURLConnection allowed=(HttpURLConnection)new URL(url+"/xml-body").openConnection();allowed.setConnectTimeout(1000);allowed.setReadTimeout(1000);
         try{check(allowed.getResponseCode()==200,"XML allowed HTTP status");try(InputStream in=allowed.getInputStream()){check(in.read()==42&&in.read()==-1,"XML allowed body");}}finally{allowed.disconnect();}
+        HostNetworkPolicy.install(facts(apk,"@xml/ipv6"));host("::1",true);host("[::1]",true);host("fe80::1%shiraz-test",true);host("fe80::1%other",false);host("0:0:0:0:0:0:0:1",true);host("::2",false);host("example.com",false);
+        try{HostNetworkPolicy.install(facts(apk,"@xml/ipv6_invalid"));throw new AssertionError("invalid numeric host accepted");}catch(IllegalArgumentException expected){}host("::1",true);host("::2",false);
+        HttpURLConnection ipv6=(HttpURLConnection)new URL(ipv6Url+"/ipv6-body").openConnection(Proxy.NO_PROXY);ipv6.setConnectTimeout(1500);ipv6.setReadTimeout(1500);
+        try{check(ipv6.getResponseCode()==200,"IPv6 policy HTTP status");try(InputStream in=ipv6.getInputStream()){check(in.read()==42&&in.read()==-1,"IPv6 policy body");}}finally{ipv6.disconnect();}
+        HostNetworkPolicy.install(facts(apk,"@xml/ipv6_deny"));host("::1",false);host("[::1]",false);host("example.com",true);
+        ipv6=(HttpURLConnection)new URL(ipv6Url+"/ipv6-forbidden").openConnection(Proxy.NO_PROXY);ipv6.setConnectTimeout(1500);ipv6.setReadTimeout(1500);
+        try{try{ipv6.getResponseCode();throw new AssertionError("IPv6 denied request sent");}catch(IOException expected){check(expected.getMessage().toLowerCase(Locale.US).contains("cleartext"),"IPv6 policy denial reason");}}finally{ipv6.disconnect();}
+        System.out.println("NETWORK_IPV6_POLICY_VERIFIED");
         System.out.println("NETWORK_XML_POLICY_VERIFIED");
     }
 }

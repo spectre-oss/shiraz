@@ -1,0 +1,2 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<network-security-config><base-config cleartextTrafficPermitted="true"/><domain-config cleartextTrafficPermitted="false"><domain>::1</domain><domain>[::1]</domain></domain-config></network-security-config>

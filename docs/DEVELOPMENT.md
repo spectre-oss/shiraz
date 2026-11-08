@@ -164,7 +164,11 @@ private directory under `/tmp` to stay within the Unix socket path limit. The
 runtime and smoke launchers select the same directory. Descriptor passing,
 Darwin reserved socket services, seqpacket on macOS, and custom TLS SNI/algorithm
 constraints still fail explicitly. Passing the tested subset does not establish
-support for every Android networking API.
+support for every Android networking API. IPv6 loopback probes exercise TCP, UDP,
+HTTP and verified HTTPS/TLS with compressed and expanded IP identities. IP SANs
+are compared as numeric address bytes without DNS. Darwin TLS descriptors use
+`SO_NOSIGPIPE`, so disconnected peers report I/O errors without terminating the app.
+These tests do not establish an external IPv6 route.
 The public `Network` adapter exposes only the host's current default network.
 Its DNS, socket factory and HTTP/HTTPS methods use that route; unknown network
 IDs fail without falling back to it. Handles and Parcelable identity round-trip.

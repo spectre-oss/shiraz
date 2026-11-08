@@ -46,7 +46,7 @@ public final class NetworkPolicySmoke {
             check(allowed.getResponseCode() == 200, "allowed HTTP status");
             try (InputStream in = allowed.getInputStream()) { check(in.read() == 42 && in.read() == -1, "allowed HTTP body"); }
         } finally { allowed.disconnect(); }
-        NetworkConfigSmoke.run(args[1],args[0]);
+        NetworkConfigSmoke.run(args[1],args[0],args[2]);
         System.out.println("NETWORK_POLICY_VERIFIED");
     }
 }

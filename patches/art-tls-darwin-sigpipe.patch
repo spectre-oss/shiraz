@@ -1,0 +1,32 @@
+--- a/external/wolfssljni/native/com_wolfssl_WolfSSLSession.c
++++ b/external/wolfssljni/native/com_wolfssl_WolfSSLSession.c
+@@ -22,6 +22,9 @@
+ #include <stdio.h>
+ #include <stdint.h>
+ #include <sys/time.h>
++#ifdef __APPLE__
++#include <sys/socket.h>
++#endif
+
+ #include <arpa/inet.h>
+ #include <wolfssl/options.h>
+@@ -367,6 +370,19 @@
+
+     fd = (*jenv)->GetIntField(jenv, fdesc, fid);
+
++#ifdef __APPLE__
++    /* wolfSSL writes directly to this descriptor. A disconnected peer must
++     * return an I/O failure, never deliver process-terminating SIGPIPE. Keep
++     * this socket-scoped rather than changing the application's signals. */
++    {
++        int enabled = 1;
++        if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE,
++                       &enabled, sizeof(enabled)) != 0) {
++            return SSL_FAILURE;
++        }
++    }
++#endif
++
+     /* set socket to non-blocking so we can use select() to detect
+      * WANT_READ / WANT_WRITE */
+     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);

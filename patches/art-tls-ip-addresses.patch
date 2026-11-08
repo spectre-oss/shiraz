@@ -1,0 +1,54 @@
+--- a/external/okhttp/okhttp/src/main/java/com/squareup/okhttp/internal/tls/OkHostnameVerifier.java
++++ b/external/okhttp/okhttp/src/main/java/com/squareup/okhttp/internal/tls/OkHostnameVerifier.java
+@@ -17,10 +17,12 @@
+
+ package com.squareup.okhttp.internal.tls;
+
++import java.net.InetAddress;
+ import java.security.cert.Certificate;
+ import java.security.cert.CertificateParsingException;
+ import java.security.cert.X509Certificate;
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.List;
+@@ -75,6 +77,9 @@
+   }
+
+   static boolean verifyAsIpAddress(String host) {
++    if (host.startsWith("[") && host.endsWith("]")) {
++      host = host.substring(1, host.length() - 1);
++    }
+     return VERIFY_AS_IP_ADDRESS.matcher(host).matches();
+   }
+
+@@ -82,13 +87,27 @@
+    * Returns true if {@code certificate} matches {@code ipAddress}.
+    */
+   private boolean verifyIpAddress(String ipAddress, X509Certificate certificate) {
++    byte[] address = numericAddress(ipAddress);
++    if (address == null) return false;
+     List<String> altNames = getSubjectAltNames(certificate, ALT_IPA_NAME);
+     for (int i = 0, size = altNames.size(); i < size; i++) {
+-      if (ipAddress.equalsIgnoreCase(altNames.get(i))) {
++      if (Arrays.equals(address, numericAddress(altNames.get(i)))) {
+         return true;
+       }
+     }
+     return false;
++  }
++
++  // SAN IP identities are address bytes, not one particular IPv6 spelling.
++  // inet_pton never resolves DNS and cannot turn a DNS SAN into an IP identity.
++  private static byte[] numericAddress(String value) {
++    if (value.startsWith("[") && value.endsWith("]")) {
++      value = value.substring(1, value.length() - 1);
++    }
++    int family = value.indexOf(':') >= 0
++        ? android.system.OsConstants.AF_INET6 : android.system.OsConstants.AF_INET;
++    InetAddress parsed = libcore.io.Libcore.os.inet_pton(family, value);
++    return parsed == null ? null : parsed.getAddress();
+   }
+
+   /**

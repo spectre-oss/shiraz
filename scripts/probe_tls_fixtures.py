@@ -11,7 +11,7 @@ def generate(directory: Path) -> None:
     subprocess.run(
         ['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
          '-keyout', str(key), '-out', str(cert), '-days', '2',
-         '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost',
+         '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:::1',
          '-addext', 'basicConstraints=critical,CA:TRUE'],
         check=True, timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
