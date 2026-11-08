@@ -34,6 +34,133 @@ def instruction(pc, mnemonic, *operands, reads=(), writes=()):
 
 
 class TpidrAuditTests(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("capstone"), "requires pinned Capstone decoder")
+    def test_real_add_words_preserve_register_extension_and_shift(self):
+        import capstone
+        from capstone import arm64
+
+        self.assertEqual(capstone.__version__, "5.0.3")
+        for word, expected in (
+            (0x8B090040, audit.Operand("reg", "x9")),
+            (0x8B35C769, audit.Operand("reg", "w21", shift="lsl", shift_amount=1, extend="sxtw")),
+        ):
+            with self.subTest(word=hex(word)):
+                decoder = audit.ElfDecoder.__new__(audit.ElfDecoder)
+                decoder.cache = {}
+                decoder.data = word.to_bytes(4, "little")
+                decoder.segments = [(0, 4, 0)]
+                decoder.arm64 = arm64
+                decoder.decoder = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+                decoder.decoder.detail = True
+                decoder.control_groups = set()
+                self.assertEqual(decoder(0).operands[2], expected)
+
+    def indexed_guard_graph(self, index_setup, index, *, operation="add", displacement=0):
+        body = [instruction(0, "mrs", R("x19"))]
+        for op, operands, writes in index_setup:
+            body.append(instruction(len(body) * 4, op, *operands, writes=writes))
+        body.extend([
+            instruction(len(body) * 4, operation, R("x20"), R("x19"), index),
+            instruction((len(body) + 1) * 4, "ldr", R("x8"), M("x20", displacement)),
+            instruction((len(body) + 2) * 4, "mov", R("x19"), R("xzr")),
+            instruction((len(body) + 3) * 4, "mov", R("x20"), R("xzr")),
+            instruction((len(body) + 4) * 4, "ret"),
+        ])
+        return self.run_graph(body)
+
+    def test_exact_register_indices_preserve_only_proved_affine_offsets(self):
+        cases = [
+            (40, R("x9"), "add", 0),
+            (5, audit.Operand("reg", "x9", shift="lsl", shift_amount=3), "add", 0),
+            (0xFFFFFFFF, audit.Operand("reg", "w9", extend="sxtw", shift="lsl", shift_amount=3), "add", 48),
+            (5, audit.Operand("reg", "w9", extend="uxtw", shift="lsl", shift_amount=3), "add", 0),
+            (0xFFFFFFD8, audit.Operand("reg", "w9", extend="sxtw"), "sub", 0),
+            (1 << 63, audit.Operand("reg", "x9", shift="lsl", shift_amount=1), "add", 40),
+        ]
+        for value, index, operation, displacement in cases:
+            with self.subTest(value=value, index=index, operation=operation):
+                result = self.indexed_guard_graph(
+                    [("mov", (R("x9"), I(value)), ())], index,
+                    operation=operation, displacement=displacement)
+                self.assertEqual(result["classification"], "guard-only", result["reasons"])
+                self.assertEqual(result["accesses"][0]["offset"], 40)
+
+    def test_exact_scalar_arithmetic_snapshots_and_writes_zero_extend(self):
+        for setup in (
+            [("mov", (R("x9"), I(-1)), ()), ("add", (R("x9"), R("x9"), I(41)), ())],
+            [("mov", (R("x10"), I((1 << 40) + 40)), ()), ("mov", (R("w9"), R("w10")), ())],
+        ):
+            result = self.indexed_guard_graph(setup, R("x9"))
+            self.assertEqual(result["classification"], "guard-only", result["reasons"])
+
+    def test_unproved_modified_or_clobbered_register_indices_are_refused(self):
+        cases = [
+            ([], R("x9")),
+            ([("mov", (R("x9"), R("sp")), ())], R("x9")),
+            ([("mov", (R("x9"), R("x19")), ())], R("x9")),
+            ([("mov", (R("x9"), I(40)), ()), ("unknown", (), ("x9",))], R("x9")),
+            ([("mov", (R("x9"), I(40)), ()), ("ldr", (R("x9"), M("x0")), ())], R("x9")),
+            ([("mov", (R("x9"), I(40)), ())], audit.Operand("reg", "x9", shift="ror", shift_amount=1)),
+            ([("mov", (R("x9"), I(40)), ())], audit.Operand("reg", "x9", shift="lsl", shift_amount=64)),
+            ([("mov", (R("w9"), I(5)), ())], audit.Operand("reg", "w9", extend="sxtw", shift_amount=5)),
+            ([("mov", (R("x9"), I(40)), ())], audit.Operand("reg", "x9", extend="sxtw")),
+            ([("mov", (R("w9"), I(20)), ())], audit.Operand("reg", "w9", extend="sxtw", shift_amount=1)),
+        ]
+        for setup, index in cases:
+            with self.subTest(setup=setup, index=index):
+                result = self.indexed_guard_graph(setup, index)
+                self.assertEqual(result["classification"], "unknown")
+                self.assertIn("register-arithmetic-index-unproved", self.reasons(result))
+
+    def test_different_scalar_paths_cannot_merge_into_one_guard_address(self):
+        result = self.run_graph([
+            instruction(0, "mrs", R("x19")),
+            instruction(4, "cbz", R("x0"), I(16)),
+            instruction(8, "mov", R("x9"), I(40)), instruction(12, "b", I(20)),
+            instruction(16, "mov", R("x9"), I(48)),
+            instruction(20, "add", R("x20"), R("x19"), R("x9")),
+            instruction(24, "ldr", R("x8"), M("x20")),
+            instruction(28, "mov", R("x19"), R("xzr")),
+            instruction(32, "mov", R("x20"), R("xzr")), instruction(36, "ret"),
+        ])
+        self.assertEqual(result["classification"], "unknown")
+        self.assertIn("non-guard-or-unmodelled-tls-memory-access", self.reasons(result))
+
+    def test_unknown_scalar_add_does_not_invent_an_address_or_stop_clean_paths(self):
+        prefix = [instruction(0, "mrs", R("x19")), instruction(4, "mov", R("x9"), I(40)),
+                  instruction(8, "add", R("x9"), R("x0"), R("x1"),
+                              reads=("x0", "x1"), writes=("x9",))]
+        clean = self.run_graph(prefix + [
+            instruction(12, "ldr", R("x8"), M("x19", 40)),
+            instruction(16, "mov", R("x19"), R("xzr")), instruction(20, "ret"),
+        ])
+        self.assertEqual(clean["classification"], "guard-only")
+        indexed = self.run_graph(prefix + [
+            instruction(12, "add", R("x20"), R("x19"), R("x9")), instruction(16, "ret"),
+        ])
+        self.assertEqual(indexed["classification"], "unknown")
+        self.assertIn("register-arithmetic-index-unproved", self.reasons(indexed))
+
+    def test_scalar_facts_are_partitioned_copied_and_invalidated(self):
+        state = audit.State()
+        state.set_scalar("x9", (1 << 40) + 7)
+        clone = state.copy()
+        self.assertEqual(clone.scalar("w9"), 7)
+        self.assertEqual(clone.fingerprint(), state.fingerprint())
+        clone.set_scalar("w9", 8)
+        self.assertEqual(clone.scalar("x9"), 8)
+        self.assertNotEqual(clone.fingerprint(), state.fingerprint())
+        for setter in (
+            lambda: clone.set("w9", audit.CLEAN),
+            lambda: clone.set_control("x9", audit.CLEAN),
+            lambda: clone.set_signature("x9", None),
+        ):
+            clone.set_scalar("x9", 40)
+            setter()
+            self.assertIsNone(clone.scalar("x9"))
+        self.assertIsNone(state.scalar("sp"))
+        self.assertIsNone(state.scalar("x0"))
+
     def test_unknown_stores_cannot_preserve_exact_spilled_thread_pointer(self):
         for op, registers, width in (("str", (R("w0"),), 4), ("str", (R("x0"),), 8),
                                      ("str", (R("q0"),), 16), ("stlr", (R("w0"),), 4),
@@ -1100,7 +1227,9 @@ class TpidrAuditTests(unittest.TestCase):
             pc = 4 + index * 16
             graph.extend([
                 instruction(pc, "cbz", R("x0"), I(pc + 12)),
-                instruction(pc + 4, "mov", R("x" + str(index)), R("xzr")),
+                # Both paths remain unknown scalars. An exact zero now has
+                # distinct semantics and must retain its own partition.
+                instruction(pc + 4, "mov", R("x" + str(index)), R("x18")),
                 instruction(pc + 8, "b", I(pc + 16)),
                 instruction(pc + 12, "nop"),
             ])

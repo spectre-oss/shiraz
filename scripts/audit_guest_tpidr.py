@@ -127,6 +127,9 @@ class Operand:
     base: str = ""
     index: str = ""
     displacement: int = 0
+    shift: str = ""
+    shift_amount: int = 0
+    extend: str = ""
 
 
 @dataclass(frozen=True)
@@ -175,6 +178,8 @@ class State:
     native_stack_clobber_below: int | None = None
     native_memory_may_contain_tp: bool = False
     native_stack_rewritten: set = field(default_factory=set)
+    # Exact integer bits only; CLEAN alone never supplies a scalar value.
+    constants: dict = field(default_factory=dict)
 
     def copy(self):
         return State(
@@ -193,6 +198,7 @@ class State:
             self.native_stack_clobber_below,
             self.native_memory_may_contain_tp,
             set(self.native_stack_rewritten),
+            dict(self.constants),
         )
 
     def fingerprint(self):
@@ -205,6 +211,7 @@ class State:
             self.native_stack_clobber_below,
             self.native_memory_may_contain_tp,
             tuple(sorted(self.native_stack_rewritten)),
+            tuple(sorted(self.constants.items())),
             *(
                 tuple(sorted((key, value) for key, value in mapping.items()
                              if not defaults or value != CLEAN))
@@ -229,6 +236,7 @@ class State:
     def set_control(self, name, value):
         name = reg(name)
         if name not in {"xzr", "wzr", "sp"}:
+            self.constants.pop(name, None)
             self.return_values[name] = value
             self.return_signatures.pop(name, None)
 
@@ -237,6 +245,7 @@ class State:
 
     def set_signature(self, name, signature):
         normalized = reg(name)
+        self.constants.pop(normalized, None)
         self.return_signatures.pop(normalized, None)
         if full_width_gpr(name) and isinstance(signature, ReturnSignature):
             self.return_signatures[normalized] = signature
@@ -261,10 +270,22 @@ class State:
     def set(self, name, value):
         name = reg(name)
         if name not in {"xzr", "wzr", "sp"}:
+            self.constants.pop(name, None)
             self.registers[name] = value
             self.return_values[name] = CLEAN
             self.image_addresses.pop(name, None)
             self.return_signatures.pop(name, None)
+
+    def scalar(self, name):
+        if name in {"xzr", "wzr"}:
+            return 0
+        value = self.constants.get(reg(name))
+        return value & 0xFFFFFFFF if value is not None and name.startswith("w") else value
+
+    def set_scalar(self, name, value):
+        if value is not None and (full_width_gpr(name) or name.startswith("w") and
+                                  reg(name) in {f"x{i}" for i in range(31)}):
+            self.constants[reg(name)] = value & ((1 << (32 if name.startswith("w") else 64)) - 1)
 
     def image(self, name):
         return self.image_addresses.get(reg(name)) if full_width_gpr(name) else None
@@ -278,6 +299,40 @@ class State:
 
 def tainted(value):
     return any(item is not None for item in value)
+
+
+def exact_register_delta(operands, state):
+    """A64 64-bit ADD/SUB index bits; no unknown integer becomes an address fact."""
+    destination, source, index = operands
+    if (any(item.kind != "reg" for item in operands)
+            or not full_width_gpr(destination.value)
+            or not (full_width_gpr(source.value) or source.value in {"sp", "xzr"})
+            or any(item.shift or item.shift_amount or item.extend for item in (destination, source))
+            or tainted(state.value(index.value)) or tainted(state.alias(index.value))
+            or tainted(state.control(index.value)) or state.signature(index.value) is not None
+            or state.image(index.value) is not None):
+        return None
+    value = state.scalar(index.value)
+    if value is None or type(index.shift_amount) is not int:
+        return None
+    if index.extend in {"uxtw", "sxtw"}:
+        if (source.value == "xzr" or not index.value.startswith("w") or
+                reg(index.value) not in {f"x{i}" for i in range(31)} | {"xzr"}
+                or index.shift not in {"", "lsl"} or not 0 <= index.shift_amount <= 4
+                or not index.shift and index.shift_amount):
+            return None
+        value &= 0xFFFFFFFF
+        if index.extend == "sxtw" and value & (1 << 31):
+            value -= 1 << 32
+    elif not index.extend:
+        if (source.value == "sp" or not (full_width_gpr(index.value) or index.value == "xzr")
+                or index.shift not in {"", "lsl"} or not 0 <= index.shift_amount < 64
+                or not index.shift and index.shift_amount):
+            return None
+    else:
+        return None
+    value = (value << index.shift_amount) & ((1 << 64) - 1)
+    return value - (1 << 64) if value & (1 << 63) else value
 
 
 def stack_fact_slots(state):
@@ -835,6 +890,23 @@ class Audit:
                         enqueue(binding["target"], returns, state)
                     continue
             op, operands = instruction.mnemonic, instruction.operands
+            if op in {"add", "sub"} and len(operands) == 3 and operands[2].kind == "reg":
+                delta = exact_register_delta(operands, state)
+                if delta is None:
+                    if any(item.kind == "reg" and (
+                            tainted(state.value(item.value)) or tainted(state.alias(item.value))
+                            or state.image(item.value) is not None or state.signature(item.value) is not None
+                    ) for item in operands[1:]):
+                        problem(pc, "register-arithmetic-index-unproved")
+                        continue
+                    # Unknown scalar arithmetic with no address facts still
+                    # follows the existing generic clobber transfer below.
+                    # It cannot derive an affine address or exact constant.
+                else:
+                    operands = (*operands[:2], Operand("imm", delta))
+            elif any(item.shift or item.shift_amount or item.extend for item in operands):
+                problem(pc, "unmodelled-operand-shift-or-extension")
+                continue
             values = [
                 state.value(item.value) if item.kind == "reg" else CLEAN
                 for item in operands
@@ -1076,6 +1148,8 @@ class Audit:
                     state.fp = None
             elif op == "mov" and len(operands) == 2 and operands[0].kind == "reg":
                 destination, source = operands
+                scalar = (state.scalar(source.value) if source.kind == "reg"
+                          else source.value if source.kind == "imm" else None)
                 image = state.image(source.value) if source.kind == "reg" else None
                 control = state.control(source.value) if source.kind == "reg" else CLEAN
                 signature = state.signature(source.value) if source.kind == "reg" else None
@@ -1120,12 +1194,14 @@ class Audit:
                 state.set_control(destination.value, control)
                 state.set_signature(destination.value, signature if full_width_gpr(destination.value) else None)
                 state.set_image(destination.value, image)
+                state.set_scalar(destination.value, scalar)
             elif (
                 op in {"add", "sub"}
                 and len(operands) == 3
                 and operands[2].kind == "imm"
             ):
                 destination, source, immediate = operands
+                scalar = state.scalar(source.value) if source.kind == "reg" else None
                 # W-register arithmetic zero-extends a truncated result. It
                 # cannot preserve the full-width TP-relative address even
                 # when the immediate is zero.
@@ -1184,6 +1260,7 @@ class Audit:
                     state.set(destination.value, value)
                 if full_width_gpr(destination.value) and image is not None:
                     state.set_image(destination.value, adjust_image_address(image, delta))
+                state.set_scalar(destination.value, None if scalar is None else scalar + delta)
             elif op in {"ldr", "ldrsw"} and len(operands) == 2 and operands[1].kind != "mem":
                 # Capstone represents a PC-relative literal address as an
                 # immediate, not a memory operand. It still reads memory and
@@ -2714,7 +2791,14 @@ class ElfDecoder:
         operands = []
         for item in decoded.operands:
             if item.type == self.arm64.ARM64_OP_REG:
-                operands.append(Operand("reg", decoded.reg_name(item.reg)))
+                shifts = {self.arm64.ARM64_SFT_INVALID: "", self.arm64.ARM64_SFT_LSL: "lsl",
+                          self.arm64.ARM64_SFT_LSR: "lsr", self.arm64.ARM64_SFT_ASR: "asr",
+                          self.arm64.ARM64_SFT_ROR: "ror"}
+                extensions = {self.arm64.ARM64_EXT_INVALID: "", self.arm64.ARM64_EXT_UXTW: "uxtw",
+                              self.arm64.ARM64_EXT_SXTW: "sxtw"}
+                operands.append(Operand(
+                    "reg", decoded.reg_name(item.reg), shift=shifts.get(item.shift.type, "unsupported"),
+                    shift_amount=item.shift.value, extend=extensions.get(item.ext, "unsupported")))
             elif item.type == self.arm64.ARM64_OP_IMM:
                 if item.shift.value:
                     operands.append(Operand("other"))
