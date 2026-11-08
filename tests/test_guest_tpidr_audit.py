@@ -34,6 +34,40 @@ def instruction(pc, mnemonic, *operands, reads=(), writes=()):
 
 
 class TpidrAuditTests(unittest.TestCase):
+    def test_unknown_stores_cannot_preserve_exact_spilled_thread_pointer(self):
+        for op, registers, width in (("str", (R("w0"),), 4), ("str", (R("x0"),), 8),
+                                     ("str", (R("q0"),), 16), ("stlr", (R("w0"),), 4),
+                                     ("stp", (R("x0"), R("x2")), 8)):
+            with self.subTest(op=op, width=width):
+                result = self.run_graph([
+                    instruction(0, "mrs", R("x19")),
+                    instruction(4, "str", R("x19"), M("sp")),
+                    instruction(8, "mov", R("x19"), R("xzr")),
+                    audit.Instruction(12, op, (*registers, M("x1")), width=width),
+                    instruction(16, "ldr", R("x19"), M("sp")),
+                    instruction(20, "ldr", R("x8"), M("x19", 40)),
+                    instruction(24, "mov", R("x19"), R("xzr")),
+                    instruction(28, "str", R("xzr"), M("sp")), instruction(32, "ret"),
+                ])
+                self.assertEqual(result["classification"], "unknown")
+                self.assertIn("unmodelled-store-may-clobber-thread-pointer-stack-spill", self.reasons(result))
+                self.assertEqual(result["accesses"], [])
+
+    def test_narrow_arithmetic_cannot_authorize_a_fullwidth_guard_load(self):
+        for op in ("add", "sub"):
+            for immediate in (0, 8):
+                with self.subTest(op=op, immediate=immediate):
+                    result = self.run_graph([
+                        instruction(0, "mrs", R("x19")),
+                        instruction(4, op, R("w19"), R("w19"), I(immediate)),
+                        instruction(8, "ldr", R("x8"), M("x19", 40)),
+                        instruction(12, "mov", R("x19"), R("xzr")),
+                        instruction(16, "ret"),
+                    ])
+                    self.assertEqual(result["classification"], "unknown")
+                    self.assertIn("narrowed-thread-pointer", self.reasons(result))
+                    self.assertEqual(result["accesses"], [])
+
     def test_literal_load_cannot_forget_tp_spilled_into_an_unproved_initial_stack(self):
         result = self.run_graph([
             instruction(0, "mrs", R("x19")), instruction(4, "ldr", R("x8"), M("x19", 40)),
@@ -124,7 +158,9 @@ class TpidrAuditTests(unittest.TestCase):
             instruction(24, "ldr", R("x11"), M("sp", 8)),
             instruction(28, "ldr", R("x12"), M("x11")), instruction(32, "b", I(256)),
         ])
-        self.assertIn("unmodelled-load-may-alias-thread-pointer-stack-spill", self.reasons(result))
+        self.assertEqual(result["classification"], "unknown")
+        self.assertIn("unmodelled-store-may-clobber-thread-pointer-stack-spill", self.reasons(result))
+        self.assertEqual(result["owned_image_accesses"], [])
 
     def test_unknown_store_cannot_retain_an_obsolete_spilled_stack_alias(self):
         result = self.run_graph([
@@ -1000,6 +1036,33 @@ class TpidrAuditTests(unittest.TestCase):
             changed = first.copy()
             setattr(changed, attribute, 16)
             self.assertNotEqual(first.fingerprint(), changed.fingerprint())
+
+    def test_default_register_facts_merge_but_clean_spill_slots_do_not(self):
+        empty = audit.State()
+        for name in ("registers", "aliases", "return_values"):
+            changed = empty.copy()
+            getattr(changed, name)["x9"] = audit.CLEAN
+            self.assertEqual(empty.fingerprint(), changed.fingerprint())
+        for name in ("stack", "stack_aliases", "stack_returns"):
+            changed = empty.copy()
+            getattr(changed, name)[8] = audit.CLEAN
+            self.assertNotEqual(empty.fingerprint(), changed.fingerprint())
+
+    def test_clean_register_diamonds_do_not_multiply_equivalent_contexts(self):
+        graph = [instruction(0, "mrs", R("x19"))]
+        for index in range(8):
+            pc = 4 + index * 16
+            graph.extend([
+                instruction(pc, "cbz", R("x0"), I(pc + 12)),
+                instruction(pc + 4, "mov", R("x" + str(index)), R("xzr")),
+                instruction(pc + 8, "b", I(pc + 16)),
+                instruction(pc + 12, "nop"),
+            ])
+        graph.extend([instruction(132, "ldr", R("x8"), M("x19", 40)),
+                      instruction(136, "mov", R("x19"), R("xzr")), instruction(140, "ret")])
+        result = self.run_graph(graph, max_contexts=40)
+        self.assertEqual(result["classification"], "guard-only")
+        self.assertNotIn("context-limit", self.reasons(result))
 
     def test_mrs_return_helper_needs_explicit_verified_caller_context(self):
         graph = [

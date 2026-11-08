@@ -20,6 +20,7 @@ import json
 import struct
 from collections import deque
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 import guest_callee_effects
@@ -34,6 +35,14 @@ MAX_VALUES = 8
 MAX_TOTAL_STEPS = 2_000_000
 MAX_CALLER_PRELUDE = 64
 CLEAN = frozenset({None})
+
+
+class DerivedBits(Enum):
+    OPAQUE = "opaque-thread-pointer-derived-bits"
+
+
+OPAQUE = DerivedBits.OPAQUE
+OPAQUE_VALUE = frozenset({OPAQUE})
 ORDERED_LOADS = frozenset({"ldar", "ldarb", "ldarh"})
 ORDERED_STORES = frozenset({"stlr", "stlrb", "stlrh"})
 
@@ -170,25 +179,26 @@ class State:
         )
 
     def fingerprint(self):
-        # Retain explicit CLEAN entries too: they affect the bounded spill-slot
-        # accounting. Frozenset values make ordering inside each lattice value
-        # immaterial, while sorted keys canonicalize dictionary insertion order.
+        # Missing register facts and explicit CLEAN facts have identical reads,
+        # liveness and limits. Canonicalize those defaults, without dropping
+        # stack entries: even CLEAN spill slots affect bounded slot accounting.
         return (
             self.sp,
             self.fp,
             *(
-                tuple(sorted(mapping.items()))
-                for mapping in (
-                    self.registers,
-                    self.stack,
-                    self.aliases,
-                    self.stack_aliases,
-                    self.return_values,
-                    self.stack_returns,
-                    self.image_addresses,
-                    self.stack_images,
-                    self.return_signatures,
-                    self.stack_signatures,
+                tuple(sorted((key, value) for key, value in mapping.items()
+                             if not defaults or value != CLEAN))
+                for mapping, defaults in (
+                    (self.registers, True),
+                    (self.stack, False),
+                    (self.aliases, True),
+                    (self.stack_aliases, False),
+                    (self.return_values, True),
+                    (self.stack_returns, False),
+                    (self.image_addresses, False),
+                    (self.stack_images, False),
+                    (self.return_signatures, False),
+                    (self.stack_signatures, False),
                 )
             ),
         )
@@ -248,6 +258,15 @@ class State:
 
 def tainted(value):
     return any(item is not None for item in value)
+
+
+def shift_pointer_offset(value, delta):
+    return value if value is None or value is OPAQUE else value + delta
+
+
+def opaque_load_register(name):
+    return full_width_gpr(name) or (isinstance(name, str) and name.startswith("w")
+                                    and reg(name) in {f"x{i}" for i in range(31)}) or name in {"xzr", "wzr"}
 
 
 def caller_prologue(decode, root, caller):
@@ -360,17 +379,22 @@ def caller_prologue(decode, root, caller):
 
 
 class Audit:
-    def __init__(self, decode, *, max_steps=MAX_STEPS, max_contexts=MAX_CONTEXTS):
+    def __init__(self, decode, *, max_steps=MAX_STEPS, max_contexts=MAX_CONTEXTS,
+                 track_opaque_loads=False):
         self.decode = decode
         self.max_steps = max_steps
         self.max_contexts = max_contexts
+        self.track_opaque_loads = track_opaque_loads
 
-    def site(self, address, caller=None):
+    def site(self, address, caller=None, *, entry_context=False):
+        if entry_context and caller is not None:
+            raise ValueError("entry context and direct caller context are mutually exclusive")
         reasons, accesses, callees = set(), set(), set()
         plt_bindings = {}
         callee_effects = {}
         owned_image_accesses = set()
         return_authentication = set()
+        opaque_loads = set()
         states = {}
         pending = deque()
         steps = 0
@@ -436,7 +460,18 @@ class Audit:
             }
         initial = State()
         caller_frame = None
+        entry_frame = None
         returns = ()
+        if entry_context:
+            if hasattr(self.decode, "caller_frame"):
+                prepared, entry_frame = self.decode.caller_frame(address)
+                entry_frame = {**entry_frame, "scope": "conditional straight-line function-entry path to MRS; alternate entries and initial stack origin unproved"}
+                if prepared is not None:
+                    initial = prepared
+                else:
+                    problem(address, "entry-prelude:" + entry_frame["reason"])
+            else:
+                problem(address, "entry-prelude:independent-entry-metadata-unavailable")
         if caller is not None:
             call = self.decode(caller)
             if (
@@ -538,6 +573,10 @@ class Audit:
                 if tainted(aliases) and slot is None:
                     problem(pc, "mixed-stack-address-atomic-access")
                 image = state.image(summary.memory_base)
+                # The helper's capability flag is also a memory read. An ELF
+                # ownership check does not prove separation from initial SP.
+                if any(tainted(value) for value in state.stack.values()):
+                    problem(pc, "atomic-flag-load-may-alias-thread-pointer-stack-spill")
                 if (
                     not tainted(base)
                     and not tainted(aliases)
@@ -737,6 +776,8 @@ class Audit:
                         problem(pc, "unproved-return-address")
                         continue
                     enqueue(return_pc, returns[:-1], state)
+                elif entry_context and state.sp != 0:
+                    problem(pc, "entry-context-stack-not-restored-at-return")
                 elif any(tainted(value) for value in state.stack.values()):
                     problem(pc, "thread-pointer-stack-return-needs-caller-context")
                 elif any(tainted(state.value(f"x{i}")) for i in range(9)):
@@ -879,6 +920,15 @@ class Audit:
                 and operands[2].kind == "imm"
             ):
                 destination, source, immediate = operands
+                # W-register arithmetic zero-extends a truncated result. It
+                # cannot preserve the full-width TP-relative address even
+                # when the immediate is zero.
+                if destination.value.startswith("w") and tainted(values[1]):
+                    problem(pc, "narrowed-thread-pointer")
+                    continue
+                if OPAQUE in values[1]:
+                    problem(pc, "opaque-thread-pointer-arithmetic")
+                    continue
                 if source.kind == "reg" and reg(source.value) in state.return_signatures:
                     problem(pc, "authenticated-return-arithmetic")
                 image = state.image(source.value) if source.kind == "reg" else None
@@ -916,11 +966,12 @@ class Audit:
                     if reg(destination.value) == "x29":
                         state.fp = None
                     value = frozenset(
-                        None if offset is None else offset + delta
+                        shift_pointer_offset(offset, delta)
                         for offset in values[1]
                     )
                     if any(
-                        offset is not None and abs(offset) > 4096 for offset in value
+                        offset is not None and offset is not OPAQUE and abs(offset) > 4096
+                        for offset in value
                     ):
                         problem(pc, "pointer-offset-limit")
                         continue
@@ -935,9 +986,15 @@ class Audit:
                     problem(pc, "unsupported-literal-memory-form")
                     continue
                 observe_owned_image_access(pc, operands[1].value, instruction.width, True, False)
-                if any(tainted(value) for value in state.stack.values()):
-                    problem(pc, "unmodelled-literal-load-may-alias-thread-pointer-stack-spill")
-                state.set(operands[0].value, CLEAN)
+                value = CLEAN
+                if any(tainted(saved) for saved in state.stack.values()):
+                    if (self.track_opaque_loads and instruction.width in (1, 2, 4, 8)
+                            and opaque_load_register(operands[0].value)):
+                        value = OPAQUE_VALUE
+                        opaque_loads.add((pc, operands[0].value, instruction.width))
+                    else:
+                        problem(pc, "unmodelled-literal-load-may-alias-thread-pointer-stack-spill")
+                state.set(operands[0].value, value)
                 state.set_alias(operands[0].value, CLEAN)
                 if reg(operands[0].value) == "x29":
                     state.fp = None
@@ -986,14 +1043,22 @@ class Audit:
                 # our stack". A preexisting unknown argument may point at a
                 # spilled TP even though exact materialized aliases are tracked.
                 # Only singleton known addresses can bypass this uncertainty.
-                if (
+                possible_spill_load = (
                     load
                     and slot is None
                     and not tainted(base_value)
                     and not tainted(index_value)
                     and any(tainted(value) for value in state.stack.values())
-                ):
-                    problem(pc, "unmodelled-load-may-alias-thread-pointer-stack-spill")
+                )
+                opaque_source = False
+                if possible_spill_load:
+                    if (self.track_opaque_loads and data and instruction.width in (1, 2, 4, 8)
+                            and all(opaque_load_register(item.value) for item in data)):
+                        opaque_source = True
+                        for item in data:
+                            opaque_loads.add((pc, item.value, instruction.width))
+                    else:
+                        problem(pc, "unmodelled-load-may-alias-thread-pointer-stack-spill")
                 if (
                     store
                     and slot is None
@@ -1005,6 +1070,9 @@ class Audit:
                     for offset in base_value:
                         if offset is None:
                             problem(pc, "mixed-pointer-memory-base")
+                        elif offset is OPAQUE:
+                            problem(pc, "opaque-thread-pointer-memory-base")
+                            accesses.add((pc, OPAQUE, op, "unsupported"))
                         elif (
                             memory.index
                             or not load
@@ -1021,6 +1089,14 @@ class Audit:
                 if not load and not store:
                     problem(pc, "unmodelled-memory-operation")
                 if store and slot is None:
+                    # Even a clean payload can partially overwrite a TP spill.
+                    # Its old affine value is no longer an exact reload fact.
+                    # Keep the failure sticky rather than silently laundering
+                    # the potentially modified pointer into a guard address.
+                    if any(tainted(value) for value in state.stack.values()):
+                        problem(pc, "unmodelled-store-may-clobber-thread-pointer-stack-spill")
+                    for saved in state.stack:
+                        state.stack[saved] = CLEAN
                     # Unknown stores can clobber a saved LR even when neither
                     # their address nor payload is derived from this TP.
                     for saved in state.stack_returns:
@@ -1057,6 +1133,14 @@ class Audit:
                                     "partial-overlap-with-thread-pointer-stack-spill",
                                 )
                     if load:
+                        if key is not None and not opaque_load_register(item.value) and (
+                            tainted(state.stack.get(key, CLEAN))
+                            or tainted(state.stack_aliases.get(key, CLEAN))
+                        ):
+                            problem(pc, "tainted-vector-stack-reload-unmodelled")
+                            state.set(item.value, CLEAN)
+                            state.set_alias(item.value, CLEAN)
+                            continue
                         signature = (
                             state.stack_signatures.get(key)
                             if key is not None and instruction.width == 8
@@ -1074,7 +1158,8 @@ class Audit:
                         )
                         state.set(
                             item.value,
-                            state.stack.get(key, CLEAN) if key is not None else CLEAN,
+                            state.stack.get(key, CLEAN) if key is not None
+                            else OPAQUE_VALUE if opaque_source else CLEAN,
                         )
                         alias = (
                             state.stack_aliases.get(key, CLEAN)
@@ -1129,7 +1214,7 @@ class Audit:
                         state.set_alias(
                             memory.base,
                             frozenset(
-                                None if value is None else value + delta
+                                shift_pointer_offset(value, delta)
                                 for value in stack_addresses
                             ),
                         )
@@ -1143,7 +1228,7 @@ class Audit:
                         state.set(
                             memory.base,
                             frozenset(
-                                None if value is None else value + delta
+                                shift_pointer_offset(value, delta)
                                 for value in base_value
                             ),
                         )
@@ -1184,13 +1269,21 @@ class Audit:
             "site": hex(address),
             "caller_context": None if caller is None else hex(caller),
             "caller_frame": caller_frame,
+            "entry_frame": entry_frame,
+            "opaque_load_tracking": self.track_opaque_loads,
+            "opaque_loads": [{"pc": hex(pc), "destination": destination, "width": width,
+                              "scope": "possible derived bits, never an affine TP or return address"}
+                             for pc, destination, width in sorted(opaque_loads)],
             "classification": classification,
             "steps": steps,
             "analysis_strategy": "bounded-exact-state-partitions",
             "state_partitions": len(states),
             "accesses": [
-                {"pc": hex(pc), "offset": offset, "instruction": op, "kind": kind}
-                for pc, offset, op, kind in sorted(accesses)
+                {"pc": hex(pc), "offset": None if offset is OPAQUE else offset,
+                 "instruction": op, "kind": kind,
+                 **({"value_kind": "opaque-derived"} if offset is OPAQUE else {})}
+                for pc, offset, op, kind in sorted(accesses, key=lambda row: (
+                    row[0], row[1] is OPAQUE, 0 if row[1] is OPAQUE else row[1], row[2], row[3]))
             ],
             "callees": [
                 {
@@ -2304,6 +2397,10 @@ def main():
     parser.add_argument("elf", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--site", action="append", type=lambda value: int(value, 0))
+    parser.add_argument("--track-opaque-loads", action="store_true",
+                        help="experimental typed GPR taint for uncertain TP spill loads; vector/atomic uncertainty still refuses")
+    parser.add_argument("--entry-context", action="store_true",
+                        help="conditional independently validated function-entry prologue to each MRS")
     parser.add_argument(
         "--bindings",
         type=Path,
@@ -2324,6 +2421,8 @@ def main():
         help="explicit directory of all hash-matched recorded guest ELFs; enables bounded cross-ELF body traversal",
     )
     args = parser.parse_args()
+    if args.entry_context and args.caller is not None:
+        parser.error("--entry-context and --caller are mutually exclusive")
     if args.caller is not None and (not args.site or len(args.site) != 1):
         parser.error("--caller requires exactly one --site")
     if args.provider_bridge is not None and args.bindings is None:
@@ -2355,12 +2454,14 @@ def main():
             }
         else:
             result = Audit(
-                decoder, max_steps=min(MAX_STEPS, MAX_TOTAL_STEPS - total_steps)
-            ).site(site, caller=args.caller)
+                decoder, max_steps=min(MAX_STEPS, MAX_TOTAL_STEPS - total_steps),
+                track_opaque_loads=args.track_opaque_loads,
+            ).site(site, caller=args.caller, entry_context=args.entry_context)
         total_steps += result.get("steps", 0)
         results.append(result)
     report = {
         "schema": 1,
+        "experimental_opaque_load_tracking": args.track_opaque_loads,
         "analyzer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "decoder": "capstone-5.0.3",
         "decoder_identity": decoder.identity,

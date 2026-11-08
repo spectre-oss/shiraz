@@ -179,6 +179,12 @@ class ReturnAuthenticationTests(unittest.TestCase):
         other.stack_signatures.clear()
         self.assertNotEqual(state.fingerprint(), other.fingerprint())
 
+    def test_caller_prologue_does_not_treat_untracked_authentication_as_nop(self):
+        for op in ("paciasp", "pacibsp"):
+            graph = {0: ins(0, op), 4: ins(4, "bl", imm(8))}
+            with self.assertRaises(a.MetadataUnavailable):
+                a.caller_prologue(graph.get, 0, 4)
+
 
 if __name__ == "__main__":
     unittest.main()
