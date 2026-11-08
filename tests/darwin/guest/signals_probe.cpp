@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/signals.hpp"
+#include "guest_errno.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <pthread.h>
 #include <sys/wait.h>
 #include <thread>
@@ -19,33 +25,204 @@ static Argument pointer(const void *value) {
   return Argument::integer(reinterpret_cast<uintptr_t>(value),
                            ArgumentType::Int64);
 }
+static Providers signal_providers(const std::shared_ptr<SignalRuntime> &runtime) {
+  auto base = native_personality();
+  Providers providers;
+  for (const auto &pair : base.modules()) {
+    Provider module = pair.second;
+    if (module.soname == "libc.so") {
+      auto additions = runtime->exports();
+      module.exports.erase(
+          std::remove_if(module.exports.begin(), module.exports.end(), [&](const auto &entry) {
+            return std::any_of(additions.begin(), additions.end(), [&](const auto &addition) {
+              return entry.name == addition.name;
+            });
+          }), module.exports.end());
+      module.exports.insert(module.exports.end(), additions.begin(), additions.end());
+    }
+    providers.add(std::move(module));
+  }
+  return providers;
+}
+struct SignalRacePayload {
+  uint32_t calls = 0, completed = 0, block = 0, entered = 0, closed = 0, post_close = 0;
+};
+static_assert(sizeof(SignalRacePayload) == 24 &&
+              __atomic_always_lock_free(sizeof(uint32_t), nullptr));
+static uint32_t race_load(const uint32_t &value) { return __atomic_load_n(&value, __ATOMIC_ACQUIRE); }
+static void race_store(uint32_t &value, uint32_t next) { __atomic_store_n(&value, next, __ATOMIC_RELEASE); }
+// A broken callback/close implementation must fail the executable gate rather
+// than leave a join blocked forever. This timer never delivers a guest signal.
+class SignalRaceDeadline {
+  std::mutex mutex;
+  std::condition_variable condition;
+  bool finished = false;
+  std::thread watcher;
+public:
+  SignalRaceDeadline() : watcher([this] {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (!condition.wait_for(lock, std::chrono::seconds(20), [&] { return finished; })) {
+      constexpr char text[] = "M5_SIGNAL_QUIESCENCE_TIMEOUT\n";
+      (void)::write(STDERR_FILENO, text, sizeof(text) - 1);
+      ::_exit(124);
+    }
+  }) {}
+  ~SignalRaceDeadline() {
+    { std::lock_guard<std::mutex> lock(mutex); finished = true; }
+    condition.notify_one();
+    watcher.join();
+  }
+};
+static void signal_shutdown_race(const std::filesystem::path &directory) {
+  struct NativeDisposition {
+    struct sigaction saved{};
+    NativeDisposition() {
+      require(!::sigaction(SIGUSR1, nullptr, &saved), "snapshot race disposition");
+      require(saved.sa_handler == SIG_DFL || saved.sa_handler == SIG_IGN,
+              "race probe does not replace a foreign native handler");
+      struct sigaction ignored{};
+      sigemptyset(&ignored.sa_mask);
+      ignored.sa_handler = SIG_IGN;
+      require(!::sigaction(SIGUSR1, &ignored, nullptr), "ignore deliveries after owned shutdown");
+    }
+    ~NativeDisposition() {
+      if (::sigaction(SIGUSR1, &saved, nullptr)) ::_exit(95);
+    }
+  } restore;
+  SignalRaceDeadline deadline;
+  Loader *current = nullptr;
+  auto runtime = std::make_shared<SignalRuntime>(
+      [&](const void *p) { return current && current->contains_code(p); });
+  auto competitor = std::make_shared<SignalRuntime>([](const void *) { return false; });
+  auto loader = std::make_unique<Loader>(
+      std::vector<std::filesystem::path>{directory}, signal_providers(runtime));
+  current = loader.get();
+  runtime->attach(*loader);
+  competitor->attach(*loader);
+  uintptr_t competitor_action = 0;
+  for (const auto &entry : competitor->exports())
+    if (entry.name == "sigaction") competitor_action = entry.address;
+  require(competitor_action != 0, "competing runtime exposes actual sigaction adapter");
+  struct GuestIgnoreAction {
+    uint32_t flags = 0, padding = 0;
+    uintptr_t handler = 1;
+    uint64_t mask = 0;
+    uintptr_t restorer = 0;
+  } ignore;
+  static_assert(sizeof(GuestIgnoreAction) == 32 && offsetof(GuestIgnoreAction, handler) == 8);
+  auto compete = [&] {
+    *guest_errno_location() = 73;
+    const auto result = invoke(reinterpret_cast<void *>(competitor_action),
+        {Argument::integer(10), pointer(&ignore), pointer(nullptr)});
+    return std::pair<int, int>{int32_t(result.result_integers[0]), *guest_errno_location()};
+  };
+  auto *module = loader->open("libsignals.so");
+  const auto install = loader->symbol(module, "signals_race_install").address;
+  SignalRacePayload payload;
+  auto install_handler = [&] {
+    int error = 0;
+    auto result = invoke(reinterpret_cast<void *>(install), {pointer(&payload), pointer(&error)});
+    require(int32_t(result.result_integers[0]) == 0 && error == 73,
+            "install/replace actual guest race callback");
+  };
+  install_handler();
+  std::atomic<bool> running{true}, close_done{false}, close_error{false};
+  std::atomic<unsigned> ready{0}, worker_errors{0};
+  std::atomic<uint64_t> sends{0};
+  std::vector<std::thread> workers;
+  std::thread closer;
+  auto cleanup = [&] {
+    running.store(false, std::memory_order_release);
+    race_store(payload.block, 0);
+    for (auto &worker : workers) if (worker.joinable()) worker.join();
+    if (closer.joinable()) closer.join();
+    runtime->shutdown();
+    competitor->shutdown();
+    loader.reset();
+    current = nullptr;
+  };
+  auto wait_for = [&](auto predicate) {
+    const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!predicate()) {
+      if (std::chrono::steady_clock::now() >= limit) return false;
+      std::this_thread::yield();
+    }
+    return true;
+  };
+  try {
+    for (unsigned i = 0; i < 2; ++i) workers.emplace_back([&] {
+      try { prepare_guest_tls(); }
+      catch (...) { worker_errors.fetch_add(1); ready.fetch_add(1); return; }
+      ready.fetch_add(1, std::memory_order_release);
+      while (running.load(std::memory_order_acquire)) {
+        if (::pthread_kill(pthread_self(), SIGUSR1)) {
+          worker_errors.fetch_add(1); break;
+        }
+        sends.fetch_add(1, std::memory_order_release);
+      }
+    });
+    require(wait_for([&] { return ready.load(std::memory_order_acquire) == 2; }) &&
+                !worker_errors.load(), "both signal-race workers prepared");
+    require(wait_for([&] { return race_load(payload.calls) >= 512; }),
+            "actual guest callbacks execute concurrently");
+    for (unsigned i = 0; i < 64; ++i) install_handler();
+    race_store(payload.block, 1);
+    require(wait_for([&] { return race_load(payload.entered) != 0; }),
+            "guest callback held active across shutdown");
+    closer = std::thread([&] {
+      try { runtime->shutdown(); }
+      catch (...) { close_error.store(true, std::memory_order_release); }
+      close_done.store(true, std::memory_order_release);
+    });
+    bool query_error = false;
+    const bool disposition_restored = wait_for([&] {
+      struct sigaction action{};
+      if (::sigaction(SIGUSR1, nullptr, &action)) { query_error = true; return true; }
+      return action.sa_handler == SIG_IGN;
+    });
+    const bool waited_for_callback = disposition_restored && !query_error &&
+                                    !close_done.load(std::memory_order_acquire);
+    const auto competing_result = compete();
+    // Release even on failure before any assertion can unwind joinable threads.
+    race_store(payload.block, 0);
+    closer.join();
+    require(waited_for_callback && !close_error.load(std::memory_order_acquire),
+            "shutdown restores native disposition but waits for active callback");
+    require(competing_result.first == -1 && competing_result.second == bionic::kEBUSY,
+            "closing signal owner remains exclusive until callback quiescence");
+    const auto reclaimed = compete();
+    require(reclaimed.first == 0 && reclaimed.second == 73,
+            "another runtime can claim signal after prior callback quiescence");
+    competitor->shutdown();
+    race_store(payload.closed, 1);
+    uint64_t before = sends.load(std::memory_order_acquire);
+    require(wait_for([&] { return sends.load(std::memory_order_acquire) >= before + 512; }),
+            "native signals continue after callback shutdown");
+    const auto callbacks = race_load(payload.calls);
+    require(callbacks == race_load(payload.completed) && !race_load(payload.post_close),
+            "no guest callback survives completed shutdown");
+    loader.reset();
+    current = nullptr;
+    before = sends.load(std::memory_order_acquire);
+    require(wait_for([&] { return sends.load(std::memory_order_acquire) >= before + 512; }),
+            "native signals continue after actual guest ELF unmap");
+    require(race_load(payload.calls) == callbacks && !race_load(payload.post_close) &&
+                !worker_errors.load(), "guest code is never entered after unmap");
+    cleanup();
+  } catch (...) { cleanup(); throw; }
+  std::cout << "M5_SIGNAL_QUIESCENCE_PASS workers=2 replacements=64 callbacks="
+            << race_load(payload.calls)
+            << " held_callback=1 shutdown_wait=1 postclose_sends=512 postunmap_sends=512 "
+               "closing_owner_busy=1 reclaim_after_quiescence=1 late_callbacks=0 "
+               "actual_guest_elf=1 general_art_unload_proof=0\n" << std::flush;
+}
 int main(int argc, char **argv) {
   try {
     require(argc == 2, "usage: signals-probe fixture-directory");
     Loader *current = nullptr;
     auto runtime = std::make_shared<SignalRuntime>(
         [&](const void *p) { return current && current->contains_code(p); });
-    auto base = native_personality();
-    Providers providers;
-    for (const auto &pair : base.modules()) {
-      Provider module = pair.second;
-      if (module.soname == "libc.so") {
-        auto additions = runtime->exports();
-        module.exports.erase(
-            std::remove_if(module.exports.begin(), module.exports.end(),
-                           [&](const auto &entry) {
-                             return std::any_of(
-                                 additions.begin(), additions.end(),
-                                 [&](const auto &addition) {
-                                   return entry.name == addition.name;
-                                 });
-                           }),
-            module.exports.end());
-        module.exports.insert(module.exports.end(), additions.begin(),
-                              additions.end());
-      }
-      providers.add(std::move(module));
-    }
+    auto providers = signal_providers(runtime);
     auto loader = std::make_unique<Loader>(
         std::vector<std::filesystem::path>{argv[1]}, std::move(providers));
     current = loader.get();
@@ -291,6 +468,7 @@ int main(int argc, char **argv) {
     close(notification[0]);
     close(notification[1]);
     runtime->shutdown();
+    signal_shutdown_race(argv[1]);
     std::cout
         << "M5_SIGNALS_PASS callback=basic_aapcs native_thread=prepared "
            "masks=translated pending=1 mask_ownership=1 mask_shutdown_guard=1 mask_thread_exit=1 mask_handler_rejected=1 waits=translated wait4_kib=1 preunmap=restored "

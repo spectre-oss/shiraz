@@ -166,3 +166,40 @@ int signals_mask_in_handler(int *error) {
   *error = errno;
   return result ? -1 : mask_probe_result;
 }
+
+// Shared with the native probe using lock-free 32-bit atomic builtins. The
+// callback performs no allocation, libc call, or first-use TLS initialization.
+struct race_payload {
+  uint32_t calls, completed, block, entered, closed, post_close;
+};
+_Static_assert(sizeof(struct race_payload) == 24 &&
+                   __atomic_always_lock_free(sizeof(uint32_t), 0),
+               "signal race payload uses inline lock-free operations");
+static struct race_payload *race_payload;
+static void race_record(int number) {
+  (void)number;
+  struct race_payload *payload = __atomic_load_n(&race_payload, __ATOMIC_ACQUIRE);
+  if (!payload) return;
+  __atomic_fetch_add(&payload->calls, 1, __ATOMIC_RELAXED);
+  if (__atomic_load_n(&payload->closed, __ATOMIC_ACQUIRE))
+    __atomic_fetch_add(&payload->post_close, 1, __ATOMIC_RELAXED);
+  if (__atomic_load_n(&payload->block, __ATOMIC_ACQUIRE)) {
+    __atomic_fetch_add(&payload->entered, 1, __ATOMIC_RELEASE);
+    while (__atomic_load_n(&payload->block, __ATOMIC_ACQUIRE)) {
+    }
+  }
+  if (__atomic_load_n(&payload->closed, __ATOMIC_ACQUIRE))
+    __atomic_fetch_add(&payload->post_close, 1, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&payload->completed, 1, __ATOMIC_RELEASE);
+}
+int signals_race_install(struct race_payload *payload, int *error) {
+  __atomic_store_n(&race_payload, payload, __ATOMIC_RELEASE);
+  struct sigaction action = {0};
+  sigemptyset(&action.sa_mask);
+  action.sa_handler = race_record;
+  action.sa_flags = SA_RESTART;
+  errno = 73;
+  int result = sigaction(SIGUSR1, &action, 0);
+  *error = errno;
+  return result;
+}

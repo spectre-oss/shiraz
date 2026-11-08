@@ -9,6 +9,8 @@ bool in_guest_signal_handler() noexcept;
 int guest_thread_signal(pthread_t thread,int signal);
 // Owns native dispositions until shutdown. Attach before exposing guest
 // installation APIs; Loader's pre-unmap hook stops callbacks before code dies.
+// Closing ownership stays reserved until in-flight callbacks finish; another
+// runtime cannot claim the same native signal during that interval.
 // Basic one-argument handlers are supported. SIGINFO/ucontext, alternate
 // stacks, realtime signals and unprepared native delivery threads are not.
 // Mask changes affect only this runtime's owned dispositions. Native masks are

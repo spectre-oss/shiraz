@@ -1728,7 +1728,7 @@ macos-guest-check: macos-guest-events-check
 
 $(MACOS_GUEST_DEP_DIR)/signals.o: tests/darwin/guest/deps/signals.c $(MACOS_OUT)/m5/guest_io.hpp
 	mkdir -p $(dir $@)
-	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -mno-outline-atomics -O2 -Wall -Wextra -Werror -c $< -o $@
 .PHONY: macos-guest-signals-fixture macos-guest-signals-check
 macos-guest-signals-fixture: $(MACOS_GUEST_DEP_DIR)/signals.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
 	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libsignals.so $(MACOS_GUEST_DEP_DIR)/signals.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libsignals.so

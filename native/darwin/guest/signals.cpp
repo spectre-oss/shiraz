@@ -202,8 +202,11 @@ void handler(int native) {
   if (native <= 0 || native >= NSIG)
     return;
   auto &slot = slots[size_t(native)];
-  slot.active.fetch_add(1, std::memory_order_acq_rel);
-  const Record *record = slot.record.load(std::memory_order_acquire);
+  // Entry and shutdown form one two-atomic handshake. SC forbids both
+  // sides observing the old value: a callback retaining an old record must
+  // announce itself before shutdown's zero check, or finish before it.
+  slot.active.fetch_add(1, std::memory_order_seq_cst);
+  const Record *record = slot.record.load(std::memory_order_seq_cst);
   if (record && record->action.handler > 1) {
     if (!guest_tls_prepared()) {
       constexpr char text[] =
@@ -221,7 +224,7 @@ void handler(int native) {
     --handling_depth;
     handling_owner = previous;
   }
-  slot.active.fetch_sub(1, std::memory_order_release);
+  slot.active.fetch_sub(1, std::memory_order_seq_cst);
   errno = previous_errno;
 }
 int status_to_guest(int native, int &guest) {
@@ -631,22 +634,28 @@ struct SignalRuntime::State {
       closing = true;
       for (size_t i = 1; i < slots.size(); ++i)
         if (slots[i].owner == this) {
-          slots[i].record.store(nullptr, std::memory_order_release);
+          slots[i].record.store(nullptr, std::memory_order_seq_cst);
           if (saved[i] && ::sigaction(int(i), &originals[i], nullptr)) {
             std::fprintf(stderr, "SHIRAZ_GUEST_FATAL cannot restore native "
                                  "signal disposition\n");
             std::abort();
           }
-          slots[i].owner = nullptr;
+          // Reserve closing ownership until the old callbacks drain. A new
+          // owner must not feed this slot's shared counter during the wait.
           wait[i] = true;
         }
     }
     for (size_t i = 1; i < slots.size(); ++i)
       if (wait[i])
-        while (slots[i].active.load(std::memory_order_acquire))
+        while (slots[i].active.load(std::memory_order_seq_cst))
           std::this_thread::yield();
     {
       std::lock_guard<std::mutex> lock(dispositions);
+      for (size_t i = 1; i < slots.size(); ++i)
+        if (wait[i]) {
+          if (slots[i].owner != this) std::abort();
+          slots[i].owner = nullptr;
+        }
       closed = true;
       validate = {};
       stopped.notify_all();
