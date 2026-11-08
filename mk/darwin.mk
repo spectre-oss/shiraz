@@ -806,6 +806,13 @@ macos-guest-personality-check: macos-guest-personality-fixture $(MACOS_OUT)/m5/p
 	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/personality-probe-hardened
 	$(MACOS_OUT)/m5/personality-probe-hardened $(MACOS_GUEST_DEP_DIR)
 
+$(MACOS_OUT)/m5/personality-sanitized: tests/darwin/guest/personality_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/personality_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-personality-sanitize-check
+macos-guest-personality-sanitize-check: macos-guest-personality-fixture $(MACOS_OUT)/m5/personality-sanitized
+	$(MACOS_OUT)/m5/personality-sanitized $(MACOS_GUEST_DEP_DIR)
+
 $(MACOS_OUT)/m5/dependency-sanitized: tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
 	mkdir -p $(dir $@)
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) -o $@

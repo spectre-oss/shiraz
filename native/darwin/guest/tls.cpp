@@ -10,6 +10,7 @@
 #include <iterator>
 #include <mutex>
 #include <vector>
+#include <utility>
 #include <pthread.h>
 #include <stdexcept>
 
@@ -35,6 +36,7 @@ static_assert(std::atomic<uintptr_t>::is_always_lock_free);
 struct MemoryDomains {
   std::mutex mutex;
   std::map<uintptr_t, uintptr_t> images;
+  std::map<uintptr_t, uintptr_t> heaps, stacks;
 };
 MemoryDomains &memory_domains() {
   // Native teardown and Image destruction may run after ordinary static
@@ -42,10 +44,20 @@ MemoryDomains &memory_domains() {
   static auto *value = new MemoryDomains;
   return *value;
 }
+bool overlaps_range(const std::map<uintptr_t, uintptr_t> &ranges,
+                    uintptr_t low, uintptr_t high, uintptr_t ignored = 0) {
+  auto next = ranges.lower_bound(low);
+  if (next != ranges.end() && next->first == ignored) ++next;
+  if (next != ranges.end() && next->first < high) return true;
+  auto before = ranges.lower_bound(low);
+  while (before != ranges.begin()) {
+    --before;
+    if (before->first != ignored) return before->second > low;
+  }
+  return false;
+}
 bool overlaps_image(const MemoryDomains &domains, uintptr_t low, uintptr_t high) {
-  auto next = domains.images.lower_bound(low);
-  return (next != domains.images.end() && next->first < high) ||
-         (next != domains.images.begin() && std::prev(next)->second > low);
+  return overlaps_range(domains.images, low, high);
 }
 uintptr_t guard() {
   // Android's stack guard is a process value copied into each thread's TLS.
@@ -84,10 +96,20 @@ struct ThreadState {
     std::lock_guard<std::mutex> lock(domains.mutex);
     if (overlaps_image(domains, high - size, high))
       throw ElfError("native stack overlaps guest image reservation");
+    if (overlaps_range(domains.heaps, high - size, high))
+      throw ElfError("native stack overlaps managed guest allocation");
+    if (overlaps_range(domains.stacks, high - size, high))
+      throw ElfError("overlapping prepared native stack extents");
     for (size_t i = 0; i < prepared_threads.size(); ++i) {
       pthread_t empty = nullptr;
       if (prepared_threads[i].compare_exchange_strong(empty, reinterpret_cast<pthread_t>(uintptr_t(1)),
                                                      std::memory_order_acq_rel)) {
+        try {
+          if (!domains.stacks.emplace(high - size, high).second) std::abort();
+        } catch (...) {
+          prepared_threads[i].store(nullptr, std::memory_order_release);
+          throw;
+        }
         prepared_index = i;
         prepared_stack_low[i].store(high - size, std::memory_order_relaxed);
         prepared_stack_high[i].store(high, std::memory_order_relaxed);
@@ -151,7 +173,12 @@ struct ThreadState {
     if (prepared_index != prepared_threads.size()) {
       auto &domains = memory_domains();
       std::lock_guard<std::mutex> lock(domains.mutex);
+      const auto low = prepared_stack_low[prepared_index].load(std::memory_order_relaxed);
+      const auto high = prepared_stack_high[prepared_index].load(std::memory_order_relaxed);
+      auto stack = domains.stacks.find(low);
+      if (stack == domains.stacks.end() || stack->second != high) std::abort();
       prepared_threads[prepared_index].store(nullptr, std::memory_order_release);
+      domains.stacks.erase(stack);
     }
   }
 };
@@ -192,13 +219,10 @@ GuestImageReservation::GuestImageReservation(uintptr_t base, uint64_t bytes) : b
     throw ElfError("guest image reservation limit");
   if (overlaps_image(domains, base, high))
     throw ElfError("overlapping guest image reservations");
-  for (size_t i = 0; i < prepared_threads.size(); ++i) {
-    if (!prepared_threads[i].load(std::memory_order_acquire)) continue;
-    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
-    const auto end = prepared_stack_high[i].load(std::memory_order_relaxed);
-    if (base < end && low < high)
-      throw ElfError("guest image overlaps prepared native stack extent");
-  }
+  if (overlaps_range(domains.stacks, base, high))
+    throw ElfError("guest image overlaps prepared native stack extent");
+  if (overlaps_range(domains.heaps, base, high))
+    throw ElfError("guest image overlaps managed guest allocation");
   // map::emplace has the strong exception guarantee. Nothing is published
   // when allocation fails; the constructor's owner can unmap and roll back.
   domains.images.emplace(base, high);
@@ -207,6 +231,58 @@ GuestImageReservation::~GuestImageReservation() {
   auto &domains = memory_domains();
   std::lock_guard<std::mutex> lock(domains.mutex);
   if (domains.images.erase(base_) != 1) std::abort();
+}
+GuestHeapReservation::GuestHeapReservation(uintptr_t base, uint64_t bytes) : base_(base) {
+  if (!base || !bytes || bytes > UINTPTR_MAX - base)
+    throw ElfError("invalid managed guest allocation extent");
+  auto &domains = memory_domains();
+  std::lock_guard<std::mutex> lock(domains.mutex);
+  if (domains.heaps.size() >= (1u << 20)) throw ElfError("managed guest allocation limit");
+  const uintptr_t high = base + bytes;
+  if (overlaps_range(domains.heaps, base, high))
+    throw ElfError("overlapping managed guest allocation extents");
+  if (overlaps_image(domains, base, high))
+    throw ElfError("managed guest allocation overlaps guest image reservation");
+  if (overlaps_range(domains.stacks, base, high))
+    throw ElfError("managed guest allocation overlaps prepared native stack extent");
+  domains.heaps.emplace(base, high);
+}
+GuestHeapReservation::~GuestHeapReservation() {
+  if (!base_) return;
+  auto &domains = memory_domains();
+  std::lock_guard<std::mutex> lock(domains.mutex);
+  if (domains.heaps.erase(base_) != 1) std::abort();
+}
+GuestHeapReservation::GuestHeapReservation(GuestHeapReservation &&other) noexcept
+    : base_(std::exchange(other.base_, 0)) {}
+void GuestHeapReservation::relocate(uintptr_t base, uint64_t bytes) {
+  if (!base_ || !base || !bytes || bytes > UINTPTR_MAX - base)
+    throw ElfError("invalid managed guest allocation relocation");
+  auto &domains = memory_domains();
+  std::lock_guard<std::mutex> lock(domains.mutex);
+  const uintptr_t high = base + bytes;
+  auto previous = domains.heaps.find(base_);
+  if (previous == domains.heaps.end()) std::abort();
+  if (overlaps_range(domains.heaps, base, high, base_))
+    throw ElfError("relocated managed guest allocation overlaps another allocation");
+  if (overlaps_image(domains, base, high))
+    throw ElfError("relocated managed guest allocation overlaps guest image reservation");
+  if (overlaps_range(domains.stacks, base, high))
+    throw ElfError("relocated managed guest allocation overlaps prepared native stack extent");
+  auto node = domains.heaps.extract(previous);
+  node.key() = base;
+  node.mapped() = high;
+  if (!domains.heaps.insert(std::move(node)).inserted) std::abort();
+  base_ = base;
+}
+bool registered_guest_heap_contains(uintptr_t pointer, uint64_t bytes) {
+  if (!pointer || !bytes) return false;
+  auto &domains = memory_domains();
+  std::lock_guard<std::mutex> lock(domains.mutex);
+  auto next = domains.heaps.upper_bound(pointer);
+  if (next == domains.heaps.begin()) return false;
+  const auto &range = *std::prev(next);
+  return pointer < range.second && bytes <= range.second - pointer;
 }
 extern "C" [[noreturn]] void shiraz_guest_stack_check_fail() { stack_fail(); }
 GuestTlsCleanupScope::GuestTlsCleanupScope() noexcept {

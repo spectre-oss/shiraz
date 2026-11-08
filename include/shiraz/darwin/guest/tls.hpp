@@ -32,6 +32,24 @@ public:
   GuestImageReservation(const GuestImageReservation &) = delete;
   GuestImageReservation &operator=(const GuestImageReservation &) = delete;
 };
+// A bounded managed allocator range, not a complete allocation-lifetime or
+// readable-object certificate. Opaque native allocation APIs remain outside
+// this registry. Admission, relocation and native-stack publication serialize
+// with Image reservations. Retain the token until the native free completes.
+class GuestHeapReservation {
+  uintptr_t base_;
+public:
+  GuestHeapReservation(uintptr_t base, uint64_t bytes);
+  ~GuestHeapReservation();
+  GuestHeapReservation(GuestHeapReservation &&other) noexcept;
+  GuestHeapReservation(const GuestHeapReservation &) = delete;
+  GuestHeapReservation &operator=(const GuestHeapReservation &) = delete;
+  // Strong precheck; reuses its existing registry node without allocating.
+  void relocate(uintptr_t base, uint64_t bytes);
+};
+// Locked diagnostic snapshot only. Not async-safe, a lifetime lease, proof of
+// actual mapped/readable user bytes, or an analyzer alias exemption.
+bool registered_guest_heap_contains(uintptr_t pointer, uint64_t bytes);
 void prepare_guest_tls();
 void *guest_tls_base();
 // Async-signal-safe readiness query only; never initializes native TLS.

@@ -82,8 +82,8 @@ void *allocate(size_t size) {
   return result;
 }
 void *allocate_nothrow(size_t size, const void *) { return std::malloc(size); }
-void deallocate(void *pointer) { std::free(pointer); }
-void deallocate_nothrow(void *pointer, const void *) { std::free(pointer); }
+void deallocate(void *pointer) { release_guest_allocation(pointer); }
+void deallocate_nothrow(void *pointer, const void *) { release_guest_allocation(pointer); }
 [[noreturn]] void pure_virtual() { fatal("pure virtual function called"); }
 const unsigned char nothrow_object = 0;
 } // namespace

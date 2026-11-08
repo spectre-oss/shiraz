@@ -11,6 +11,9 @@
 namespace shiraz::guest {
 int *guest_errno_location();
 int errno_to_guest(int host);
+// Shared managed-allocation retirement. Unknown native malloc pointers retain
+// native free compatibility; this does not assert complete allocation ownership.
+void release_guest_allocation(void *pointer);
 enum class ErrnoPolicy { None, Observe, Null, MinusOne };
 class HostErrno {
 public:

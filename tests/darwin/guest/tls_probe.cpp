@@ -244,6 +244,110 @@ static void memory_domain_tests(const std::filesystem::path &directory) {
   require(overflow_refused, "overflow cannot publish a reservation");
   std::cout << "M5_MEMORY_DOMAIN_PASS stack_first=1 image_first=1 retry=1 races=32 image_lifetime=1 overflow=1\n";
 }
+static void heap_domain_tests() {
+  // These tokens test serialized range admission/relocation, not actual
+  // allocations, live-object identity, readable bytes or guest execution.
+  auto storage = std::unique_ptr<void, decltype(&std::free)>(std::malloc(512), &std::free);
+  require(bool(storage), "heap domain fixture storage");
+  const auto base = reinterpret_cast<uintptr_t>(storage.get());
+  {
+    GuestHeapReservation owner(base, 128);
+    GuestHeapReservation neighbor(base + 128, 128);
+    require(registered_guest_heap_contains(base, 128) &&
+                !registered_guest_heap_contains(base, 129) &&
+                !registered_guest_heap_contains(base, UINT64_MAX) &&
+                !registered_guest_heap_contains(base, 0), "bounded individual heap range snapshots");
+    bool overlap = false;
+    try { GuestHeapReservation duplicate(base + 64, 128); }
+    catch (const ElfError &) { overlap = true; }
+    require(overlap, "heap overlap refused, adjacency allowed");
+    owner.relocate(base, 64);
+    require(registered_guest_heap_contains(base, 64) &&
+                !registered_guest_heap_contains(base + 64, 1), "same-base range shrink");
+    owner.relocate(base + 256, 64);
+    require(!registered_guest_heap_contains(base, 1) &&
+                registered_guest_heap_contains(base + 256, 64), "moved range admission");
+    bool failed_move = false, image_after = false, heap_after = false;
+    try { owner.relocate(base + 160, 64); }
+    catch (const ElfError &) { failed_move = true; }
+    try { GuestImageReservation conflict(base + 256, 8); }
+    catch (const ElfError &) { image_after = true; }
+    {
+      GuestImageReservation image(base + 384, 64);
+      try { GuestHeapReservation conflict(base + 384, 8); }
+      catch (const ElfError &) { heap_after = true; }
+      try { owner.relocate(base + 384, 8); failed_move = false; }
+      catch (const ElfError &) {}
+    }
+    require(failed_move && image_after && heap_after &&
+                registered_guest_heap_contains(base + 256, 64),
+            "failed relocation retains original and Image/heap exclusion works both orders");
+    GuestHeapReservation moved(std::move(owner));
+    require(registered_guest_heap_contains(base + 256, 64), "moving token preserves range");
+  }
+  require(!registered_guest_heap_contains(base + 256, 1), "final token releases range");
+  bool overflow = false, stack_first = false;
+  try { GuestHeapReservation invalid(UINTPTR_MAX - 7, 16); }
+  catch (const ElfError &) { overflow = true; }
+  uint64_t main_word = 0;
+  try { GuestHeapReservation conflict(reinterpret_cast<uintptr_t>(&main_word), 8); }
+  catch (const ElfError &) { stack_first = true; }
+  require(overflow && stack_first, "heap extent overflow and prepared native stack refused");
+  std::atomic<uintptr_t> address{0};
+  std::atomic<bool> start{false}, done{false}, retry{false};
+  bool heap_first = false, ready = false;
+  std::thread worker([&] {
+    uint64_t word = 0;
+    address.store(reinterpret_cast<uintptr_t>(&word), std::memory_order_release);
+    domain_wait([&] { return start.load(std::memory_order_acquire); });
+    try { prepare_guest_tls(); }
+    catch (const ElfError &error) {
+      heap_first = !std::strcmp(error.what(), "native stack overlaps managed guest allocation") &&
+                   !guest_tls_prepared();
+    }
+    done.store(true, std::memory_order_release);
+    domain_wait([&] { return retry.load(std::memory_order_acquire); });
+    try { prepare_guest_tls(); ready = guest_tls_prepared(); }
+    catch (...) {}
+  });
+  domain_wait([&] { return address.load(std::memory_order_acquire) != 0; });
+  {
+    GuestHeapReservation claimed(address.load(), 8);
+    start.store(true, std::memory_order_release);
+    domain_wait([&] { return done.load(std::memory_order_acquire); });
+  }
+  retry.store(true, std::memory_order_release);
+  worker.join();
+  require(heap_first && ready, "heap-first publication refuses then retries without readiness leak");
+  for (int iteration = 0; iteration < 32; ++iteration) {
+    address.store(0); start.store(false); done.store(false);
+    std::atomic<bool> main_done{false};
+    bool prepared = false, refused = false;
+    std::thread racer([&] {
+      uint64_t word = 0;
+      address.store(reinterpret_cast<uintptr_t>(&word), std::memory_order_release);
+      domain_wait([&] { return start.load(std::memory_order_acquire); });
+      try { prepare_guest_tls(); prepared = guest_tls_prepared(); }
+      catch (const ElfError &) { refused = true; }
+      done.store(true, std::memory_order_release);
+      domain_wait([&] { return main_done.load(std::memory_order_acquire); });
+    });
+    domain_wait([&] { return address.load(std::memory_order_acquire) != 0; });
+    start.store(true, std::memory_order_release);
+    std::unique_ptr<GuestHeapReservation> claimed;
+    bool reservation_refused = false;
+    try { claimed = std::make_unique<GuestHeapReservation>(address.load(), 8); }
+    catch (const ElfError &) { reservation_refused = true; }
+    main_done.store(true, std::memory_order_release);
+    domain_wait([&] { return done.load(std::memory_order_acquire); });
+    racer.join();
+    require((bool(claimed) && refused && !prepared) ||
+                (!claimed && reservation_refused && prepared),
+            "heap/native-stack race admits exactly one owner");
+  }
+  std::cout << "M5_HEAP_DOMAIN_PASS relocation=1 strong_failure=1 move_token=1 image_orders=2 "
+               "stack_orders=2 retry=1 races=32 overflow=1\n";
+}
 int main(int argc, char **argv) {
   try {
     require(argc == 2, "usage: tls-probe fixture-directory");
@@ -251,6 +355,7 @@ int main(int argc, char **argv) {
     auto &loader = *resident;
     auto *module = loader.open("libtls-fixture.so");
     memory_domain_tests(std::filesystem::canonical(argv[1]));
+    heap_domain_tests();
     require(loader.image_count() == 3,
             "genuine guest fixture, peer DSO and unchanged compiler-rt execute");
     auto exercise = loader.symbol(module, "tls_exercise").address;

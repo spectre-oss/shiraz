@@ -1,9 +1,39 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 extern long host_fail(void);
 extern void host_barrier(void);
+// Return the actual allocator pointers to the host probe. Each operation
+// records the guest errno separately so the probe can query the live domain
+// without confusing its own native errno with the guest value.
+static int allocation_saved_errno;
+uintptr_t allocation_malloc(size_t bytes) {
+  errno = 777;
+  void *result = malloc(bytes);
+  allocation_saved_errno = errno;
+  return (uintptr_t)result;
+}
+uintptr_t allocation_calloc(size_t count, size_t bytes) {
+  errno = 777;
+  void *result = calloc(count, bytes);
+  allocation_saved_errno = errno;
+  return (uintptr_t)result;
+}
+uintptr_t allocation_realloc(uintptr_t pointer, size_t bytes) {
+  errno = 777;
+  void *result = realloc((void *)pointer, bytes);
+  allocation_saved_errno = errno;
+  return (uintptr_t)result;
+}
+int allocation_free(uintptr_t pointer) {
+  errno = 777;
+  free((void *)pointer);
+  allocation_saved_errno = errno;
+  return 73;
+}
+int allocation_errno(void) { return allocation_saved_errno; }
 int memory_test(void) {
   char *data = malloc(128);
   if (!data)
