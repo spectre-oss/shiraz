@@ -7,6 +7,7 @@ public final class NativeCapture {
  public static native long microphoneOpen(int sampleRate,int channels);
  public static native int microphoneRead(long handle,byte[] bytes,int offset,int length);
  public static native long cameraOpen();
+ public static native int cameraCount();
  public static native int[] cameraFrame(long handle);
  public static native int[] cameraSize(long handle);
  public static native long aacOpen(int sampleRate,int channels,int bitrate);

@@ -22,12 +22,22 @@ from macos_guest_differential_smoke import validate_collector_signature
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def bounded_bytes(path):
+    if not path.is_file() or not 0 < path.stat().st_size <= 256 << 20:
+        raise ValueError("local return fixture artifact size bound")
+    with path.open("rb") as stream:
+        data = stream.read((256 << 20) + 1)
+    if len(data) > 256 << 20:
+        raise ValueError("local return fixture artifact grew beyond bound")
+    return data
+
+
 def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(bounded_bytes(path)).hexdigest()
 
 
 def verify_wrappers(path, key):
-    data = path.read_bytes()
+    data = bounded_bytes(path)
     metadata = ElfBindingMetadata(data, path.name)
     opcodes = (0xD503233F, 0xD50323BF) if key == "a" else (0xD503237F, 0xD50323FF)
     found = {}
@@ -67,6 +77,26 @@ def inspect_existing_hardened_signature(path, env):
             "policy_sha256": digest(ROOT / "scripts/macos_guest_differential_smoke.py")}
 
 
+def validate_execution_marker(stdout, returncode):
+    markers = [line for line in stdout.splitlines() if line.startswith("M5_ATOMIC_EFFECTS_PASS ")]
+    if returncode != 0 or len(markers) != 1:
+        raise ValueError("actual guest wrapper execution lacks a unique successful result")
+    fields = {}
+    for item in markers[0].split()[1:]:
+        if item.count("=") != 1:
+            raise ValueError("malformed guest result field")
+        key, value = item.split("=", 1)
+        if key in fields:
+            raise ValueError("duplicate guest result field")
+        fields[key] = value
+    expected = {"guest_elf": "1", "exact_body": "1", "cases": "10", "cas_cases": "36",
+                "cas_orderings": "3", "sp_lr": "1", "nzcv": "1", "fp_control": "1",
+                "vector_samples": "2", "android_execution": "0", "app_execution": "0"}
+    if any(fields.get(key) != value for key, value in expected.items()):
+        raise ValueError("actual guest result does not establish the required exact cases/effects")
+    return markers[0]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
@@ -99,15 +129,14 @@ def main():
             log.write_text(run.stdout + run.stderr)
             if digest(probe) != probe_hashes[mode] or digest(elf) != elf_hash:
                 raise ValueError("probe/guest artifact changed during execution")
-            markers = [line for line in run.stdout.splitlines() if line.startswith("M5_ATOMIC_EFFECTS_PASS ")]
-            if run.returncode or len(markers) != 1 or "cases=10" not in markers[0] or "cas_cases=36" not in markers[0]:
-                raise ValueError("actual authenticated guest wrapper execution failed: " + str(log))
+            marker = validate_execution_marker(run.stdout, run.returncode)
             results.append({"key": key, "mode": mode, "guest_elf_sha256": elf_hash,
                             "probe_sha256": probe_hashes[mode], "wrappers": wrappers,
-                            "returncode": run.returncode, "marker": markers[0], "log": str(log)})
+                            "returncode": run.returncode, "marker": marker, "log": str(log)})
     report = {"schema": 1, "scope": "first-party guest return-instruction fixture; not ART/APK or cryptographic security proof",
               "profile": profile, "new_host_build": False, "signing_performed": False,
               "hardened_art_verified": False, "hardware_execution": True,
+              "unwind_verified": False, "authentication_failure_execution_verified": False,
               "hardened_signature": hardened_signature,
               "assembly_sha256": digest(ROOT / "tests/darwin/guest/atomic_effects.S"),
               "harness_sha256": digest(Path(__file__)), "runs": results}

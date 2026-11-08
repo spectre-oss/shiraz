@@ -3,16 +3,70 @@
 
 import hashlib
 import json
+import struct
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from guest_binding_evidence import augment_binding_report
+from guest_binding_evidence import (
+    augment_binding_report,
+    bounded_read,
+    verify_relocation_inventory,
+)
+from test_guest_tpidr_audit import BindingElfFixture
 
 
 class GuestBindingEvidenceTests(unittest.TestCase):
+    def test_bounded_read_refuses_growth_and_truncation_between_stat_and_read(self):
+        for actual in (b"", b"123", b"12345", b"123456789"):
+            path = MagicMock()
+            path.stat.return_value.st_size = 4
+            stream = path.open.return_value.__enter__.return_value
+            stream.read.return_value = actual
+            with self.assertRaisesRegex(ValueError, "changed size"):
+                bounded_read(path, 8)
+            stream.read.assert_called_once_with(9)
+        for size in (0, 9):
+            path = MagicMock()
+            path.stat.return_value.st_size = size
+            with self.assertRaisesRegex(ValueError, "byte bound"):
+                bounded_read(path, 8)
+            path.open.assert_not_called()
+
+    def test_only_undefined_weak_symbols_can_have_no_provider(self):
+        fixture = BindingElfFixture()
+        binding = {"relocation": 0x1500, "relocation_type": 1026, "addend": 0,
+                   "symbol": "local_function", "version": "", "provider": "",
+                   "target": None, "abi": "unresolved-weak-null"}
+        for info, section, accepted in ((0x22, 0, True), (0x12, 0, False), (0x22, 1, False)):
+            struct.pack_into("<IBBHQQ", fixture.data, 0x1218, 1, info, 0, section, 0x200, 8)
+            if accepted:
+                self.assertEqual(verify_relocation_inventory(fixture.metadata(), [binding]), 1)
+            else:
+                with self.assertRaisesRegex(ValueError, "provider"):
+                    verify_relocation_inventory(fixture.metadata(), [binding])
+
+    def test_inventory_requires_every_real_relocation_and_exact_metadata(self):
+        fixture = BindingElfFixture()
+        metadata = fixture.metadata()
+        binding = {"relocation": 0x1500, "relocation_type": 1026, "addend": 0,
+                   "symbol": "local_function", "version": "", "provider": "libfixture.so",
+                   "target": 0x200, "abi": "guest-AAPCS64"}
+        self.assertEqual(verify_relocation_inventory(metadata, [binding]), 1)
+        for rows in ([], [binding, binding], [{**binding, "relocation": 0x1508}]):
+            with self.assertRaisesRegex(ValueError, "inventory"):
+                verify_relocation_inventory(metadata, rows)
+        for field, value in (("symbol", "other"), ("version", "OTHER"),
+                             ("relocation_type", 1025), ("addend", 1), ("addend", False)):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "metadata"):
+                verify_relocation_inventory(metadata, [{**binding, field: value}])
+        for field, value in (("abi", "unrecorded"), ("provider", "")):
+            with self.assertRaises(ValueError):
+                verify_relocation_inventory(metadata, [{**binding, field: value}])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

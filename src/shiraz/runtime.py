@@ -15,6 +15,8 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 import zipfile
+from pathlib import Path
+
 from .apk import FormatError, inspect_apk
 from .architecture import native_abi, supports_native_abis
 from .host_layout import darwin_socket_directory, host_out_dir
@@ -755,11 +757,11 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
                 digitalis = Path(configured_bridge).resolve()
                 if not digitalis.is_file():
                     raise FormatError('Configured Digitalis native bridge is missing')
-        if not supports_native_abis(report['native_abis']) and digitalis is None:
-            raise FormatError('APK has no native ABI candidate for this host (' + str(native_abi()) + ')')
                 for name in ('libberberis_proxy_libc.so', 'libberberis_proxy_libm.so'):
                     if not (digitalis.parent / name).is_file():
                         raise FormatError('Incomplete Digitalis runtime: missing ' + name + '; run make runtime-digitalis')
+        if not supports_native_abis(report['native_abis']) and digitalis is None:
+            raise FormatError('APK has no native ABI candidate for this host (' + str(native_abi()) + ')')
     vm, framework, framework_resources, required, optional = runtime_inputs(system, ROOT, HOST, execution_mode)
     # Optional Apache HTTP compatibility DEX, built separately from licensed
     # upstream jars. Keep APK classes ahead of this fallback library.
@@ -822,6 +824,9 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         facts.update(package_timestamps(data, report['apk_sha256']))
         metadata.write_text(properties_text(facts), encoding='utf-8')
         profile_values = validate_device_profile(device_profile) if device_profile else {}
+        if darwin:
+            from .darwin_app import prepare_app_bundle
+            vm = prepare_app_bundle(work, vm, HOST, package)
         command, env = launch_command(
             system, root=ROOT, host=HOST, environ=os.environ, vm=vm, classpath=classpath,
             framework_resources=framework_resources, work=work, data=data, app_lib=app_lib, metadata=metadata,

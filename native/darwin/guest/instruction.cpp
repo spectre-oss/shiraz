@@ -3,11 +3,20 @@
 #include "shiraz/darwin/guest/tls.hpp"
 #include <cstring>
 #include <cstdlib>
+#include <unistd.h>
 namespace shiraz::guest {
 extern "C" void shiraz_guest_tpidr_entry();
-extern "C" void *shiraz_guest_tls_access() noexcept {
+// The shared assembly forwards the original guest SP in the otherwise unused
+// eighth integer argument. x0..x6 retain their Linux syscall dispatch meaning.
+extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
+                                        uint64_t, uint64_t, uint64_t, uintptr_t original_sp) noexcept {
   try {
     HostErrno preserve;
+    if ((original_sp & 15) || !prepared_guest_stack_contains(original_sp)) {
+      constexpr char message[] = "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      std::abort();
+    }
     return guest_tls_base();
   } catch (...) { std::abort(); }
 }
@@ -57,7 +66,8 @@ ThreadPointerPatch plan_thread_pointer(uintptr_t site, uint32_t original,
   put(result, 32, reinterpret_cast<uintptr_t>(&shiraz_guest_tpidr_entry));
   put(result, 40, island + 16);
   put(result, 48, target);
-  put(result, 56, reinterpret_cast<uintptr_t>(accessor ? accessor : &shiraz_guest_tls_access));
+  put(result, 56, accessor ? reinterpret_cast<uintptr_t>(accessor)
+                          : reinterpret_cast<uintptr_t>(&shiraz_guest_tls_access));
   return result;
 }
 ThreadPointerPatch plan_system_call(uintptr_t site, uint32_t original,

@@ -98,6 +98,9 @@ int main(int argc, char **argv) {
       auto malformed = bytes; mutate(malformed);
       try { Image image(malformed, Image::Mapping::Deferred); }
       catch (const ElfError &error) {
+        if (std::string(error.what()).find(reason) == std::string::npos)
+          std::cerr << "provenance rejection mismatch expected=" << reason
+                    << " actual=" << error.what() << '\n';
         require(std::string(error.what()).find(reason) != std::string::npos, "specific provenance rejection");
         ++rejected; return;
       }
@@ -107,7 +110,8 @@ int main(int argc, char **argv) {
     reject([&](auto &b) { put(b, offset(elf, analysis.sites[0].address), 0xd51bd040, 4); }, "writes");
     reject([&](auto &b) { put(b, offset(elf, analysis.sites[0].address), 0xd53bd052, 4); }, "x18");
     reject([&](auto &b) { put(b, offset(elf, elf.symbols[function].address), 0xffffffff, 4); }, "invalid reachable");
-    reject([&](auto &b) { put(b, offset(elf, elf.symbols[function].address), 0xd4000001, 4); }, "system-control");
+    reject([&](auto &b) { put(b, offset(elf, elf.symbols[function].address), 0xd4000001, 4); }, "Linux syscall dispatcher");
+    reject([&](auto &b) { put(b, offset(elf, elf.symbols[function].address), 0xd4000021, 4); }, "unsupported guest SVC immediate");
     reject([&](auto &b) { put(b, offset(elf, elf.symbols[function].address), 0x16000000, 4); }, "target outside");
     reject([&](auto &b) { put(b, table + literal * 24 + 8, elf.symbols[function].address, 8); }, "overlaps declared data");
     size_t header = offset(elf, elf.eh_frame_header);

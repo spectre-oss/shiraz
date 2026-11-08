@@ -97,3 +97,7 @@ extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeCapture_cameraS
  if(!allowed(env,"android.permission.CAMERA"))return nullptr;
  return checked(env,[&]()->jintArray{auto c=get(id);std::lock_guard<std::mutex> lock(c->mutex);if(c->closed||c->fd<0)throw std::runtime_error("Camera closed");jint size[2]={c->width,c->height};jintArray out=env->NewIntArray(2);if(out)env->SetIntArrayRegion(out,0,2,size);return out;});
 }
+
+extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeCapture_cameraCount(JNIEnv*,jclass){
+ for(int i=0;i<64;i++){char path[32];std::snprintf(path,sizeof(path),"/dev/video%d",i);if(::access(path,F_OK)==0)return 1;}return 0;
+}

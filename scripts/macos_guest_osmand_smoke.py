@@ -31,6 +31,7 @@ WORK = ROOT / "build/macos/m5/osmand-jni"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
+    parser.add_argument("--bridge", type=Path, help="existing alternate bridge; local adhoc runner only")
     parser.add_argument(
         "--core",
         action="store_true",
@@ -50,11 +51,15 @@ def main():
         help="prepare unsigned private native closure without signing or ART execution",
     )
     args = parser.parse_args()
+    if args.bridge and args.mode != "adhoc":
+        parser.error("--bridge requires the unchanged local adhoc runner")
     if args.mode != "adhoc" and not args.core:
         parser.error("copied native modes require --core and the seven-library gate")
     if args.prepare_only and args.mode == "adhoc":
         parser.error("--prepare-only requires --mode hardened or staged-adhoc")
     work = WORK if args.mode == "adhoc" else WORK / args.mode
+    if args.bridge:
+        work = WORK / "alternate-bridge"
     apk = args.apk.resolve(strict=True)
     library = ROOT / "build/macos/m5/design/abi-table/libs/lib/arm64-v8a/libosmand.so"
     native_digests = {}
@@ -110,7 +115,7 @@ def main():
     }
     runtime = HOST
     vm = HOST / "bin/dalvikvm"
-    bridge = ROOT / "build/macos/libshiraz-guest.so"
+    bridge = args.bridge.resolve(strict=True) if args.bridge else ROOT / "build/macos/libshiraz-guest.so"
     observer = ROOT / "build/macos/m5/osmand-host-observer.so"
     native_paths = [ROOT / "build/macos", HOST / "lib64", library.parent]
     closure = None
@@ -122,6 +127,8 @@ def main():
             ROOT / "build/macos/libEGL_shim.so",
             ROOT / "build/macos/libEGL.dylib",
             ROOT / "build/macos/libGLESv2.dylib",
+            ROOT / "build/macos/libandroid.so",
+            ROOT / "build/macos/libshiraz-resources.so",
         ]
         closure = stage_closure(ROOT, HOST, work, env, extra_images=extras)
         runtime = Path(closure["tree"])
@@ -331,6 +338,7 @@ def main():
             expected_modules,
             native_bridge=bridge,
             bridge_sha256=bridge_sha256,
+            verify_inventory=True,
         )
     except (OSError, ValueError, TypeError, KeyError) as error:
         binding_error = str(error)
@@ -340,7 +348,10 @@ def main():
     if closure:
         try:
             inventory = validate_native_inventory(
-                result.stdout, closure, [vm, bridge, observer]
+                result.stdout, closure, [vm, bridge, observer, *(
+                    Path(closure["extra_images"][str(ROOT / "build/macos" / name)])
+                    for name in ("libandroid.so", "libshiraz-resources.so")
+                )]
             )
             (work / "native-closure.log").write_text(inventory["raw_report"])
         except (OSError, ValueError, KeyError, TypeError) as error:

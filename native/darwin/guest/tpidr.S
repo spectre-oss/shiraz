@@ -68,9 +68,12 @@ _shiraz_guest_tpidr_entry:
 .cfi_def_cfa x29, 48
     ldr x16, [sp, #784]
     ldr x16, [x16, #16]
-    // SVC dispatch takes Linux x8 as its seventh integer argument. TLS
-    // accessors ignore arguments. Original x6 is restored from the frame.
+    // SVC dispatch takes Linux x8 as its seventh integer argument. Production
+    // TLS access takes original guest SP as its eighth argument. Test getters
+    // and seven-argument syscall dispatchers ignore that extra register.
+    // Original x6/x7 are restored from the frame.
     mov x6, x8
+    add x7, sp, #848
     blr x16
     ldr x16, [sp, #784]
     ldr w17, [x16, #8]

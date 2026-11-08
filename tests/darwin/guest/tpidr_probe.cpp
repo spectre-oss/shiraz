@@ -12,6 +12,12 @@
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#include <sanitizer/common_interface_defs.h>
+#define SHIRAZ_ASAN_FIBER_TEST 1
+#endif
+#endif
 using namespace shiraz::guest;
 extern "C" char shiraz_tpidr_test_start[], shiraz_tpidr_test_site[], shiraz_tpidr_test_end[];
 extern "C" void *shiraz_tpidr_stress_access() noexcept;
@@ -24,14 +30,30 @@ struct alignas(16) Result {
   uint64_t expected_sp, original_x18;
 };
 static_assert(sizeof(Result) == 816 && offsetof(Result, vectors) == 288);
+struct ForeignCall { void (*entry)(Result *); Result *result; };
+extern "C" int shiraz_test_other_stack(void *, int (*)(void *), void *);
+static int foreign_mrs(void *opaque) {
+#ifdef SHIRAZ_ASAN_FIBER_TEST
+  __sanitizer_finish_switch_fiber(nullptr, nullptr, nullptr);
+#endif
+  auto *call = static_cast<ForeignCall *>(opaque);
+  call->entry(call->result);
+  return 0;
+}
 static void require(bool value, const char *message) {
   if (!value) throw std::runtime_error(message);
 }
 extern "C" uintptr_t syscall_probe(uint64_t a0, uint64_t a1, uint64_t a2,
-                                   uint64_t a3, uint64_t a4, uint64_t a5, uint64_t number) noexcept {
+                                   uint64_t a3, uint64_t a4, uint64_t a5, uint64_t number,
+                                   uintptr_t original_sp) noexcept {
   const uint64_t values[] = {a0,a1,a2,a3,a4,a5,number};
   for (unsigned i=0;i<7;++i)
     if(values[i] != 0x6677445522331000ULL + (i==6?8:i)) std::abort();
+  static_assert(offsetof(Result, expected_sp) == 800);
+  if ((original_sp & 15) || !prepared_guest_stack_contains(original_sp)) std::abort();
+  uintptr_t expected_sp;
+  std::memcpy(&expected_sp, reinterpret_cast<const void *>(original_sp + 800), sizeof(expected_sp));
+  if (expected_sp != original_sp) std::abort();
   return reinterpret_cast<uintptr_t>(guest_tls_base());
 }
 static void verify(const Result &result, unsigned target, uintptr_t tls) {
@@ -172,10 +194,52 @@ int main() {
     int status;
     require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 97,
             "corrupting the saved stack guard triggers actual failure");
+    constexpr size_t foreign_size = 256 * 1024;
+    void *foreign_stack = mmap(nullptr, foreign_size, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANON, -1, 0);
+    require(foreign_stack != MAP_FAILED, "foreign MRS stack allocation");
+    Result foreign_result{};
+    ForeignCall call{programs.front().function, &foreign_result};
+    int descriptors[2];
+    require(pipe(descriptors) == 0, "foreign MRS diagnostic pipe");
+    child = fork();
+    require(child >= 0, "foreign MRS child");
+    if (!child) {
+      close(descriptors[0]);
+      if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
+      close(descriptors[1]);
+      std::signal(SIGABRT, [](int) { _exit(97); });
+#ifdef SHIRAZ_ASAN_FIBER_TEST
+      // Preserve the suspended native fake stack: call/result may reside in
+      // it. This child must abort on the new stack and never resumes it.
+      void *suspended_fake_stack = nullptr;
+      __sanitizer_start_switch_fiber(&suspended_fake_stack, foreign_stack, foreign_size);
+#endif
+      shiraz_test_other_stack(static_cast<uint8_t *>(foreign_stack) + foreign_size - 16,
+                             &foreign_mrs, &call);
+      _exit(98);
+    }
+    close(descriptors[1]);
+    std::string diagnostic;
+    char buffer[512];
+    ssize_t count;
+    while ((count = read(descriptors[0], buffer, sizeof(buffer))) > 0) {
+      diagnostic.append(buffer, size_t(count));
+      if (diagnostic.size() > 8192) { kill(child, SIGKILL); break; }
+    }
+    close(descriptors[0]);
+    require(waitpid(child, &status, 0) == child, "collect foreign MRS child");
+    if (diagnostic != "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n")
+      std::cerr << "foreign MRS status=" << status << " diagnostic=" << diagnostic;
+    require(WIFEXITED(status) && WEXITSTATUS(status) == 97 &&
+                count == 0 && diagnostic == "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n",
+            "real rewritten MRS on a foreign stack reaches the exact extent refusal");
+    require(munmap(foreign_stack, foreign_size) == 0, "foreign MRS stack cleanup");
     require(munmap(memory, size) == 0, "TPIDR test cleanup");
     std::cout << "M5_TPIDR_THUNK_PASS targets=31 accessors=2 gpr=31 vector_bits=4096 "
                  "flags=NZCV,FPCR,FPSR sp=1 lr=1 pac=1 threads=4 malformed=6 guard=1 corruption_abort=1 "
                  "host_tpidr_written=0 elf_auto_rewrite=0 unwind_verified=0\n";
+    std::cout << "M5_TPIDR_STACK_PASS foreign_stack_rejected=1 original_sp=1 syscall_arguments=7\n";
   } catch (const std::exception &error) {
     std::cerr << "FAIL " << error.what() << '\n';
     return 1;

@@ -3,11 +3,62 @@
 
 import hashlib
 import json
+import struct
 from pathlib import Path
 
 MAX_REPORT = 64 * 1024 * 1024
 MAX_BINDINGS = 200000
 GUEST_ABIS = {"guest-AAPCS64", "guest-local-AAPCS64"}
+
+
+def bounded_read(path, limit):
+    size = path.stat().st_size
+    if not 0 < size <= limit:
+        raise ValueError("binding evidence byte bound")
+    with path.open("rb") as stream:
+        data = stream.read(limit + 1)
+    if len(data) != size:
+        raise ValueError("binding evidence changed size during bounded read")
+    return data
+
+
+def verify_relocation_inventory(metadata, bindings):
+    """Require exact named GLOB_DAT/JUMP_SLOT coverage, independently of JSON."""
+    expected = {}
+    for slot, (index, addend, kind) in metadata.relocations.items():
+        if not index:  # The native evidence format excludes symbol zero.
+            continue
+        name, info, _, section, _, _ = struct.unpack(
+            "<IBBHQQ", metadata.read(metadata.tags[6] + index * 24, 24))
+        version = ""
+        if 0x6FFFFFF0 in metadata.tags:
+            number = struct.unpack("<H", metadata.read(metadata.tags[0x6FFFFFF0] + index * 2, 2))[0] & 0x7FFF
+            if number > 1:
+                if not 0 < section < 0xFF00:
+                    requirement = metadata.needed_version(number)
+                    version = requirement[0] if requirement else None
+                else:
+                    version = metadata.defined_version(number)
+                if version is None:
+                    raise ValueError("binding inventory symbol version unavailable")
+        expected[slot] = (metadata.string(name), version, kind, addend, info >> 4, section == 0)
+    actual = {binding["relocation"]: binding for binding in bindings}
+    if len(actual) != len(bindings) or set(actual) != set(expected):
+        raise ValueError("binding report lacks exact ELF relocation inventory")
+    for slot, (name, version, kind, addend, strength, undefined) in expected.items():
+        binding = actual[slot]
+        if (binding["symbol"], binding["version"], binding["relocation_type"], binding.get("addend")) != (
+            name, version, kind, addend
+        ) or type(binding.get("addend")) is not int:
+            raise ValueError("binding report relocation disagrees with ELF metadata")
+        if binding["abi"] in {"", "unrecorded"}:
+            raise ValueError("binding report contains unrecorded adapter")
+        if not binding["provider"] and not (
+            undefined and strength == 2 and binding["abi"] == "unresolved-weak-null"
+            and binding["target"] is None
+        ):
+            raise ValueError("binding report lacks selected provider")
+    return len(expected)
 
 
 def augment_binding_report(
@@ -19,12 +70,11 @@ def augment_binding_report(
     *,
     native_bridge=None,
     bridge_sha256=None,
+    verify_inventory=False,
 ):
     """Reject stale/foreign paths and preserve unknown/native-provider bindings."""
     raw_path, output = Path(raw_path), Path(output)
-    if not 0 < raw_path.stat().st_size <= MAX_REPORT:
-        raise ValueError("binding report size limit")
-    raw = raw_path.read_bytes()
+    raw = bounded_read(raw_path, MAX_REPORT)
     report = json.loads(raw)
     if (
         report.get("schema") != 1
@@ -46,9 +96,7 @@ def augment_binding_report(
         expected = (library_directory / name).resolve(strict=True)
         if actual != expected or actual.parent != library_directory:
             raise ValueError("binding report ELF file escapes verified library set")
-        if not 0 < actual.stat().st_size <= 256 * 1024 * 1024:
-            raise ValueError("binding report ELF size limit")
-        if hashlib.sha256(actual.read_bytes()).hexdigest() != hashes[name]:
+        if hashlib.sha256(bounded_read(actual, 256 << 20)).hexdigest() != hashes[name]:
             raise ValueError("binding report ELF changed since APK verification")
         module["elf_sha256"] = hashes[name]
     bridge_identity = None
@@ -59,7 +107,7 @@ def augment_binding_report(
             or not 0 < native_bridge.stat().st_size <= 256 << 20
         ):
             raise ValueError("native bridge identity size bound")
-        actual_bridge_hash = hashlib.sha256(native_bridge.read_bytes()).hexdigest()
+        actual_bridge_hash = hashlib.sha256(bounded_read(native_bridge, 256 << 20)).hexdigest()
         if not isinstance(bridge_sha256, str) or actual_bridge_hash != bridge_sha256:
             raise ValueError("native bridge changed since pre-execution identity")
         bridge_identity = {
@@ -119,6 +167,15 @@ def augment_binding_report(
                     "native/unknown binding must not expose a guest target"
                 )
             binding["provider_elf_sha256"] = provider_hash
+        if verify_inventory:
+            from audit_guest_tpidr import ElfBindingMetadata
+
+            metadata = ElfBindingMetadata(bounded_read(library_directory / module["name"], 256 << 20), module["name"])
+            if metadata.elf_sha256 != hashes[module["name"]]:
+                raise ValueError("binding inventory ELF changed since APK verification")
+            verify_relocation_inventory(metadata, bindings)
+    if verify_inventory:
+        report["relocation_inventory_verification"] = "exact-named-GLOB_DAT-JUMP_SLOT-ELF-metadata"
     if bridge_identity is not None:
         report["native_bridge"] = bridge_identity
     report["source_report_sha256"] = hashlib.sha256(raw).hexdigest()

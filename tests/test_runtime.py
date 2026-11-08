@@ -149,7 +149,7 @@ class RuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             bridge = Path(directory) / 'libberberis_arm64.so'
             bridge.touch()
-            with patch('shiraz.architecture.platform.machine', return_value='x86_64'), patch.dict(os.environ, {'SHIRAZ_DIGITALIS_LIBRARY': str(bridge)}):
+            with patch('shiraz.runtime.host_system', return_value='Linux'), patch('shiraz.architecture.platform.machine', return_value='x86_64'), patch.dict(os.environ, {'SHIRAZ_DIGITALIS_LIBRARY': str(bridge)}):
                 for name in ('libberberis_proxy_libc.so', 'libberberis_proxy_libm.so'):
                     with self.assertRaisesRegex(FormatError, name):
                         run_activity(Path('missing.apk'), report)

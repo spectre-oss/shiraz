@@ -5,9 +5,15 @@
 volatile long guest_state;
 volatile long guest_bss[8];
 volatile long *guest_pointer = &guest_state;
+#ifdef SHIRAZ_DESCRIPTOR_GATE
+extern int guest_descriptor_cases(void);
+#endif
 __attribute__((constructor)) static void setup(void) {
   *guest_pointer = 73;
   guest_bss[7] = 91;
+#ifdef SHIRAZ_DESCRIPTOR_GATE
+  if (guest_descriptor_cases()) *guest_pointer = -1000;
+#endif
 }
 __attribute__((noinline)) long guest_leaf(void) { return guest_state; }
 long guest_read(void) { return *guest_pointer + guest_bss[7] + guest_leaf(); }

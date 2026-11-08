@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/tls.hpp"
 #include "guest_io.hpp"
+#include "guest_tls_layout.hpp"
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -34,6 +35,7 @@ uintptr_t guard() {
   return value;
 }
 struct ThreadState {
+  // Owned canary storage, not a complete bionic TCB/private-slot personality.
   alignas(16) std::array<uintptr_t, 64> slots{};
   std::vector<Destructor> destructors;
   std::map<GuestThreadKeyHandle, const void *, std::owner_less<GuestThreadKeyHandle>> key_values;
@@ -41,7 +43,11 @@ struct ThreadState {
   unsigned cleanup_depth = 0;
   bool draining = false;
   size_t prepared_index = prepared_threads.size();
-  ThreadState() { slots[5] = guard(); }
+  ThreadState() {
+    static_assert(bionic::kTlsPointerBytes == sizeof(uintptr_t));
+    static_assert(bionic::kTlsStackGuardSlot >= 0 && bionic::kTlsStackGuardSlot < 64);
+    slots[size_t(bionic::kTlsStackGuardSlot)] = guard();
+  }
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
     const auto thread = pthread_self();

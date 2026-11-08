@@ -46,7 +46,7 @@ LINUX_ENV = [
 
 DARWIN_BOOT = ':'.join('<HOST>/framework/' + name for name in runtime.JARS)
 DARWIN_COMMAND = [
-    '<HOST>/bin/dalvikvm', '-Xbootclasspath:' + DARWIN_BOOT, '-Xnoimage-dex2oat', '-Xint', '-Xusejit:false',
+    f'<ROOT>/{RUN}/host/Shiraz.app/Contents/MacOS/ShirazHost', '-Xbootclasspath:' + DARWIN_BOOT, '-Xnoimage-dex2oat', '-Xint', '-Xusejit:false',
     '-Xcheck:jni', '-Dlog.tag=INFO', '-Djava.library.path=<ROOT>/build/macos:<HOST>/lib64',
     '-Dshiraz.frameworkResources=<ROOT>/build/framework-res/framework-res.apk',
     '-Dshiraz.speechData=<ROOT>/.local/share',
@@ -77,6 +77,7 @@ class LaunchCommandTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
         if system == 'Darwin':
+            (host / 'bin/dalvikvm').write_bytes(b'\xcf\xfa\xed\xfe' + b'fixture')
             self.write_fonts_conf()
         return host
 
@@ -121,7 +122,10 @@ class LaunchCommandTests(unittest.TestCase):
         with patch('shiraz.architecture.platform.machine', return_value='x86_64'):
             command, env, _ = self.launch('Linux', host, {})
         self.assertEqual(command, [self.expand(item, host) for item in LINUX_COMMAND])
-        self.assertEqual(list(env.items()), [(key, self.expand(value, host)) for key, value in LINUX_ENV])
+        expected = dict((key, self.expand(value, host)) for key, value in LINUX_ENV)
+        with patch.object(runtime, 'ROOT', self.root):
+            expected.update(runtime.native_build_environment({}))
+        self.assertEqual(env, expected)
 
     def test_linux_runtime_loader_wraps_the_same_command(self):
         host = self.tree('Linux')

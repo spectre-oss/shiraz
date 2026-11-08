@@ -668,7 +668,7 @@ macos-guest-fixture: macos-guest-toolchain $(MACOS_OUT)/m5/fixture.o
 
 MACOS_GUEST_CPPFLAGS := -Iinclude -I$(MACOS_OUT)/m5 -I.deps/capstone/src/include
 MACOS_GUEST_SOURCES := native/darwin/guest/providers.cpp native/darwin/guest/lifecycle.cpp native/darwin/guest/jump.cpp native/darwin/guest/jump.S native/darwin/guest/dynamic.cpp native/darwin/guest/tls.cpp native/darwin/guest/instruction.cpp native/darwin/guest/decode.cpp native/darwin/guest/unwind.cpp native/darwin/guest/unwind_runtime.cpp native/darwin/guest/tpidr.S native/darwin/guest/loader.cpp native/darwin/guest/jit.cpp native/darwin/guest/elf.cpp native/darwin/guest/image.cpp native/darwin/guest/call.cpp native/darwin/guest/va_list.cpp native/darwin/guest/closure.cpp native/darwin/guest/invoke.S .deps/capstone/build/libcapstone.a
-MACOS_GUEST_HEADERS := include/shiraz/darwin/guest/unwind.hpp include/shiraz/darwin/guest/unwind_runtime.hpp include/shiraz/darwin/guest/decode.hpp include/shiraz/darwin/guest/instruction.hpp include/shiraz/darwin/guest/tls.hpp include/shiraz/darwin/guest/providers.hpp include/shiraz/darwin/guest/lifecycle.hpp include/shiraz/darwin/guest/jump.hpp $(MACOS_OUT)/m5/guest_errno.hpp include/shiraz/darwin/guest/loader.hpp include/shiraz/darwin/guest/dynamic.hpp include/shiraz/darwin/guest/jit.hpp include/shiraz/darwin/guest/elf.hpp include/shiraz/darwin/guest/image.hpp include/shiraz/darwin/guest/call.hpp include/shiraz/darwin/guest/va_list.hpp include/shiraz/darwin/guest/closure.hpp $(MACOS_OUT)/m5/guest_io.hpp
+MACOS_GUEST_HEADERS := $(MACOS_OUT)/m5/guest_tls_layout.hpp include/shiraz/darwin/guest/unwind.hpp include/shiraz/darwin/guest/unwind_runtime.hpp include/shiraz/darwin/guest/decode.hpp include/shiraz/darwin/guest/instruction.hpp include/shiraz/darwin/guest/tls.hpp include/shiraz/darwin/guest/providers.hpp include/shiraz/darwin/guest/lifecycle.hpp include/shiraz/darwin/guest/jump.hpp $(MACOS_OUT)/m5/guest_errno.hpp include/shiraz/darwin/guest/loader.hpp include/shiraz/darwin/guest/dynamic.hpp include/shiraz/darwin/guest/jit.hpp include/shiraz/darwin/guest/elf.hpp include/shiraz/darwin/guest/image.hpp include/shiraz/darwin/guest/call.hpp include/shiraz/darwin/guest/va_list.hpp include/shiraz/darwin/guest/closure.hpp $(MACOS_OUT)/m5/guest_io.hpp
 $(MACOS_OUT)/m5/elf-probe: tests/darwin/guest/elf_probe.cpp tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
 	mkdir -p $(dir $@)
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/elf_probe.cpp tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) -o $@
@@ -979,9 +979,9 @@ macos-guest-tls-sanitize-check: macos-guest-tls-fixture $(MACOS_OUT)/m5/tls-sani
 macos-guest-check: macos-guest-tls-check macos-guest-tls-sanitize-check
 
 .PHONY: macos-guest-tpidr-thunk-check macos-guest-tpidr-thunk-sanitize-check
-$(MACOS_OUT)/m5/tpidr-thunk-probe: tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+$(MACOS_OUT)/m5/tpidr-thunk-probe: tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
 	mkdir -p $(dir $@)
-	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) -o $@
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) -o $@
 macos-guest-tpidr-thunk-check: $(MACOS_OUT)/m5/tpidr-thunk-probe
 	$(MACOS_OUT)/m5/tpidr-thunk-probe
 	cp $(MACOS_OUT)/m5/tpidr-thunk-probe $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened.pending
@@ -990,9 +990,9 @@ macos-guest-tpidr-thunk-check: $(MACOS_OUT)/m5/tpidr-thunk-probe
 	codesign --verify --strict $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
 	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
 	$(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
-$(MACOS_OUT)/m5/tpidr-thunk-sanitized: tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+$(MACOS_OUT)/m5/tpidr-thunk-sanitized: tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
 	mkdir -p $(dir $@)
-	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) -o $@
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) -o $@
 macos-guest-tpidr-thunk-sanitize-check: $(MACOS_OUT)/m5/tpidr-thunk-sanitized
 	$(MACOS_OUT)/m5/tpidr-thunk-sanitized
 macos-guest-check: macos-guest-tpidr-thunk-check macos-guest-tpidr-thunk-sanitize-check
@@ -2040,15 +2040,15 @@ macos-guest-descriptor-local-check:
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -Wall -Wextra -Werror -fsyntax-only tests/darwin/guest/descriptor_compile.cpp
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_JNI_FLAGS) -std=c++17 -Wall -Wextra -Werror -fsyntax-only native/darwin/guest/jni.cpp
 
-.PHONY: macos-guest-jni-descriptor-local-check
-# Requires a current --mode adhoc JNI run; only guest ELF variants are built.
-macos-guest-jni-descriptor-local-check:
-	uv run --no-project python scripts/macos_guest_jni_descriptor_local.py
+.PHONY: macos-guest-return-auth-unwind-local-check
+# Requires existing probes and guest dependencies; never builds/signs host code.
+macos-guest-return-auth-unwind-local-check:
+	uv run --no-project python scripts/macos_guest_return_auth_unwind_local.py --apk "$(APK)"
 
-.PHONY: macos-guest-jni-descriptor-hardened-local-check
-# Reuses an existing strict signed closure; verifies it without signing.
-macos-guest-jni-descriptor-hardened-local-check:
-	uv run --no-project python scripts/macos_guest_jni_descriptor_local.py --mode hardened
+.PHONY: macos-guest-descriptor-runtime-local-check
+# Guest-only compilation; all host probes must already exist unchanged.
+macos-guest-descriptor-runtime-local-check:
+	uv run --no-project python scripts/macos_guest_descriptor_runtime_local.py
 
 .PHONY: macos-guest-opensles-lifetime-local-check
 # LLVM text only: verifies no static-destructor registration before loader exit.
@@ -2066,6 +2066,33 @@ $(MACOS_OUT)/m5/opensles-probe: tests/darwin/guest/opensles_probe.cpp native/dar
 macos-guest-opensles-check: $(MACOS_OUT)/m5/opensles-probe
 	$(MACOS_OUT)/m5/opensles-probe
 macos-guest-check: macos-guest-opensles-check
+
+.PHONY: macos-guest-unsigned-local-build
+# Existing generated inputs only. Suppress the linker's automatic signature;
+# write a separate image and never mutate the normal bridge.
+macos-guest-unsigned-local-build:
+	mkdir -p $(MACOS_OUT)/m5/unsigned
+	$(MACOS_GUEST_BRIDGE_LINK) -Wl,-no_adhoc_codesign -o $(MACOS_OUT)/m5/unsigned/libshiraz-guest.so
+
+$(MACOS_OUT)/m5/guest_tls_layout.hpp: scripts/generate_guest_tls_layout.py
+	uv run --no-project python scripts/generate_guest_tls_layout.py
+$(MACOS_OUT)/libshiraz-guest.so: $(MACOS_OUT)/m5/guest_tls_layout.hpp
+
+.PHONY: macos-guest-tls-layout-local-check
+macos-guest-tls-layout-local-check:
+	uv run --no-project python scripts/generate_guest_tls_layout.py
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -Wall -Wextra -Werror -fsyntax-only native/darwin/guest/tls.cpp
+macos-guest-check: macos-guest-tls-layout-local-check
+
+.PHONY: macos-guest-jni-descriptor-local-check
+# Requires a current --mode adhoc JNI run; only guest ELF variants are built.
+macos-guest-jni-descriptor-local-check:
+	uv run --no-project python scripts/macos_guest_jni_descriptor_local.py
+
+.PHONY: macos-guest-jni-descriptor-hardened-local-check
+# Reuses an existing strict signed closure; verifies it without signing.
+macos-guest-jni-descriptor-hardened-local-check:
+	uv run --no-project python scripts/macos_guest_jni_descriptor_local.py --mode hardened
 
 .PHONY: macos-guest-telegram-api-check
 $(MACOS_OUT)/m5/telegram-api-probe: tests/darwin/guest/telegram_api_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS)
@@ -2092,3 +2119,11 @@ macos-telegram-framework-smoke: macos-runtime-libs macos-graphics-libs macos-fra
 	uv run --no-project python scripts/java_framework_smoke.py ViewSwitcherSmoke --marker VIEW_SWITCHER_OK
 	uv run --no-project python scripts/java_framework_smoke.py PathLastPointSmoke --marker PATH_LAST_POINT_OK
 	uv run --no-project python scripts/java_framework_smoke.py ColorGlyphBoundsSmoke --marker COLOR_GLYPH_BOUNDS_OK
+
+# AVFoundation capture keeps macOS TCC and Shiraz per-app consent independent.
+$(MACOS_OUT)/capture.exports: scripts/darwin_jni_exports.py java/shiraz/runtime/NativeCapture.java
+	uv run --no-project python scripts/darwin_jni_exports.py java/shiraz/runtime/NativeCapture.java > $@
+$(MACOS_OUT)/libshiraz-capture.so: native/darwin/capture.mm java/shiraz/runtime/NativeCapture.java $(MACOS_OUT)/capture.exports
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fobjc-arc -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/capture.exports -Wl,-dead_strip native/darwin/capture.mm -o $@ -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreMedia -framework CoreVideo -pthread
+macos-runtime-libs: $(MACOS_OUT)/libshiraz-capture.so
+macos-jvm-native: $(MACOS_OUT)/libshiraz-capture.so
