@@ -12,6 +12,9 @@
 #include <new>
 #include <unordered_set>
 #include <vector>
+#if defined(__APPLE__)
+namespace shiraz { namespace darwin { struct WindowQueue; } }
+#endif
 
 struct ANativeWindow {
     std::atomic<unsigned> references{1};
@@ -25,6 +28,10 @@ struct ANativeWindow {
     uint64_t sharedRevision=0;
     std::vector<uint32_t> transfer;
     std::vector<uint8_t> front, back;
+#if defined(__APPLE__)
+    // M4b IOSurface buffer queue (native/darwin/window_queue.inc), made lazily.
+    std::unique_ptr<shiraz::darwin::WindowQueue> queue;
+#endif
     ANativeWindow(int32_t w, int32_t h) : width(w), height(h), initial_width(w), initial_height(h),
         front(size_t(w) * h * 4), back(front.size()) {}
 };
@@ -69,6 +76,9 @@ static int publish_shared(ANativeWindow* w,bool allowResize=true) {
     } catch (const std::bad_alloc&) { return -ENOMEM; }
       catch (...) { return -EIO; }
 }
+#if defined(__APPLE__)
+#include "darwin/window_queue.inc"
+#endif
 extern "C" ANativeWindow* shiraz_window_create(int32_t w, int32_t h) {
     if (!valid_size(w, h)) return nullptr;
     try {
@@ -115,6 +125,9 @@ static int32_t set_geometry(ANativeWindow* w, int32_t width, int32_t height, int
         std::vector<uint8_t> front(size_t(width) * height * 4), back(front.size());
         w->front.swap(front); w->back.swap(back); w->width = width; w->height = height;w->front_argb=false;++w->revision;
     } catch (const std::bad_alloc&) { return -ENOMEM; }
+#if defined(__APPLE__)
+    cpuPosted(w);
+#endif
     if(hostResize){w->initial_width=width;w->initial_height=height;}
     return publish_shared(w);
 }
@@ -141,12 +154,19 @@ extern "C" int32_t ANativeWindow_unlockAndPost(ANativeWindow* w) {
     std::lock_guard<std::mutex> guard(w->mutex);
     if (!w->locked) return -EINVAL;
     w->front.swap(w->back); w->locked = false;w->front_argb=false;++w->revision;
+#if defined(__APPLE__)
+    cpuPosted(w);
+#endif
     int error=publish_shared(w,false);if(error)return error;
     if (w->frameSink) w->frameSink(reinterpret_cast<const uint32_t*>(w->front.data()), w->width, w->height, false);
     return 0;
 }
 extern "C" int32_t shiraz_window_copy_argb(ANativeWindow* w, uint32_t* output, uint64_t capacity) {
     if (!w || !output) return -EINVAL;
+#if defined(__APPLE__)
+    // The newest frame may be an IOSurface slot: materialise it first (C2).
+    return copyArgbLocked(w, output, capacity, nullptr);
+#endif
     std::lock_guard<std::mutex> guard(w->mutex);
     int error=sync_shared(w);if(error)return error;
     auto count = uint64_t(w->width) * w->height;
@@ -165,6 +185,9 @@ static int32_t post_argb_locked(ANativeWindow* w,const uint32_t* pixels,uint64_t
     if(w->locked)return -EBUSY;
     if(count!=uint64_t(w->width)*w->height)return -EINVAL;
     std::memcpy(w->front.data(),pixels,size_t(count)*4);w->front_argb=true;++w->revision;
+#if defined(__APPLE__)
+    cpuPosted(w);
+#endif
     int error=publish_shared(w,false);if(error)return error;
     if(w->frameSink)w->frameSink(reinterpret_cast<const uint32_t*>(w->front.data()),w->width,w->height,true);
     return 0;
@@ -189,6 +212,21 @@ void shiraz_window_set_frame_sink(ANativeWindow* w, ShirazFrameSink sink) {
 
 extern "C" int shiraz_window_export(ANativeWindow* w) {
     if(!w)return -EINVAL;
+#if defined(__APPLE__)
+    {
+        // First publish carries the newest frame, which may be an IOSurface slot.
+        std::unique_lock<std::mutex> lock(w->mutex);
+        try {
+            if(!w->shared){
+                uint64_t revision=0;int error=materialize(w,lock,&revision);if(error)return error;
+                w->shared=shiraz::SharedFrame::create();
+                error=publish_shared(w);
+                if(error){w->shared.reset();return error;}
+            }
+            return w->shared->duplicate();
+        } catch(const std::bad_alloc&){return -ENOMEM;}catch(...){return -EIO;}
+    }
+#endif
     std::lock_guard<std::mutex> guard(w->mutex);
     try {
         if(!w->shared){

@@ -45,4 +45,10 @@ public final class NativeGpu {
   public static native void ripple(long surface, float[] geometry, int color,
                                    int sparkle);
   public static native void color(long surface, int color);
+  // macOS M4b only (natives exist in the darwin libshiraz-gpu): draw the newest
+  // queued IOSurface slot of a Shiraz ANativeWindow into this surface, with no
+  // CPU copy. False means the caller must use the CPU path for this frame.
+  public static native boolean windowSupported();
+  public static native boolean window(long surface, long window, float[] destination,
+                                      boolean opaque);
 }

@@ -17,4 +17,5 @@ void darwinForgetContext(EGLContext context) {
     if (context == EGL_NO_CONTEXT) return;
     std::lock_guard<std::mutex> guard(drawsMutex);
     for (auto& entry : draws) entry.second->framebuffers.erase(context);
+    darwinZeroCopyForgetContext(context);  // M4b window slots (egl_shim_iosurface.inc)
 }

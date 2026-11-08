@@ -94,6 +94,8 @@ thread_local GLuint currentFramebuffer = 0;
 #if defined(__APPLE__)
 // ANGLE: OES framebuffer entry points while an ES 1 context is current.
 #include "darwin/egl_shim_gles1.inc"
+// M4b: IOSurface zero copy for app GLES window frames.
+#include "darwin/egl_shim_iosurface.inc"
 #include "darwin/egl_shim_contexts.inc"
 #endif
 Draw* findDraw(EGLSurface surface) {
@@ -166,6 +168,9 @@ EGLSurface createWindow(EGLDisplay display, EGLConfig config, EGLNativeWindowTyp
         entry->window = native; entry->width = width; entry->height = height;
         draws[reinterpret_cast<EGLSurface>(token)] = entry;
         ANativeWindow_acquire(native);
+#if defined(__APPLE__)
+        darwinRegister(reinterpret_cast<EGLSurface>(token), native, display);
+#endif
         return reinterpret_cast<EGLSurface>(token);
     }
     Proc proc = realProc();
@@ -177,6 +182,9 @@ EGLBoolean makeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface read, EGL
     using Fn = EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
     auto real = reinterpret_cast<Fn>(symbol("eglMakeCurrent"));
     if (!real) return EGL_FALSE;
+#if defined(__APPLE__)
+    { int result = darwinMakeCurrent(display, draw, read, context, real); if (result >= 0) return EGLBoolean(result); }
+#endif
     Draw* found = findDraw(draw);
     if (!found) {
         EGLBoolean result = real(display, draw, read, context);
@@ -213,6 +221,9 @@ void traceSwap(std::chrono::steady_clock::time_point started) {
     window = now; swaps = 0; readback = 0;
 }
 EGLBoolean swapBuffers(EGLDisplay display, EGLSurface surface) {
+#if defined(__APPLE__)
+    { int result = darwinSwap(surface); if (result >= 0) return EGLBoolean(result); }
+#endif
     Draw* found = findDraw(surface);
     if (!found) {
         using Fn = EGLBoolean (*)(EGLDisplay, EGLSurface);
@@ -252,6 +263,9 @@ EGLBoolean swapBuffers(EGLDisplay display, EGLSurface surface) {
     glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(packBuffer));
     glPixelStorei(GL_PACK_ALIGNMENT, packAlignment);
     if (readError != GL_NO_ERROR) return EGL_FALSE;
+#if defined(__APPLE__)
+    shiraz_cpu_pixel_reads_add("shim-readback", uint64_t(pixels) * 4);
+#endif
     for (size_t y = 0; y < static_cast<size_t>(draw.height); ++y) {
         const uint32_t* source = draw.read.data() + (draw.height - 1 - y) * width;
         uint32_t* target = draw.argb.data() + y * width;
@@ -264,6 +278,18 @@ EGLBoolean swapBuffers(EGLDisplay display, EGLSurface surface) {
     // A concurrent host resize supersedes this frame; do not reset Gecko's compositor.
     int result=shiraz_window_post_argb_sized(draw.window, draw.argb.data(), draw.argb.size(), draw.width, draw.height);
     EGLBoolean posted = result==0 || result==-EAGAIN ? EGL_TRUE : EGL_FALSE;
+#if defined(__APPLE__)
+    shiraz_zero_copy_count("swaps", 1);
+    if (zcTrace() && result == 0) {
+        // Same line as a zero-copy queue, so the frame-id gates read both arms alike.
+        static std::mutex swapsMutex; static std::unordered_map<ANativeWindow*, uint64_t> swapsByWindow;
+        uint64_t value; { std::lock_guard<std::mutex> guard(swapsMutex); value = ++swapsByWindow[draw.window]; }
+        std::fprintf(stderr, "SHIRAZ_ZC_QUEUE window=%p rev=%llu v=%llu t_ns=%llu path=readback\n", static_cast<void*>(draw.window),
+                     static_cast<unsigned long long>(shiraz_window_revision(draw.window)), static_cast<unsigned long long>(value),
+                     static_cast<unsigned long long>(zcNowNs()));
+    }
+    shiraz_zero_copy_sample("swap_ms", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+#endif
     traceSwap(started);
     return posted;
 }
@@ -312,6 +338,9 @@ EGLBoolean surfaceAttrib(EGLDisplay display, EGLSurface surface, EGLint attribut
     return EGL_FALSE;
 }
 EGLBoolean destroySurface(EGLDisplay display, EGLSurface surface) {
+#if defined(__APPLE__)
+    if (darwinDestroySurface(surface)) return EGL_TRUE;
+#endif
     Draw* found = nullptr;
     {
         std::lock_guard<std::mutex> guard(drawsMutex);
@@ -340,6 +369,9 @@ EGLBoolean destroySurface(EGLDisplay display, EGLSurface surface) {
 static void bindWindowFramebuffer(GLenum target, GLuint framebuffer) {
     BindFramebuffer bind = realBindFramebuffer();
     if (!bind) return;
+#if defined(__APPLE__)
+    if (darwinBindWindow(target, framebuffer, bind)) return;
+#endif
     // Engines may cache the window FBO returned by GL_FRAMEBUFFER_BINDING.
     // Prepare its new dimensions before rendering, not during swap/readback.
     if (currentWindow != EGL_NO_SURFACE && (framebuffer == 0 || framebuffer == currentFramebuffer)) {
@@ -484,5 +516,24 @@ extern "C" EGLBoolean eglDestroyImageKHR(EGLDisplay display, EGLImageKHR image) 
     return real(display, image);
 }
 extern "C" EGLClientBuffer eglGetNativeClientBufferANDROID(const AHardwareBuffer* b) { return nativeClientBuffer(b); }
+#if defined(__APPLE__)
+// The ANGLE libEGL this shim loaded (real path), so the zero-copy consumer can
+// check that SDL's EGL is the same instance (DESIGN-v2.md section 3.5).
+extern "C" const char* shiraz_egl_library_path(void) {
+    static const std::string path = [] {
+        // The image implementing eglCreateSync: ANGLE's libEGL forwards to libGLESv2, and
+        // SDL's eglGetProcAddress answers with the libGLESv2 entry, so compare those.
+        Dl_info info{};
+        using GetProc = void* (*)(const char*);
+        auto getProc = reinterpret_cast<GetProc>(symbol("eglGetProcAddress"));
+        void* entry = getProc ? getProc("eglCreateSync") : nullptr;
+        if (!entry) entry = symbol("eglCreateSync");
+        if (!entry || !dladdr(entry, &info) || !info.dli_fname) return std::string();
+        char resolved[PATH_MAX];
+        return std::string(realpath(info.dli_fname, resolved) ? resolved : info.dli_fname);
+    }();
+    return path.empty() ? nullptr : path.c_str();
+}
+#endif
 
 extern "C" EGLBoolean eglSurfaceAttrib(EGLDisplay display, EGLSurface surface, EGLint attribute, EGLint value) { return surfaceAttrib(display, surface, attribute, value); }

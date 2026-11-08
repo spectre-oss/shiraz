@@ -18,6 +18,11 @@
 #include <sstream>
 #include <cstdlib>
 #include <algorithm>
+#if defined(__APPLE__)
+#include <chrono>
+#include <cstdio>
+#include <dlfcn.h>
+#endif
 
 namespace shiraz {
 namespace {
@@ -577,6 +582,43 @@ void present(const Surface& initial, const std::string& title, int frames, const
                 for(uint32_t pixel:output){const char rgb[]={char(pixel>>16),char(pixel>>8),char(pixel)};file.write(rgb,3);}
                 file.close();if(!file||std::rename(temporary.c_str(),capture)!=0)throw std::runtime_error("Cannot write presentation snapshot");
             }
+#if defined(__APPLE__)
+            // M4b presenter sample sequence (DESIGN-v2 section 7.3), opt-in observation:
+            // SHIRAZ_PRESENT_SAMPLES=<path>[,full_every=N] appends "seq t_ns centre tl br" per
+            // present (three 1x1 reads of the renderer output at app-relative points: window
+            // centre, inside the top-left 64 px block, inside the bottom-right 32x96 px block),
+            // and every Nth present writes <path>-present-<seq>.ppm. Each read is an observer read.
+            static const std::string samples=[]{const char* v=std::getenv("SHIRAZ_PRESENT_SAMPLES");return std::string(v?v:"");}();
+            if(!samples.empty()){
+                static const std::string path=samples.substr(0,samples.find(','));
+                static const long fullEvery=[]{auto at=samples.find(",full_every=");return at==std::string::npos?0L:std::strtol(samples.c_str()+at+12,nullptr,10);}();
+                static uint64_t sequence=0;++sequence;
+                using Observe=void(*)(const char*,uint64_t);
+                static const Observe observe=reinterpret_cast<Observe>(dlsym(RTLD_DEFAULT,"shiraz_observer_reads_add"));
+                const double scale=v.width/double(image.width);
+                const int points[3][2]={{int(v.x+v.width/2),int(v.y+v.height/2)},{int(v.x+32*scale),int(v.y+32*scale)},
+                                        {int(v.x+(image.width-16)*scale),int(v.y+(image.height-48)*scale)}};
+                const auto now=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+                std::ofstream file(path,std::ios::app);file<<sequence<<' '<<now;
+                for(const auto& point:points){
+                    uint32_t pixel=0;SDL_Rect one{point[0],point[1],1,1};
+                    checked(SDL_RenderReadPixels(renderer.get(),&one,SDL_PIXELFORMAT_ARGB8888,&pixel,4));
+                    if(observe)observe("present-samples",4);
+                    char hex[8];std::snprintf(hex,sizeof hex,"%06x",pixel&0xffffff);file<<' '<<hex;
+                }
+                file<<'\n';
+                if(fullEvery>0&&sequence%uint64_t(fullEvery)==0){
+                    int cw=0,ch=0;checked(SDL_GetRendererOutputSize(renderer.get(),&cw,&ch));
+                    if(cw>0&&ch>0&&cw<=8192&&ch<=8192){
+                        std::vector<uint32_t> output(static_cast<size_t>(cw)*ch);
+                        checked(SDL_RenderReadPixels(renderer.get(),nullptr,SDL_PIXELFORMAT_ARGB8888,output.data(),cw*4));
+                        if(observe)observe("present-samples",uint64_t(cw)*ch*4);
+                        std::ofstream ppm(path+"-present-"+std::to_string(sequence)+".ppm",std::ios::binary|std::ios::trunc);ppm<<"P6\n"<<cw<<' '<<ch<<"\n255\n";
+                        for(uint32_t pixel:output){const char rgb[]={char(pixel>>16),char(pixel>>8),char(pixel)};ppm.write(rgb,3);}
+                    }
+                }
+            }
+#endif
             SDL_RenderPresent(renderer.get());
             repaint=false;presentedWidth=w;presentedHeight=h;++presents;
         } else {++skippedPresents;}

@@ -39,3 +39,4 @@ _eglWaitGL
 _eglWaitNative
 _glBindFramebuffer
 _shiraz_egl_bind_framebuffer
+_shiraz_egl_library_path

@@ -6,6 +6,7 @@
 // the handful of EGL types and constants the dispatch table names are needed.
 #include <cstdint>
 #include <thread>
+#include "shiraz/darwin/window_queue.h"
 typedef unsigned int EGLBoolean;typedef unsigned int EGLenum;typedef int32_t EGLint;
 typedef void* EGLDisplay;typedef void* EGLContext;typedef void* EGLSurface;typedef void* EGLConfig;typedef void* EGLNativeWindowType;
 #define EGL_NO_DISPLAY ((EGLDisplay)0)
@@ -40,8 +41,35 @@ extern "C" JNIEXPORT jboolean JNICALL Java_android_view_Surface_nativeResizeWind
     return shiraz_window_resize(reinterpret_cast<ANativeWindow*>(window), width, height) == 0;
 }
 extern "C" JNIEXPORT void JNICALL Java_android_view_Surface_nativeReleaseWindow(JNIEnv*, jclass, jlong window) {
+#if defined(__APPLE__)
+    // M4b: the Java owner let go; the consumer retires its cached images at its next frame.
+    shiraz_window_abandon(reinterpret_cast<ANativeWindow*>(window));
+#endif
     ANativeWindow_release(reinterpret_cast<ANativeWindow*>(window));
 }
+#if defined(__APPLE__)
+// M4b (C7): the revision the copied pixels belong to (materialised from the newest
+// queued IOSurface when the CPU copy is stale), or -1 on failure.
+extern "C" JNIEXPORT jlong JNICALL Java_android_view_Surface_nativeCopyArgbRevision(JNIEnv* env, jclass, jlong window, jintArray pixels) {
+    if (!window || !pixels) return -1;
+    jsize count = env->GetArrayLength(pixels);
+    jint* data = env->GetIntArrayElements(pixels, nullptr);
+    if (!data) return -1;
+    uint64_t revision = 0;
+    int copied = shiraz_window_copy_argb_revision(reinterpret_cast<ANativeWindow*>(window), reinterpret_cast<uint32_t*>(data), static_cast<size_t>(count), &revision);
+    env->ReleaseIntArrayElements(pixels, data, copied == 0 ? 0 : JNI_ABORT);
+    return copied == 0 ? static_cast<jlong>(revision) : -1;
+}
+// An offscreen window (ImageReader/PixelCopy-style consumer) keeps the readback path.
+extern "C" JNIEXPORT void JNICALL Java_android_view_Surface_nativeMarkOffscreen(JNIEnv*, jclass, jlong window) {
+    shiraz_window_set_offscreen(reinterpret_cast<ANativeWindow*>(window));
+}
+// CPU frames presented by Surface.publishWindow (counter cpu_publishes).
+extern "C" JNIEXPORT void JNICALL Java_android_view_Surface_nativeCountCpuPublish(JNIEnv*, jclass, jlong window) {
+    shiraz_zero_copy_count("cpu_publishes", 1);
+    shiraz_zero_copy_event("cpu_publish", reinterpret_cast<ANativeWindow*>(window));
+}
+#endif
 extern "C" JNIEXPORT jint JNICALL Java_android_view_Surface_nativeExportWindow(JNIEnv*, jclass, jlong window) {
     return shiraz_window_export(reinterpret_cast<ANativeWindow*>(window));
 }

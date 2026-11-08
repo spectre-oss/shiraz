@@ -248,6 +248,9 @@ jlong allocate(int w, int h) {
   return id;
 }
 } // namespace
+#if defined(__APPLE__)
+#include "darwin/gpu_iosurface.inc"
+#endif
 namespace shiraz {
 bool gpu_initialize(void *(*getProc)(const char *)) {
   const char *mode = std::getenv("SHIRAZ_CANVAS");
@@ -277,9 +280,15 @@ bool gpu_initialize(void *(*getProc)(const char *)) {
   }
   engine.context->setResourceCacheLimit(128u * 1024 * 1024);
   std::cerr << "SHIRAZ_CANVAS backend=skia-ganesh gpu=1 antialias=coverage\n";
+#if defined(__APPLE__)
+  shiraz_zero_copy::initialize(getProc);
+#endif
   return true;
 }
 void gpu_shutdown() {
+#if defined(__APPLE__)
+  shiraz_zero_copy::shutdown(engine.context.get());
+#endif
   collect();
   jthrowable pending = ownerEnv ? ownerEnv->ExceptionOccurred() : nullptr;
   if (pending)
@@ -291,6 +300,9 @@ void gpu_shutdown() {
       if (array && s.written) {
         int w = s.target->width(), h = s.target->height();
         std::vector<jint> data(w * h);
+#if defined(__APPLE__)
+        shiraz_zero_copy::countRead("gpu-read", uint64_t(w) * h * 4);
+#endif
         if (s.target->readPixels(SkImageInfo::Make(w, h, kBGRA_8888_SkColorType,
                                                    kUnpremul_SkAlphaType),
                                  data.data(), w * 4, 0, 0))
@@ -314,6 +326,9 @@ void gpu_shutdown() {
 void gpu_prepare() {
   if (engine.context)
     engine.context->resetContext();
+#if defined(__APPLE__)
+  shiraz_zero_copy::prepare(engine.context.get());
+#endif
 }
 uint64_t gpu_revision() { return engine.revision; }
 void gpu_software_frame() {
@@ -353,6 +368,9 @@ bool gpu_present(int w, int h, const uint32_t *pixels, int sw, int sh) {
                        int(viewport.height)),
       SkSamplingOptions(SkFilterMode::kLinear));
   engine.context->flushAndSubmit();
+#if defined(__APPLE__)
+  shiraz_zero_copy::present();
+#endif
   return true;
 }
 } // namespace shiraz
@@ -409,6 +427,9 @@ int w = s->width(), height = s->height();
 if (!array || e->GetArrayLength(array) != w * height)
   throw std::invalid_argument("GPU read size");
 std::vector<jint> data(w *height);
+#if defined(__APPLE__)
+shiraz_zero_copy::countRead("gpu-read", uint64_t(w) * height * 4);
+#endif
 if (!s->readPixels(SkImageInfo::Make(w, height, kBGRA_8888_SkColorType,
                                      kUnpremul_SkAlphaType),
                    data.data(), w * 4, 0, 0))

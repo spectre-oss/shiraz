@@ -48,7 +48,11 @@ public class Surface implements android.os.Parcelable {
  public static boolean shirazEglRelease() { return nativeEglMakeCurrent(0, 0); }
  public boolean shirazEglMakeCurrent(long context) { long window = shirazNativeWindow(); return window != 0 && context != 0 && nativeEglMakeCurrent(window, context); }
  public boolean shirazEglSwap() { long window = shirazNativeWindow(); return window != 0 && nativeEglSwap(window); }
- public long shirazOffscreenWindow(int w, int h) { shirazConfigure(w, h, PixelFormat.RGBA_8888); return shirazNativeWindow(); }
+ public long shirazOffscreenWindow(int w, int h) { shirazConfigure(w, h, PixelFormat.RGBA_8888); long window = shirazNativeWindow(); if (ShirazWindowDraw.MAC && window != 0) nativeMarkOffscreen(window); return window; }
+ // macOS M4b natives (from_surface.cpp, __APPLE__); never called off macOS.
+ private static native long nativeCopyArgbRevision(long window, int[] pixels);
+ private static native void nativeMarkOffscreen(long window);
+ private static native void nativeCountCpuPublish(long window);
  private static native boolean nativeCopyArgb(long window, int[] pixels);
  boolean shirazPostArgb(int[] pixels) { long window = shirazNativeWindow(); return window != 0 && nativePostArgb(window, pixels); }
  private int[] published;
@@ -60,6 +64,16 @@ public class Surface implements android.os.Parcelable {
 
   int count = front.getWidth() * front.getHeight();
   if (published == null || published.length != count) published = new int[count];
+  if (ShirazWindowDraw.MAC) {
+   // C7: the copy reports the revision its pixels belong to; continuous production no longer starves it.
+   long got = nativeCopyArgbRevision(nativeWindow, published);
+   if (got >= revision) {
+    if(format==PixelFormat.RGB_565||format==PixelFormat.RGBX_8888||format==PixelFormat.OPAQUE)
+     for(int i=0;i<published.length;i++)published[i]|=0xff000000;
+    front.setPixels(published, 0, front.getWidth(), 0, 0, front.getWidth(), front.getHeight());lastNativeRevision=got;nativeCountCpuPublish(nativeWindow);trace("publish");
+   }
+   return;
+  }
   if (nativeCopyArgb(nativeWindow, published)&&revision==nativeWindowRevision(nativeWindow)){
    // EGL's backing buffer can carry alpha even when this consumer is opaque.
    // Apply the same opacity contract as the software Canvas producer path.
@@ -96,8 +110,10 @@ public class Surface implements android.os.Parcelable {
   if(proxy)return delegate==null?PixelCopy.ERROR_SOURCE_INVALID:delegate.shirazCopyPixels(source,destination);
   if(!valid||front==null)return PixelCopy.ERROR_SOURCE_INVALID;
   if(!hasPostedFrame&&(nativeWindow==0||nativeWindowRevision(nativeWindow)<=initialNativeRevision))return PixelCopy.ERROR_SOURCE_NO_DATA;
+  long requestedAtEntry=ShirazWindowDraw.MAC&&nativeWindow!=0?nativeWindowRevision(nativeWindow):0;
   publishWindow();
-  if(nativeWindow!=0&&lastNativeRevision!=nativeWindowRevision(nativeWindow))return PixelCopy.ERROR_TIMEOUT;
+  if(ShirazWindowDraw.MAC){if(nativeWindow!=0&&lastNativeRevision<requestedAtEntry)return PixelCopy.ERROR_TIMEOUT;}
+  else if(nativeWindow!=0&&lastNativeRevision!=nativeWindowRevision(nativeWindow))return PixelCopy.ERROR_TIMEOUT;
   Rect crop=source==null?new Rect(0,0,width,height):new Rect(source);
   if(!crop.intersect(0,0,width,height))return PixelCopy.ERROR_SOURCE_INVALID;
   Canvas canvas=new Canvas(destination);
@@ -106,7 +122,9 @@ public class Surface implements android.os.Parcelable {
   return PixelCopy.SUCCESS;
  }
  public Canvas lockHardwareCanvas(){throw new UnsupportedOperationException("Hardware surface canvas requires EGL/native window support");}
- public synchronized void shirazDraw(Canvas canvas,int width,int height){if(proxy){target().shirazDraw(canvas,width,height);return;}if(valid&&front!=null&&width>0&&height>0){publishWindow();canvas.drawBitmap(front,null,new Rect(0,0,width,height),null);}}
+ public synchronized void shirazDraw(Canvas canvas,int width,int height){if(proxy){target().shirazDraw(canvas,width,height);return;}
+  if(ShirazWindowDraw.MAC&&valid&&nativeWindow!=0&&width>0&&height>0&&ShirazWindowDraw.available()&&ShirazWindowDraw.draw(canvas,nativeWindow,width,height,format==PixelFormat.RGB_565||format==PixelFormat.RGBX_8888||format==PixelFormat.OPAQUE))return;
+  if(valid&&front!=null&&width>0&&height>0){publishWindow();canvas.drawBitmap(front,null,new Rect(0,0,width,height),null);}}
  private static native int nativeExportWindow(long window);
  private static native long nativeImportWindow(int descriptor);
  public int describeContents(){return CONTENTS_FILE_DESCRIPTOR;}

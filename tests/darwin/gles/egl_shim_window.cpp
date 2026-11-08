@@ -15,6 +15,12 @@
 //    window framebuffer, while ANGLE's own glBindFramebuffer(0) is not (ES 1:
 //    the shim's framebuffer uses the OES entry points, egl_shim_gles1.inc);
 //  - a resize through ANativeWindow_setBuffersGeometry is honoured.
+// M4b zero copy (default; SHIRAZ_EGL_ZERO_COPY=0 keeps the readback path): the
+// window colour attachment is a GL_RENDERBUFFER over an IOSurface slot, the
+// app's texture namespace is untouched (first glGenTextures = 1, deleting
+// names 1..64 keeps frames exact), and a slot's size is latched at dequeue: the
+// frame drawn into the pre-resize slot is dropped, never stretched, and a
+// mid-frame bind of 0 after a resize does not re-dequeue (DESIGN-v2 C4, C5).
 //
 // usage: SHIRAZ_EGL_LIBRARY=<dir>/libEGL.dylib egl_shim_window <dir>
 //   <dir> holds libGLESv2.dylib, libEGL_shim.so and libshiraz-gles2.so.
@@ -64,6 +70,7 @@ struct Gl {
     PFNGLGENFRAMEBUFFERSPROC genFramebuffers; PFNGLGETSTRINGPROC getString; PFNGLGETERRORPROC getError;
     PFNGLVIEWPORTPROC viewport; Bind angleBind;
 };
+PFNGLREADPIXELSPROC readPixels = nullptr; PFNGLFINISHPROC finishGl = nullptr;
 GLint binding(const Gl& gl) { GLint value = -1; gl.getIntegerv(GL_FRAMEBUFFER_BINDING, &value); return value; }
 uint32_t argb(float r, float g, float b) {
     return 0xff000000u | (uint32_t(r * 255.f + .5f) << 16) | (uint32_t(g * 255.f + .5f) << 8) | uint32_t(b * 255.f + .5f);
@@ -73,6 +80,11 @@ bool clearAndSwap(const Gl& gl, EGLDisplay display, EGLSurface surface, PFNEGLSW
     gl.viewport(0, 0, width, height);
     gl.clearColor(r, g, b, 1.f);
     gl.clear(GL_COLOR_BUFFER_BIT);
+    // The producer reads its own frame back before the swap (app glReadPixels, gles_readback.cpp order).
+    uint8_t rgba[4] = {0, 0, 0, 0};
+    finishGl(); readPixels(width / 2, height / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    const uint32_t read = 0xff000000u * (rgba[3] == 255) | uint32_t(rgba[0]) << 16 | uint32_t(rgba[1]) << 8 | rgba[2];
+    if (read != argb(r, g, b)) { std::printf("     glReadPixels before swap 0x%08x (a=%u) expected 0x%08x\n", read, rgba[3], argb(r, g, b)); return false; }
     if (!swap(display, surface)) return false;
     std::vector<uint32_t> pixels(size_t(width) * height);
     if (shiraz_window_copy_argb(window, pixels.data(), pixels.size()) != 0) return false;
@@ -99,6 +111,7 @@ int main(int argc, char** argv) {
           sym<PFNGLCLEARPROC>(gles, "glClear"), sym<PFNGLGENFRAMEBUFFERSPROC>(gles, "glGenFramebuffers"),
           sym<PFNGLGETSTRINGPROC>(gles, "glGetString"), sym<PFNGLGETERRORPROC>(gles, "glGetError"),
           sym<PFNGLVIEWPORTPROC>(gles, "glViewport"), sym<Bind>(gles, "glBindFramebuffer")};
+    readPixels = sym<PFNGLREADPIXELSPROC>(gles, "glReadPixels"); finishGl = sym<PFNGLFINISHPROC>(gles, "glFinish");
     auto getProc = sym<PFNEGLGETPROCADDRESSPROC>(shim, "eglGetProcAddress");
     auto getDisplay = sym<PFNEGLGETDISPLAYPROC>(shim, "eglGetDisplay");
     auto initialize = sym<PFNEGLINITIALIZEPROC>(shim, "eglInitialize");
@@ -126,6 +139,13 @@ int main(int argc, char** argv) {
         {"shim bionic_glBindFramebuffer", sym<Bind>(shim, "bionic_glBindFramebuffer")},
         {"eglGetProcAddress(glBindFramebuffer)", procBind},
     };
+    const char* zeroCopyEnv = std::getenv("SHIRAZ_EGL_ZERO_COPY");
+    const bool zeroCopy = !(zeroCopyEnv && std::strcmp(zeroCopyEnv, "0") == 0);
+    std::printf("zero copy %s\n", zeroCopy ? "on (iosurface slots)" : "off (readback)");
+    auto attachmentParameter = sym<PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC>(gles, "glGetFramebufferAttachmentParameteriv");
+    auto genTextures = sym<PFNGLGENTEXTURESPROC>(gles, "glGenTextures");
+    auto deleteTextures = sym<PFNGLDELETETEXTURESPROC>(gles, "glDeleteTextures");
+    auto bindTexture = sym<PFNGLBINDTEXTUREPROC>(gles, "glBindTexture");
     for (EGLint version : {3, 1}) {
         std::printf("== ES %d context\n", version);
         // As native/from_surface.cpp does on macOS: ES 3 without a config
@@ -154,6 +174,18 @@ int main(int argc, char** argv) {
         const GLint windowFramebuffer = binding(gl);
         std::printf("     window framebuffer=%d\n", windowFramebuffer);
         check(windowFramebuffer > 0, "eglMakeCurrent bound the shim's window framebuffer");
+        if (zeroCopy && version == 3) {
+            GLint type = 0;
+            attachmentParameter(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+            check(type == GL_RENDERBUFFER, "zero copy: window colour attachment is a GL_RENDERBUFFER");
+            GLuint first = 0; genTextures(1, &first);
+            std::printf("     first glGenTextures -> %u\n", first);
+            check(first == 1, "zero copy: the app's first texture name is 1 (no shim texture names)");
+            std::vector<GLuint> names(64); for (GLuint i = 0; i < 64; ++i) names[i] = i + 1;
+            deleteTextures(64, names.data());
+            bindTexture(GL_TEXTURE_2D, 7); bindTexture(GL_TEXTURE_2D, 0);
+            check(clearAndSwap(gl, display, surface, swap, window, 4, 4, 0.f, 0.f, 1.f), "zero copy: frames exact after deleting textures 1..64 and binding a hard-coded name");
+        }
         check(clearAndSwap(gl, display, surface, swap, window, 4, 4, 1.f, 0.f, 0.f), "clear reaches the window after eglSwapBuffers");
         // The test's own ANGLE calls: in an ES 1 context ANGLE accepts only
         // the OES framebuffer entry points.
@@ -172,6 +204,25 @@ int main(int argc, char** argv) {
             width += 2;
             check(ANativeWindow_setBuffersGeometry(window, width, width + 1, 1) == 0, "window resized");
             route.bind(GL_FRAMEBUFFER, 0);
+            if (zeroCopy) {
+                if (version == 3) {
+                    GLint name = 0, previousRb = 0, rbWidth = 0;
+                    attachmentParameter(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
+                    auto getRb = sym<PFNGLGETRENDERBUFFERPARAMETERIVPROC>(gles, "glGetRenderbufferParameteriv");
+                    auto bindRb = sym<PFNGLBINDRENDERBUFFERPROC>(gles, "glBindRenderbuffer");
+                    gl.getIntegerv(GL_RENDERBUFFER_BINDING, &previousRb);
+                    bindRb(GL_RENDERBUFFER, GLuint(name)); getRb(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbWidth); bindRb(GL_RENDERBUFFER, GLuint(previousRb));
+                    check(rbWidth == width - 2, "zero copy: a bind of 0 after a resize keeps the dequeued slot (no re-dequeue mid-frame)");
+                }
+                // The frame drawn into the pre-resize slot is dropped at queue (-EAGAIN), never stretched.
+                gl.viewport(0, 0, width, width + 1); gl.clearColor(1.f, 0.f, 1.f, 1.f); gl.clear(GL_COLOR_BUFFER_BIT);
+                check(swap(display, surface) == EGL_TRUE, "zero copy: the swap of the pre-resize slot succeeds (frame dropped)");
+                std::vector<uint32_t> pixels(size_t(width) * (width + 1));
+                bool stretched = false;
+                if (shiraz_window_copy_argb(window, pixels.data(), pixels.size()) == 0) for (uint32_t pixel : pixels) if (pixel == argb(1.f, 0.f, 1.f)) stretched = true;
+                check(!stretched, "zero copy: the dropped pre-resize frame is not presented");
+                route.bind(GL_FRAMEBUFFER, 0);
+            }
             check(clearAndSwap(gl, display, surface, swap, window, width, width + 1, 0.f, 1.f, 0.f), "resized window frame after the routed bind");
         }
         angleBind(GL_FRAMEBUFFER, 0);

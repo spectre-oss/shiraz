@@ -232,6 +232,11 @@ final class GpuCanvas extends Canvas {
         restoreToCount(saved);
     }
   }
+  // macOS M4b (ShirazWindowDraw): the window's newest IOSurface frame, default paint.
+  boolean shirazDrawWindow(long window, float[] destination, boolean opaque) {
+    prepare(null);
+    return NativeGpu.window(handle, window, destination, opaque);
+  }
   @Override
   public void drawBitmap(Bitmap source, Rect from, RectF to, Paint paint) {
     if (source == null || to == null)
