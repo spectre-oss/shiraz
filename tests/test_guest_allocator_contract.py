@@ -104,7 +104,7 @@ class AllocatorBindingTests(unittest.TestCase):
 
 
 class ManagedMallocAuditTests(unittest.TestCase):
-    def report(self, body, *, profile=True, initial=None, plt=100):
+    def report(self, body, *, profile=True, initial=None, plt=100, atomic=None):
         graph = {item.address: item for item in body}
         graph[plt] = instruction(plt, "adrp", R("x16"), I(0x8000))
 
@@ -128,6 +128,9 @@ class ManagedMallocAuditTests(unittest.TestCase):
 
             def owned_image_data(self, address, width):
                 return 0x8000 <= address and address + width <= 0x8100
+
+            def atomic32(self, pc):
+                return atomic if atomic is not None and pc == atomic.entry else None
 
         return audit.Audit(Decoder()).site(0, entry_context=initial is not None)
 
@@ -251,6 +254,43 @@ class ManagedMallocAuditTests(unittest.TestCase):
             else:
                 self.assertTrue(self.reasons(report) & {
                     "unproved-return-address", "thread-pointer-used-as-return-target"})
+
+    def test_all_simd_alias_fact_kinds_refuse_native_crossing(self):
+        for name in ("b0", "h7", "s8", "d8", "d15", "q8", "v8", "q31", "v31"):
+            for field in ("registers", "aliases", "return_values"):
+                with self.subTest(register=name, field=field):
+                    initial = audit.State(**{field: {name: frozenset({0})}})
+                    report = self.report(self.basic(), initial=initial)
+                    self.assertFalse(report["conditional_managed_malloc"])
+                    self.assertIn("managed-malloc-simd-facts-unmodelled", self.reasons(report))
+
+    def test_native_spill_uncertainty_survives_clearing_visible_tp_and_literal_read(self):
+        report = self.report([
+            instruction(0, "mrs", R("x19")), instruction(4, "bl", I(100)),
+            instruction(8, "mov", R("x19"), R("xzr")),
+            instruction(12, "ldr", R("x8"), I(0x9000)), instruction(16, "ret"),
+        ])
+        self.assertTrue(report["conditional_managed_malloc"])
+        self.assertIn("unmodelled-literal-load-may-alias-thread-pointer-stack-spill", self.reasons(report))
+        self.assertEqual(report["classification"], "unknown")
+
+    def test_native_spill_uncertainty_reaches_atomic_flag_and_rmw_reads(self):
+        from guest_callee_effects import Atomic32Effects, AtomicPath
+
+        effect = Atomic32Effects(32, 48, "a" * 64, 0x9000,
+                                 (AtomicPath("lse", 52, ("x0", "x16")),))
+        report = self.report([
+            instruction(0, "mrs", R("x19")), instruction(4, "bl", I(100)),
+            instruction(8, "mov", R("x19"), R("xzr")),
+            instruction(12, "mov", R("x0"), R("xzr")),
+            instruction(16, "mov", R("x1"), R("xzr")),
+            instruction(20, "bl", I(32)), instruction(24, "ret"),
+            instruction(32, "bti"), instruction(52, "ret"),
+        ], atomic=effect)
+        self.assertTrue(report["conditional_managed_malloc"])
+        self.assertIn("atomic-flag-load-may-alias-thread-pointer-stack-spill", self.reasons(report))
+        self.assertIn("unmodelled-load-may-alias-thread-pointer-stack-spill", self.reasons(report))
+        self.assertEqual(report["classification"], "unknown")
 
 
 if __name__ == "__main__":
