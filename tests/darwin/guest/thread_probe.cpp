@@ -2,6 +2,7 @@
 #include "shiraz/darwin/guest/memory.hpp"
 #include <filesystem>
 #include <iostream>
+#include <pthread.h>
 using namespace shiraz::guest;
 // Detached threads can finish host key-destructor epilogues after notifying the
 // guest. Match NativeBridge's process-resident image lifetime rather than racing
@@ -26,6 +27,12 @@ int main(int argc, char **argv) {
       return invoke(reinterpret_cast<void *>(loader.symbol(module, name).address), arguments)
           .result_integers[0];
     };
+    require(loader.symbol(module, "pthread_self").abi == "pthread/self-noargs",
+            "pthread_self uses the dedicated opaque-handle adapter");
+    errno = ELOOP;
+    require(call("self_identity", {}) == reinterpret_cast<uintptr_t>(pthread_self()) &&
+                errno == ELOOP && *guest_errno_location() == 731,
+            "pthread_self returns the native thread identity and preserves both errnos");
     other_resident = new Loader({std::filesystem::canonical(argv[1])}, native_personality(
         [](const void *code) { return other_resident && other_resident->contains_code(code); }));
     auto *other_module = other_resident->open("libthread.so");
@@ -70,7 +77,7 @@ int main(int argc, char **argv) {
                  "key_guards=1 key_width=1 destructors=12 detached=2 callback_validation=1 "
                  "key_iteration_threads=4 key_iterations=4 key_clear_before_callback=1 "
                  "key_reset_final_pass=1 key_create_in_destructor=1 key_delete_suppresses=1 "
-                 "key_delete_in_destructor=1 key_namespaces=2\n";
+                 "key_delete_in_destructor=1 key_namespaces=2 self_noargs=1 self_errnos=1\n";
   } catch (const std::exception &error) {
     std::cerr << "FAIL " << error.what() << '\n';
     return 1;

@@ -30,6 +30,18 @@ struct Record {
 Argument pointer(const void *value) {
   return Argument::integer(reinterpret_cast<uintptr_t>(value), ArgumentType::Int64);
 }
+ProviderExport self_export() {
+  // Unlike fixed_export, this adapter never clears/restores host errno and
+  // never obtains guest errno storage. The result is an opaque native handle,
+  // not a guest TCB pointer. Common closure dispatch still owns its normal
+  // stack, capture-boundary and first-entry TLS effects; this ABI tag alone
+  // must not be interpreted as a whole-call memory-purity contract.
+  auto address = closure([](Capture &capture) {
+    return_value(capture, ::pthread_self());
+  });
+  return {"pthread_self", "LIBC", reinterpret_cast<uintptr_t>(address),
+          SymbolKind::Function, "pthread/self-noargs", false};
+}
 void *call_guest(void *function, void *argument) {
   try {
     prepare_guest_tls();
@@ -303,7 +315,7 @@ std::vector<ProviderExport> thread_exports(CodeValidator validate) {
     method("pthread_key_delete", state, &Threads::key_delete),
     method("pthread_setspecific", state, &Threads::set),
     method("pthread_getspecific", state, &Threads::get),
-    fixed_export("pthread_self", "LIBC", &::pthread_self),
+    self_export(),
     fixed_export("pthread_equal", "LIBC", &::pthread_equal),
   };
   auto signal=closure([state](Capture &capture){CallCursor cursor(capture,Convention::Aapcs64);

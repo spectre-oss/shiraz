@@ -8,6 +8,9 @@
 #define CHECK(value) do { if (!(value)) return __LINE__; } while (0)
 static pthread_key_t key;
 static int destroyed;
+// bionic marks pthread_self const; prevent CSE/hoisting across the errno
+// sentinels so these checks actually cross the provider on every invocation.
+static pthread_t (*volatile call_self)(void) = pthread_self;
 struct Work { int index, error, destructors; pthread_t self; };
 static void destructor(void *opaque) {
   struct Work *work = opaque;
@@ -18,13 +21,21 @@ static void destructor(void *opaque) {
 }
 static void *worker(void *opaque) {
   struct Work *work = opaque;
-  work->self = pthread_self();
+  work->self = call_self();
   errno = 700 + work->index;
+  if (!pthread_equal(call_self(), work->self) || errno != 700 + work->index)
+    work->error = 5;
   if (pthread_join(work->self, 0) != EDEADLK) work->error = 3;
   if (pthread_getspecific(key) || pthread_setspecific(key, work) ||
       pthread_getspecific(key) != work || errno != 700 + work->index)
     work->error = 4;
   return work;
+}
+uintptr_t self_identity(void) {
+  errno = 731;
+  pthread_t first = call_self();
+  if (!pthread_equal(first, call_self()) || errno != 731) return 0;
+  return (uintptr_t)first;
 }
 int run_threads(void) {
   struct { uint64_t before; pthread_attr_t value; uint64_t after; } attribute;
