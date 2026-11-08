@@ -158,7 +158,7 @@ records 933 of 4,445 matching `android.*` class names against the pinned Android
 not a percentage of Android behavior that works. The runtime advertises API 27;
 that declaration does not establish certification at either API level.
 
-The current probe catalog defines 239 assertions. A separately imported,
+The recorded development probe catalog defines 239 assertions. A separately imported,
 fingerprint-verified suite 0.333.2 snapshot contains 233 cases, with 49 Network
 passes and 184 cases not run. No failures in that targeted run does not mean the
 unrun areas passed. The exported report does not record the host platform, so

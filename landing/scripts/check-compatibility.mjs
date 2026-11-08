@@ -30,15 +30,26 @@ for (const row of classes.packages) {
   packages.add(row.package);
 }
 for (const key of ['present','reference']) if (classes.packages.reduce((sum,row) => sum + row[key],0) !== classes[key]) throw Error('Class inventory totals disagree');
-const definitions = JSON.parse(readFileSync(`${root}tests/api-probe/catalog.json`, 'utf8'));
-const categories = new Map();
-for (const item of definitions) {
-  if (!['automatic','manual'].includes(item.mode)) throw Error('Invalid probe mode');
-  const row = categories.get(item.category) || {name:item.category,automatic:0,manual:0};
-  row[item.mode]++; categories.set(item.category,row);
+const planned = inventory.probeCatalog;
+const plannedNames = new Set(); let plannedTotal = 0;
+for (const row of planned.categories) {
+  if (plannedNames.has(row.name) || !integer(row.automatic) || !integer(row.manual)) throw Error('Invalid planned assertion counts');
+  plannedNames.add(row.name); plannedTotal += row.automatic + row.manual;
 }
-const expected = [...categories.values()].sort((a,b)=>a.name.localeCompare(b.name));
-if (inventory.probeCatalog.total !== definitions.length || JSON.stringify(expected) !== JSON.stringify(inventory.probeCatalog.categories)) throw Error('Probe catalog changed: run make landing-compatibility-data');
+if (!integer(planned.total) || plannedTotal !== planned.total) throw Error('Planned assertion totals disagree');
+// The static website can publish a versioned snapshot without the runtime tree.
+const catalogPath = `${root}tests/api-probe/catalog.json`;
+if (existsSync(catalogPath)) {
+  const definitions = JSON.parse(readFileSync(catalogPath, 'utf8'));
+  const categories = new Map();
+  for (const item of definitions) {
+    if (!['automatic','manual'].includes(item.mode)) throw Error('Invalid probe mode');
+    const row = categories.get(item.category) || {name:item.category,automatic:0,manual:0};
+    row[item.mode]++; categories.set(item.category,row);
+  }
+  const expected = [...categories.values()].sort((a,b)=>a.name.localeCompare(b.name));
+  if (planned.total !== definitions.length || JSON.stringify(expected) !== JSON.stringify(planned.categories)) throw Error('Probe catalog changed: run make landing-compatibility-data');
+}
 if (support.schemaVersion !== 1 || !Array.isArray(support.areas) || !support.areas.length) throw Error('Missing subsystem support notes');
 const areaIds = new Set();
 for (const area of support.areas) {
@@ -46,7 +57,7 @@ for (const area of support.areas) {
   if (!/^[a-z0-9-]+$/.test(area.id) || areaIds.has(area.id) || !['Partial','Unsupported','Unverified'].includes(area.status)) throw Error('Invalid subsystem identity/status');
   areaIds.add(area.id);
   const file = resolve(root,area.evidence);
-  if (!/^(docs|java|native|tests)\//.test(area.evidence) || !file.startsWith(root) || !existsSync(file)) throw Error('Invalid subsystem evidence path');
+  if (!/^(docs|java|native|tests)\//.test(area.evidence) || !file.startsWith(root) || (area.evidence.startsWith('docs/') && !existsSync(file))) throw Error('Invalid subsystem evidence path');
 }
 const snapshot = inventory.probeSnapshot;
 if (snapshot) {
@@ -60,4 +71,4 @@ if (snapshot) {
   }
   if (total !== snapshot.catalogSize) throw Error('Recorded assertions do not sum to the snapshot catalog');
 }
-console.log(`Validated ${support.areas.length} subsystem notes, ${classes.reference} reference classes and ${definitions.length} planned assertions`);
+console.log(`Validated ${support.areas.length} subsystem notes, ${classes.reference} reference classes and ${planned.total} planned assertions`);

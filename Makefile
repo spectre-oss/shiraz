@@ -1598,7 +1598,7 @@ digitalis-platform-smoke:
 # Regenerate measured inventories after rebuilding the local framework. No app data is imported.
 .PHONY: landing-compatibility-data
 ifeq ($(shell uname -s),Darwin)
-landing-compatibility-data: macos-framework
+landing-compatibility-data: $(if $(wildcard mk/darwin.mk),macos-framework,framework)
 else
 landing-compatibility-data: framework
 endif
