@@ -6,12 +6,14 @@
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/va_list.hpp"
 #include <cstring>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <mach-o/dyld.h>
 #include <pthread.h>
+#include <poll.h>
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -40,6 +42,40 @@ static void require(bool value, const char *label) {
   if (!value)
     throw std::runtime_error(label);
 }
+class WaitableChildDisposition {
+  struct sigaction previous{};
+public:
+  WaitableChildDisposition() {
+    require(!sigaction(SIGCHLD, nullptr, &previous), "snapshot child disposition");
+    struct sigaction action{};
+    sigemptyset(&action.sa_mask);
+    action.sa_handler = SIG_DFL;
+    require(!sigaction(SIGCHLD, &action, nullptr), "keep refusal child waitable");
+  }
+  ~WaitableChildDisposition() {
+    if (sigaction(SIGCHLD, &previous, nullptr)) _exit(95);
+  }
+};
+static int foreign_stack_provider_case() {
+  // Fresh self-exec isolates this fatal admission test from inherited native
+  // TLS/C++ state after fork. No guest instructions or handler may execute.
+  prepare_guest_tls();
+  require(guest_tls_prepared(), "provider refusal child has prepared TLS");
+  constexpr size_t bytes = 256 * 1024;
+  void *memory = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  require(memory != MAP_FAILED, "provider refusal child stack allocation");
+  void *top = static_cast<uint8_t *>(memory) + bytes - 16;
+  require(!prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(top)),
+          "provider refusal child stack is foreign");
+  void *provider = closure([](Capture &) {
+    constexpr char marker[] = "UNEXPECTED_PROVIDER_HANDLER_ENTRY\n";
+    (void)::write(STDERR_FILENO, marker, sizeof(marker) - 1);
+  });
+  require(std::signal(SIGABRT, [](int) { _exit(97); }) != SIG_ERR,
+          "provider refusal child abort observer");
+  shiraz_test_other_stack(top, &call_other_stack_provider, provider);
+  return 98;
+}
 static double host_va_callback(int count, const GuestVaList *args) noexcept {
   try {
     if (count < 0 || count > 32 || !args)
@@ -60,6 +96,8 @@ static double host_va_callback(int count, const GuestVaList *args) noexcept {
 }
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::strcmp(argv[1], "--provider-foreign-stack") == 0)
+      return foreign_stack_provider_case();
     require(argc == 2, "usage: elf-probe fixture.so");
     std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
     require(bool(file), "fixture open");
@@ -162,40 +200,69 @@ int main(int argc, char **argv) {
     require(epoch_cursor->next(8, false) == epoch_value,
             "live native argument span survives a TLS readiness epoch");
     prepare_guest_tls();
-    other_stack = mmap(nullptr, other_stack_bytes, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANON, -1, 0);
-    require(other_stack != MAP_FAILED, "provider alternate stack allocation");
-    void *provider = closure([](Capture &) {
-      constexpr char marker[] = "UNEXPECTED_PROVIDER_HANDLER_ENTRY\n";
-      (void)::write(STDERR_FILENO, marker, sizeof(marker) - 1);
-    });
+    {
+    WaitableChildDisposition child_disposition;
     int descriptors[2];
     require(pipe(descriptors) == 0, "provider refusal diagnostic pipe");
+    char child_mode[] = "--provider-foreign-stack";
+    char *child_argv[] = {argv[0], child_mode, nullptr};
     pid_t child = fork();
     require(child >= 0, "provider refusal child");
     if (!child) {
       close(descriptors[0]);
       if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
       close(descriptors[1]);
-      std::signal(SIGABRT, [](int) { _exit(97); });
-      shiraz_test_other_stack(static_cast<uint8_t *>(other_stack) + other_stack_bytes - 16,
-                             &call_other_stack_provider, provider);
-      _exit(98);
+      execv(argv[0], child_argv);
+      _exit(96);
     }
     close(descriptors[1]);
     std::string diagnostic;
     char buffer[512];
-    ssize_t count;
-    while ((count = read(descriptors[0], buffer, sizeof(buffer))) > 0) {
+    ssize_t count = -1;
+    bool failed = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+      pollfd input{descriptors[0], POLLIN | POLLHUP, 0};
+      int ready = poll(&input, 1, 100);
+      if (ready < 0 && errno == EINTR) continue;
+      if (ready < 0) { failed = true; break; }
+      if (!ready) continue;
+      count = read(descriptors[0], buffer, sizeof(buffer));
+      if (count < 0 && errno == EINTR) continue;
+      if (count <= 0) break;
       diagnostic.append(buffer, size_t(count));
-      if (diagnostic.size() > 8192) { kill(child, SIGKILL); break; }
+      if (diagnostic.size() > 8192) { failed = true; break; }
     }
     close(descriptors[0]);
-    int status;
-    require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 97 && count == 0 &&
-                diagnostic == "SHIRAZ_GUEST_FATAL provider SP outside prepared native stack extent\n",
+    int status = -1;
+    int wait_error = 0;
+    pid_t waited = 0;
+    while (std::chrono::steady_clock::now() < deadline) {
+      waited = waitpid(child, &status, WNOHANG);
+      wait_error = waited < 0 ? errno : 0;
+      if (waited == child || (waited < 0 && wait_error != EINTR)) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (waited != child) {
+      failed = true;
+      // With default SIGCHLD and no competing reaper, an outstanding child
+      // retains its PID until we reap it. ECHILD removes that ownership:
+      // never signal a numeric PID after the kernel says it is not ours.
+      if (waited == 0 || (waited < 0 && wait_error == EINTR)) {
+        kill(child, SIGKILL);
+        do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+      }
+    }
+    const bool refused = !failed && waited == child && WIFEXITED(status) &&
+        WEXITSTATUS(status) == 97 && count == 0 &&
+        diagnostic == "SHIRAZ_GUEST_FATAL provider SP outside prepared native stack extent\n";
+    if (!refused)
+      std::cerr << "provider refusal child status=" << status << " read=" << count
+                << " failed=" << failed << " wait_errno=" << wait_error
+                << " diagnostic=" << diagnostic << std::endl;
+    require(refused,
             "real provider entry refuses foreign SP before handler execution");
-    require(munmap(other_stack, other_stack_bytes) == 0, "provider alternate stack cleanup");
+    }
     std::vector<Argument> twelve;
     for (int i = 1; i <= 12; ++i)
       twelve.push_back(Argument::integer(i % 2 ? i : -i));
