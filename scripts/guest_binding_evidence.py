@@ -6,6 +6,7 @@ import json
 import struct
 from pathlib import Path
 
+from guest_allocator_contract import managed_malloc_binding
 from guest_native_target import validate_native_target
 
 MAX_REPORT = 64 * 1024 * 1024
@@ -149,6 +150,8 @@ def augment_binding_report(
             if type(binding.get("nonreturning", False)) is not bool:
                 raise ValueError("invalid nonreturning binding contract")
             native_target = validate_native_target(binding)
+            if managed_malloc_binding(binding) and bridge_identity is None:
+                raise ValueError("managed malloc contract requires bridge identity")
             if native_target is not None:
                 if bridge_identity is None:
                     raise ValueError("native target identity requires bridge identity")

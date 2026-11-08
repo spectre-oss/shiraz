@@ -26,6 +26,9 @@ CaptureBoundary::CaptureBoundary() noexcept : previous_(boundary.current) {
 }
 CaptureBoundary::~CaptureBoundary() { boundary.current = previous_; }
 uint64_t capture_boundary_token() noexcept { return boundary.current; }
+CaptureBoundaryStorage capture_boundary_storage() noexcept {
+  return {reinterpret_cast<uintptr_t>(&boundary), sizeof(boundary)};
+}
 extern "C" void shiraz_guest_closure_entry();
 static_assert(offsetof(Capture, stack) == 240);
 static_assert(offsetof(Capture, native_stack_remaining) == 248 && sizeof(Capture) == 256);

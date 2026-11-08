@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+import guest_allocator_contract
 import guest_callee_effects
 import guest_mrs_window
 import guest_native_target
@@ -167,6 +168,11 @@ class State:
     # Symbolic identities, not PAC bits or a cryptographic validation claim.
     return_signatures: dict = field(default_factory=dict)
     stack_signatures: dict = field(default_factory=dict)
+    # A native callee can save input registers in its frames below incoming SP.
+    # Never silently treat later reads there as clean, even after a new store
+    # (precise post-call overwrite coverage is not modeled yet).
+    native_stack_clobber_below: int | None = None
+    native_memory_may_contain_tp: bool = False
 
     def copy(self):
         return State(
@@ -182,6 +188,8 @@ class State:
             dict(self.stack_images),
             dict(self.return_signatures),
             dict(self.stack_signatures),
+            self.native_stack_clobber_below,
+            self.native_memory_may_contain_tp,
         )
 
     def fingerprint(self):
@@ -191,6 +199,8 @@ class State:
         return (
             self.sp,
             self.fp,
+            self.native_stack_clobber_below,
+            self.native_memory_may_contain_tp,
             *(
                 tuple(sorted((key, value) for key, value in mapping.items()
                              if not defaults or value != CLEAN))
@@ -415,6 +425,7 @@ class Audit:
         steps = 0
         stack_windows = {"thread_pointer": None, "protected_facts": None}
         image_stack_separation = set()
+        managed_malloc_observations = set()
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -557,7 +568,7 @@ class Audit:
             state = states[key].copy()
             steps += 1
             instruction = self.decode(pc)
-            live = any(
+            live = state.native_memory_may_contain_tp or any(
                 tainted(value)
                 for value in (*state.registers.values(), *state.stack.values())
             )
@@ -626,7 +637,7 @@ class Audit:
                 image = state.image(summary.memory_base)
                 # The helper's capability flag is also a memory read. An ELF
                 # ownership check does not prove separation from initial SP.
-                if (any(tainted(value) for value in state.stack.values()) and
+                if ((state.native_memory_may_contain_tp or any(tainted(value) for value in state.stack.values())) and
                         not image_read_disjoint(pc, state, summary.flag_address, summary.flag_width)):
                     problem(pc, "atomic-flag-load-may-alias-thread-pointer-stack-spill")
                 if (
@@ -635,7 +646,7 @@ class Audit:
                 ):
                     observe_owned_image_access(pc, image, summary.rmw_width, True, True)
                 if slot is None:
-                    if any(tainted(value) for value in state.stack.values()):
+                    if state.native_memory_may_contain_tp or any(tainted(value) for value in state.stack.values()):
                         problem(
                             pc, "unmodelled-load-may-alias-thread-pointer-stack-spill"
                         )
@@ -671,6 +682,9 @@ class Audit:
                     for saved in list(state.stack_signatures):
                         if slot < saved + 8 and saved < slot + summary.rmw_width:
                             del state.stack_signatures[saved]
+                if (slot is not None and state.native_stack_clobber_below is not None
+                        and slot < state.native_stack_clobber_below):
+                    problem(pc, "native-callee-stack-spill-atomic-access-unproved")
                 # Keep every explicit path, including CAS initial mismatch
                 # retaining x17 and a mismatch after a failed exclusive store
                 # clobbering it. Memory may-write effects above conservatively
@@ -692,6 +706,69 @@ class Audit:
                             "kind": "native-provider-nonreturning",
                             "binding": dict(binding),
                         }
+                        continue
+                    if binding.get("effect") == "managed-malloc":
+                        if mrs_window is None:
+                            problem(pc, "managed-malloc-mrs-window-unproved")
+                            continue
+                        if (not returns or state.signature("x30") is not None or
+                                state.control("x30") != frozenset({returns[-1][0]}) or
+                                state.sp != returns[-1][1]):
+                            problem(pc, "managed-malloc-return-continuation-unproved")
+                            continue
+                        call = self.decode(returns[-1][0] - 4)
+                        if (call is None or call.mnemonic != "bl" or
+                                call.operands != (Operand("imm", pc),)):
+                            problem(pc, "managed-malloc-direct-bl-unproved")
+                            continue
+                        if (tainted(state.value("x0")) or tainted(state.alias("x0")) or
+                                tainted(state.control("x0")) or state.signature("x0") is not None):
+                            problem(pc, "managed-malloc-size-has-pointer-or-control-fact")
+                            continue
+                        if any(
+                            not full_width_gpr(name) and name != "sp" and tainted(value)
+                            for mapping in (state.registers, state.aliases, state.return_values)
+                            for name, value in mapping.items()
+                        ):
+                            problem(pc, "managed-malloc-simd-facts-unmodelled")
+                            continue
+                        _, protected = stack_fact_slots(state)
+                        if any(slot < state.sp or slot - anchor_sp < -mrs_window["before"] or
+                               slot + 8 - anchor_sp > mrs_window["after"] for slot in protected):
+                            problem(pc, "managed-malloc-protected-stack-facts-outside-active-window")
+                            continue
+                        return_pc = returns[-1][0]
+                        post = state.copy()
+                        post.native_stack_clobber_below = max(
+                            state.sp, state.native_stack_clobber_below
+                            if state.native_stack_clobber_below is not None else state.sp)
+                        post.native_memory_may_contain_tp |= any(
+                            tainted(value) for value in (*state.registers.values(), *state.stack.values()))
+                        poison = OPAQUE_VALUE if post.native_memory_may_contain_tp else CLEAN
+                        for index in (*range(19), 30):
+                            # Clobbered does not mean independent of TP: an
+                            # unspecified scratch result may retain/copy input
+                            # bits. Only malloc's defined x0 result is clean.
+                            post.set(f"x{index}", CLEAN if index == 0 else poison)
+                            post.set_alias(f"x{index}", CLEAN)
+                        for index in range(32):
+                            for prefix in ("b", "h", "s", "d", "q", "v"):
+                                if 8 <= index <= 15 and prefix in ("b", "h", "s", "d"):
+                                    continue  # Preserved low 64 bits, checked clean above.
+                                post.set(f"{prefix}{index}", poison)
+                                post.set_alias(f"{prefix}{index}", CLEAN)
+                        callee_effects[pc] = {
+                            "entry": hex(pc), "kind": "conditional-managed-malloc",
+                            "binding": dict(binding), "assumptions": list(guest_allocator_contract.ASSUMPTIONS),
+                            "explicit_cell_admission": "native errno/guest errno/boundary span outside current prepared stack",
+                            "result": "opaque; no heap, disjointness or readable-byte fact",
+                        }
+                        managed_malloc_observations.add((
+                            pc, state.sp, return_pc, bool(protected),
+                            min(protected) - anchor_sp if protected else 0,
+                            max(protected) + 8 - anchor_sp if protected else 0,
+                        ))
+                        enqueue(return_pc, returns[:-1], post)
                         continue
                     if binding["target"] is None:
                         problem(pc, "PLT-binding:" + binding["reason"])
@@ -830,6 +907,8 @@ class Audit:
                     enqueue(return_pc, returns[:-1], state)
                 elif entry_context and state.sp != 0:
                     problem(pc, "entry-context-stack-not-restored-at-return")
+                elif state.native_memory_may_contain_tp:
+                    problem(pc, "native-callee-spills-return-needs-caller-context")
                 elif any(tainted(value) for value in state.stack.values()):
                     problem(pc, "thread-pointer-stack-return-needs-caller-context")
                 elif any(tainted(state.value(f"x{i}")) for i in range(9)):
@@ -1039,7 +1118,7 @@ class Audit:
                     continue
                 observe_owned_image_access(pc, operands[1].value, instruction.width, True, False)
                 value = CLEAN
-                if (any(tainted(saved) for saved in state.stack.values()) and
+                if ((state.native_memory_may_contain_tp or any(tainted(saved) for saved in state.stack.values())) and
                         not image_read_disjoint(pc, state, operands[1].value, instruction.width)):
                     if (self.track_opaque_loads and instruction.width in (1, 2, 4, 8)
                             and opaque_load_register(operands[0].value)):
@@ -1106,8 +1185,11 @@ class Audit:
                     and not tainted(base_value)
                     and not tainted(index_value)
                     and not image_disjoint
-                    and any(tainted(value) for value in state.stack.values())
+                    and (state.native_memory_may_contain_tp or any(tainted(value) for value in state.stack.values()))
                 )
+                if (load and slot is not None and state.native_stack_clobber_below is not None
+                        and slot < state.native_stack_clobber_below):
+                    problem(pc, "native-callee-stack-spill-reload-unproved")
                 opaque_source = False
                 if possible_spill_load:
                     if (self.track_opaque_loads and data and instruction.width in (1, 2, 4, 8)
@@ -1151,7 +1233,7 @@ class Audit:
                     # Its old affine value is no longer an exact reload fact.
                     # Keep the failure sticky rather than silently laundering
                     # the potentially modified pointer into a guard address.
-                    if any(tainted(value) for value in state.stack.values()):
+                    if state.native_memory_may_contain_tp or any(tainted(value) for value in state.stack.values()):
                         problem(pc, "unmodelled-store-may-clobber-thread-pointer-stack-spill")
                     for saved in state.stack:
                         state.stack[saved] = CLEAN
@@ -1341,6 +1423,13 @@ class Audit:
                 {"pc": hex(pc), "analysis_image_address": hex(start), "read_width": width,
                  "protected_min_offset": low, "protected_end_offset": high}
                 for pc, start, width, low, high in sorted(image_stack_separation)
+            ],
+            "conditional_managed_malloc": [
+                {"pc": hex(pc), "abstract_call_sp": sp, "continuation": hex(continuation),
+                 "has_protected_stack_facts": has_facts,
+                 "protected_min_offset": low, "protected_end_offset": high,
+                 "scope": "conditional call crossing only; native spill footprint and full lifetime unproved"}
+                for pc, sp, continuation, has_facts, low, high in sorted(managed_malloc_observations)
             ],
             "observed_stack_fact_window": {
                 "anchor": "first-mrs-sp",
@@ -1942,6 +2031,7 @@ class ElfBindingMetadata:
             # Identity is a diagnostic snapshot, not a native effect grant.
             # Keep legacy adapters unknown; reject malformed claimed identity.
             guest_native_target.validate_native_target(binding)
+            guest_allocator_contract.managed_malloc_binding(binding)
             self.proof[slot] = dict(binding)
         if self.trusted_provider_contracts:
             self.mrs_window_record = validated_window
@@ -2135,6 +2225,15 @@ class ElfBindingMetadata:
                 "bridge_sha256": self.provider_bridge["sha256"],
                 "reason": "verified-explicit-nonreturning-noargs-provider",
             }
+        if guest_allocator_contract.managed_malloc_binding(proof):
+            if not self.trusted_provider_contracts:
+                return {**result, "reason": "managed-malloc-contract-untrusted"}
+            if (addend != 0 or proof.get("relocation_type") != kind or info & 15 != 2 or
+                    (required_library is not None and proof["provider"] != required_library)):
+                return {**result, "reason": "managed-malloc-binding-mismatch"}
+            return {**result, "effect": "managed-malloc",
+                    "bridge_sha256": self.provider_bridge["sha256"],
+                    "reason": "explicit-first-party-managed-malloc-contract"}
         if proof.get("native_target") is not None:
             if not self.trusted_provider_contracts:
                 return {**result, "reason": "native-target-identity-untrusted"}
@@ -2275,6 +2374,9 @@ class ElfDecoder:
             ).hexdigest(),
             "native_target_reader_sha256": hashlib.sha256(
                 Path(guest_native_target.__file__).read_bytes()
+            ).hexdigest(),
+            "allocator_contract_reader_sha256": hashlib.sha256(
+                Path(guest_allocator_contract.__file__).read_bytes()
             ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()

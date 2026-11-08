@@ -335,6 +335,19 @@ bool guest_tls_prepared() noexcept {
     if (thread.load(std::memory_order_acquire) == current) return true;
   return false;
 }
+bool prepared_guest_stack_disjoint(uintptr_t pointer, uint64_t bytes) noexcept {
+  if (!pointer || !bytes || bytes > UINTPTR_MAX - pointer) return false;
+  const auto current = pthread_self();
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    if (prepared_threads[i].load(std::memory_order_acquire) != current) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (prepared_threads[i].load(std::memory_order_acquire) != current) continue;
+    if (!low || low >= high) return false;
+    return pointer >= high || pointer + bytes <= low;
+  }
+  return false;
+}
 bool prepared_guest_stack_contains(uintptr_t pointer) noexcept {
   return prepared_guest_stack_remaining(pointer) != 0;
 }

@@ -16,6 +16,7 @@ from guest_binding_evidence import (
     bounded_read,
     verify_relocation_inventory,
 )
+from test_guest_allocator_contract import malloc_binding
 from test_guest_native_target import self_binding
 from test_guest_tpidr_audit import BindingElfFixture
 
@@ -131,6 +132,21 @@ class GuestBindingEvidenceTests(unittest.TestCase):
         self.assertTrue(report["modules"][0]["bindings"][0]["nonreturning"])
         identity["native_bridge"].write_bytes(b"changed after observed execution")
         with self.assertRaisesRegex(ValueError, "changed since"):
+            self.augment(**identity)
+
+    def test_managed_malloc_contract_requires_bridge_identity_and_exact_row(self):
+        identity = self.terminal_binding()
+        self.binding.clear()
+        self.binding.update(malloc_binding(), relocation=32)
+        with self.assertRaisesRegex(ValueError, "managed malloc contract requires bridge identity"):
+            self.augment()
+        report = self.augment(**identity)
+        binding = report["modules"][0]["bindings"][0]
+        self.assertEqual(binding["abi"], "heap/managed-malloc-v1")
+        self.assertIsNone(binding["target"])
+        self.assertIsNone(binding["provider_elf_sha256"])
+        self.binding["addend"] = 4
+        with self.assertRaisesRegex(ValueError, "managed malloc contract requires exact native binding"):
             self.augment(**identity)
 
     def test_terminal_contract_cannot_label_interior_entry_or_object(self):

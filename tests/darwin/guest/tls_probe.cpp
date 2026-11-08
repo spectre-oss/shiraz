@@ -250,6 +250,20 @@ static void heap_domain_tests() {
   auto storage = std::unique_ptr<void, decltype(&std::free)>(std::malloc(512), &std::free);
   require(bool(storage), "heap domain fixture storage");
   const auto base = reinterpret_cast<uintptr_t>(storage.get());
+  const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+  const auto low = high - pthread_get_stacksize_np(pthread_self());
+  const auto boundary_storage = capture_boundary_storage();
+  require(prepared_guest_stack_disjoint(base, 512) &&
+              prepared_guest_stack_disjoint(low - 16, 16) &&
+              prepared_guest_stack_disjoint(high, 1) &&
+              !prepared_guest_stack_disjoint(low - 1, 2) &&
+              !prepared_guest_stack_disjoint(high - 1, 2) &&
+              !prepared_guest_stack_disjoint(UINTPTR_MAX - 7, 16) &&
+              !prepared_guest_stack_disjoint(base, 0) &&
+              prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(&errno), sizeof(errno)) &&
+              prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(guest_errno_location()), sizeof(int)) &&
+              prepared_guest_stack_disjoint(boundary_storage.address, boundary_storage.bytes),
+          "prepared span exclusion covers exact bounds and current adapter cells, not readability");
   {
     GuestHeapReservation owner(base, 128);
     GuestHeapReservation neighbor(base + 128, 128);
@@ -298,6 +312,8 @@ static void heap_domain_tests() {
   bool heap_first = false, ready = false;
   std::thread worker([&] {
     uint64_t word = 0;
+    require(!prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(&word), 8),
+            "unprepared exclusion query refuses without initializing TLS");
     address.store(reinterpret_cast<uintptr_t>(&word), std::memory_order_release);
     domain_wait([&] { return start.load(std::memory_order_acquire); });
     try { prepare_guest_tls(); }
@@ -346,7 +362,7 @@ static void heap_domain_tests() {
             "heap/native-stack race admits exactly one owner");
   }
   std::cout << "M5_HEAP_DOMAIN_PASS relocation=1 strong_failure=1 move_token=1 image_orders=2 "
-               "stack_orders=2 retry=1 races=32 overflow=1\n";
+               "stack_orders=2 retry=1 races=32 overflow=1 adapter_cell_spans=1\n";
 }
 int main(int argc, char **argv) {
   try {

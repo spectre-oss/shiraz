@@ -65,6 +65,9 @@ uintptr_t prepared_guest_stack_remaining(uintptr_t pointer) noexcept;
 // cached bound pair, using subtraction so caller sizes cannot wrap addresses.
 // Async query only; no allocation, registry lock or pthread metadata lookup.
 bool prepared_guest_stack_window(uintptr_t anchor, uint64_t before, uint64_t after) noexcept;
+// Lock-free current-thread extent exclusion. False for unprepared, empty or
+// overflowing spans. This does not assert mapped bytes or object lifetime.
+bool prepared_guest_stack_disjoint(uintptr_t pointer, uint64_t bytes) noexcept;
 // Handles have namespace-independent identity and stay alive while any thread
 // retains a value. Deletion suppresses future selections, never invokes a
 // destructor. A callback already selected during concurrent deletion may finish.

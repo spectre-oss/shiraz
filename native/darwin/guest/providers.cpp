@@ -188,6 +188,28 @@ void managed_free(void *pointer) {
   // overlapping record. Unknown valid native allocations remain freeable.
   state->retire_reused(base, span, state->entries.end());
 }
+ProviderExport managed_malloc_export() {
+  void *address = closure([](Capture &capture) {
+    auto *guest_error = guest_errno_location();
+    const auto storage = capture_boundary_storage();
+    // This admission is about normal returned calls. The entry boundary may
+    // already have written its cell; an overlap refuses before continuation,
+    // rather than certifying pre-write safety. Native C/C++ object lifetimes
+    // and conforming allocator/private metadata behavior remain assumptions.
+    if (!prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(&errno), sizeof(errno)) ||
+        !prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(guest_error), sizeof(*guest_error)) ||
+        !prepared_guest_stack_disjoint(storage.address, storage.bytes))
+      throw ElfError("managed malloc adapter storage overlaps native stack extent");
+    CallCursor cursor(capture, Convention::Aapcs64);
+    const auto bytes = cursor.read<size_t>();
+    HostErrno preserve;
+    void *result = managed_malloc(bytes);
+    if (!result) *guest_error = errno_to_guest(errno ? errno : EIO);
+    return_value(capture, result);
+  });
+  return {"malloc", "LIBC", reinterpret_cast<uintptr_t>(address), SymbolKind::Function,
+          "heap/managed-malloc-v1", false};
+}
 void *memory_find(const void *pointer, int value, size_t length) {
   return const_cast<void *>(std::memchr(pointer, value, length));
 }
@@ -225,7 +247,7 @@ Providers core_personality() {
   add(&string_find, "strchr");
   add(&string_rfind, "strrchr");
   add(&string_substring, "strstr");
-  add(&managed_malloc, "malloc", ErrnoPolicy::Null);
+  libc.exports.push_back(managed_malloc_export());
   add(&managed_calloc, "calloc", ErrnoPolicy::Null);
   add(&managed_realloc, "realloc", ErrnoPolicy::Observe);
   add(&std::abort, "abort");

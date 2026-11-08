@@ -28,6 +28,10 @@ private:
   uint64_t previous_;
 };
 uint64_t capture_boundary_token() noexcept;
+// Normal call setup only: obtaining this address can initialize Mach-O TLV.
+// The dispatcher has already entered its boundary before an adapter uses it.
+struct CaptureBoundaryStorage { uintptr_t address; uint64_t bytes; };
+CaptureBoundaryStorage capture_boundary_storage() noexcept;
 enum class Convention { Apple, Aapcs64 };
 class CallCursor {
 public:
