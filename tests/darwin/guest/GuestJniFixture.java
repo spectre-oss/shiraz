@@ -74,8 +74,10 @@ public class GuestJniFixture {
         if (tlsFailure[0] != null) throw new AssertionError(tlsFailure[0]);
         // Java join observes ART termination before native TSD necessarily finishes.
         long tlsDeadline = System.nanoTime() + 2000000000L;
-        while (tlsSummary() == 0 && System.nanoTime() < tlsDeadline) Thread.sleep(1);
-        check(tlsSummary() == 101, "TLS destructors complete on Java Thread exit");
+        int tlsObserved;
+        while ((tlsObserved = tlsSummary()) != 101 && tlsObserved >= 0 &&
+               System.nanoTime() < tlsDeadline) Thread.sleep(1);
+        check(tlsObserved == 101, "TLS destructors complete on Java Thread exit: " + tlsObserved);
         System.out.println("M5_ART_TLS_PERSISTENCE_PASS entries=8 emutls=1 key_dtors=1 cxx_dtors=1");
         if (Boolean.getBoolean("guest.test.late.tls")) {
             check(hostLateTls() == 73, "native final-round callback enters real JNI");
