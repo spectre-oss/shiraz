@@ -813,6 +813,31 @@ $(MACOS_OUT)/m5/personality-sanitized: tests/darwin/guest/personality_probe.cpp 
 macos-guest-personality-sanitize-check: macos-guest-personality-fixture $(MACOS_OUT)/m5/personality-sanitized
 	$(MACOS_OUT)/m5/personality-sanitized $(MACOS_GUEST_DEP_DIR)
 
+# Instrument the exact production assembly entry with a raw body shim. Only
+# this private providers object renames its C++ body; runtime objects do not.
+$(MACOS_OUT)/m5/malloc-quarantine-providers.o: native/darwin/guest/providers.cpp $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -Dshiraz_guest_managed_malloc_body=shiraz_test_actual_managed_malloc_body -c $< -o $@
+$(MACOS_OUT)/m5/malloc-quarantine-probe: tests/darwin/guest/malloc_quarantine_probe.cpp tests/darwin/guest/malloc_quarantine_entry.S $(MACOS_OUT)/m5/malloc-quarantine-providers.o $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/malloc_quarantine_probe.cpp tests/darwin/guest/malloc_quarantine_entry.S $(MACOS_OUT)/m5/malloc-quarantine-providers.o $(filter-out native/darwin/guest/providers.cpp,$(MACOS_GUEST_SOURCES)) -o $@
+.PHONY: macos-guest-malloc-quarantine-check
+macos-guest-malloc-quarantine-check: $(MACOS_OUT)/m5/malloc-quarantine-probe
+	$<
+	cp $< $(MACOS_OUT)/m5/malloc-quarantine-hardened.pending
+	mv $(MACOS_OUT)/m5/malloc-quarantine-hardened.pending $(MACOS_OUT)/m5/malloc-quarantine-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/malloc-quarantine-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/malloc-quarantine-hardened
+	$(MACOS_OUT)/m5/malloc-quarantine-hardened
+$(MACOS_OUT)/m5/malloc-quarantine-providers-sanitized.o: native/darwin/guest/providers.cpp $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Dshiraz_guest_managed_malloc_body=shiraz_test_actual_managed_malloc_body -c $< -o $@
+$(MACOS_OUT)/m5/malloc-quarantine-sanitized: tests/darwin/guest/malloc_quarantine_probe.cpp tests/darwin/guest/malloc_quarantine_entry.S $(MACOS_OUT)/m5/malloc-quarantine-providers-sanitized.o $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/malloc_quarantine_probe.cpp tests/darwin/guest/malloc_quarantine_entry.S $(MACOS_OUT)/m5/malloc-quarantine-providers-sanitized.o $(filter-out native/darwin/guest/providers.cpp,$(MACOS_GUEST_SOURCES)) -o $@
+.PHONY: macos-guest-malloc-quarantine-sanitize-check
+macos-guest-malloc-quarantine-sanitize-check: $(MACOS_OUT)/m5/malloc-quarantine-sanitized
+	$<
+macos-guest-check: macos-guest-malloc-quarantine-check macos-guest-malloc-quarantine-sanitize-check
+
 $(MACOS_OUT)/m5/dependency-sanitized: tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
 	mkdir -p $(dir $@)
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) -o $@

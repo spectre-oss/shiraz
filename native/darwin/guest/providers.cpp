@@ -4,6 +4,7 @@
 #include "guest_errno.hpp"
 #include <atomic>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -15,6 +16,7 @@
 #include <tuple>
 
 namespace shiraz::guest {
+extern "C" void *shiraz_guest_managed_malloc_entry(size_t);
 int *guest_errno_location() {
   static thread_local int value = 0;
   return &value;
@@ -189,25 +191,7 @@ void managed_free(void *pointer) {
   state->retire_reused(base, span, state->entries.end());
 }
 ProviderExport managed_malloc_export() {
-  void *address = scalar_closure([](Capture &capture) {
-    auto *guest_error = guest_errno_location();
-    const auto storage = capture_boundary_storage();
-    // This admission is about normal returned calls. The entry boundary may
-    // already have written its cell; an overlap refuses before continuation,
-    // rather than certifying pre-write safety. Native C/C++ object lifetimes
-    // and conforming allocator/private metadata behavior remain assumptions.
-    if (!prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(&errno), sizeof(errno)) ||
-        !prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(guest_error), sizeof(*guest_error)) ||
-        !prepared_guest_stack_disjoint(storage.address, storage.bytes))
-      throw ElfError("managed malloc adapter storage overlaps native stack extent");
-    CallCursor cursor(capture, Convention::Aapcs64);
-    const auto bytes = cursor.read<size_t>();
-    HostErrno preserve;
-    void *result = managed_malloc(bytes);
-    if (!result) *guest_error = errno_to_guest(errno ? errno : EIO);
-    return_value(capture, result);
-  });
-  return {"malloc", "LIBC", reinterpret_cast<uintptr_t>(address), SymbolKind::Function,
+  return {"malloc", "LIBC", reinterpret_cast<uintptr_t>(&shiraz_guest_managed_malloc_entry), SymbolKind::Function,
           "heap/managed-malloc-v2", false};
 }
 void *memory_find(const void *pointer, int value, size_t length) {
@@ -223,6 +207,38 @@ char *string_substring(const char *haystack, const char *needle) {
   return const_cast<char *>(std::strstr(haystack, needle));
 }
 } // namespace
+extern "C" void *shiraz_guest_managed_malloc_body(size_t bytes, uintptr_t incoming_sp) noexcept {
+  // Assembly has quarantined guest register copies before this first C++
+  // frame. Saved guest state remains on the stack and can be recovered by
+  // unwinding: this is not a native-memory or asynchronous purity contract.
+  HostErrno preserve;
+  try {
+    if (!guest_tls_prepared())
+      throw ElfError("managed malloc requires prepared guest TLS");
+    require_guest_tls_lifetime();
+    if ((incoming_sp & 15) || !prepared_guest_stack_window(incoming_sp, 160, 0))
+      throw ElfError("managed malloc SP outside prepared native stack extent");
+    CaptureBoundary transition;
+    auto *guest_error = guest_errno_location();
+    const auto storage = capture_boundary_storage();
+    // Returning-path admission only: assembly and boundary storage have
+    // already been written. No pre-write safety claim follows from this check.
+    if (!prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(&errno), sizeof(errno)) ||
+        !prepared_guest_stack_disjoint(reinterpret_cast<uintptr_t>(guest_error), sizeof(*guest_error)) ||
+        !prepared_guest_stack_disjoint(storage.address, storage.bytes))
+      throw ElfError("managed malloc adapter storage overlaps native stack extent");
+    errno = 0;
+    void *result = managed_malloc(bytes);
+    if (!result) *guest_error = errno_to_guest(errno ? errno : EIO);
+    return result;
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "SHIRAZ_GUEST_FATAL %s\n", error.what());
+    std::abort();
+  } catch (...) {
+    std::fprintf(stderr, "SHIRAZ_GUEST_FATAL unknown managed malloc failure\n");
+    std::abort();
+  }
+}
 void release_guest_allocation(void *pointer) { managed_free(pointer); }
 Providers core_personality() {
   Provider libc{"libc.so", {"LIBC", "LIBC_O"}, {}, false};

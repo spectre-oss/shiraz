@@ -4,9 +4,13 @@
 #include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
 #include <cstddef>
+#include <chrono>
+#include <cerrno>
 #include <condition_variable>
 #include <csignal>
 #include <sys/wait.h>
+#include <sys/mman.h>
+#include <poll.h>
 #include <unistd.h>
 #include <iostream>
 #include <mutex>
@@ -14,12 +18,156 @@
 #include <cstring>
 #include <cstdlib>
 #include <thread>
+#include <string>
 #include <unwind.h>
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#include <sanitizer/common_interface_defs.h>
+#define SHIRAZ_MALLOC_ASAN_FIBER 1
+#endif
+#endif
 
 using namespace shiraz::guest;
 static void require(bool value, const char *message) {
   if (!value)
     throw std::runtime_error(message);
+}
+extern "C" void *shiraz_guest_managed_malloc_entry(size_t);
+extern "C" int shiraz_test_malloc_other_stack(void *, int (*)(void *), void *);
+asm(R"MALLOC_STACK_ASM(
+.text
+.p2align 2
+.globl _shiraz_test_malloc_other_stack
+_shiraz_test_malloc_other_stack:
+    stp x29, x30, [sp, #-32]!
+    stp x19, x20, [sp, #16]
+    mov x19, sp
+    mov x20, x1
+    mov sp, x0
+    mov x0, x2
+    blr x20
+    mov sp, x19
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #32
+    ret
+)MALLOC_STACK_ASM");
+static int call_direct_malloc(void *foreign) {
+  (void)foreign;
+#ifdef SHIRAZ_MALLOC_ASAN_FIBER
+  if (foreign) __sanitizer_finish_switch_fiber(nullptr, nullptr, nullptr);
+#endif
+  void *result = shiraz_guest_managed_malloc_entry(64);
+  release_guest_allocation(result);
+  constexpr char message[] = "UNEXPECTED_MANAGED_MALLOC_RETURN\n";
+  (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+  return 98;
+}
+static int malloc_refusal_child(bool foreign_stack) {
+  require(!guest_tls_prepared(), "fresh malloc refusal child starts unprepared");
+  require(std::signal(SIGABRT, [](int) { _exit(97); }) != SIG_ERR,
+          "malloc refusal abort observer");
+  if (!foreign_stack) return call_direct_malloc(nullptr);
+  prepare_guest_tls();
+  require(guest_tls_prepared(), "foreign malloc stack case has prepared TLS");
+  constexpr size_t bytes = 256 * 1024;
+  void *memory = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  require(memory != MAP_FAILED, "foreign malloc test stack allocation");
+  void *top = static_cast<uint8_t *>(memory) + bytes - 16;
+  require(!prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(top)),
+          "foreign malloc test stack lies outside prepared extent");
+  // The called body is noexcept and must abort. No exception unwind across
+  // this test-only pivot or asynchronous stack behavior is claimed.
+#ifdef SHIRAZ_MALLOC_ASAN_FIBER
+  // Notify ASan of the deliberate child-only stack switch. The original fake
+  // stack stays suspended; this fatal test never resumes its native frame.
+  void *suspended_fake_stack = nullptr;
+  __sanitizer_start_switch_fiber(&suspended_fake_stack, memory, bytes);
+#endif
+  return shiraz_test_malloc_other_stack(top, &call_direct_malloc, reinterpret_cast<void *>(uintptr_t(1)));
+}
+class MallocChildDisposition {
+  struct sigaction previous{};
+public:
+  MallocChildDisposition() {
+    require(!sigaction(SIGCHLD, nullptr, &previous), "snapshot malloc child disposition");
+    struct sigaction action{};
+    sigemptyset(&action.sa_mask);
+    action.sa_handler = SIG_DFL;
+    require(!sigaction(SIGCHLD, &action, nullptr), "keep malloc refusal child waitable");
+  }
+  ~MallocChildDisposition() {
+    if (sigaction(SIGCHLD, &previous, nullptr)) _exit(95);
+  }
+};
+static void malloc_refusal_case(const char *executable, const char *mode, const char *expected) {
+  MallocChildDisposition disposition;
+  int descriptors[2];
+  require(!pipe(descriptors), "malloc refusal diagnostic pipe");
+  char *child_argv[] = {const_cast<char *>(executable), const_cast<char *>(mode), nullptr};
+  const pid_t child = fork();
+  require(child >= 0, "malloc refusal fork");
+  if (!child) {
+    close(descriptors[0]);
+    if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
+    close(descriptors[1]);
+    execv(executable, child_argv);
+    _exit(96);
+  }
+  close(descriptors[1]);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  std::string diagnostic;
+  ssize_t count = -1;
+  bool failed = false;
+  char buffer[512];
+  while (std::chrono::steady_clock::now() < deadline) {
+    pollfd input{descriptors[0], POLLIN | POLLHUP, 0};
+    const int ready = poll(&input, 1, 100);
+    if (ready < 0 && errno == EINTR) continue;
+    if (ready < 0) { failed = true; break; }
+    if (!ready) continue;
+    count = read(descriptors[0], buffer, sizeof(buffer));
+    if (count < 0 && errno == EINTR) continue;
+    if (count <= 0) break;
+    diagnostic.append(buffer, size_t(count));
+    if (diagnostic.size() > 8192) { failed = true; break; }
+  }
+  close(descriptors[0]);
+  int status = -1, wait_error = 0;
+  pid_t waited = 0;
+  while (std::chrono::steady_clock::now() < deadline) {
+    waited = waitpid(child, &status, WNOHANG);
+    wait_error = waited < 0 ? errno : 0;
+    if (waited == child || (waited < 0 && wait_error != EINTR)) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (waited != child) {
+    failed = true;
+    // Do not signal a PID after ECHILD has removed our ownership.
+    if (waited == 0 || (waited < 0 && wait_error == EINTR)) {
+      kill(child, SIGKILL);
+      do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+    }
+  }
+  const bool refused = !failed && waited == child && WIFEXITED(status) &&
+      WEXITSTATUS(status) == 97 && count == 0 && diagnostic == expected;
+  if (!refused)
+    std::cerr << "malloc refusal mode=" << mode << " status=" << status << " read=" << count
+              << " failed=" << failed << " wait_errno=" << wait_error
+              << " diagnostic=" << diagnostic << std::endl;
+  require(refused, "actual typed malloc admission refuses before normal return");
+}
+static void malloc_admission_tests(const char *executable, const Providers &registry) {
+  uintptr_t allocate = 0;
+  for (const auto &entry : registry.modules().at("libc.so").exports)
+    if (entry.name == "malloc") allocate = entry.address;
+  require(allocate == reinterpret_cast<uintptr_t>(&shiraz_guest_managed_malloc_entry),
+          "managed malloc exports actual static typed entry");
+  malloc_refusal_case(executable, "--malloc-unprepared",
+                     "SHIRAZ_GUEST_FATAL managed malloc requires prepared guest TLS\n");
+  malloc_refusal_case(executable, "--malloc-foreign-stack",
+                     "SHIRAZ_GUEST_FATAL managed malloc SP outside prepared native stack extent\n");
+  std::cout << "M5_MALLOC_ADMISSION_PASS static_entry=1 unprepared_refused=1 foreign_sp_refused=1 "
+               "fresh_processes=2 deadline_seconds=10 native_memory_purity=0\n" << std::flush;
 }
 // Raw machine observations precede any C++ instruction after the call. This
 // fixture checks declared register effects, not hidden native spill contents.
@@ -283,6 +431,10 @@ static void host_barrier() {
 }
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::strcmp(argv[1], "--malloc-unprepared") == 0)
+      return malloc_refusal_child(false);
+    if (argc == 2 && std::strcmp(argv[1], "--malloc-foreign-stack") == 0)
+      return malloc_refusal_child(true);
     require(argc == 2, "usage: personality-probe fixture-directory");
     bool rejected_object = false, rejected_null = false, rejected_empty = false;
     try {
@@ -299,6 +451,7 @@ int main(int argc, char **argv) {
     require(rejected_object && rejected_null && rejected_empty,
             "nonreturning metadata rejects objects, null pointers and empty closures");
     auto registry = core_personality();
+    malloc_admission_tests(argv[0], registry);
     scalar_scratch_tests(registry);
     Provider helper{"libfixture_host.so", {}, {}, false};
     helper.exports.push_back(
