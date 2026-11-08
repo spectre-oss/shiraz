@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/image.hpp"
+#include "shiraz/darwin/guest/call.hpp"
 #include "shiraz/darwin/guest/jit.hpp"
 #include "shiraz/darwin/guest/instruction.hpp"
 #include <algorithm>
@@ -274,10 +275,9 @@ size_t Image::initialize() {
       if (!valid)
         throw ElfError("guest constructor outside executable LOAD");
       void *pointer = at(address, 4);
-      void (*function)();
-      static_assert(sizeof(function) == sizeof(pointer));
-      std::memcpy(&function, &pointer, sizeof(function));
-      function();
+      // Constructors are guest calls too: use the same AAPCS64 frame and
+      // capture-boundary lifetime as JNI and other synchronous callbacks.
+      invoke(pointer, {});
       ++metrics_.executed_constructors;
     };
     size_t count = 0;
