@@ -17,6 +17,13 @@ public final class InputMethodManager {
     public interface KeyboardController { boolean setVisible(boolean visible); }
     private KeyboardController keyboard;private boolean shown,forced,explicit;
     private InputMethodManager() {}
+    // Native SDL text input has no installed Android InputMethodService or
+    // Android subtype identity. Do not advertise a synthetic keyboard package.
+    public java.util.List<InputMethodInfo> getInputMethodList(){return java.util.Collections.emptyList();}
+    public java.util.List<InputMethodInfo> getEnabledInputMethodList(){return java.util.Collections.emptyList();}
+    public java.util.List<InputMethodSubtype> getEnabledInputMethodSubtypeList(InputMethodInfo method,boolean allowImplicitlySelectedSubtypes){return java.util.Collections.emptyList();}
+    public InputMethodSubtype getCurrentInputMethodSubtype(){return null;}
+    public InputMethodSubtype getLastInputMethodSubtype(){return null;}
     public static InputMethodManager shirazHost(KeyboardController controller){InputMethodManager value=new InputMethodManager();value.keyboard=controller;return value;}
     public boolean shirazKeyboardRequested(){return shown;}
     public void shirazCheckEditor(){if(shown&&(served==null||!served.isAttachedToWindow()||!served.hasFocus())){keyboard.setVisible(false);shown=false;forced=false;explicit=false;}}

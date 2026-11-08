@@ -22,6 +22,10 @@ int write_log(int priority, const char *tag, std::string message) {
 }
 Provider log_provider() {
   Provider provider{"liblog.so", {"LIBLOG"}, {}, false};
+  provider.exports.push_back(fixed_export("__android_log_write","LIBLOG",+[](int priority,const char *tag,const char *text){
+    if(!text)return -errno_to_guest(EINVAL);
+    return write_log(priority,tag,std::string(text,strnlen(text,1023)));
+  }));
   for (bool list : {false, true}) {
     void *entry = closure([list](Capture &capture) {
       CallCursor cursor(capture, Convention::Aapcs64);

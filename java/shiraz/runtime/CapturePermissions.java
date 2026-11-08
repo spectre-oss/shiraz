@@ -53,15 +53,15 @@ public final class CapturePermissions {
   if(!canRequest(p))throw new SecurityException("Capture permission is undeclared or app is in background");
   if(!"once".equals(choice)&&!"foreground".equals(choice)&&!"denied".equals(choice))throw new IllegalArgumentException("permission choice");
   once.remove(p);if("once".equals(choice)){once.add(p);decisions.remove(p);}else decisions.setProperty(p,choice);
-  save();event(p,"decision:"+choice);
+  save();event(p,"decision:"+choice);android.app.AppOpsManager.shirazPermissionChanged(p);
  }
- public void revoke(String p){if(!supports(p))throw new IllegalArgumentException("permission");synchronized(this){once.remove(p);decisions.setProperty(p,"denied");save();}stop(p);event(p,"revoked");}
+ public void revoke(String p){if(!supports(p))throw new IllegalArgumentException("permission");synchronized(this){once.remove(p);decisions.setProperty(p,"denied");save();}stop(p);event(p,"revoked");android.app.AppOpsManager.shirazPermissionChanged(p);}
  public synchronized void require(String p){if(!granted(p)){event(p,"access-denied");throw new SecurityException(label(p)+" permission has not been granted for foreground use");}}
  public synchronized long begin(String p,Runnable stop){require(p);if(active.size()>=16)throw new IllegalStateException("Capture device limit");long id=nextLease++;event(p,"capture-start");active.put(id,new Lease(p,stop));return id;}
  public synchronized void end(long id){Lease lease=active.remove(id);if(lease!=null)event(lease.permission,"capture-stop");}
  public void failure(String p){event(p,"device-unavailable");}
  private void stop(String permission){List<Map.Entry<Long,Lease>> leases;synchronized(this){leases=new ArrayList<Map.Entry<Long,Lease>>(active.entrySet());}for(Map.Entry<Long,Lease> e:leases)if(permission==null||permission.equals(e.getValue().permission)){try{e.getValue().stop.run();}finally{end(e.getKey());}}}
- public void setForeground(boolean value){synchronized(this){foreground=value;if(!value){for(String p:once)event(p,"one-time-expired");once.clear();}revision++;}if(!value)stop(null);}
+ public void setForeground(boolean value){synchronized(this){foreground=value;if(!value){for(String p:once)event(p,"one-time-expired");once.clear();}revision++;}if(!value)stop(null);android.app.AppOpsManager.shirazPermissionChanged(null);}
  public synchronized long revision(){return revision;}
  public synchronized String activeSummary(){boolean camera=false,mic=false;for(Lease lease:active.values()){camera|=CAMERA.equals(lease.permission);mic|=MICROPHONE.equals(lease.permission);}return camera&&mic?"Camera + microphone in use":camera?"Camera in use":mic?"Microphone in use":"";}
  public synchronized String history(){

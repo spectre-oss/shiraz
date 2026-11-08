@@ -152,12 +152,14 @@ public class TextView extends View {
     public void setRawInputType(int value){inputType=value;}
     public void setInputType(int value){
         int kind=value&InputType.TYPE_MASK_CLASS,variation=value&InputType.TYPE_MASK_VARIATION;
-        boolean numeric=kind==InputType.TYPE_CLASS_NUMBER;
-        if(value!=0&&!numeric&&((kind!=InputType.TYPE_CLASS_TEXT&&kind!=0)||(variation&15)!=0||variation>0xe0||(value&~0xff0ff)!=0))throw new UnsupportedOperationException("Input type requires an unsupported key listener");
+        // Android treats flag-only input types as text while retaining the caller's bits.
+        if(kind==0&&value!=0)kind=InputType.TYPE_CLASS_TEXT;
+        boolean numeric=kind==InputType.TYPE_CLASS_NUMBER,phone=kind==InputType.TYPE_CLASS_PHONE;
+        if(value!=0&&!numeric&&!phone&&(kind!=InputType.TYPE_CLASS_TEXT||(variation&15)!=0||variation>0xe0||(value&~0xff0ff)!=0))throw new UnsupportedOperationException("Input type requires an unsupported key listener");
         boolean masksText=numeric ? variation==InputType.TYPE_NUMBER_VARIATION_PASSWORD
                 : kind==InputType.TYPE_CLASS_TEXT&&(variation==InputType.TYPE_TEXT_VARIATION_PASSWORD||variation==InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
-        inputType=value;keyListener=value==0?null:numeric?android.text.method.DigitsKeyListener.getInstance((value&InputType.TYPE_NUMBER_FLAG_SIGNED)!=0,(value&InputType.TYPE_NUMBER_FLAG_DECIMAL)!=0):new shiraz.runtime.TextKeyListener(value);if(text instanceof Editable)configureFilters((Editable)text);
-        if(value!=0){if(!(text instanceof Editable))setText(text,BufferType.EDITABLE);setSingleLine(numeric||(value&InputType.TYPE_TEXT_FLAG_MULTI_LINE)==0);}
+        inputType=value;keyListener=value==0?null:phone?android.text.method.DialerKeyListener.getInstance():numeric?android.text.method.DigitsKeyListener.getInstance((value&InputType.TYPE_NUMBER_FLAG_SIGNED)!=0,(value&InputType.TYPE_NUMBER_FLAG_DECIMAL)!=0):new shiraz.runtime.TextKeyListener(value);if(text instanceof Editable)configureFilters((Editable)text);
+        if(value!=0){if(!(text instanceof Editable))setText(text,BufferType.EDITABLE);setSingleLine(numeric||phone||(value&InputType.TYPE_TEXT_FLAG_MULTI_LINE)==0);}
         if(masksText)setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());else if(transformation instanceof android.text.method.PasswordTransformationMethod)setTransformationMethod(null);
     }
     protected final boolean shirazAcceptsTextInput(){return keyListener!=null;}
@@ -184,7 +186,7 @@ public class TextView extends View {
     public TextView(Context context,AttributeSet attrs,int style){this(context,attrs,style,0);}
     public TextView(Context context,AttributeSet attrs,int style,int resource){
         super(context,attrs,style,resource);
-        paint.density=getResources().getDisplayMetrics().density;setTextSize(15);
+        paint.density=getResources().getDisplayMetrics().density;paint.setTextSize(15*getResources().getDisplayMetrics().scaledDensity);
         if(attrs!=null||style!=0||resource!=0){
             shiraz.runtime.XmlAttributes a=new shiraz.runtime.XmlAttributes(context,attrs,style,resource);a.prefetch(CONSTRUCTOR_ATTRIBUTES);
             if(a.has("freezesText"))setFreezesText(a.bool("freezesText",false));
@@ -232,7 +234,7 @@ public class TextView extends View {
         if(values.hasValue(8))setLetterSpacing(values.getFloat(8,0));
         if(values.hasValue(9)||values.hasValue(10)||values.hasValue(11)||values.hasValue(12))setShadowLayer(values.getFloat(12,0),values.getFloat(10,0),values.getFloat(11,0),values.getColor(9,0));
         String features=values.getString(13);if(features!=null&&!features.isEmpty())throw new UnsupportedOperationException("Text font feature settings are not implemented");
-        if(values.hasValue(0))setTextSize(TypedValue.COMPLEX_UNIT_PX,values.getDimensionPixelSize(0,(int)getTextSize()));
+        if(values.hasValue(0))setTextSizeInternal(TypedValue.COMPLEX_UNIT_PX,values.getDimensionPixelSize(0,(int)getTextSize()));
         if(values.hasValue(1))setTextColor(values.getColorStateList(1));if(values.hasValue(2))setHintTextColor(values.getColorStateList(2));if(values.hasValue(6))setLinkTextColor(values.getColorStateList(6));
         if(resetTypeface&&!values.hasValue(3)&&!values.hasValue(4)&&!values.hasValue(5))setTypeface((Typeface)null);
         if(values.hasValue(3)||values.hasValue(4)||values.hasValue(5)){
@@ -355,7 +357,8 @@ public class TextView extends View {
     public float getLetterSpacing(){return paint.getLetterSpacing();}
     public void setLetterSpacing(float value){if(value!=paint.getLetterSpacing()){paint.setLetterSpacing(value);changed();}}
     public void setTextSize(float value){setTextSize(TypedValue.COMPLEX_UNIT_SP,value);}
-    public void setTextSize(int unit,float value){float size=TypedValue.applyDimension(unit,value,getResources().getDisplayMetrics());if(size!=paint.getTextSize()){paint.setTextSize(size);changed();}}
+    public void setTextSize(int unit,float value){setTextSizeInternal(unit,value);}
+    private void setTextSizeInternal(int unit,float value){float size=TypedValue.applyDimension(unit,value,getResources().getDisplayMetrics());if(size!=paint.getTextSize()){paint.setTextSize(size);changed();}}
     public void setTypeface(Typeface value){paint.setTypeface(value);changed();}
     public void setTypeface(Typeface value,int style){setTypeface(Typeface.create(value,style));}
     public Typeface getTypeface(){return paint.getTypeface();}
@@ -449,8 +452,10 @@ public class TextView extends View {
     public int getCompoundPaddingEnd(){return getLayoutDirection()==LAYOUT_DIRECTION_RTL?getCompoundPaddingLeft():getCompoundPaddingRight();}
     public int getTotalPaddingLeft(){return getCompoundPaddingLeft();}
     public int getTotalPaddingRight(){return getCompoundPaddingRight();}
-    public int getTotalPaddingTop(){return getCompoundPaddingTop();}
-    public int getTotalPaddingBottom(){return getCompoundPaddingBottom();}
+    public int getExtendedPaddingTop(){ensure(available(getWidth()));return getCompoundPaddingTop()+(lines.size()>maxLines?verticalOffset(getHeight()):0);}
+    public int getExtendedPaddingBottom(){ensure(available(getWidth()));return getCompoundPaddingBottom()+(lines.size()>maxLines?Math.max(0,getHeight()-getCompoundPaddingTop()-getCompoundPaddingBottom()-contentHeight)-verticalOffset(getHeight()):0);}
+    public int getTotalPaddingTop(){ensure(available(getWidth()));return getCompoundPaddingTop()+verticalOffset(getHeight());}
+    public int getTotalPaddingBottom(){ensure(available(getWidth()));return getCompoundPaddingBottom()+Math.max(0,getHeight()-getCompoundPaddingTop()-getCompoundPaddingBottom()-contentHeight)-verticalOffset(getHeight());}
     public int getTotalPaddingStart(){return getCompoundPaddingStart();}
     public int getTotalPaddingEnd(){return getCompoundPaddingEnd();}
     @Override protected boolean verifyDrawable(Drawable d){return super.verifyDrawable(d)||d!=null&&(d==cursorDrawable||d==compoundLeft||d==compoundRight||d==compoundTop||d==compoundBottom||d==compoundStart||d==compoundEnd);}

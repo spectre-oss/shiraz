@@ -656,6 +656,10 @@ struct SignalRuntime::State {
 SignalRuntime::SignalRuntime(CodeValidator validate)
     : state_(std::make_shared<State>(std::move(validate))) {}
 bool in_guest_signal_handler() noexcept { return handling_depth != 0; }
+int guest_thread_signal(pthread_t thread,int signal){
+  int native=host_signal(signal);if(native<0)return signal>0&&signal<=64?ENOTSUP:EINVAL;
+  return ::pthread_kill(thread,native);
+}
 SignalRuntime::~SignalRuntime() {
   try {
     shutdown();

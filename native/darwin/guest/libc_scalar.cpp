@@ -320,7 +320,18 @@ std::vector<ProviderExport> libc_scalar_exports(CodeValidator validate) {
     });
     result.push_back({seed ? "srand" : "rand", "LIBC", reinterpret_cast<uintptr_t>(code),
                       SymbolKind::Function, "random/bionic-bsd-degree31/private-state", false});
+    result.push_back({seed ? "srandom" : "random", "LIBC", reinterpret_cast<uintptr_t>(code),
+                      SymbolKind::Function, "random/bionic-bsd-degree31/private-state", false});
   }
+  struct Random48{std::mutex mutex;uint64_t state=0x1234abcd330eULL;};auto random48=std::make_shared<Random48>();
+  auto next48=closure([random48](Capture &capture){std::lock_guard<std::mutex> lock(random48->mutex);
+    random48->state=(random48->state*0x5deece66dULL+0xb)&0xffffffffffffULL;
+    return_value(capture,long(random48->state>>17));
+  });
+  result.push_back({"lrand48","LIBC",uintptr_t(next48),SymbolKind::Function,"random/private-posix-48bit-state",false});
+  result.push_back(fixed_export("strtok","LIBC",+[](char *text,const char *delimiters)->char *{
+    thread_local char *next=nullptr;return ::strtok_r(text,delimiters,&next);
+  }));
   return result;
 }
 } // namespace shiraz::guest

@@ -31,11 +31,17 @@ Provider math_provider() {
   UNARY(log); FLOAT_UNARY(logf); UNARY(log10); UNARY(log2); FLOAT_UNARY(log2f);
   FLOAT_BINARY(nextafterf); BINARY(pow); FLOAT_BINARY(powf); BINARY(remainder);
   UNARY(sin); FLOAT_UNARY(sinf); UNARY(sinh); UNARY(tan); FLOAT_UNARY(tanf); UNARY(tanh);
+  UNARY(expm1); UNARY(log1p); FLOAT_UNARY(atanf); FLOAT_UNARY(sqrtf);
+  UNARY(floor); FLOAT_UNARY(floorf); UNARY(ceil); FLOAT_UNARY(ceilf);
+  UNARY(trunc); FLOAT_UNARY(truncf); UNARY(rint); FLOAT_UNARY(rintf);
+  FLOAT_UNARY(roundf); FLOAT_UNARY(tanhf); UNARY(fabs); FLOAT_UNARY(log10f);
+  BINARY(fmin); BINARY(fmax); FLOAT_BINARY(fminf); FLOAT_BINARY(fmaxf);
 #undef UNARY
 #undef FLOAT_UNARY
 #undef BINARY
 #undef FLOAT_BINARY
   add("frexp", static_cast<double (*)(double, int *)>(&::frexp)); add("frexpf", &::frexpf);
+  add("scalbn", static_cast<double (*)(double,int)>(&::scalbn));
   add("modf", static_cast<double (*)(double, double *)>(&::modf)); add("modff", &::modff);
   add("remquo", static_cast<double (*)(double, double, int *)>(&::remquo)); add("ilogbf", &::ilogbf); add("nan", &::nan);
   // These have no result; the explicit adapter preserves host errno and maps

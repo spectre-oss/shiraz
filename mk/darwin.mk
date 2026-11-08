@@ -699,8 +699,9 @@ MACOS_GUEST_ART := context/art_standalone
 MACOS_GUEST_JNI_FLAGS := -I$(MACOS_GUEST_ART)/libnativehelper/include -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -I$(MACOS_GUEST_ART)/system/core/libnativebridge/include
 $(MACOS_OUT)/m5/guest_jni_slots.inc: scripts/generate_guest_jni.py $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h
 	uv run --no-project python scripts/generate_guest_jni.py $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h $@
-$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/binding_evidence.cpp include/shiraz/darwin/guest/binding_evidence.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) native/darwin/guest/jni.cpp native/darwin/guest/bridge.cpp include/shiraz/darwin/guest/jni.hpp $(MACOS_OUT)/m5/guest_jni_slots.inc native/darwin/guest/guestegl.cpp include/shiraz/darwin/guest/guestegl.hpp include/shiraz/darwin/guest/guestegl_symbols.inc native/darwin/guest/path.cpp include/shiraz/darwin/guest/path.hpp
-	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) $(MACOS_GUEST_JNI_FLAGS) $(MACOS_ANGLE_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fvisibility=hidden -dynamiclib -Wl,-install_name,@rpath/libshiraz-guest.so $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_IO_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) native/darwin/guest/binding_evidence.cpp native/darwin/guest/jni.cpp native/darwin/guest/bridge.cpp native/darwin/guest/bitmap.cpp native/android_bitmap.cpp native/darwin/guest/guestegl.cpp native/darwin/guest/path.cpp -o $@
+MACOS_GUEST_BRIDGE_LINK = $(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) $(MACOS_GUEST_JNI_FLAGS) $(MACOS_ANGLE_CFLAGS) -isystem third_party/opensles -std=c++17 -O2 -g -Wall -Wextra -Werror -fvisibility=hidden -dynamiclib -Wl,-install_name,@rpath/libshiraz-guest.so $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_IO_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) native/darwin/guest/binding_evidence.cpp native/darwin/guest/jni.cpp native/darwin/guest/bridge.cpp native/darwin/guest/bitmap.cpp native/android_bitmap.cpp native/darwin/guest/guestegl.cpp native/darwin/guest/path.cpp native/darwin/guest/opensles.cpp -framework AudioToolbox
+$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/opensles.cpp native/opensles.cpp include/shiraz/darwin/guest/opensles.hpp native/darwin/guest/binding_evidence.cpp include/shiraz/darwin/guest/binding_evidence.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) native/darwin/guest/jni.cpp native/darwin/guest/bridge.cpp include/shiraz/darwin/guest/jni.hpp $(MACOS_OUT)/m5/guest_jni_slots.inc native/darwin/guest/guestegl.cpp include/shiraz/darwin/guest/guestegl.hpp include/shiraz/darwin/guest/guestegl_symbols.inc native/darwin/guest/path.cpp include/shiraz/darwin/guest/path.hpp
+	$(MACOS_GUEST_BRIDGE_LINK) -o $@
 
 $(MACOS_OUT)/m5/jni-fixture.o: tests/darwin/guest/jni_fixture.c $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h $(MACOS_OUT)/m5/guest_io.hpp
 	mkdir -p $(dir $@)
@@ -2048,3 +2049,46 @@ macos-guest-jni-descriptor-local-check:
 # Reuses an existing strict signed closure; verifies it without signing.
 macos-guest-jni-descriptor-hardened-local-check:
 	uv run --no-project python scripts/macos_guest_jni_descriptor_local.py --mode hardened
+
+.PHONY: macos-guest-opensles-lifetime-local-check
+# LLVM text only: verifies no static-destructor registration before loader exit.
+macos-guest-opensles-lifetime-local-check:
+	mkdir -p $(MACOS_OUT)/m5
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_JNI_FLAGS) -isystem third_party/opensles -std=c++17 -Wall -Wextra -Werror -O0 -S -emit-llvm native/darwin/guest/opensles.cpp -o $(MACOS_OUT)/m5/opensles-lifetime.ll
+	uv run --no-project python -c 'from pathlib import Path; s=Path("$(MACOS_OUT)/m5/opensles-lifetime.ll").read_text(); assert "define " in s and "audio_runtime" in s; assert all(x not in s for x in ("llvm.global_ctors", "__cxa_atexit", "AudioRuntimeD")); print("M5_OPENSL_LIFETIME_COMPILE_PASS static_destructors=0 runtime_execution=0 signing_performed=0")'
+macos-guest-check: macos-guest-opensles-lifetime-local-check
+
+# Typed guest OpenSL tables and native AudioQueue backend. This component gate
+# exercises object/queue semantics without claiming hardware audio playback.
+.PHONY: macos-guest-opensles-check
+$(MACOS_OUT)/m5/opensles-probe: tests/darwin/guest/opensles_probe.cpp native/darwin/guest/opensles.cpp native/opensles.cpp include/shiraz/darwin/guest/opensles.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_JNI_CFLAGS) -isystem third_party/opensles -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/opensles_probe.cpp native/darwin/guest/opensles.cpp $(MACOS_GUEST_SOURCES) -framework AudioToolbox -o $@
+macos-guest-opensles-check: $(MACOS_OUT)/m5/opensles-probe
+	$(MACOS_OUT)/m5/opensles-probe
+macos-guest-check: macos-guest-opensles-check
+
+.PHONY: macos-guest-telegram-api-check
+$(MACOS_OUT)/m5/telegram-api-probe: tests/darwin/guest/telegram_api_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/telegram_api_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_IO_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-telegram-api-check: $(MACOS_OUT)/m5/telegram-api-probe
+	$(MACOS_OUT)/m5/telegram-api-probe $(MACOS_OUT)/m5/telegram-api-work
+macos-guest-check: macos-guest-telegram-api-check
+
+.PHONY: macos-work-source-smoke
+macos-work-source-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py WorkSourceSmoke --marker WORK_SOURCE_OK
+
+.PHONY: macos-telegram-framework-smoke
+macos-telegram-framework-smoke: macos-runtime-libs macos-graphics-libs macos-framework-resources macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py WorkSourceSmoke --marker WORK_SOURCE_OK
+	uv run --no-project python scripts/java_framework_smoke.py ColorValueSmoke --marker COLOR_VALUE_AND_DEFAULT_FEATURES_OK
+	uv run --no-project python scripts/java_framework_smoke.py TypefaceBuilderSmoke --marker TYPEFACE_BUILDER_OK
+	uv run --no-project python scripts/java_framework_smoke.py BitmapDrawableConstructorSmoke --marker BITMAP_DRAWABLE_CONSTRUCTOR_OK
+	uv run --no-project python scripts/java_framework_smoke.py AppOpsWatchSmoke --marker APP_OPS_WATCH_OK
+	uv run --no-project python scripts/java_framework_smoke.py BackupUnavailableSmoke --marker BACKUP_UNAVAILABLE_OK
+	uv run --no-project python scripts/java_framework_smoke.py InputMethodMetadataSmoke --marker INPUT_METHOD_METADATA_OK
+	uv run --no-project python scripts/java_framework_smoke.py WindowMetadataSmoke --marker WINDOW_METADATA_OK
+	uv run --no-project python scripts/java_framework_smoke.py BitmapOpacitySmoke --marker BITMAP_OPACITY_OK
+	uv run --no-project python scripts/java_framework_smoke.py ViewSwitcherSmoke --marker VIEW_SWITCHER_OK
+	uv run --no-project python scripts/java_framework_smoke.py PathLastPointSmoke --marker PATH_LAST_POINT_OK
+	uv run --no-project python scripts/java_framework_smoke.py ColorGlyphBoundsSmoke --marker COLOR_GLYPH_BOUNDS_OK

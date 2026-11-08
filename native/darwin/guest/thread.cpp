@@ -2,6 +2,7 @@
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/thread.hpp"
 #include "shiraz/darwin/guest/cleanup.hpp"
+#include "shiraz/darwin/guest/signals.hpp"
 #include "guest_io.hpp"
 #include <climits>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <mutex>
 #include <pthread.h>
 #include <unistd.h>
+#include <sched.h>
 
 namespace shiraz::guest {
 namespace {
@@ -18,6 +20,8 @@ struct Attributes {
   size_t stack = 1024 * 1024;
   size_t guard = size_t(getpagesize());
   bool detached = false;
+  void *base = nullptr;
+  bool guard_known = true;
 };
 struct Record {
   pthread_t host = nullptr;
@@ -108,6 +112,42 @@ public:
     *size = value->stack;
     return 0;
   }
+  int get_attributes(pthread_t thread,void *address) {
+    if(!address)return EINVAL;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(thread!=pthread_self() && !records_.count(uintptr_t(thread)))return ESRCH;
+    if(attributes_.count(address))return EBUSY;
+    if(attributes_.size()>=4096)return EAGAIN;
+    void *top=pthread_get_stackaddr_np(thread);size_t size=pthread_get_stacksize_np(thread);
+    if(!top||!size)return ESRCH;
+    Attributes value;value.stack=size;value.base=static_cast<char *>(top)-size;value.guard_known=false;
+    attributes_.emplace(address,value);std::memset(address,0,b::kPthreadAttrSize);return 0;
+  }
+  int attr_getstack_address(void *address,void **base,size_t *size) {
+    std::lock_guard<std::mutex> lock(mutex_);auto *value=attr(address);
+    if(!value||!base||!size)return EINVAL;*base=value->base;*size=value->stack;return 0;
+  }
+  int set_name(pthread_t thread,const char *name) {
+    if(!name)return EINVAL;
+    if(strnlen(name,16)==16)return ERANGE;
+    if(thread!=pthread_self())return ENOTSUP;
+    return pthread_setname_np(name);
+  }
+  int set_schedule(pthread_t thread,int policy,const void *parameters) {
+    if(!parameters)return EINVAL;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(thread!=pthread_self()&&!records_.count(uintptr_t(thread)))return ESRCH;
+    int native=policy==0?SCHED_OTHER:policy==1?SCHED_FIFO:policy==2?SCHED_RR:-1;
+    if(native<0)return EINVAL;int32_t priority;std::memcpy(&priority,parameters,4);
+    sched_param value{};value.sched_priority=priority;return pthread_setschedparam(thread,native,&value);
+  }
+  int thread_signal(int process,int tid,int signal){
+    if(process!=::getpid()||tid<=0)return ESRCH;
+    uint64_t own=0;if(!pthread_threadid_np(nullptr,&own)&&own==uint64_t(tid))return guest_thread_signal(pthread_self(),signal);
+    std::lock_guard<std::mutex> lock(mutex_);
+    for(const auto &entry:records_){uint64_t candidate=0;if(!entry.second->finished&&!pthread_threadid_np(entry.second->host,&candidate)&&candidate==uint64_t(tid))return guest_thread_signal(entry.second->host,signal);}
+    return ESRCH;
+  }
   int attr_setguard(void *address, size_t size) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto *value = attr(address);
@@ -120,6 +160,7 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
     auto *value = attr(address);
     if (!value || !size) return EINVAL;
+    if (!value->guard_known) return ENOTSUP;
     *size = value->guard;
     return 0;
   }
@@ -242,13 +283,17 @@ ProviderExport method(const char *name, std::shared_ptr<Threads> state,
 std::vector<ProviderExport> thread_exports(CodeValidator validate) {
   if (!validate) throw ElfError("pthread adapters require guest code validation");
   auto state = std::make_shared<Threads>(std::move(validate));
-  return {
+  std::vector<ProviderExport> result{
     method("pthread_attr_init", state, &Threads::attr_init),
     method("pthread_attr_destroy", state, &Threads::attr_destroy),
     method("pthread_attr_setdetachstate", state, &Threads::attr_setdetach),
     method("pthread_attr_getdetachstate", state, &Threads::attr_getdetach),
     method("pthread_attr_setstacksize", state, &Threads::attr_setstack),
     method("pthread_attr_getstacksize", state, &Threads::attr_getstack),
+    method("pthread_attr_getstack",state,&Threads::attr_getstack_address),
+    method("pthread_getattr_np",state,&Threads::get_attributes),
+    method("pthread_setname_np",state,&Threads::set_name),
+    method("pthread_setschedparam",state,&Threads::set_schedule),
     method("pthread_attr_setguardsize", state, &Threads::attr_setguard),
     method("pthread_attr_getguardsize", state, &Threads::attr_getguard),
     method("pthread_create", state, &Threads::create),
@@ -261,5 +306,11 @@ std::vector<ProviderExport> thread_exports(CodeValidator validate) {
     fixed_export("pthread_self", "LIBC", &::pthread_self),
     fixed_export("pthread_equal", "LIBC", &::pthread_equal),
   };
+  auto signal=closure([state](Capture &capture){CallCursor cursor(capture,Convention::Aapcs64);
+    int process=cursor.read<int>(),tid=cursor.read<int>(),number=cursor.read<int>();HostErrno preserve;
+    int error=state->thread_signal(process,tid,number);if(error)*guest_errno_location()=errno_to_guest(error);return_value(capture,error?-1:0);
+  });
+  result.push_back({"tgkill","LIBC",uintptr_t(signal),SymbolKind::Function,"pthread/owned-thread-signal",false});
+  return result;
 }
 } // namespace shiraz::guest

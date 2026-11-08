@@ -29,6 +29,7 @@ public final class ViewDiagnostics {
   draws++;System.err.println("SHIRAZ_VIEW_DRAW class="+view.getClass().getName()+" id="+Integer.toHexString(view.getId())+" elapsed_ms="+elapsed);
  }
  private static int events,inputTrees;
+ public static synchronized void clickListener(Object listener){if(!TRACE||events>=4096||listener==null)return;String name=listener.getClass().getName();System.err.println("SHIRAZ_CLICK_LISTENER class="+name.substring(0,Math.min(256,name.length())));}
  public static synchronized void inputTree(View root){
   if(!TRACE||!"1".equals(System.getenv("SHIRAZ_DUMP_VIEWS"))||inputTrees>=32)return;
   inputTrees++;System.err.println("SHIRAZ_INPUT_TREE n="+inputTrees);dump(root,System.err);DialogOverlay.dumpVisible(System.err);

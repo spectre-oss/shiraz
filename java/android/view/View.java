@@ -403,7 +403,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void setPressed(boolean value) { if(!value)cancelLongPress();if (pressed != value) { pressed = value; refreshDrawableState(); invalidate(); } }
     public boolean isPressed() { return pressed; }
     public boolean hasOnClickListeners(){return clickListener!=null;}
-    public boolean performClick() { shiraz.runtime.ViewDiagnostics.input(this,-1,true); if (clickListener == null) return false; clickListener.onClick(this); return true; }
+    public boolean performClick() { shiraz.runtime.ViewDiagnostics.input(this,-1,true); if (clickListener == null) return false; shiraz.runtime.ViewDiagnostics.clickListener(clickListener);try{clickListener.onClick(this);}catch(RuntimeException|Error error){if("1".equals(System.getenv("SHIRAZ_TRACE_INPUT")))error.printStackTrace();throw error;} return true; }
 
     public void drawableHotspotChanged(float x,float y){if(backgroundDrawable!=null)backgroundDrawable.setHotspot(x,y);if(foregroundDrawable!=null)foregroundDrawable.setHotspot(x,y);}
     public void requestUnbufferedDispatch(MotionEvent event) { if(event==null)throw new NullPointerException("event"); }
@@ -619,8 +619,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public static class MeasureSpec {
         public static final int UNSPECIFIED=0, EXACTLY=0x40000000, AT_MOST=0x80000000;
         public static int makeMeasureSpec(int size,int mode) {
-            if (size < 0 || size > 0x3fffffff || mode != UNSPECIFIED && mode != EXACTLY && mode != AT_MOST) throw new IllegalArgumentException("MeasureSpec");
-            return size | mode;
+            return (size & 0x3fffffff) | (mode & 0xc0000000);
         }
         public static int getMode(int spec) { return spec & 0xc0000000; }
         public static int getSize(int spec) { return spec & 0x3fffffff; }
@@ -1042,6 +1041,9 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public float getElevation(){return elevation;}
     public void setElevation(float value){validZ(value);validZ(value+translationZ);if(elevation!=value){elevation=value;invalidate();}}
     public static final android.util.Property<View,Float> SCALE_X=new android.util.FloatProperty<View>("scaleX"){public Float get(View view){return view.getScaleX();}public void setValue(View view,float value){view.setScaleX(value);}};
+    public static final android.util.Property<View,Float> ROTATION=new android.util.FloatProperty<View>("rotation"){public Float get(View view){return view.getRotation();}public void setValue(View view,float value){view.setRotation(value);}};
+    public static final android.util.Property<View,Float> ROTATION_X=new android.util.FloatProperty<View>("rotationX"){public Float get(View view){return view.getRotationX();}public void setValue(View view,float value){view.setRotationX(value);}};
+    public static final android.util.Property<View,Float> ROTATION_Y=new android.util.FloatProperty<View>("rotationY"){public Float get(View view){return view.getRotationY();}public void setValue(View view,float value){view.setRotationY(value);}};
     public static final android.util.Property<View,Float> SCALE_Y=new android.util.FloatProperty<View>("scaleY"){public Float get(View view){return view.getScaleY();}public void setValue(View view,float value){view.setScaleY(value);}};
     public static final android.util.Property<View,Float> ALPHA=new android.util.FloatProperty<View>("alpha"){public Float get(View view){return view.getAlpha();}public void setValue(View view,float value){view.setAlpha(value);}};
     public static final android.util.Property<View,Float> TRANSLATION_X=new android.util.FloatProperty<View>("translationX"){public Float get(View view){return view.getTranslationX();}public void setValue(View view,float value){view.setTranslationX(value);}};

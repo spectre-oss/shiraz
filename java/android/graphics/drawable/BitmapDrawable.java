@@ -17,6 +17,8 @@ public class BitmapDrawable extends Drawable {
     public int getGravity() { return gravity; }
     public void setGravity(int value) { if(value!=gravity) {gravity=value;invalidateSelf();} }
     private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    @Deprecated public BitmapDrawable(){this(null,null);}
+    @Deprecated public BitmapDrawable(Resources resources){this(resources,null);}
     public BitmapDrawable(Bitmap bitmap) { this(null, bitmap); }
     public BitmapDrawable(Resources resources, Bitmap bitmap) {
         if (resources != null) targetDensity=resources.getDisplayMetrics().densityDpi;

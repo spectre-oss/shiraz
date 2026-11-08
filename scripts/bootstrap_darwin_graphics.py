@@ -13,7 +13,7 @@ the CMake builds ignore the Homebrew prefixes. zlib and expat come from the
 macOS SDK (stub zlib.pc and expat.pc describe them); ICU is the in-tree ICU
 78.3 from bootstrap_darwin.py.
 
-  FreeType 2.14.3      libfreetype.a (SDK zlib; no bzip2, brotli, png or harfbuzz)
+  FreeType 2.14.3      libfreetype.a (SDK zlib + in-tree libpng; no bzip2, brotli or harfbuzz)
   HarfBuzz 15.1.0      libharfbuzz.a (core + hb-ft only)
   fontconfig 2.18.3    libfontconfig.a + an in-tree fonts.conf (no host state)
   pixman 0.46.4        libpixman-1.a
@@ -395,7 +395,7 @@ def install_fonts_conf():
     os.replace(fresh, FONTS_CONF)
 
 
-FREETYPE_OPTIONS = ('brotli=disabled', 'bzip2=disabled', 'harfbuzz=disabled', 'png=disabled',
+FREETYPE_OPTIONS = ('brotli=disabled', 'bzip2=disabled', 'harfbuzz=disabled', 'png=enabled',
                     'tests=disabled', 'zlib=system', 'error_strings=false')
 HARFBUZZ_OPTIONS = tuple(f'{name}=disabled' for name in (
     'glib', 'gobject', 'cairo', 'chafa', 'png', 'zlib', 'icu', 'graphite', 'fontations', 'gdi',
@@ -503,7 +503,7 @@ def build_graphics():
 
 # Test program -> (pkg-config modules, C++ link driver needed, arguments).
 CHECKS = (
-    ('freetype', ('freetype2',), False, lambda: [FONT_DIR / 'Roboto-Regular.ttf']),
+    ('freetype', ('freetype2',), False, lambda: [FONT_DIR / 'Roboto-Regular.ttf', FONT_DIR / 'NotoColorEmoji.ttf']),
     ('harfbuzz', ('harfbuzz', 'freetype2'), True, lambda: [FONT_DIR / 'Roboto-Regular.ttf']),
     ('fontconfig', ('fontconfig',), False, lambda: [ROOT, FONT_DIR]),
     ('cairo', ('cairo',), False, lambda: []),
@@ -566,7 +566,7 @@ def check():
     CHECK_OUT.mkdir(parents=True, exist_ok=True)
     archives = [PREFIX / 'lib' / name for name in ('libfreetype.a', 'libharfbuzz.a', 'libfontconfig.a',
                                                      'libpixman-1.a', 'libcairo.a', 'libwebp.a',
-                                                     'libsharpyuv.a', 'libjpeg.a')]
+                                                     'libsharpyuv.a', 'libjpeg.a', 'libpng16.a')]
     imports = undefined_imports(archives)
     denied = [symbol for symbol in imports if DENIED_IMPORT.match(symbol)]
     (CHECK_OUT / 'archive-imports.txt').write_text('\n'.join(imports) + '\n')
@@ -579,16 +579,16 @@ def check():
     if gate.returncode:
         raise SystemExit('graphics archives import symbols outside libSystem, libz, libexpat and libc++:\n'
                          + gate.stderr[-4000:])
-    # The gate must reject a leak: an extra object importing libpng fails to link.
+    # PNG resolves from the pinned archive; a GLib dependency must still fail.
     leak = CHECK_OUT / 'link-gate-leak.c'
-    leak.write_text('void* png_create_read_struct(const char*, void*, void*, void*);\n'
-                    'void* shiraz_link_gate_leak(void) { return png_create_read_struct("1.6", 0, 0, 0); }\n')
+    leak.write_text('void* g_object_new(unsigned long, const char*, ...);\n'
+                    'void* shiraz_link_gate_leak(void) { return g_object_new(0, 0); }\n')
     leak_object = CHECK_OUT / 'link-gate-leak.o'
     run([tool('clang'), *target, '-c', leak, '-o', leak_object], env=env)
     if not link_gate(archives, target, env, extra=(leak_object,)).returncode:
-        raise SystemExit('link gate accepted an object importing _png_create_read_struct')
+        raise SystemExit('link gate accepted an object importing _g_object_new')
     print(f"archive link gate: all members resolve against {' '.join(LINK_GATE_LIBRARIES)} and libSystem; "
-          'a libpng import is rejected')
+          'a GLib import is rejected')
     for name, modules, cxx, arguments in CHECKS:
         source = ROOT / 'tests/darwin/graphics' / f'{name}.c'
         executable = CHECK_OUT / f'test-{name}'

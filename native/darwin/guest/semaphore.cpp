@@ -2,6 +2,7 @@
 #include "shiraz/darwin/guest/sync.hpp"
 #include "guest_io.hpp"
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -9,6 +10,7 @@
 #include <mutex>
 #include <semaphore.h>
 #include <unistd.h>
+#include <time.h>
 
 namespace shiraz::guest {
 namespace {
@@ -123,7 +125,7 @@ public:
     notify(*slot);
     return 0;
   }
-  int wait(void *address) {
+  int wait_internal(void *address,const int64_t *deadline) {
     auto *slot = get(address);
     if (!slot) return EINVAL;
     for (;;) {
@@ -138,13 +140,31 @@ public:
         slot->waiters.fetch_sub(1, std::memory_order_release);
         return 0;
       }
-      int result = ::sem_wait(slot->wake), error = errno;
+      int result,error=0;
+      if(!deadline){result=::sem_wait(slot->wake);error=errno;}
+      else {
+        int64_t fields[2];std::memcpy(fields,deadline,16);
+        if(fields[1]<0||fields[1]>=1000000000){slot->waiters.fetch_sub(1,std::memory_order_release);return EINVAL;}
+        if(fields[0]<0){slot->waiters.fetch_sub(1,std::memory_order_release);return ETIMEDOUT;}
+        for(;;){
+          result=::sem_trywait(slot->wake);error=errno;
+          if(!result||error!=EAGAIN)break;
+          timespec now{};if(::clock_gettime(CLOCK_REALTIME,&now)){error=errno;break;}
+          int64_t seconds=fields[0]-now.tv_sec,nanos=fields[1]-now.tv_nsec;
+          if(nanos<0){--seconds;nanos+=1000000000;}
+          if(seconds<0||(!seconds&&!nanos)){error=ETIMEDOUT;break;}
+          timespec pause{0,seconds>0?1000000:std::min<int64_t>(nanos,1000000)};
+          if(::nanosleep(&pause,nullptr)){error=errno;break;}
+        }
+      }
       slot->waiters.fetch_sub(1, std::memory_order_acq_rel);
       if (!result) slot->notified.store(false, std::memory_order_release);
       if (slot->count.load(std::memory_order_acquire)) notify(*slot);
       if (result) return error ? error : EIO;
     }
   }
+  int wait(void *address){return wait_internal(address,nullptr);}
+  int timedwait(void *address,const int64_t *deadline){return deadline?wait_internal(address,deadline):EFAULT;}
   int trywait(void *address) {
     auto *slot = get(address);
     return !slot ? EINVAL : take(*slot) ? 0 : EAGAIN;
@@ -177,6 +197,7 @@ std::vector<ProviderExport> semaphore_exports() {
           method("sem_destroy", state, &Semaphores::destroy),
           method("sem_post", state, &Semaphores::post),
           method("sem_wait", state, &Semaphores::wait),
+          method("sem_timedwait",state,&Semaphores::timedwait),
           method("sem_trywait", state, &Semaphores::trywait),
           method("sem_getvalue", state, &Semaphores::value)};
 }

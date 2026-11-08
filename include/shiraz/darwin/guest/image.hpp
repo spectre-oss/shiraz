@@ -21,7 +21,7 @@ class Image {
 public:
   enum class Mapping { SelfContained, Deferred };
   explicit Image(const std::vector<uint8_t> &bytes,
-                 Mapping mode = Mapping::SelfContained);
+                 Mapping mode = Mapping::SelfContained, uintptr_t syscall_dispatcher = 0);
   ~Image();
   Image(const Image &) = delete;
   Image &operator=(const Image &) = delete;
@@ -45,6 +45,7 @@ private:
   ImageMetrics metrics_;
   Elf elf_;
   ThreadPointerAnalysis analysis_;
+  uintptr_t syscall_dispatcher_ = 0;
   std::unique_ptr<UnwindRegistration> unwind_;
   uint64_t mapping_size_ = 0;
   uint8_t *base_ = nullptr;

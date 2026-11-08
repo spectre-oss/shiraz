@@ -75,6 +75,9 @@ public class Window {
  public void addFlags(int flags){setFlags(flags,flags);}public void clearFlags(int flags){setFlags(0,flags);}
  public void setDimAmount(float amount){WindowManager.LayoutParams value=new WindowManager.LayoutParams(attributes);value.dimAmount=amount;setAttributes(value);}
  public void setWindowAnimations(int animations){attributes.windowAnimations=animations;attributesChanged();}
+ public void setFormat(int format){attributes.format=format==0?android.graphics.PixelFormat.OPAQUE:format;attributesChanged();}
+ public void setType(int type){attributes.type=type;attributesChanged();}
+ public WindowManager getWindowManager(){return (WindowManager)context.getSystemService(Context.WINDOW_SERVICE);}
  public void setSoftInputMode(int mode){attributes.softInputMode=mode;attributesChanged();}
  private Drawable background;
  private shiraz.runtime.HostOptionsMenu options;private boolean prepared,invalidating,destroyed;private android.os.Handler menuHandler;
@@ -139,8 +142,14 @@ public class Window {
   return id==0?null:context.getDrawable(id);
  }
  public void setDecorFitsSystemWindows(boolean value){}
- public void setNavigationBarContrastEnforced(boolean value){}
- public void setStatusBarContrastEnforced(boolean value){}
+ private boolean navigationBarContrast=true,statusBarContrast=true;
+ private int navigationBarDividerColor;
+ public void setNavigationBarContrastEnforced(boolean value){navigationBarContrast=value;}
+ public boolean isNavigationBarContrastEnforced(){return navigationBarContrast;}
+ public void setStatusBarContrastEnforced(boolean value){statusBarContrast=value;}
+ public boolean isStatusBarContrastEnforced(){return statusBarContrast;}
+ public void setNavigationBarDividerColor(int color){navigationBarDividerColor=color;}
+ public int getNavigationBarDividerColor(){return navigationBarDividerColor;}
  public View getDecorView(){
   if(decor==null){decor=new FrameLayout(context){@Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(callback!=null&&!destroyed)callback.onWindowFocusChanged(focused);}};decor.setLayoutDirection(View.LAYOUT_DIRECTION_LOCALE);content=new FrameLayout(context);content.setId(16908290);decor.addView(content,new FrameLayout.LayoutParams(-1,-1));installActionBar();if(background==null)background=themeBackground();if(background!=null)decor.setBackground(background);if(rootListener!=null)rootListener.run();}return decor;
  }

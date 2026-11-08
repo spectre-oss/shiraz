@@ -15,4 +15,6 @@ using ThreadPointerAccessor = void *(*)() noexcept;
 // callback returning the real thread pointer. Null selects production access.
 ThreadPointerPatch plan_thread_pointer(uintptr_t site, uint32_t original,
                                       uintptr_t island, ThreadPointerAccessor accessor = nullptr);
+ThreadPointerPatch plan_system_call(uintptr_t site, uint32_t original,
+                                    uintptr_t island, uintptr_t dispatcher);
 } // namespace shiraz::guest

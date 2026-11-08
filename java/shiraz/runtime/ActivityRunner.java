@@ -87,6 +87,7 @@ public final class ActivityRunner {
         private android.net.wifi.WifiManager wifi;
         private android.view.LayoutInflater inflater;
         private android.os.PowerManager power;
+        private android.app.AppOpsManager appOps;
         private android.app.KeyguardManager keyguard;
         @Override public synchronized Object getSystemService(String service) {
             if(STORAGE_SERVICE.equals(service)){if(storageManager==null)storageManager=android.os.storage.StorageManager.shirazForStorage(storage);return storageManager;}
@@ -99,7 +100,7 @@ public final class ActivityRunner {
             if(NFC_SERVICE.equals(service))return new android.nfc.NfcManager(this);
             if(ACCOUNT_SERVICE.equals(service))return android.accounts.AccountManager.get(this);
             if(TELEPHONY_SERVICE.equals(service))return new android.telephony.TelephonyManager();
-            if(APP_OPS_SERVICE.equals(service))return new android.app.AppOpsManager(this);
+            if(APP_OPS_SERVICE.equals(service)){if(appOps==null)appOps=new android.app.AppOpsManager(this);return appOps;}
             if(WIFI_SERVICE.equals(service)){capture.wifiAccess("service:requested");if(wifi==null)wifi=android.net.wifi.WifiManager.shirazForHost(capture);return wifi;}
             if(CONNECTIVITY_SERVICE.equals(service)){if(connectivity==null)connectivity=android.net.ConnectivityManager.shirazForHost();return connectivity;}
             if(INPUT_SERVICE.equals(service))return android.hardware.input.InputManager.getInstance();

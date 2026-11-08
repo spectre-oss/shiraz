@@ -38,6 +38,9 @@ struct Relocation {
 struct Elf {
   uint64_t first_page = 0, span = 0;
   std::vector<Segment> segments;
+  // Optional allocated, non-instruction section extents. LOAD segments remain
+  // authoritative for mapping; these declarations only separate data/code.
+  std::vector<Segment> data_sections;
   // Original bounded ELF64 PHDR records for guest dl_iterate_phdr. These are
   // file metadata, not host Mach-O headers or reconstructed LOAD records.
   std::vector<uint8_t> program_headers;

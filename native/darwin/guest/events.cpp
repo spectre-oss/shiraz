@@ -360,6 +360,118 @@ int unsupported_inotify() { return failure(ENOSYS); }
 int unsupported_inotify_flags(int) { return failure(ENOSYS); }
 int unsupported_inotify_add(int, const char *, uint32_t) { return failure(ENOSYS); }
 int unsupported_inotify_remove(int, uint32_t) { return failure(ENOSYS); }
+struct GuestEpollEvent {uint32_t events,padding;uint64_t data;};
+static_assert(sizeof(GuestEpollEvent)==16 && offsetof(GuestEpollEvent,data)==8);
+struct EpollWatch {
+  int fd;uint32_t events;uint64_t data,id;bool active=true;
+  std::shared_ptr<Counter> counter;
+  struct Filter {int fd;int16_t type;uint32_t bit;};std::vector<Filter> filters;
+};
+struct Epoll {
+  int descriptor;bool closed=false;std::mutex mutex;
+  std::map<int,std::shared_ptr<EpollWatch>> watches;
+  std::vector<std::shared_ptr<EpollWatch>> identities;
+};
+std::mutex epolls_mutex;std::map<int,std::shared_ptr<Epoll>> epolls;
+std::shared_ptr<Epoll> epoll_lookup(int fd){std::lock_guard<std::mutex> lock(epolls_mutex);auto it=epolls.find(fd);return it==epolls.end()?nullptr:it->second;}
+int epoll_create_flags(int flags){
+  if(!same_process() || in_guest_signal_handler())return failure(ENOTSUP);
+  if(flags & ~0x80000)return failure(EINVAL);
+  try{auto value=std::make_shared<Epoll>();std::lock_guard<std::mutex> lock(epolls_mutex);
+    if(epolls.size()>=256)return failure(EMFILE);
+    int fd=::kqueue();if(fd<0)return -1;
+    if(::fcntl(fd,F_SETFD,flags?FD_CLOEXEC:0)){int error=errno;::close(fd);return failure(error);}
+    value->descriptor=fd;try{epolls.emplace(fd,value);}catch(...){::close(fd);throw;}return fd;
+  }catch(const std::bad_alloc &){return failure(ENOMEM);}
+}
+int epoll_create_legacy(int size){return size>0?epoll_create_flags(0):failure(EINVAL);}
+int install_epoll_watch(Epoll &queue,const EpollWatch &watch,bool remove=false){
+  for(size_t i=0;i<watch.filters.size();++i){auto f=watch.filters[i];struct kevent change{};
+    unsigned flags=remove?EV_DELETE:EV_ADD|EV_ENABLE;
+    if(!remove && (watch.events & 0x80000000u))flags|=EV_CLEAR;
+    if(!remove && (watch.events & 0x40000000u))flags|=EV_DISPATCH;
+    EV_SET(&change,uintptr_t(f.fd),f.type,flags,0,0,reinterpret_cast<void *>((watch.id<<2)|i));
+    if(::kevent(queue.descriptor,&change,1,nullptr,0,nullptr) && !(remove&&(errno==ENOENT||errno==EBADF)))return -1;
+  }return 0;
+}
+int epoll_control(int epfd,int operation,int fd,const void *input){
+  if(!same_process()||in_guest_signal_handler())return failure(ENOTSUP);
+  auto queue=epoll_lookup(epfd);if(!queue)return failure(EBADF);
+  if(fd==epfd)return failure(EINVAL);
+  if(operation!=1&&operation!=2&&operation!=3)return failure(EINVAL);
+  if(operation!=2&&!input)return failure(EFAULT);
+  if(epoll_lookup(fd))return failure(ENOTSUP); // Nested event loops need cycle/ownership handling.
+  if(::fcntl(fd,F_GETFD)<0)return -1;
+  GuestEpollEvent event{};if(input&&operation!=2)std::memcpy(&event,input,16);
+  if(event.events & ~(1u|4u|8u|16u|0x2000u|0x80000000u|0x40000000u))return failure(ENOTSUP);
+  auto counter=lookup(fd);
+  try{std::lock_guard<std::mutex> lock(queue->mutex);if(queue->closed)return failure(EBADF);
+    auto previous=queue->watches.find(fd);
+    if(operation==1&&previous!=queue->watches.end())return failure(EEXIST);
+    if(operation!=1&&previous==queue->watches.end())return failure(ENOENT);
+    if(operation==2){if(install_epoll_watch(*queue,*previous->second,true))return -1;previous->second->active=false;queue->identities[size_t(previous->second->id-1)].reset();queue->watches.erase(previous);return 0;}
+    if(queue->watches.size()>=4096||queue->identities.size()>=65536)return failure(ENOSPC);
+    auto watch=std::make_shared<EpollWatch>();watch->fd=fd;watch->events=event.events;watch->data=event.data;watch->counter=counter;watch->id=queue->identities.size()+1;
+    if(event.events & (1|0x2000|16|8))watch->filters.push_back({counter?counter->readable.read:fd,EVFILT_READ,1});
+    if(event.events & 4)watch->filters.push_back({counter?counter->writable.read:fd,int16_t(counter?EVFILT_READ:EVFILT_WRITE),4});
+    queue->identities.push_back(watch);
+    std::shared_ptr<EpollWatch> old=previous==queue->watches.end()?nullptr:previous->second;
+    if(!old)queue->watches.emplace(fd,watch); // Allocate before changing kernel subscriptions.
+    if(old&&install_epoll_watch(*queue,*old,true)){watch->active=false;queue->identities[size_t(watch->id-1)].reset();return -1;}
+    if(install_epoll_watch(*queue,*watch)){
+      int error=errno;install_epoll_watch(*queue,*watch,true);watch->active=false;queue->identities[size_t(watch->id-1)].reset();
+      if(old)install_epoll_watch(*queue,*old);else queue->watches.erase(fd);
+      return failure(error);
+    }
+    if(old){old->active=false;queue->identities[size_t(old->id-1)].reset();}queue->watches[fd]=watch;return 0;
+  }catch(const std::bad_alloc &){return failure(ENOMEM);}
+}
+int epoll_wait_events(int fd,void *output,int capacity,int timeout){
+  if(!output)return failure(EFAULT);if(capacity<=0||capacity>4096)return failure(EINVAL);
+  if(!same_process()||in_guest_signal_handler())return failure(ENOTSUP);
+  auto queue=epoll_lookup(fd);if(!queue)return failure(EBADF);
+  try{std::vector<struct kevent> events(static_cast<size_t>(capacity));timespec wait{timeout/1000,(timeout%1000)*1000000L};
+    int count=::kevent(fd,nullptr,0,events.data(),int(events.size()),timeout<0?nullptr:&wait);if(count<0)return -1;
+    std::lock_guard<std::mutex> lock(queue->mutex);if(queue->closed)return failure(EBADF);
+    std::map<uint64_t,GuestEpollEvent> ready;
+    for(int i=0;i<count;++i){auto &event=events[size_t(i)];uint64_t encoded=uintptr_t(event.udata),id=encoded>>2;unsigned slot=encoded&3;
+      if(!id||id>queue->identities.size())continue;auto watch=queue->identities[size_t(id-1)];
+      if(!watch||!watch->active||slot>=watch->filters.size())continue;
+      if(!ready.count(id)&&ready.size()>=size_t(capacity))continue;
+      uint32_t bits=watch->filters[slot].bit & watch->events;
+      if(event.flags & EV_EOF)bits|=16u|(watch->events & 0x2000u);
+      if(event.flags & EV_ERROR)bits|=8;
+      if(!bits)continue;
+      auto &value=ready[id];value.events|=bits;value.data=watch->data;
+    }
+    size_t n=0;for(auto &entry:ready){std::memcpy(static_cast<uint8_t *>(output)+16*n++,&entry.second,16);
+      auto watch=queue->identities[size_t(entry.first-1)];if(watch->events&0x40000000u)for(auto f:watch->filters){struct kevent change{};EV_SET(&change,uintptr_t(f.fd),f.type,EV_DISABLE,0,0,nullptr);::kevent(fd,&change,1,nullptr,0,nullptr);}}
+    return int(n);
+  }catch(const std::bad_alloc &){return failure(ENOMEM);}
+}
+void epoll_forget(int fd){
+  std::lock_guard<std::mutex> lock(epolls_mutex);
+  auto own=epolls.find(fd);if(own!=epolls.end()){std::lock_guard<std::mutex> qlock(own->second->mutex);own->second->closed=true;epolls.erase(own);}
+  for(auto &entry:epolls){std::lock_guard<std::mutex> qlock(entry.second->mutex);auto found=entry.second->watches.find(fd);
+    if(found!=entry.second->watches.end()){install_epoll_watch(*entry.second,*found->second,true);found->second->active=false;entry.second->identities[size_t(found->second->id-1)].reset();entry.second->watches.erase(found);}}
+}
+int guest_select(int count,void *read,void *write,void *except,void *timeout){
+  if(count<0||count>1024)return failure(EINVAL);
+  try{std::vector<GuestPoll> polls;int64_t limit[2]{};
+    auto present=[](void *set,int fd){return set&&(static_cast<uint8_t *>(set)[fd/8]&(1u<<(fd%8)));};
+    for(int fd=0;fd<count;++fd){uint16_t bits=(present(read,fd)?1:0)|(present(write,fd)?4:0)|(present(except,fd)?2:0);if(bits)polls.push_back({fd,bits,0});}
+    if(timeout){int64_t fields[2];std::memcpy(fields,timeout,16);if(fields[0]<0||fields[1]<0||fields[1]>=1000000)return failure(EINVAL);limit[0]=fields[0];limit[1]=fields[1]*1000;}
+    timespec before{},after{};::clock_gettime(CLOCK_UPTIME_RAW,&before);
+    int result=guest_ppoll(polls.data(),uint32_t(polls.size()),timeout?limit:nullptr,nullptr);int saved=errno;
+    if(timeout){::clock_gettime(CLOCK_UPTIME_RAW,&after);int64_t seconds=limit[0]-(after.tv_sec-before.tv_sec),nanos=limit[1]-(after.tv_nsec-before.tv_nsec);if(nanos<0){--seconds;nanos+=1000000000;}int64_t left[2]={seconds<0?0:seconds,seconds<0?0:nanos/1000};std::memcpy(timeout,left,16);}
+    if(result<0)return failure(saved);
+    for(auto p:polls)if(p.result&32)return failure(EBADF);
+    for(void *set:{read,write,except})if(set)std::memset(set,0,128);
+    int ready=0;for(auto p:polls){auto set=[&](void *output,bool value){if(output&&value){static_cast<uint8_t *>(output)[p.fd/8]|=uint8_t(1u<<(p.fd%8));++ready;}};
+      set(read,(p.events&1)&&(p.result&(1|8|16)));set(write,(p.events&4)&&(p.result&(4|8)));set(except,(p.events&2)&&(p.result&2));}
+    return ready;
+  }catch(const std::bad_alloc &){return failure(ENOMEM);}
+}
 } // namespace
 bool event_descriptor_tracked(int fd) noexcept { return hinted(fd); }
 ssize_t event_descriptor_read(int fd, void *buffer, size_t count) {
@@ -377,6 +489,7 @@ ssize_t event_descriptor_write(int fd, const void *buffer, size_t count) {
   return counter ? counter_write(counter, buffer, count) : ::write(fd, buffer, count);
 }
 int event_descriptor_close(int fd) {
+  if(same_process()&&!in_guest_signal_handler())epoll_forget(fd);
   if (!hinted(fd)) return ::close(fd);
   if (in_guest_signal_handler()) return failure(ENOTSUP);
   // Close is safe in a fork child, but inherited virtual counter operations
@@ -393,6 +506,7 @@ int event_descriptor_close(int fd) {
   return result;
 }
 int event_descriptor_dup(int fd) {
+  if(same_process()&&!in_guest_signal_handler()&&epoll_lookup(fd))return failure(ENOTSUP);
   if (!hinted(fd)) return ::dup(fd);
   if (in_guest_signal_handler()) return failure(ENOTSUP);
   if (!same_process()) return failure(ENOTSUP);
@@ -401,6 +515,7 @@ int event_descriptor_dup(int fd) {
   return found == table.descriptors.end() ? ::dup(fd) : duplicate_locked(table, fd, found->second, 0, false);
 }
 static int duplicate_to(int source, int destination, bool atomic, int native_flags) {
+  if(same_process()&&!in_guest_signal_handler()&&(epoll_lookup(source)||epoll_lookup(destination)))return failure(ENOTSUP);
   auto native = [&] {
     if (!atomic) return ::dup2(source, destination);
     if (__builtin_available(macOS 27.0, *)) return ::dup3(source, destination, native_flags);
@@ -526,6 +641,11 @@ std::vector<ProviderExport> event_exports() {
     fixed_export("eventfd_write", "LIBC", &convenience_write),
     fixed_export("poll", "LIBC", &guest_poll, ErrnoPolicy::MinusOne),
     fixed_export("ppoll", "LIBC", &guest_ppoll, ErrnoPolicy::MinusOne),
+    fixed_export("select","LIBC",&guest_select,ErrnoPolicy::MinusOne),
+    fixed_export("epoll_create","LIBC",&epoll_create_legacy,ErrnoPolicy::MinusOne),
+    fixed_export("epoll_create1","LIBC",&epoll_create_flags,ErrnoPolicy::MinusOne),
+    fixed_export("epoll_ctl","LIBC",&epoll_control,ErrnoPolicy::MinusOne),
+    fixed_export("epoll_wait","LIBC",&epoll_wait_events,ErrnoPolicy::MinusOne),
     fixed_export("inotify_init", "LIBC", &unsupported_inotify, ErrnoPolicy::MinusOne),
     fixed_export("inotify_init1", "LIBC", &unsupported_inotify_flags, ErrnoPolicy::MinusOne),
     fixed_export("inotify_add_watch", "LIBC", &unsupported_inotify_add, ErrnoPolicy::MinusOne),

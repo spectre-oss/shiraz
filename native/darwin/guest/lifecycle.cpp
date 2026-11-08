@@ -16,6 +16,8 @@ struct Lifecycle::State {
   std::mutex mutex;
   std::condition_variable changed;
   std::vector<Entry> entries;
+  struct ForkEntry { void *prepare,*parent,*child,*dso; };
+  std::vector<ForkEntry> fork_entries;
   std::map<std::thread::id, size_t> executing;
   CodeValidator validate;
   size_t registrations = 0, active = 0;
@@ -43,6 +45,17 @@ struct Lifecycle::State {
     changed.notify_all();
     return 0;
   }
+  int add_fork(void *prepare,void *parent,void *child,void *dso) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if(!attached||closed||shutting_down)return errno_to_guest(EINVAL);
+    for(void *function:{prepare,parent,child})if(function&&!validate(function))return errno_to_guest(EINVAL);
+    if(fork_entries.size()>=4096)return errno_to_guest(ENOMEM);
+    try{fork_entries.push_back({prepare,parent,child,dso});}catch(const std::bad_alloc &){return errno_to_guest(ENOMEM);}
+    // Owned by this guest namespace, never registered with native pthread_atfork.
+    // Guest fork/clone remains explicitly unsupported; native host subprocesses
+    // must not accidentally execute guest callbacks in an unrelated child.
+    return 0;
+  }
   void completed() {
     std::lock_guard<std::mutex> lock(mutex);
     auto found = executing.find(std::this_thread::get_id());
@@ -53,6 +66,7 @@ struct Lifecycle::State {
     changed.notify_all();
   }
   void finalize(void *dso) {
+    if(dso){std::lock_guard<std::mutex> lock(mutex);fork_entries.erase(std::remove_if(fork_entries.begin(),fork_entries.end(),[&](const ForkEntry &entry){return entry.dso==dso;}),fork_entries.end());}
     for (;;) {
       Entry entry{};
       {
@@ -100,6 +114,7 @@ struct Lifecycle::State {
       std::unique_lock<std::mutex> lock(mutex);
       if (entries.empty() && !active) {
         closed = true;
+        fork_entries.clear();
         // Process-resident provider closures must never retain a validator
         // that could inspect an Image after its Loader has been destroyed.
         validate = {};
@@ -133,10 +148,15 @@ std::vector<ProviderExport> Lifecycle::exports() const {
     HostErrno preserve;
     state->finalize(dso);
   });
+  auto atfork=closure([state](Capture &capture){CallCursor cursor(capture,Convention::Aapcs64);
+    void *prepare=cursor.read<void *>(),*parent=cursor.read<void *>(),*child=cursor.read<void *>(),*dso=cursor.read<void *>();
+    HostErrno preserve;return_value(capture,state->add_fork(prepare,parent,child,dso));
+  });
   return {{"__cxa_atexit", "LIBC", reinterpret_cast<uintptr_t>(cxa), SymbolKind::Function,
            "guest-lifecycle/validated-resident-callback", false},
           {"atexit", "LIBC", reinterpret_cast<uintptr_t>(plain), SymbolKind::Function,
            "guest-lifecycle/no-argument-callback", false},
+          {"__register_atfork","LIBC",uintptr_t(atfork),SymbolKind::Function,"guest-lifecycle/owned-atfork-registration-no-guest-fork",false},
           {"__cxa_finalize", "LIBC", reinterpret_cast<uintptr_t>(finalize), SymbolKind::Function,
            "guest-lifecycle/lifo-per-dso-exactly-once", false}};
 }

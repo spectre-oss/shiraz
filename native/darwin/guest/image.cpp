@@ -40,7 +40,7 @@ bool contains(const Segment &segment, uint64_t address, uint64_t size) {
 }
 } // namespace
 
-Image::Image(const std::vector<uint8_t> &bytes, Mapping mode)
+Image::Image(const std::vector<uint8_t> &bytes, Mapping mode, uintptr_t syscall_dispatcher)
     : elf_(timed_parse(bytes, page_size(), metrics_.parse_ns)) {
   if (mode == Mapping::SelfContained) {
     if (!elf_.needed.empty())
@@ -58,10 +58,13 @@ Image::Image(const std::vector<uint8_t> &bytes, Mapping mode)
   const uint64_t page = page_size();
   auto rewrite_start = Clock::now();
   analysis_ = analyze_thread_pointers(elf_, bytes);
+  syscall_dispatcher_ = syscall_dispatcher;
+  if (!analysis_.syscalls.empty() && !syscall_dispatcher_)
+    throw ElfError("guest direct syscalls require a Linux syscall dispatcher");
   metrics_.rewrite_ns = elapsed(rewrite_start);
   auto map_start = Clock::now();
   unwind_ = std::make_unique<UnwindRegistration>(elf_, bytes);
-  uint64_t islands = (analysis_.sites.size() * uint64_t(64) + page - 1) & ~(page - 1);
+  uint64_t islands = ((analysis_.sites.size() + analysis_.syscalls.size()) * uint64_t(64) + page - 1) & ~(page - 1);
   mapping_size_ = elf_.span + islands;
   // Each page has one owner/protection class. Parser already rejected
   // incompatible segment sharing at the host page granularity.
@@ -143,15 +146,19 @@ void Image::seal() {
   auto rewrite_start = Clock::now();
   const uint64_t page = page_size();
   std::vector<ThreadPointerPatch> patches;
-  patches.reserve(analysis_.sites.size());
-  for (size_t i = 0; i < analysis_.sites.size(); ++i) {
-    const auto &site = analysis_.sites[i];
+  auto sites = analysis_.sites;
+  sites.insert(sites.end(), analysis_.syscalls.begin(), analysis_.syscalls.end());
+  patches.reserve(sites.size());
+  for (size_t i = 0; i < sites.size(); ++i) {
+    const auto &site = sites[i];
     auto *code = static_cast<uint8_t *>(at(site.address, 4));
     uint32_t original;
     std::memcpy(&original, code, 4);
     if (original != site.instruction) throw ElfError("guest TPIDR code changed after analysis");
-    patches.push_back(plan_thread_pointer(reinterpret_cast<uintptr_t>(code), original,
-        reinterpret_cast<uintptr_t>(base_ + elf_.span + i * 64)));
+    uintptr_t island = reinterpret_cast<uintptr_t>(base_ + elf_.span + i * 64);
+    patches.push_back(original == 0xd4000001u
+        ? plan_system_call(reinterpret_cast<uintptr_t>(code), original, island, syscall_dispatcher_)
+        : plan_thread_pointer(reinterpret_cast<uintptr_t>(code), original, island));
   }
   {
     JitWriteScope writable;
@@ -159,7 +166,7 @@ void Image::seal() {
       auto *island = base_ + elf_.span + i * 64;
       const auto &patch = patches[i];
       if (patch.uses_island) std::memcpy(island, patch.island.data(), patch.island.size());
-      std::memcpy(at(analysis_.sites[i].address, 4), &patch.replacement, 4);
+      std::memcpy(at(sites[i].address, 4), &patch.replacement, 4);
     }
   }
   metrics_.rewrite_ns += elapsed(rewrite_start);

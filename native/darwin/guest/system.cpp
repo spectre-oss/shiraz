@@ -150,6 +150,18 @@ std::vector<ProviderExport> system_exports() {
           fixed_export("getpid", "LIBC", &::getpid),
           fixed_export("getuid", "LIBC", &::getuid),
           fixed_export("geteuid", "LIBC", &::geteuid),
+          fixed_export("getgid","LIBC",&::getgid),fixed_export("getegid","LIBC",&::getegid),
+          fixed_export("sched_get_priority_min","LIBC",+[](int policy){int native=policy==0?SCHED_OTHER:policy==1?SCHED_FIFO:policy==2?SCHED_RR:-1;if(native<0){errno=EINVAL;return -1;}return ::sched_get_priority_min(native);},ErrnoPolicy::MinusOne),
+          fixed_export("sched_get_priority_max","LIBC",+[](int policy){int native=policy==0?SCHED_OTHER:policy==1?SCHED_FIFO:policy==2?SCHED_RR:-1;if(native<0){errno=EINVAL;return -1;}return ::sched_get_priority_max(native);},ErrnoPolicy::MinusOne),
+          fixed_export("__sched_cpucount","LIBC",+[](size_t size,const void *input){
+            if(!input||size>4096){errno=EINVAL;return 0;}int count=0;auto *bytes=static_cast<const uint8_t *>(input);
+            for(size_t i=0;i<size;++i)count+=__builtin_popcount(unsigned(bytes[i]));return count;
+          },ErrnoPolicy::Observe),
+          fixed_export("sched_getaffinity","LIBC",+[](int pid,size_t size,void *output){
+            if(pid && pid!=::getpid()){errno=ESRCH;return -1;}long cpus=::sysconf(_SC_NPROCESSORS_ONLN);
+            if(!output){errno=EFAULT;return -1;}if(cpus<=0||size>4096||size<size_t((cpus+63)/64)*8){errno=EINVAL;return -1;}
+            std::memset(output,0,size);auto *bytes=static_cast<uint8_t *>(output);for(long i=0;i<cpus;++i)bytes[i/8]|=uint8_t(1u<<(i%8));return 0;
+          },ErrnoPolicy::MinusOne),
           fixed_export("sched_yield", "LIBC", &::sched_yield, ErrnoPolicy::MinusOne)};
 }
 } // namespace shiraz::guest

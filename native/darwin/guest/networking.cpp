@@ -21,6 +21,8 @@
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <net/if.h>
 
 namespace shiraz::guest {
 namespace {
@@ -298,6 +300,26 @@ public:
     int native_flags;
     if (!flags(requested, message_flags, native_flags, EOPNOTSUPP)) return -1;
     return ::recv(fd, output, size, native_flags);
+  }
+  ssize_t transmit(int fd,const void *input,size_t size,int requested) {
+    return send_to(fd,input,size,requested,nullptr,0);
+  }
+  ssize_t send_to(int fd,const void *input,size_t size,int requested,const void *destination,uint32_t length) {
+    if(size>transfer_limit)return fail(EOVERFLOW);
+    if(!input && size)return fail(EFAULT);
+    int native_flags;if(!flags(requested,message_flags,native_flags,EOPNOTSUPP))return -1;
+    Address address;
+    if(destination && !address_native(destination,length,address))return -1;
+    return ::sendto(fd,input,size,native_flags,destination?address.data():nullptr,destination?address.size:0);
+  }
+  ssize_t receive_from(int fd,void *output,size_t size,int requested,void *source,uint32_t *length) {
+    if(size>transfer_limit)return fail(EOVERFLOW);
+    if((!output && size)||(source&&!length))return fail(EFAULT);
+    int native_flags;if(!flags(requested,message_flags,native_flags,EOPNOTSUPP))return -1;
+    Address address;address.size=sizeof(address.storage);
+    ssize_t result=::recvfrom(fd,output,size,native_flags,source?address.data():nullptr,source?&address.size:nullptr);
+    if(result>=0 && source && !copy_address(address,source,length))return -1;
+    return result;
   }
   int option(int fd, int level, int name, void *value, uint32_t *size, bool setting);
   int get_option(int fd, int level, int name, void *value, uint32_t *size) { return option(fd, level, name, value, size, false); }
@@ -718,6 +740,20 @@ std::vector<ProviderExport> networking_exports() {
   add("getsockname", &Network::local_name); add("getpeername", &Network::peer_name);
   add("getsockopt", &Network::get_option); add("setsockopt", &Network::set_option);
   add("recv", &Network::receive); add("sendmsg", &Network::send_message); add("recvmsg", &Network::receive_message);
+  add("send",&Network::transmit);add("sendto",&Network::send_to);add("recvfrom",&Network::receive_from);
+  result.push_back(fixed_export("inet_pton","LIBC",+[](int family,const char *text,void *output){
+    int native=family_native(family);if(native!=AF_INET&&native!=AF_INET6)return fail(EAFNOSUPPORT);
+    if(!text||!output)return fail(EFAULT);return ::inet_pton(native,text,output);
+  },ErrnoPolicy::MinusOne));
+  result.push_back(fixed_export("inet_ntop","LIBC",+[](int family,const void *input,char *output,uint32_t size)->const char *{
+    int native=family_native(family);if(native!=AF_INET&&native!=AF_INET6){errno=EAFNOSUPPORT;return nullptr;}
+    if(!input||!output){errno=EFAULT;return nullptr;}return ::inet_ntop(native,input,output,size);
+  },ErrnoPolicy::Null));
+  result.push_back(fixed_export("inet_ntoa","LIBC",+[](uint32_t address)->char *{
+    thread_local char output[INET_ADDRSTRLEN];in_addr value{address};
+    return ::inet_ntop(AF_INET,&value,output,sizeof(output))?output:nullptr;
+  },ErrnoPolicy::Null));
+  result.push_back(fixed_export("if_indextoname","LIBC",&::if_indextoname,ErrnoPolicy::Null));
   result.push_back(fixed_export("__cmsg_nxthdr", "LIBC", &next_control, ErrnoPolicy::Observe));
   return result;
 }

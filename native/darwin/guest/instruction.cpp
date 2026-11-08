@@ -60,4 +60,12 @@ ThreadPointerPatch plan_thread_pointer(uintptr_t site, uint32_t original,
   put(result, 56, reinterpret_cast<uintptr_t>(accessor ? accessor : &shiraz_guest_tls_access));
   return result;
 }
+ThreadPointerPatch plan_system_call(uintptr_t site, uint32_t original,
+                                    uintptr_t island, uintptr_t dispatcher) {
+  if (original != 0xd4000001u || !dispatcher)
+    throw ElfError("guest SVC #0 requires a Linux syscall dispatcher");
+  auto result = plan_thread_pointer(site, 0xd53bd040u, island);
+  put(result, 56, dispatcher);
+  return result;
+}
 } // namespace shiraz::guest

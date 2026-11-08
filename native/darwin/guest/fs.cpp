@@ -5,6 +5,9 @@
 #include <cstring>
 #include <sys/mount.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <limits>
 
 namespace shiraz::guest {
 namespace {
@@ -86,12 +89,53 @@ int descriptor_stat(int fd, void *output) {
   if (names < 0) return errno ? -1 : fail(EOPNOTSUPP);
   return serialize(native, names, output);
 }
+int directory(int fd){return fd==-100?AT_FDCWD:fd;}
+ssize_t read_link_at(int fd,const char *path,char *output,size_t size){
+  if(!path_ok(path))return -1;if(!output&&size)return fail(EFAULT);
+  if(size>(64u<<20))return fail(EINVAL);return ::readlinkat(directory(fd),path,output,size);
+}
+int link_at(int from,const char *source,int to,const char *destination,int flags){
+  if(!path_ok(source)||!path_ok(destination))return -1;
+  if(flags & ~0x400)return fail(EINVAL);
+  return ::linkat(directory(from),source,directory(to),destination,flags & 0x400?AT_SYMLINK_FOLLOW:0);
+}
+int symlink_at(const char *source,int fd,const char *destination){
+  if(!path_ok(source)||!path_ok(destination))return -1;
+  return ::symlinkat(source,directory(fd),destination);
+}
+int allocate_file(int fd,int64_t offset,int64_t length){
+  if(offset<0||length<=0||offset>INT64_MAX-length)return errno_to_guest(EINVAL);
+  struct stat info{};if(::fstat(fd,&info))return errno_to_guest(errno);
+  if(!S_ISREG(info.st_mode))return errno_to_guest(ENODEV);
+  int64_t end=offset+length;
+  fstore_t store{};store.fst_flags=F_ALLOCATEALL;store.fst_posmode=F_PEOFPOSMODE;
+  // Reserving the whole prefix is stronger than the requested interval and
+  // preserves existing bytes. Only extend the logical file after reservation.
+  store.fst_length=end;
+  if(::fcntl(fd,F_PREALLOCATE,&store))return errno_to_guest(errno);
+  if(end>info.st_size && ::ftruncate(fd,end))return errno_to_guest(errno);
+  return 0;
+}
+int advise_file(int fd,int64_t offset,int64_t length,int advice){
+  if(offset<0||length<0)return errno_to_guest(EINVAL);
+  int result=-1;
+  if(advice==0||advice==1||advice==2)result=::fcntl(fd,F_RDAHEAD,advice==1?0:1);
+  else if(advice==3){if(length>INT_MAX)return errno_to_guest(EOVERFLOW);radvisory request{offset,int(length)};result=::fcntl(fd,F_RDADVISE,&request);}
+  else if(advice==5)result=::fcntl(fd,F_NOCACHE,1);
+  else return errno_to_guest(advice==4?ENOTSUP:EINVAL);
+  return result?errno_to_guest(errno):0;
+}
 }
 std::vector<ProviderExport> filesystem_exports() {
   // Android LP64 defines statfs/statfs64 from the same __STATFS64_BODY layout.
   return {fixed_export("statfs", "LIBC", &path_stat, ErrnoPolicy::MinusOne),
           fixed_export("statfs64", "LIBC", &path_stat, ErrnoPolicy::MinusOne),
           fixed_export("fstatfs", "LIBC", &descriptor_stat, ErrnoPolicy::MinusOne),
-          fixed_export("fstatfs64", "LIBC", &descriptor_stat, ErrnoPolicy::MinusOne)};
+          fixed_export("fstatfs64", "LIBC", &descriptor_stat, ErrnoPolicy::MinusOne),
+          fixed_export("readlinkat","LIBC",&read_link_at,ErrnoPolicy::MinusOne),
+          fixed_export("linkat","LIBC",&link_at,ErrnoPolicy::MinusOne),
+          fixed_export("symlinkat","LIBC",&symlink_at,ErrnoPolicy::MinusOne),
+          fixed_export("posix_fallocate","LIBC",&allocate_file),
+          fixed_export("posix_fadvise","LIBC",&advise_file)};
 }
 }

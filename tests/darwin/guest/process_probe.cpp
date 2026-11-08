@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <csignal>
 #include <cstring>
@@ -40,7 +41,7 @@ int main(int argc, char **argv) {
     for (const auto &pair : base.modules()) {
       Provider module = pair.second;
       if (module.soname == "libc.so") {
-        auto additions = process_exports(lifecycle);
+        auto additions = process_exports(lifecycle, module.exports);
         auto callbacks = lifecycle->exports();
         additions.insert(additions.end(), callbacks.begin(), callbacks.end());
         module.exports.erase(std::remove_if(module.exports.begin(), module.exports.end(),
@@ -72,6 +73,45 @@ int main(int argc, char **argv) {
       return long(int64_t(value));
     };
     int error = 0;
+    auto raw_with = [&](long number, std::array<uint64_t,6> arguments) {
+      *guest_errno_location() = 73;
+      errno = 61;
+      std::vector<Argument> values;
+      for (auto argument : arguments) values.push_back(Argument::integer(argument,ArgumentType::Int64));
+      values.push_back(Argument::integer(number,ArgumentType::Int64));
+      auto result = call("__shiraz_linux_syscall", values);
+      require(*guest_errno_location() == 73 && errno == 61, "raw SVC preserves both errno slots");
+      return int64_t(result);
+    };
+    auto raw_syscall = [&](long number) { return raw_with(number,{}); };
+    require(raw_syscall(172) == ::getpid(), "raw syscall returns actual pid");
+    require(raw_syscall(0x7fffffff) == -38, "raw syscall returns negative Linux ENOSYS");
+    uint32_t futex_word = 7;
+    uint64_t futex_address = uintptr_t(&futex_word);
+    require(raw_with(98,{futex_address,128,8,0,0,0}) == -11,"futex compare mismatch is EAGAIN");
+    int64_t expired[2] = {0,0};
+    require(raw_with(98,{futex_address,128,7,uintptr_t(expired),0,0}) == -110,"relative futex timeout");
+    require(raw_with(98,{futex_address,137,7,0,0,0}) == -22,"zero futex bitset rejected");
+    std::atomic<int64_t> waited{-999};
+    std::thread waiter([&] {
+      int64_t timeout[2] = {2,0};
+      waited = raw_with(98,{futex_address,128,7,uintptr_t(timeout),0,0});
+    });
+    auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    int64_t woken = 0;
+    while (std::chrono::steady_clock::now() < limit && !woken) {
+      woken = raw_with(98,{futex_address,129,1,0,0,0});
+      if(!woken) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    waiter.join();
+    require(woken == 1 && waited == 0,"real futex wait/wake without lost wake");
+    require(raw_with(98,{futex_address,129,1,0,0,0}) == 0,"wake counts actual waiters");
+    int descriptors[2]; require(!::pipe(descriptors),"syscall I/O test pipe");
+    const char payload[]="raw Linux syscall"; char received[sizeof(payload)]{};
+    require(raw_with(64,{uint64_t(descriptors[1]),uintptr_t(payload),sizeof(payload),0,0,0}) == sizeof(payload),"raw write uses translated provider");
+    require(raw_with(63,{uint64_t(descriptors[0]),uintptr_t(received),sizeof(received),0,0,0}) == sizeof(received) &&
+        !std::memcmp(payload,received,sizeof(payload)),"raw read returns actual bytes");
+    ::close(descriptors[0]);::close(descriptors[1]);
     const std::pair<long,long> ids[] = {{172,::getpid()},{173,::getppid()},{174,::getuid()},
       {175,::geteuid()},{176,::getgid()},{177,::getegid()}};
     for (const auto &id : ids) require(syscall(id.first, error) == id.second && error == 73, "real host process identifiers");
@@ -114,15 +154,15 @@ int main(int argc, char **argv) {
       ~RestoreStderr() { if (descriptor >= 0) { dup2(descriptor,STDERR_FILENO); close(descriptor); } }
     } restoring{saved_stderr};
     close(log_pipe[1]);
-    long unsupported = syscall(98,error);
-    require(unsupported == -1 && error == 38, "futex remains explicitly ENOSYS");
+    long unsupported = syscall(0x7ffffffe,error);
+    require(unsupported == -1 && error == 38, "unknown syscall remains explicitly ENOSYS");
     require(syscall(0x7fffffff,error) == -1 && error == 38, "unknown Linux syscall is not forwarded");
     int logged = int(call("process_log",{}));
     std::fflush(stderr);
     require(dup2(saved_stderr,STDERR_FILENO) >= 0, "restore process log surface"); close(saved_stderr);
     restoring.descriptor = -1;
     auto evidence = read_pipe(log_pipe[0]); close(log_pipe[0]);
-    require(logged == 73 && evidence.find("futex=unfinished") != std::string::npos &&
+    require(logged == 73 && evidence.find("number=2147483646") != std::string::npos &&
                 evidence.find("guest-copy[") != std::string::npos && evidence.find("scalar=-31 float=2.75 text=guest %") != std::string::npos &&
                 evidence.find("Xuest-copy") == std::string::npos,
             "copied syslog ident, PID/PERROR and real AAPCS formatted delivery");
@@ -151,6 +191,6 @@ int main(int argc, char **argv) {
     int status; require(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==97 &&
         message.find("owned guest abort")!=std::string::npos && message.find("later message")==std::string::npos,
         "abort emits an owned copy of the first guest message then really aborts");
-    std::cout << "M5_PROCESS_PASS syscall_ids=7 getrandom=real futex=unfinished syslog=native_asl perror=1 abort=owned_first nonreturning_contract=1 exit_finalizers=1 fast_exit_finalizers=0 threads=4\n";
+    std::cout << "M5_PROCESS_PASS syscall_ids=7 raw_svc=negative_errno raw_io=real getrandom=real futex=wait_wake_timeout_bitset_validation syslog=native_asl perror=1 abort=owned_first nonreturning_contract=1 exit_finalizers=1 fast_exit_finalizers=0 threads=4\n";
   } catch (const std::exception &failure) { std::cerr << "FAIL " << failure.what() << '\n'; return 1; }
 }

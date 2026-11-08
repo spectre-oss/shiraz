@@ -60,7 +60,7 @@ ThreadPointerAnalysis analyze_thread_pointers(const Elf &elf,
     for (uint64_t address = begin; address - segment.address + 4 <= segment.file_size; address += 4) {
       uint32_t word;
       std::memcpy(&word, code(address), 4);
-      if (tpidr(word)) {
+      if (tpidr(word) || word == 0xd4000001u) {
         if (words.size() >= 131072) throw ElfError("guest TPIDR site limit");
         words.push_back({address, word});
       }
@@ -69,6 +69,8 @@ ThreadPointerAnalysis analyze_thread_pointers(const Elf &elf,
   ThreadPointerAnalysis result;
   if (words.empty()) return result;
   std::vector<std::pair<uint64_t, uint64_t>> objects;
+  for (const auto &section : elf.data_sections)
+    objects.emplace_back(section.address, section.address + section.file_size);
   for (const auto &symbol : elf.symbols)
     if (symbol.section && symbol.section != 0xfff1 && (symbol.info & 15) == 1 && symbol.size) {
       if (symbol.address > UINT64_MAX - symbol.size) throw ElfError("guest object extent overflow");
@@ -249,7 +251,9 @@ ThreadPointerAnalysis analyze_thread_pointers(const Elf &elf,
       std::memcpy(&word, code(address), 4);
       if ((word & 0xffffffe0u) == 0xd51bd040u)
         fail("guest TPIDR_EL0 writes are unsupported", address);
-      if (instruction->id == ARM64_INS_SVC || instruction->id == ARM64_INS_HVC ||
+      if (instruction->id == ARM64_INS_SVC && word != 0xd4000001u)
+        fail("unsupported guest SVC immediate", address);
+      if (instruction->id == ARM64_INS_HVC ||
           instruction->id == ARM64_INS_SMC || instruction->id == ARM64_INS_ERET ||
           instruction->id == ARM64_INS_ERETAA || instruction->id == ARM64_INS_ERETAB ||
           instruction->id == ARM64_INS_DRPS)
@@ -324,10 +328,14 @@ ThreadPointerAnalysis analyze_thread_pointers(const Elf &elf,
   }
   for (const auto &entry : words) {
     if (test(visited, entry.address)) {
+      if (entry.instruction == 0xd4000001u) {
+        result.syscalls.push_back(entry);
+        continue;
+      }
       if ((entry.instruction & 31) == 18) fail("guest TPIDR x18 destination is reserved", entry.address);
       result.sites.push_back(entry);
     } else if (data(entry.address, false)) ++result.data_words;
-    else fail("ambiguous unreachable TPIDR word", entry.address);
+    else fail("ambiguous unreachable TPIDR/SVC word", entry.address);
   }
   std::sort(result.sites.begin(), result.sites.end(),
             [](const auto &a, const auto &b) { return a.address < b.address; });

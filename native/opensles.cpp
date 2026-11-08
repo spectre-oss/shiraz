@@ -16,7 +16,11 @@ static const SLInterfaceID_ iid_OUTPUTMIX = { 0x97750f60, 0xddd7, 0x11db, 0x92b1
 extern "C" const SLInterfaceID SL_IID_OUTPUTMIX = &iid_OUTPUTMIX;
 static const SLInterfaceID_ iid_RECORD = { 0xc5657aa0, 0xdddb, 0x11db, 0x82f7, { 0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b } };
 extern "C" const SLInterfaceID SL_IID_RECORD = &iid_RECORD;
+#if defined(__APPLE__)
+#include <AudioToolbox/AudioToolbox.h>
+#else
 #include <alsa/asoundlib.h>
+#endif
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
@@ -31,6 +35,9 @@ extern "C" const SLInterfaceID SL_IID_RECORD = &iid_RECORD;
 #include <type_traits>
 #include <new>
 namespace {
+#if !defined(SHIRAZ_OPENSL_GUEST)
+template<class T> T guest_table(T value){return value;}
+#endif
 template<class R,class... A> auto unsupported(R(*)(A...))->R(*)(A...){return [](A...)->R{if constexpr(!std::is_void<R>::value)return SL_RESULT_FEATURE_UNSUPPORTED;};}
 static SLObjectItf_ defaults_SLObjectItf_(){SLObjectItf_ t{};t.Realize=unsupported(t.Realize);t.Resume=unsupported(t.Resume);t.GetState=unsupported(t.GetState);t.GetInterface=unsupported(t.GetInterface);t.RegisterCallback=unsupported(t.RegisterCallback);t.AbortAsyncOperation=unsupported(t.AbortAsyncOperation);t.Destroy=unsupported(t.Destroy);t.SetPriority=unsupported(t.SetPriority);t.GetPriority=unsupported(t.GetPriority);t.SetLossOfControlInterfaces=unsupported(t.SetLossOfControlInterfaces);return t;}
 static SLEngineItf_ defaults_SLEngineItf_(){SLEngineItf_ t{};t.CreateLEDDevice=unsupported(t.CreateLEDDevice);t.CreateVibraDevice=unsupported(t.CreateVibraDevice);t.CreateAudioPlayer=unsupported(t.CreateAudioPlayer);t.CreateAudioRecorder=unsupported(t.CreateAudioRecorder);t.CreateMidiPlayer=unsupported(t.CreateMidiPlayer);t.CreateListener=unsupported(t.CreateListener);t.Create3DGroup=unsupported(t.Create3DGroup);t.CreateOutputMix=unsupported(t.CreateOutputMix);t.CreateMetadataExtractor=unsupported(t.CreateMetadataExtractor);t.CreateExtensionObject=unsupported(t.CreateExtensionObject);t.QueryNumSupportedInterfaces=unsupported(t.QueryNumSupportedInterfaces);t.QuerySupportedInterfaces=unsupported(t.QuerySupportedInterfaces);t.QueryNumSupportedExtensions=unsupported(t.QueryNumSupportedExtensions);t.QuerySupportedExtension=unsupported(t.QuerySupportedExtension);t.IsExtensionSupported=unsupported(t.IsExtensionSupported);return t;}
@@ -43,8 +50,26 @@ template<class Table> struct Interface {const Table* table;Object* owner;};
 struct Object {
  Interface<SLOutputMixItf_> mix;Interface<SLObjectItf_> object;Interface<SLEngineItf_> engine;Interface<SLPlayItf_> play;Interface<SLVolumeItf_> volume;Interface<SLAndroidSimpleBufferQueueItf_> queue;Interface<SLAndroidConfigurationItf_> config;
  int kind;SLuint32 state=SL_OBJECT_STATE_UNREALIZED,playState=SL_PLAYSTATE_STOPPED;unsigned rate=48000,channels=2,bits=16,capacity=4,generation=0,completed=0;uint64_t frames=0;bool floating=false,done=false,muted=false,selfDelete=false;SLmillibel gain=0;
- std::mutex mutex;std::condition_variable changed;std::thread worker;std::deque<std::vector<unsigned char>> buffers;snd_pcm_t* pcm=nullptr;slAndroidSimpleBufferQueueCallback callback=nullptr;void* callbackContext=nullptr;slPlayCallback playCallback=nullptr;void* playContext=nullptr;SLuint32 eventMask=0;SLmillisecond marker=SL_TIME_UNKNOWN;bool markerFired=false;
- explicit Object(int type);~Object(){if(pcm)snd_pcm_close(pcm);}
+ std::mutex mutex;std::condition_variable changed;std::thread worker;std::deque<std::vector<unsigned char>> buffers;
+#if defined(__APPLE__)
+ AudioQueueRef pcm=nullptr;
+#else
+ snd_pcm_t* pcm=nullptr;
+#endif
+ slAndroidSimpleBufferQueueCallback callback=nullptr;void* callbackContext=nullptr;slPlayCallback playCallback=nullptr;void* playContext=nullptr;SLuint32 eventMask=0;SLmillisecond marker=SL_TIME_UNKNOWN;bool markerFired=false;
+#if defined(SHIRAZ_OPENSL_GUEST)
+ bool workerFinished=false;
+#endif
+ explicit Object(int type);~Object(){
+#if defined(__APPLE__)
+ if(pcm)AudioQueueDispose(pcm,true);
+#else
+ if(pcm)snd_pcm_close(pcm);
+#endif
+#if defined(SHIRAZ_OPENSL_GUEST)
+ shiraz_opensl_track(this,false);
+#endif
+ }
 };
 template<class Table> Object* owner(const Table* const* self){return reinterpret_cast<const Interface<Table>*>(self)->owner;}
 bool same(SLInterfaceID a,SLInterfaceID b){return a&&b&&!std::memcmp(a,b,sizeof(SLInterfaceID_));}
@@ -60,7 +85,15 @@ void run(Object* o){
   const auto started=std::chrono::steady_clock::now();
   if(gain!=1.f){if(o->floating){auto* p=reinterpret_cast<float*>(bytes.data());for(size_t i=0;i<bytes.size()/4;i++)p[i]*=gain;}else{auto* p=reinterpret_cast<int16_t*>(bytes.data());for(size_t i=0;i<bytes.size()/2;i++)p[i]=int16_t(p[i]*gain);}}
   size_t count=bytes.size()/(o->channels*(o->bits/8)),written=0;
+#if defined(__APPLE__)
+  AudioQueueBufferRef buffer=nullptr;
+  if(!AudioQueueAllocateBuffer(o->pcm,UInt32(bytes.size()),&buffer)){
+   std::memcpy(buffer->mAudioData,bytes.data(),bytes.size());buffer->mAudioDataByteSize=UInt32(bytes.size());
+   if(!AudioQueueEnqueueBuffer(o->pcm,buffer,0,nullptr))written=count;else AudioQueueFreeBuffer(o->pcm,buffer);
+  }
+#else
   while(written<count){auto n=snd_pcm_writei(o->pcm,bytes.data()+written*o->channels*(o->bits/8),count-written);if(n<0){if(snd_pcm_recover(o->pcm,int(n),1)<0)break;}else if(n==0)break;else written+=size_t(n);}
+#endif
   slAndroidSimpleBufferQueueCallback callback=nullptr;void* context=nullptr;
   {std::unique_lock<std::mutex> lock(o->mutex);
    // A null/file PCM accepts writes immediately. Do not turn its completion
@@ -70,18 +103,55 @@ void run(Object* o){
    if(o->done)return;
    if(o->generation==generation){if(!o->buffers.empty())o->buffers.pop_front();o->frames+=written;++o->completed;callback=o->callback;context=o->callbackContext;}
   }
-  if(callback)callback(reinterpret_cast<SLAndroidSimpleBufferQueueItf>(&o->queue),context);
+  if(callback){
+#if defined(SHIRAZ_OPENSL_GUEST)
+   shiraz_opensl_callback(reinterpret_cast<void *>(callback),&o->queue,context,0,false);
+#else
+   callback(reinterpret_cast<SLAndroidSimpleBufferQueueItf>(&o->queue),context);
+#endif
+  }
   slPlayCallback end=nullptr;void* endContext=nullptr;SLuint32 events=0;{std::lock_guard<std::mutex> lock(o->mutex);if(!o->done){if(o->buffers.empty())events|=o->eventMask&SL_PLAYEVENT_HEADATEND;if(!o->markerFired&&o->marker!=SL_TIME_UNKNOWN&&o->frames*1000/o->rate>=o->marker){events|=o->eventMask&SL_PLAYEVENT_HEADATMARKER;o->markerFired=true;}if(events){end=o->playCallback;endContext=o->playContext;}}}
-  if(end)end(reinterpret_cast<SLPlayItf>(&o->play),endContext,events);
+  if(end){
+#if defined(SHIRAZ_OPENSL_GUEST)
+   shiraz_opensl_callback(reinterpret_cast<void *>(end),&o->play,endContext,events,true);
+#else
+   end(reinterpret_cast<SLPlayItf>(&o->play),endContext,events);
+#endif
+  }
  }
 }
 SLresult realize(SLObjectItf self,SLboolean async){if(async)return SL_RESULT_FEATURE_UNSUPPORTED;Object* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);if(o->state==SL_OBJECT_STATE_REALIZED)return SL_RESULT_PRECONDITIONS_VIOLATED;
- if(o->kind==2){const char* device=std::getenv("SHIRAZ_AUDIO_DEVICE");if(!device||!*device)device="default";if(snd_pcm_open(&o->pcm,device,SND_PCM_STREAM_PLAYBACK,0)<0)return SL_RESULT_RESOURCE_ERROR;
+ if(o->kind==2){
+#if defined(__APPLE__)
+ AudioStreamBasicDescription format{};format.mSampleRate=o->rate;format.mFormatID=kAudioFormatLinearPCM;
+ format.mFormatFlags=kAudioFormatFlagIsPacked|(o->floating?kAudioFormatFlagIsFloat:kAudioFormatFlagIsSignedInteger);
+ format.mBytesPerPacket=format.mBytesPerFrame=o->channels*(o->bits/8);format.mFramesPerPacket=1;format.mChannelsPerFrame=o->channels;format.mBitsPerChannel=o->bits;
+ if(AudioQueueNewOutput(&format,[](void*,AudioQueueRef queue,AudioQueueBufferRef buffer){AudioQueueFreeBuffer(queue,buffer);},nullptr,nullptr,nullptr,0,&o->pcm))return SL_RESULT_RESOURCE_ERROR;
+ if(AudioQueueStart(o->pcm,nullptr)){AudioQueueDispose(o->pcm,true);o->pcm=nullptr;return SL_RESULT_RESOURCE_ERROR;}
+#else
+ const char* device=std::getenv("SHIRAZ_AUDIO_DEVICE");if(!device||!*device)device="default";if(snd_pcm_open(&o->pcm,device,SND_PCM_STREAM_PLAYBACK,0)<0)return SL_RESULT_RESOURCE_ERROR;
  if(snd_pcm_set_params(o->pcm,o->floating?SND_PCM_FORMAT_FLOAT_LE:SND_PCM_FORMAT_S16_LE,SND_PCM_ACCESS_RW_INTERLEAVED,o->channels,o->rate,1,80000)<0){snd_pcm_close(o->pcm);o->pcm=nullptr;return SL_RESULT_CONTENT_UNSUPPORTED;}
- try{o->worker=std::thread([o]{run(o);if(o->selfDelete)delete o;});}catch(const std::exception&){snd_pcm_close(o->pcm);o->pcm=nullptr;return SL_RESULT_RESOURCE_ERROR;}std::fprintf(stderr,"SHIRAZ_OPENSL_OUTPUT rate=%u channels=%u bits=%u\n",o->rate,o->channels,o->bits);}
+#endif
+ try{o->worker=std::thread([o]{run(o);
+#if defined(SHIRAZ_OPENSL_GUEST)
+ {std::lock_guard<std::mutex> lock(o->mutex);o->workerFinished=true;o->changed.notify_all();}
+#else
+ if(o->selfDelete)delete o;
+#endif
+ });}catch(const std::exception&){
+#if defined(__APPLE__)
+ AudioQueueDispose(o->pcm,true);
+#else
+ snd_pcm_close(o->pcm);
+#endif
+ o->pcm=nullptr;return SL_RESULT_RESOURCE_ERROR;}std::fprintf(stderr,"SHIRAZ_OPENSL_OUTPUT rate=%u channels=%u bits=%u\n",o->rate,o->channels,o->bits);}
  o->state=SL_OBJECT_STATE_REALIZED;return SL_RESULT_SUCCESS;
 }
-void destroy(SLObjectItf self){Object* o=owner(self);{std::lock_guard<std::mutex> lock(o->mutex);o->done=true;o->changed.notify_all();}if(o->worker.joinable()){if(o->worker.get_id()==std::this_thread::get_id()){o->selfDelete=true;o->worker.detach();return;}o->worker.join();}delete o;}
+void destroy(SLObjectItf self){Object* o=owner(self);{std::lock_guard<std::mutex> lock(o->mutex);o->done=true;o->changed.notify_all();}if(o->worker.joinable()){if(o->worker.get_id()==std::this_thread::get_id()){o->selfDelete=true;o->worker.detach();return;}o->worker.join();}
+#if defined(SHIRAZ_OPENSL_GUEST)
+ if(o->selfDelete){std::unique_lock<std::mutex> lock(o->mutex);o->changed.wait(lock,[&]{return o->workerFinished;});}
+#endif
+ delete o;}
 SLresult setPlay(SLPlayItf self,SLuint32 state){if(state<SL_PLAYSTATE_STOPPED||state>SL_PLAYSTATE_PLAYING)return SL_RESULT_PARAMETER_INVALID;Object* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);if(o->state!=SL_OBJECT_STATE_REALIZED)return SL_RESULT_PRECONDITIONS_VIOLATED;o->playState=state;o->changed.notify_all();return SL_RESULT_SUCCESS;}
 SLresult enqueue(SLAndroidSimpleBufferQueueItf self,const void* data,SLuint32 size){Object* o=owner(self);if(!data||!size||size>4*1024*1024||size%(o->channels*(o->bits/8)))return SL_RESULT_PARAMETER_INVALID;std::lock_guard<std::mutex> lock(o->mutex);if(o->buffers.size()>=o->capacity)return SL_RESULT_BUFFER_INSUFFICIENT;try{o->buffers.emplace_back(static_cast<const unsigned char*>(data),static_cast<const unsigned char*>(data)+size);}catch(const std::bad_alloc&){return SL_RESULT_MEMORY_FAILURE;}o->changed.notify_all();return SL_RESULT_SUCCESS;}
 SLresult clear(SLAndroidSimpleBufferQueueItf self){Object* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);o->buffers.clear();++o->generation;o->completed=0;o->changed.notify_all();return SL_RESULT_SUCCESS;}
@@ -106,6 +176,10 @@ SLPlayItf_ playTable(){auto t=defaults_SLPlayItf_();
 SLAndroidSimpleBufferQueueItf_ queueTable(){auto t=defaults_SLAndroidSimpleBufferQueueItf_();t.Enqueue=enqueue;t.Clear=clear;t.GetState=[](SLAndroidSimpleBufferQueueItf self,SLAndroidSimpleBufferQueueState* state){if(!state)return SL_RESULT_PARAMETER_INVALID;auto* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);state->count=o->buffers.size();state->index=o->completed;return SL_RESULT_SUCCESS;};t.RegisterCallback=[](SLAndroidSimpleBufferQueueItf self,slAndroidSimpleBufferQueueCallback cb,void* context){auto* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);o->callback=cb;o->callbackContext=context;return SL_RESULT_SUCCESS;};return t;}
 SLVolumeItf_ volumeTable(){auto t=defaults_SLVolumeItf_();t.SetVolumeLevel=[](SLVolumeItf self,SLmillibel gain){if(gain>0||gain<SL_MILLIBEL_MIN)return SL_RESULT_PARAMETER_INVALID;auto* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);o->gain=gain;return SL_RESULT_SUCCESS;};t.GetVolumeLevel=[](SLVolumeItf self,SLmillibel* gain){if(!gain)return SL_RESULT_PARAMETER_INVALID;auto* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);*gain=o->gain;return SL_RESULT_SUCCESS;};t.GetMaxVolumeLevel=[](SLVolumeItf,SLmillibel* gain){if(!gain)return SL_RESULT_PARAMETER_INVALID;*gain=0;return SL_RESULT_SUCCESS;};t.SetMute=[](SLVolumeItf self,SLboolean mute){auto* o=owner(self);std::lock_guard<std::mutex> lock(o->mutex);o->muted=mute;return SL_RESULT_SUCCESS;};return t;}
 SLAndroidConfigurationItf_ configTable(){auto t=defaults_SLAndroidConfigurationItf_();t.SetConfiguration=[](SLAndroidConfigurationItf,const SLchar* key,const void* value,SLuint32 size){if(!key||!value||size!=sizeof(SLuint32))return SL_RESULT_PARAMETER_INVALID;if(!strcmp(reinterpret_cast<const char*>(key),reinterpret_cast<const char*>(SL_ANDROID_KEY_STREAM_TYPE))&&*static_cast<const SLuint32*>(value)==SL_ANDROID_STREAM_MEDIA)return SL_RESULT_SUCCESS;return SL_RESULT_FEATURE_UNSUPPORTED;};return t;}
-Object::Object(int type):kind(type){static const SLOutputMixItf_ mt={unsupported(SLOutputMixItf_{}.GetDestinationOutputDeviceIDs),unsupported(SLOutputMixItf_{}.RegisterDeviceChangeCallback),unsupported(SLOutputMixItf_{}.ReRoute)};mix={&mt,this};static const auto ot=objectTable();static const auto et=engineTable();static const auto pt=playTable();static const auto vt=volumeTable();static const auto qt=queueTable();static const auto ct=configTable();object={&ot,this};engine={&et,this};play={&pt,this};volume={&vt,this};queue={&qt,this};config={&ct,this};}
+Object::Object(int type):kind(type){static const SLOutputMixItf_ mt={unsupported(SLOutputMixItf_{}.GetDestinationOutputDeviceIDs),unsupported(SLOutputMixItf_{}.RegisterDeviceChangeCallback),unsupported(SLOutputMixItf_{}.ReRoute)};mix={&mt,this};static const auto ot=guest_table(objectTable());static const auto et=guest_table(engineTable());static const auto pt=guest_table(playTable());static const auto vt=guest_table(volumeTable());static const auto qt=guest_table(queueTable());static const auto ct=guest_table(configTable());object={&ot,this};engine={&et,this};play={&pt,this};volume={&vt,this};queue={&qt,this};config={&ct,this};
+#if defined(SHIRAZ_OPENSL_GUEST)
+shiraz_opensl_track(this,true);
+#endif
+}
 }
 extern "C" SLresult slCreateEngine(SLObjectItf* out,SLuint32 options,const SLEngineOption* values,SLuint32 count,const SLInterfaceID*,const SLboolean* required){if(!out||options>16||count>32||(options&&!values)||(count&&!required))return SL_RESULT_PARAMETER_INVALID;for(unsigned i=0;i<options;i++)if(values[i].feature!=SL_ENGINEOPTION_THREADSAFE)return SL_RESULT_FEATURE_UNSUPPORTED;for(unsigned i=0;i<count;i++)if(required[i])return SL_RESULT_FEATURE_UNSUPPORTED;auto* o=new(std::nothrow) Object(0);if(!o)return SL_RESULT_MEMORY_FAILURE;*out=reinterpret_cast<SLObjectItf>(&o->object);return SL_RESULT_SUCCESS;}

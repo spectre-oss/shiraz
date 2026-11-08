@@ -5,6 +5,7 @@ namespace shiraz::guest {
 struct ThreadPointerSite { uint64_t address; uint32_t instruction; };
 struct ThreadPointerAnalysis {
   std::vector<ThreadPointerSite> sites;
+  std::vector<ThreadPointerSite> syscalls;
   size_t decoded = 0, data_words = 0;
 };
 // Conservative control-flow proof rooted in defined functions and constructors.

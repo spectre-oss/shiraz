@@ -27,6 +27,13 @@ static_assert(sizeof(Result) == 816 && offsetof(Result, vectors) == 288);
 static void require(bool value, const char *message) {
   if (!value) throw std::runtime_error(message);
 }
+extern "C" uintptr_t syscall_probe(uint64_t a0, uint64_t a1, uint64_t a2,
+                                   uint64_t a3, uint64_t a4, uint64_t a5, uint64_t number) noexcept {
+  const uint64_t values[] = {a0,a1,a2,a3,a4,a5,number};
+  for (unsigned i=0;i<7;++i)
+    if(values[i] != 0x6677445522331000ULL + (i==6?8:i)) std::abort();
+  return reinterpret_cast<uintptr_t>(guest_tls_base());
+}
 static void verify(const Result &result, unsigned target, uintptr_t tls) {
   for (unsigned reg = 0; reg < 31; ++reg) {
     uint64_t expected = reg == 18 ? result.original_x18
@@ -59,20 +66,23 @@ int main() {
     size_t used = 0;
     {
       JitWriteScope writable;
-      for (int stress = 0; stress < 2; ++stress) for (unsigned target = 0; target < 32; ++target) {
+      for (int stress = 0; stress < 3; ++stress) for (unsigned target = 0; target < 32; ++target) {
         if (target == 18) continue;
+        if (stress == 2 && target != 0) continue;
         auto *start = memory + used;
         auto *site = start + site_offset;
         auto *island = start + ((length + 15) & ~size_t(15));
         used = size_t(island + 64 - memory);
         require(used <= size, "bounded TPIDR test programs");
         std::memcpy(start, shiraz_tpidr_test_start, length);
-        uint32_t original = 0xd53bd040u | target;
+        uint32_t original = stress == 2 ? 0xd4000001u : 0xd53bd040u | target;
         std::memcpy(site, &original, 4);
         uint32_t observed;
         std::memcpy(&observed, site, 4);
-        auto patch = plan_thread_pointer(uintptr_t(site), observed, uintptr_t(island),
-            stress ? &shiraz_tpidr_stress_access : nullptr);
+        auto patch = stress == 2
+            ? plan_system_call(uintptr_t(site), observed, uintptr_t(island), uintptr_t(&syscall_probe))
+            : plan_thread_pointer(uintptr_t(site), observed, uintptr_t(island),
+                stress ? &shiraz_tpidr_stress_access : nullptr);
         std::memcpy(site, &patch.replacement, 4);
         if (patch.uses_island) {
           uintptr_t unwind_pc = 0;

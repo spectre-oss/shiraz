@@ -151,6 +151,30 @@ Elf parse_elf(const std::vector<uint8_t> &bytes, uint64_t page_size) {
     bad("ELF image span exceeds limit");
   elf.first_page = low;
   elf.span = high - low;
+  uint64_t shoff = r.u(40, 8), shcount = r.u(60, 2);
+  if (shoff && shcount) {
+    if (r.u(58, 2) != 64 || shcount > 16384)
+      bad("ELF section-header limit/stride");
+    r.range(shoff, shcount * 64);
+    std::vector<std::pair<uint64_t,uint64_t>> code_sections;
+    for (uint64_t i = 0; i < shcount; ++i) {
+      uint64_t p = shoff + i * 64, type = r.u(p + 4, 4), flags = r.u(p + 8, 8);
+      uint64_t address = r.u(p + 16, 8), offset = r.u(p + 24, 8), size = r.u(p + 32, 8);
+      if (!(flags & 2) || !size || type == 8) continue;
+      if (file_address(elf, address, size) != offset)
+        bad("ELF allocated section disagrees with LOAD mapping");
+      if (flags & 4) code_sections.emplace_back(address, add(address,size));
+      else elf.data_sections.push_back({offset,address,size,size,4});
+    }
+    std::sort(code_sections.begin(),code_sections.end());
+    std::vector<std::pair<uint64_t,uint64_t>> merged;
+    for(auto code:code_sections){if(!merged.empty()&&code.first<=merged.back().second)merged.back().second=std::max(merged.back().second,code.second);else merged.push_back(code);}
+    for (const auto &data : elf.data_sections) {
+      auto next=std::upper_bound(merged.begin(),merged.end(),data.address,[](uint64_t address,const auto &code){return address<code.first;});
+      if((next!=merged.begin()&&std::prev(next)->second>data.address)||(next!=merged.end()&&next->first<add(data.address,data.file_size)))
+        bad("ELF data/code sections overlap");
+    }
+  }
   if (!has_dynamic)
     bad("ELF dynamic table is missing");
   if (elf.eh_frame_header_size)
@@ -215,13 +239,48 @@ Elf parse_elf(const std::vector<uint8_t> &bytes, uint64_t page_size) {
     bad("unsupported ELF dynamic flags");
   elf.symbolic = tags.count(16) || (tag(30) & 2);
   elf.global = tag(0x6ffffffb) & 2;
-  if (!tag(4))
-    bad("ELF SYSV hash required by initial parser");
-  uint64_t hash = file_address(elf, tag(4), 8);
-  uint64_t buckets = r.u(hash, 4), symbols = r.u(hash + 4, 4);
-  if (!buckets || buckets > kMaxSymbols || !symbols || symbols > kMaxSymbols)
-    bad("ELF symbol/hash limit");
-  file_address(elf, tag(4), 8 + 4 * (buckets + symbols));
+  uint64_t symbols = 0;
+  if (tags.count(4)) {
+    if (!tag(4))
+      bad("invalid ELF SYSV hash address");
+    uint64_t hash = file_address(elf, tag(4), 8);
+    uint64_t buckets = r.u(hash, 4);
+    symbols = r.u(hash + 4, 4);
+    if (!buckets || buckets > kMaxSymbols || !symbols || symbols > kMaxSymbols)
+      bad("ELF symbol/hash limit");
+    file_address(elf, tag(4), 8 + 4 * (buckets + symbols));
+  } else if (tag(0x6ffffef5)) {
+    // GNU hash has no nchain count. Each nonempty bucket starts a contiguous
+    // symbol chain whose final hash word has its low bit set.
+    uint64_t base = tag(0x6ffffef5);
+    uint64_t header = file_address(elf, base, 16);
+    uint64_t buckets = r.u(header, 4), first = r.u(header + 4, 4);
+    uint64_t bloom = r.u(header + 8, 4), shift = r.u(header + 12, 4);
+    if (!buckets || buckets > kMaxSymbols || !first || first > kMaxSymbols ||
+        !bloom || bloom > kMaxSymbols || (bloom & (bloom - 1)) || shift >= 32)
+      bad("invalid ELF GNU hash header");
+    uint64_t prefix = 16 + bloom * 8 + buckets * 4;
+    uint64_t table = file_address(elf, base, prefix);
+    uint64_t chains = add(base, prefix), visits = 0;
+    symbols = first;
+    for (uint64_t i = 0; i < buckets; ++i) {
+      uint64_t index = r.u(table + 16 + bloom * 8 + i * 4, 4);
+      if (!index)
+        continue;
+      if (index < first || index >= kMaxSymbols)
+        bad("invalid ELF GNU hash bucket");
+      for (;;) {
+        if (index >= kMaxSymbols || ++visits > kMaxSymbols)
+          bad("ELF GNU hash chain limit");
+        uint64_t word = r.u(file_address(elf, add(chains, (index - first) * 4), 4), 4);
+        symbols = std::max(symbols, ++index);
+        if (word & 1)
+          break;
+      }
+    }
+  } else {
+    bad("ELF symbol hash table is missing");
+  }
   if (tag(11) != 24)
     bad("invalid ELF symbol entry size");
   uint64_t symbase = file_address(elf, tag(6), symbols * 24);

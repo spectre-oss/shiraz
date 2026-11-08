@@ -117,9 +117,12 @@ public class EdgeEffect {
      * @param context Context used to provide theming and resource information for the EdgeEffect
      */
     public EdgeEffect(Context context) {
+        this(context,null);
+    }
+    public EdgeEffect(Context context,android.util.AttributeSet attributes) {
         mPaint.setAntiAlias(true);
-        final TypedArray a = context.obtainStyledAttributes(
-                new int[]{0x010104ce});
+        final TypedArray a = context.obtainStyledAttributes(attributes,
+                new int[]{0x010104ce},0,0);
         final int themeColor = a.getColor(
                 0, 0xff666666);
         a.recycle();

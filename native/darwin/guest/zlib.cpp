@@ -280,6 +280,36 @@ Provider zlib_provider(CodeValidator validate) {
   provider.exports.push_back(fixed_export("adler32", "", +[](uLong v, const Bytef *p, uInt n) { return checksum(v, p, n, false); }));
   provider.exports.push_back(fixed_export("crc32", "", +[](uLong v, const Bytef *p, uInt n) { return checksum(v, p, n, true); }));
   provider.exports.push_back(fixed_export("zlibVersion", "", &::zlibVersion));
+  struct Gzip {
+    struct Identity{};std::mutex mutex;std::vector<std::unique_ptr<Identity>> identities;
+    std::map<void *,gzFile> files;
+    ~Gzip(){for(auto &entry:files)::gzclose(entry.second);}
+  };
+  auto gzip=std::make_shared<Gzip>();
+  for(int operation:{0,1,2}) {
+    auto entry=closure([gzip,operation](Capture &capture){
+      CallCursor cursor(capture,Convention::Aapcs64);HostErrno preserve;
+      std::lock_guard<std::mutex> lock(gzip->mutex);
+      try {
+        if(!operation){const char *path=cursor.read<const char *>(),*mode=cursor.read<const char *>();
+          if(!path||!mode||strnlen(path,4096)==4096||strnlen(mode,32)==32||gzip->identities.size()>=4096){*guest_errno_location()=errno_to_guest(EINVAL);return_value(capture,static_cast<void *>(nullptr));return;}
+          auto identity=std::make_unique<Gzip::Identity>();void *key=identity.get();
+          gzip->identities.push_back(std::move(identity));gzip->files.emplace(key,nullptr);
+          gzFile file=::gzopen(path,mode);if(!file){gzip->files.erase(key);*guest_errno_location()=errno_to_guest(errno?errno:EIO);return_value(capture,static_cast<void *>(nullptr));return;}
+          gzip->files[key]=file;return_value(capture,key);
+        } else {void *identity=cursor.read<void *>();auto found=gzip->files.find(identity);
+          if(found==gzip->files.end()){*guest_errno_location()=errno_to_guest(EBADF);return_value(capture,-1);return;}
+          int value;
+          if(operation==1){void *output=cursor.read<void *>();unsigned size=cursor.read<unsigned>();
+            if((!output&&size)||size>maximum_transfer){*guest_errno_location()=errno_to_guest(EINVAL);return_value(capture,-1);return;}
+            value=::gzread(found->second,output,size);
+          }else{value=::gzclose(found->second);gzip->files.erase(found);}
+          if(value<0&&errno)*guest_errno_location()=errno_to_guest(errno);return_value(capture,value);
+        }
+      }catch(const std::bad_alloc &){*guest_errno_location()=errno_to_guest(ENOMEM);if(!operation)return_value(capture,static_cast<void *>(nullptr));else return_value(capture,-1);}
+    });
+    provider.exports.push_back({operation==0?"gzopen":operation==1?"gzread":"gzclose","",uintptr_t(entry),SymbolKind::Function,"zlib/owned-gzip-file",false});
+  }
   return provider;
 }
 } // namespace shiraz::guest

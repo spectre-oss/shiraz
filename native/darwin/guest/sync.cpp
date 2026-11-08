@@ -375,6 +375,26 @@ int read_clock(int clock, void *output) {
   std::memcpy(output, fields, sizeof(fields));
   return 0;
 }
+int clock_resolution(int clock,void *output){
+  clockid_t native;try{native=host_clock(clock);}catch(const Failure &error){errno=error.code;return -1;}
+  timespec result{};if(::clock_getres(native,output?&result:nullptr))return -1;
+  if(output){int64_t fields[2]={result.tv_sec,result.tv_nsec};std::memcpy(output,fields,16);}return 0;
+}
+int clock_sleep(int clock,int flags,const int64_t *input,int64_t *remaining){
+  clockid_t native;try{native=host_clock(clock);}catch(const Failure &error){return errno_to_guest(error.code);}
+  if(!input)return errno_to_guest(EFAULT);
+  if(flags & ~1)return errno_to_guest(EINVAL);
+  int64_t fields[2];std::memcpy(fields,input,16);
+  if(fields[0]<0||fields[1]<0||fields[1]>=1000000000)return errno_to_guest(EINVAL);
+  timespec request{fields[0],fields[1]},rest{};
+  if(flags & 1){timespec now{};if(::clock_gettime(native,&now))return errno_to_guest(errno);
+    request.tv_sec-=now.tv_sec;request.tv_nsec-=now.tv_nsec;if(request.tv_nsec<0){--request.tv_sec;request.tv_nsec+=1000000000;}
+    if(request.tv_sec<0)return 0;
+  }
+  if(!::nanosleep(&request,&rest))return 0;
+  int error=errno;if(error==EINTR&&!(flags&1)&&remaining){int64_t values[2]={rest.tv_sec,rest.tv_nsec};std::memcpy(remaining,values,16);}
+  return errno_to_guest(error);
+}
 template <typename... Args>
 ProviderExport method(const char *name, std::shared_ptr<Synchronization> state,
                       int (Synchronization::*function)(Args...)) {
@@ -426,6 +446,8 @@ std::vector<ProviderExport> sync_exports(CodeValidator validate) {
     method("pthread_condattr_setpshared", s, &Synchronization::condattr_setpshared),
     method("pthread_once", s, &Synchronization::once),
     fixed_export("clock_gettime", "LIBC", &read_clock, ErrnoPolicy::MinusOne),
+    fixed_export("clock_getres","LIBC",&clock_resolution,ErrnoPolicy::MinusOne),
+    fixed_export("clock_nanosleep","LIBC",&clock_sleep),
   };
 }
 } // namespace shiraz::guest

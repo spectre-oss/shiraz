@@ -144,6 +144,13 @@ public class Path {
     public void toggleInverseFillType() { fill=FillType.values()[fill.ordinal()^2];changed(); }
     public void moveTo(float x,float y) { append(1,x,y); this.x=startX=x; this.y=startY=y; }
     public void rMoveTo(float dx,float dy) { moveTo(x+dx,y+dy); }
+    public void setLastPoint(float px,float py) {
+        valid(px);valid(py);if(semanticSize==0){moveTo(px,py);return;}
+        float[] commands=Arrays.copyOf(semanticData,semanticSize);int end=-1;
+        for(int i=0;i<commands.length;){int verb=(int)commands[i++],count=verb==3?6:verb==5?4:verb==4?0:2;if(count!=0)end=i+count-2;i+=count;}
+        commands[end]=px;commands[end+1]=py;
+        rewind();for(int i=0;i<commands.length;){int verb=(int)commands[i++];if(verb==1){moveTo(commands[i],commands[i+1]);i+=2;}else if(verb==2){lineTo(commands[i],commands[i+1]);i+=2;}else if(verb==3){cubicTo(commands[i],commands[i+1],commands[i+2],commands[i+3],commands[i+4],commands[i+5]);i+=6;}else if(verb==5){quadTo(commands[i],commands[i+1],commands[i+2],commands[i+3]);i+=4;}else close();}
+    }
     public void lineTo(float x,float y) { valid(x); valid(y); ensureStart(); append(2,x,y); this.x=x; this.y=y; }
     public void rLineTo(float dx,float dy) { lineTo(x+dx,y+dy); }
     public void cubicTo(float x1,float y1,float x2,float y2,float x3,float y3) { valid(x1);valid(y1);valid(x2);valid(y2);valid(x3);valid(y3); ensureStart(); append(3,x1,y1,x2,y2,x3,y3); x=x3; y=y3; }

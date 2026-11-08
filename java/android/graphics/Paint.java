@@ -162,7 +162,7 @@ public class Paint {
         Typeface face=shirazTypeface();int[] supported=shiraz.runtime.NativeText.variationAxes(face.shirazFamily(),face.getStyle());int count=0;for(int i=0;i<requested.length;i++)for(int axis:supported)if(axis==requested[i]){requested[count]=requested[i];coords[count++]=coords[i];break;}
         if(count==0)return false;variationTags=java.util.Arrays.copyOf(requested,count);variationValues=java.util.Arrays.copyOf(coords,count);variationSettings=settings;return true;
     }
-    public Typeface setTypeface(Typeface value) { Typeface previous = typeface; typeface = value;variationSettings=null;variationTags=null;variationValues=null; return previous; }
+    public Typeface setTypeface(Typeface value) { Typeface previous = typeface; typeface = value;variationSettings=null;variationTags=null;variationValues=null;if(value!=null&&value.shirazVariationSettings()!=null)setFontVariationSettings(value.shirazVariationSettings()); return previous; }
     public Typeface getTypeface() { return typeface; }
     Typeface shirazTypeface() { return typeface == null ? Typeface.DEFAULT : typeface; }
     public PathEffect getPathEffect() { return pathEffect; }

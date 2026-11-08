@@ -4,4 +4,5 @@
 namespace shiraz::guest {
 using UnwrapEnvironment = std::function<void *(void *)>;
 Provider bitmap_provider(UnwrapEnvironment unwrap);
+Provider android_provider(const std::filesystem::path &directory, UnwrapEnvironment unwrap);
 }

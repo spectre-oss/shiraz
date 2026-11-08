@@ -121,6 +121,17 @@ public:
     streams_.emplace(identity, std::move(stream));
     return identity;
   }
+  void *attach(int fd,const char *text) {
+    Mode parsed{}; if(!mode(text,parsed))return nullptr;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if(identities_.size()==maximum_identities){errno=EMFILE;return nullptr;}
+    auto token=std::make_unique<Token>();auto stream=std::make_shared<Stream>(nullptr,true);
+    void *identity=token.get();identities_.push_back(std::move(token));
+    streams_.emplace(identity,stream);
+    FILE *file=::fdopen(fd,parsed.host);
+    if(!file){streams_.erase(identity);return nullptr;}
+    stream->host=file;return identity;
+  }
   int close(void *identity) {
     auto stream = find(identity);
     if (!stream) return -1;
@@ -308,6 +319,7 @@ std::vector<ProviderExport> stdio_exports() {
   std::vector<ProviderExport> result;
   auto add = [&](const char *name, auto method) { result.push_back(method_export(name, state, method)); };
   add("fopen", &StdioState::open);
+  add("fdopen", &StdioState::attach);
   add("fopen64", &StdioState::open);
   add("fclose", &StdioState::close);
   add("fflush", &StdioState::flush);

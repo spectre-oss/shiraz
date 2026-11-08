@@ -107,7 +107,12 @@ struct Loader::State {
       throw ElfError("guest ELF read: " + key);
     auto module = std::make_unique<Module>();
     module->key = key;
-    module->image = std::make_unique<Image>(bytes, Image::Mapping::Deferred);
+    uintptr_t syscall_dispatcher = 0;
+    auto libc = providers.modules().find("libc.so");
+    if (libc != providers.modules().end())
+      for (const auto &entry : libc->second.exports)
+        if (entry.name == "__shiraz_linux_syscall") syscall_dispatcher = entry.address;
+    module->image = std::make_unique<Image>(bytes, Image::Mapping::Deferred, syscall_dispatcher);
     // Free input bytes before recursing into dependencies.
     std::vector<uint8_t>().swap(bytes);
     const auto &elf = module->image->elf();

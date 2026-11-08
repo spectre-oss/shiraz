@@ -33,9 +33,9 @@ public final class Bitmap {
     private long gpu;
     private boolean gpuDirty;
     private Thread gpuThread;
-    private void cpuRead(){if(gpu!=0&&gpuThread!=Thread.currentThread()){if(gpuDirty)throw new IllegalStateException("GPU screen bitmap used outside its render thread");releaseGpu();gpu=0;}if(gpu!=0&&!shiraz.runtime.NativeGpu.valid(gpu)){releaseGpu();gpu=0;gpuDirty=false;}if(gpuDirty){shiraz.runtime.NativeGpu.read(gpu,pixels);}}
+    private void cpuRead(){if(gpu!=0&&gpuThread!=Thread.currentThread()){if(gpuDirty)throw new IllegalStateException("GPU screen bitmap used outside its render thread");releaseGpu();gpu=0;}if(gpu!=0&&!shiraz.runtime.NativeGpu.valid(gpu)){releaseGpu();gpu=0;gpuDirty=false;}if(gpuDirty){shiraz.runtime.NativeGpu.read(gpu,pixels);}normalizeOpacity();}
     private void cpuWrite(){cpuRead();changed();if(gpu!=0){releaseGpu();gpu=0;gpuDirty=false;}}
-    long shirazGpuImage(){requireLive();if(gpu!=0&&!shiraz.runtime.NativeGpu.valid(gpu)){releaseGpu();gpu=0;gpuDirty=false;}if(gpu==0){gpu=shiraz.runtime.NativeGpu.create(width,height,pixels);gpuLease=new GpuLease(gpu);gpuThread=Thread.currentThread();}return gpu;}
+    long shirazGpuImage(){requireLive();if(!hasAlpha){cpuRead();if(gpu!=0){releaseGpu();gpu=0;gpuDirty=false;}}if(gpu!=0&&!shiraz.runtime.NativeGpu.valid(gpu)){releaseGpu();gpu=0;gpuDirty=false;}if(gpu==0){gpu=shiraz.runtime.NativeGpu.create(width,height,pixels);gpuLease=new GpuLease(gpu);gpuThread=Thread.currentThread();}return gpu;}
     long shirazGpuTarget(){long result=shirazGpuImage();changed();gpuDirty=true;return result;}
     public void shirazPrepareNativePixels(){requireLive();cpuWrite();}
     public boolean shirazHasGpu(){return gpu!=0&&gpuDirty;}
@@ -51,6 +51,8 @@ public final class Bitmap {
 
     private int capacity;
     private boolean mutable=true;
+    private boolean hasAlpha=true;
+    private void normalizeOpacity(){if(!hasAlpha&&config!=Config.ALPHA_8)for(int i=0;i<pixels.length;i++)pixels[i]|=0xff000000;}
     private Config config=Config.ARGB_8888;
     private static volatile int defaultDensity=160;
     /** Host display density for newly allocated bitmaps; existing bitmaps retain theirs. */
@@ -116,13 +118,13 @@ public final class Bitmap {
     public static Bitmap createBitmap(android.util.DisplayMetrics metrics,int width,int height,Config config,boolean hasAlpha,ColorSpace colorSpace){
         if(colorSpace==null)throw new IllegalArgumentException("Bitmap color space is null");
         if(!colorSpace.isSrgb())throw new UnsupportedOperationException("Bitmap color space must be sRGB");
-        if(!hasAlpha)throw new UnsupportedOperationException("Opaque-only bitmap storage is not implemented");
-        Bitmap result=createBitmap(width,height,config);if(metrics!=null)result.setDensity(metrics.densityDpi);return result;
+
+        Bitmap result=createBitmap(width,height,config);result.setHasAlpha(hasAlpha);if(metrics!=null)result.setDensity(metrics.densityDpi);return result;
     }
     public ColorSpace getColorSpace(){requireLive();return config==Config.ALPHA_8?null:ColorSpace.get(ColorSpace.Named.SRGB);}
     public void prepareToDraw(){requireLive();}
-    public boolean hasAlpha(){requireLive();return true;}
-    public void setHasAlpha(boolean value){requireLive();if(!value)throw new UnsupportedOperationException("Opaque-only bitmap storage is not implemented");}
+    public boolean hasAlpha(){requireLive();return hasAlpha;}
+    public void setHasAlpha(boolean value){requireLive();if(value==hasAlpha)return;cpuWrite();hasAlpha=value;normalizeOpacity();}
     static Bitmap fromPixels(int width,int height,int[] pixels) {
         if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || (long)width*height > 16*1024*1024 || pixels == null || (long)width*height != pixels.length) throw new IllegalArgumentException("Decoded bitmap dimensions");
         return new Bitmap(width,height,pixels);
@@ -174,7 +176,7 @@ public final class Bitmap {
         if(!onGpu)cpuRead();
         Bitmap copy=new Bitmap(width,height,onGpu?new int[pixels.length]:pixels.clone());
         if(onGpu)shiraz.runtime.NativeGpu.copyInto(gpu,copy.shirazGpuTarget());
-        copy.config=config;
+        copy.config=config;copy.hasAlpha=hasAlpha;
         if(this.config==Config.ALPHA_8||config==Config.ALPHA_8)for(int i=0;i<copy.pixels.length;i++)copy.pixels[i]&=0xff000000;
         copy.mutable=mutable;copy.density=density;copy.ninePatchChunk=getNinePatchChunk();return copy;
     }
@@ -219,7 +221,7 @@ public final class Bitmap {
         for (int color : pixels) { output.put((byte)(color >>> 24)); output.put((byte)(color >>> 16)); output.put((byte)(color >>> 8)); output.put((byte) color); }
     }
     public int getAllocationByteCount(){return (capacity==0?width*height:capacity)*4;}
-    private int logicalColor(int color){return config==Config.ALPHA_8?color&0xff000000:color;}
+    private int logicalColor(int color){return config==Config.ALPHA_8?color&0xff000000:hasAlpha?color:color|0xff000000;}
     // Alpha-only bitmaps use bounded int backing; RGB is ignored, including native raster writes.
     int[] colorPixels(int color){requireLive();cpuRead();if(config!=Config.ALPHA_8)return pixels;int[] result=new int[pixels.length];for(int i=0;i<result.length;i++)result[i]=(pixels[i]&0xff000000)|(color&0xffffff);return result;}
     private int index(int x, int y) {

@@ -4,6 +4,7 @@ import android.content.ContentResolver;
 /** Read-only access to absent Android settings; callers retain their own defaults. */
 public final class Settings {
  private Settings(){}
+ public static boolean canDrawOverlays(android.content.Context context){if(context==null)throw new NullPointerException("context");return false;}
  public static class SettingNotFoundException extends android.util.AndroidException {public SettingNotFoundException(String name){super(name);}}
  private static String read(ContentResolver resolver,String table,String name){if(resolver==null)throw new NullPointerException("resolver");return resolver.shirazReadSetting(table,name);}
  private static int integer(String value,int fallback){try{return value==null?fallback:Integer.parseInt(value);}catch(NumberFormatException error){return fallback;}}

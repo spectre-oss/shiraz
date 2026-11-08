@@ -352,6 +352,13 @@ extern "C" JNIEXPORT jint JNICALL Java_android_graphics_FontFamily_nativeRegiste
         auto owned = std::make_shared<std::vector<FT_Byte>>(static_cast<size_t>(count));
         env->GetByteArrayRegion(bytes, 0, count, reinterpret_cast<jbyte*>(owned->data()));
         if (env->ExceptionCheck()) return 0;
+        FT_Library validator = nullptr;
+        if (FT_Init_FreeType(&validator)) throw std::runtime_error("Cannot initialize font validation");
+        FT_Face checked = nullptr;
+        FT_Error validation = FT_New_Memory_Face(validator,owned->data(),static_cast<FT_Long>(owned->size()),0,&checked);
+        if (checked) FT_Done_Face(checked);
+        FT_Done_FreeType(validator);
+        if (validation) throw std::invalid_argument("Invalid font data");
         std::lock_guard<std::mutex> lock(memoryFontMutex);
         // Reloading the same resource must not consume another permanent font slot.
         for (size_t i = 0; i < memoryFonts.size(); ++i) {
@@ -428,7 +435,7 @@ extern "C" JNIEXPORT jfloatArray JNICALL Java_shiraz_runtime_NativeText_metricsV
 }
 static void loadTextGlyph(Font& face,unsigned glyphId,float skew,float scaleX,int paintStyle,int hinting,bool fakeBold) {
             if (FT_HAS_COLOR(face.face)) {
-                if (FT_Load_Glyph(face.face, glyphId, FT_LOAD_COLOR)) throw std::runtime_error("Cannot load color glyph");
+                if (auto failure=FT_Load_Glyph(face.face, glyphId, FT_LOAD_COLOR)) throw std::runtime_error("Cannot load color glyph (FreeType "+std::to_string(failure)+", font "+face.filename.substr(face.filename.find_last_of('/')+1)+")");
                 return;
             }
             if (FT_Load_Glyph(face.face, glyphId, (skew == 0 && scaleX==1 && paintStyle==0 ? FT_LOAD_DEFAULT : FT_LOAD_NO_BITMAP) | (hinting==0 ? FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP : 0))) throw std::runtime_error("Cannot load text glyph");

@@ -659,6 +659,18 @@ ProviderExport method_export(const char *name, std::shared_ptr<FileState> state,
           "file/translated",
           false};
 }
+ssize_t vector_io(int fd,const void *input,int count,bool writing){
+  struct Vector{void *data;uint64_t size;};static_assert(sizeof(Vector)==16);
+  if(count<0||count>1024){errno=EINVAL;return -1;}if(!input&&count){errno=EFAULT;return -1;}
+  std::vector<Vector> vectors(size_t(count),Vector{});size_t total=0;
+  for(int i=0;i<count;++i){std::memcpy(&vectors[size_t(i)],static_cast<const uint8_t *>(input)+size_t(i)*16,16);
+    auto &v=vectors[size_t(i)];if((!v.data&&v.size)||v.size>(64u<<20)-total){errno=v.data?EINVAL:EFAULT;return -1;}total+=v.size;}
+  std::vector<uint8_t> bytes(total);size_t offset=0;
+  if(writing)for(auto &v:vectors){if(v.size)std::memcpy(bytes.data()+offset,v.data,size_t(v.size));offset+=v.size;}
+  ssize_t result=writing?event_descriptor_write(fd,bytes.data(),bytes.size()):event_descriptor_read(fd,bytes.data(),bytes.size());
+  if(!writing&&result>0){offset=0;size_t remaining=size_t(result);for(auto &v:vectors){size_t n=std::min(size_t(v.size),remaining);if(n)std::memcpy(v.data,bytes.data()+offset,n);remaining-=n;offset+=n;if(!remaining)break;}}
+  return result;
+}
 } // namespace
 std::vector<ProviderExport> file_exports() {
   auto state = std::make_shared<FileState>();
@@ -763,6 +775,8 @@ std::vector<ProviderExport> file_exports() {
     return event_descriptor_read(fd, buffer, count);
   });
   fixed("write", &event_descriptor_write);
+  fixed("readv",+[](int fd,const void *input,int count){return vector_io(fd,input,count,false);});
+  fixed("writev",+[](int fd,const void *input,int count){return vector_io(fd,input,count,true);});
   fixed("pread", &::pread);
   fixed("pread64", &::pread);
   fixed("pwrite", &::pwrite);

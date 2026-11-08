@@ -57,6 +57,16 @@ int main(int argc, char **argv) {
     if (!file.read(reinterpret_cast<char *>(original.data()), length))
       throw std::runtime_error("fixture read");
     parse_elf(original, 16384);
+    auto gnu_only = [](Bytes &b) { put(b, tag(b, 4) - 8, 0x70000077); };
+    Bytes gnu = original;
+    gnu_only(gnu);
+    auto sysv_elf = parse_elf(original, 16384);
+    auto gnu_elf = parse_elf(gnu, 16384);
+    if (sysv_elf.symbols.size() != gnu_elf.symbols.size())
+      throw std::runtime_error("GNU-only symbol count differs");
+    for (size_t i = 0; i < sysv_elf.symbols.size(); ++i)
+      if (sysv_elf.symbols[i].name != gnu_elf.symbols[i].name)
+        throw std::runtime_error("GNU-only symbol names differ");
     // Android linkers can page-pad RELRO beyond the final LOAD byte.
     Bytes padded = original;
     size_t relro = ph(padded, 0x6474e552);
@@ -110,6 +120,28 @@ int main(int argc, char **argv) {
     reject("dynamic terminator", [](Bytes &b) { put(b, tag(b, 0) - 8, 21); });
     reject("duplicate dynamic", [](Bytes &b) { put(b, tag(b, 11) - 8, 6); });
     reject("missing SYSV hash", [](Bytes &b) { put(b, tag(b, 4), 0); });
+    auto reject_gnu = [&](const char *label, const std::function<void(Bytes &)> &mutate) {
+      reject(label, [&](Bytes &b) { gnu_only(b); mutate(b); });
+    };
+    reject_gnu("GNU bucket count", [](Bytes &b) {
+      put(b, address(b, read(b, tag(b, 0x6ffffef5), 8)), 0xffffffff, 4);
+    });
+    reject_gnu("GNU bloom size", [](Bytes &b) {
+      put(b, address(b, read(b, tag(b, 0x6ffffef5), 8)) + 8, 3, 4);
+    });
+    reject_gnu("GNU bucket before symbol offset", [](Bytes &b) {
+      size_t p = address(b, read(b, tag(b, 0x6ffffef5), 8));
+      put(b, p + 4, 2, 4);
+      put(b, p + 16 + read(b, p + 8, 4) * 8, 1, 4);
+    });
+    reject_gnu("GNU chain symbol limit", [](Bytes &b) {
+      size_t p = address(b, read(b, tag(b, 0x6ffffef5), 8));
+      size_t bucket = p + 16 + read(b, p + 8, 4) * 8;
+      put(b, p + 4, (1u << 20) - 1, 4);
+      put(b, bucket, (1u << 20) - 1, 4);
+      size_t chains = bucket + read(b, p, 4) * 4;
+      put(b, chains, 0, 4);
+    });
     reject("symbol count cap", [](Bytes &b) {
       put(b, address(b, read(b, tag(b, 4), 8)) + 4, 0xffffffff, 4);
     });

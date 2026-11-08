@@ -55,7 +55,14 @@ public final class MediaBrowser {
   public void onError(String parentId){}
   public void onError(String parentId,Bundle options){}
  }
- public static final class MediaItem {
-  private MediaItem(){throw new UnsupportedOperationException("No media browser service");}
+ public static final class MediaItem implements android.os.Parcelable {
+  public static final int FLAG_BROWSABLE=1,FLAG_PLAYABLE=2;
+  private final android.media.MediaDescription description;private final int flags;
+  public MediaItem(android.media.MediaDescription description,int flags){if(description==null||description.getMediaId()==null||description.getMediaId().isEmpty())throw new IllegalArgumentException("Media item requires a media ID");this.description=description;this.flags=flags;}
+  public android.media.MediaDescription getDescription(){return description;}public String getMediaId(){return description.getMediaId();}public int getFlags(){return flags;}
+  public boolean isBrowsable(){return (flags&FLAG_BROWSABLE)!=0;}public boolean isPlayable(){return (flags&FLAG_PLAYABLE)!=0;}
+  public int describeContents(){return description.describeContents();}
+  public void writeToParcel(android.os.Parcel output,int parcelFlags){output.writeInt(flags);description.writeToParcel(output,parcelFlags);}
+  public static final android.os.Parcelable.Creator<MediaItem> CREATOR=new android.os.Parcelable.Creator<MediaItem>(){public MediaItem createFromParcel(android.os.Parcel input){int flags=input.readInt();return new MediaItem(android.media.MediaDescription.CREATOR.createFromParcel(input),flags);}public MediaItem[] newArray(int size){return new MediaItem[size];}};
  }
 }

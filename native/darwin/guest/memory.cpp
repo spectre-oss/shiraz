@@ -326,6 +326,16 @@ public:
     if (::munmap(address, old_length)) { int error = errno; ::munmap(destination, new_length); fail(error); return MAP_FAILED; }
     relocate(moved, target); ranges_.swap(moved); return destination;
   }
+  int advise(void *address,size_t size,int advice) {
+    std::lock_guard<std::mutex> lock(mutex_);uintptr_t begin,end;
+    if(!range(address,size,begin,end))return -1;
+    if(!owned(begin,end))return fail(EPERM);
+    int native;
+    switch(advice){case 0:native=MADV_NORMAL;break;case 1:native=MADV_RANDOM;break;
+      case 2:native=MADV_SEQUENTIAL;break;case 3:native=MADV_WILLNEED;break;case 8:native=MADV_FREE;break;
+      default:return fail(EOPNOTSUPP);}
+    return ::madvise(address,end-begin,native);
+  }
   int sync(void *address, size_t size, int flags) {
     std::lock_guard<std::mutex> lock(mutex_);
     uintptr_t begin, end;
@@ -381,6 +391,7 @@ std::vector<ProviderExport> memory_exports() {
           method_export("mprotect", state, &MemoryState::protect),
           method_export("msync", state, &MemoryState::sync),
           method_export("mremap", state, &MemoryState::remap),
+          method_export("madvise",state,&MemoryState::advise),
           fixed_export("getpagesize", "LIBC", &::getpagesize)};
 }
 Providers native_personality(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle, std::shared_ptr<SignalRuntime> signals, std::shared_ptr<CleanupRuntime> cleanup) {
@@ -394,8 +405,6 @@ Providers native_personality(CodeValidator validate, std::shared_ptr<Lifecycle> 
       provider.exports.erase(std::remove_if(provider.exports.begin(), provider.exports.end(),
           [](const auto &entry) { return entry.name == "abort"; }), provider.exports.end());
       auto exports = memory_exports();
-      auto processes = process_exports(lifecycle);
-      exports.insert(exports.end(), std::make_move_iterator(processes.begin()), std::make_move_iterator(processes.end()));
       auto checked = fortify_exports();
       exports.insert(exports.end(), std::make_move_iterator(checked.begin()), std::make_move_iterator(checked.end()));
       for (auto group : {locale_exports(), multibyte_exports(), time_exports(), system_exports(), scan_exports(), jump_exports(), quad_exports(), transfer_exports(), wideformat_exports(), filesystem_exports()})
@@ -437,6 +446,10 @@ Providers native_personality(CodeValidator validate, std::shared_ptr<Lifecycle> 
                                 std::make_move_iterator(tls.begin()),
                                 std::make_move_iterator(tls.end()));
       }
+    }
+    if (pair.first == "libc.so") {
+      auto processes = process_exports(lifecycle, provider.exports);
+      provider.exports.insert(provider.exports.end(), processes.begin(), processes.end());
     }
     result.add(std::move(provider));
   }

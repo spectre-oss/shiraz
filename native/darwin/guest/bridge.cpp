@@ -8,6 +8,7 @@
 #include "shiraz/darwin/guest/guestegl.hpp"
 #include "shiraz/darwin/guest/jni.hpp"
 #include "shiraz/darwin/guest/path.hpp"
+#include "shiraz/darwin/guest/opensles.hpp"
 #include "shiraz/darwin/guest/loader.hpp"
 #include "shiraz/darwin/guest/binding_evidence.hpp"
 #include <cstdio>
@@ -64,19 +65,25 @@ void *load(const char *path, int flags) {
     std::lock_guard<std::recursive_mutex> lock(*mutex);
     auto canonical = std::filesystem::canonical(path);
     if (!loader) {
+      std::function<void()> close_audio;
       lifecycle = std::make_shared<shiraz::guest::Lifecycle>(shiraz::guest::is_guest_code);
       signals = std::make_shared<shiraz::guest::SignalRuntime>(shiraz::guest::is_guest_code);
       cleanup = std::make_shared<shiraz::guest::CleanupRuntime>(shiraz::guest::is_guest_code);
       loader = std::make_unique<shiraz::guest::Loader>(
           std::vector<std::filesystem::path>{canonical.parent_path()},
           shiraz::guest::dynamic_personality(
-              [] {
+              [&] {
                 auto providers = shiraz::guest::native_personality(shiraz::guest::is_guest_code, lifecycle, signals, cleanup);
-                if(const char *shim=std::getenv("SHIRAZ_GUEST_EGL_SHIM"))
+                if(const char *shim=std::getenv("SHIRAZ_GUEST_EGL_SHIM")) {
                   for(auto &provider:shiraz::guest::guest_graphics_providers(shim))providers.add(std::move(provider));
+                  providers.add(shiraz::guest::android_provider(std::filesystem::path(shim).parent_path(),[](void *env)->void * {
+                    return shiraz::guest::host_env(static_cast<JNIEnv *>(env));
+                  }));
+                }
                 providers.add(shiraz::guest::bitmap_provider([](void *env) -> void * {
                   return shiraz::guest::host_env(static_cast<JNIEnv *>(env));
                 }));
+                providers.add(shiraz::guest::opensles_provider(shiraz::guest::is_guest_code,close_audio));
                 return providers;
               }(),
               {[] { return loader.get(); }, mutex, [] {
@@ -85,6 +92,7 @@ void *load(const char *path, int flags) {
                  shiraz::guest::set_path_reader_validator(
                      loader->code_validator("libandroidx.graphics.path.so"));
                }}));
+      loader->add_preunmap_hook(std::move(close_audio));
       lifecycle->attach(*loader);
       signals->attach(*loader);
       cleanup->attach(*loader);
@@ -140,6 +148,7 @@ void *load(const char *path, int flags) {
     return handle;
   } catch (const std::exception &error) {
     last_error = error.what();
+    std::fprintf(stderr, "SHIRAZ_GUEST_LOAD_FAILED reason=%s\n", last_error.c_str());
     return nullptr;
   }
 }

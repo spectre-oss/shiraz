@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "shiraz/darwin/guest/tls.hpp"
+#include <pthread.h>
 namespace shiraz::guest {
 // Only query from an ABI entry or a prepared guest signal callback; the
 // signal dispatcher checks readiness before touching this native TLS state.
 bool in_guest_signal_handler() noexcept;
+int guest_thread_signal(pthread_t thread,int signal);
 // Owns native dispositions until shutdown. Attach before exposing guest
 // installation APIs; Loader's pre-unmap hook stops callbacks before code dies.
 // Basic one-argument handlers are supported. SIGINFO/ucontext, alternate
