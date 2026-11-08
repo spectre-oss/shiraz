@@ -240,7 +240,15 @@ public final class ActivityRunner {
         DedicatedProcess.run(new DedicatedProcess.Task(){public void run() throws Throwable {
             HostTlsProvider.install();
             android.os.Looper.prepareMainLooper();
-            ActivityRunner.run(args);
+            boolean profile="1".equals(System.getenv("SHIRAZ_PROFILE_METHODS"));
+            if(profile){
+                if(args.length!=9)throw new IllegalArgumentException("Profiling requires normal activity arguments");
+                File directory=new File(args[6],"cache");
+                if(!directory.isDirectory()&&!directory.mkdirs())throw new java.io.IOException("Cannot create method trace directory");
+                dalvik.system.VMDebug.startMethodTracing(new File(directory,"shiraz-methods.trace").getAbsolutePath(),8*1024*1024,0,true,1000);
+            }
+            try { ActivityRunner.run(args); }
+            finally { if(profile)dalvik.system.VMDebug.stopMethodTracing(); }
         }},new DedicatedProcess.Task(){public void run() throws Throwable {
             android.app.ActivityThread.shirazClear();
             try { android.os.AsyncTask.shirazShutdown(); }

@@ -154,7 +154,7 @@ struct Font {
         return true;
     }
 };
-std::shared_ptr<Font> font(JNIEnv* env, jstring family, jint style) {
+std::shared_ptr<Font> font(JNIEnv* env, jstring family, jint style, jfloat pixels = -1) {
     if (!family || style < 0 || style > 3) throw std::invalid_argument("Invalid font family or style");
     auto units = env->GetStringLength(family);
     if (units < 1 || units > 256) throw std::invalid_argument("Invalid font family length");
@@ -176,15 +176,17 @@ std::shared_ptr<Font> font(JNIEnv* env, jstring family, jint style) {
             name.push_back(static_cast<char>(0x80 | ((point >> 6) & 63))); name.push_back(static_cast<char>(0x80 | (point & 63)));
         }
     }
-    struct Entry { std::string family; int style; std::shared_ptr<Font> font; };
+    // Separate FreeType faces keep HarfBuzz's per-size caches warm when UI labels
+    // alternate between title/body/button sizes. Variation changes still invalidate.
+    struct Entry { std::string family; int style; float pixels; std::shared_ptr<Font> font; };
     static std::mutex mutex;
     static std::list<Entry> cache;
     std::lock_guard<std::mutex> lock(mutex);
-    for (auto it = cache.begin(); it != cache.end(); ++it) if (it->family == name && it->style == style) {
+    for (auto it = cache.begin(); it != cache.end(); ++it) if (it->family == name && it->style == style && it->pixels == pixels) {
         auto value = it->font; cache.splice(cache.begin(), cache, it); return value;
     }
     auto value = std::make_shared<Font>(name, style);
-    cache.push_front({std::move(name), style, value}); if (cache.size() > 16) cache.pop_back();
+    cache.push_front({std::move(name), style, pixels, value}); if (cache.size() > 16) cache.pop_back();
     return value;
 }
 struct Text {
@@ -365,7 +367,7 @@ extern "C" JNIEXPORT jfloat JNICALL Java_shiraz_runtime_NativeText_measureResolv
     if (!text) { error(env, "java/lang/NullPointerException", "text"); return 0; }
     try {
         Text input(env, text); if (!input.chars) return 0;
-        auto selected = font(env, family, style); if (!selected) return 0;
+        auto selected = font(env, family, style, size); if (!selected) return 0;
         auto& face = *selected; std::lock_guard<std::mutex> lock(shapingMutex); face.variations(env,tags,values); if(env->ExceptionCheck())return 0; if (!face.size(size)) return 0;
         Run run(face,input,size,spacing,levels,featureSettings);
         unsigned count = run.glyphs.size(); auto positions = run.positions.data();
@@ -381,7 +383,7 @@ extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeText_breakResolved(J
     try {
         if(std::isnan(maxWidth)||(measured&&env->GetArrayLength(measured)<1))throw std::invalid_argument("Text break output or width");
         Text input(env,text);if(!input.chars)return 0;
-        auto selected=font(env,family,style);if(!selected)return 0;
+        auto selected=font(env,family,style,size);if(!selected)return 0;
         auto& face=*selected;std::lock_guard<std::mutex> lock(shapingMutex);face.variations(env,tags,values);if(env->ExceptionCheck())return 0;
         float width=0;int accepted=0;
         if(maxWidth>=0){
@@ -410,7 +412,7 @@ extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeText_breakResolved(J
 }
 extern "C" JNIEXPORT jfloatArray JNICALL Java_shiraz_runtime_NativeText_metricsVariable(JNIEnv* env, jclass, jfloat size, jstring family, jint style, jintArray tags,jfloatArray values) {
     try {
-        auto selected = font(env, family, style); if (!selected) return nullptr;
+        auto selected = font(env, family, style, size); if (!selected) return nullptr;
         auto& face = *selected; std::lock_guard<std::mutex> lock(shapingMutex); face.variations(env,tags,values); if(env->ExceptionCheck())return nullptr; if (!face.size(size)) return env->NewFloatArray(5);
         auto metrics = face.face->size->metrics;
         float scale = static_cast<float>(face.bitmapScale);
@@ -459,7 +461,7 @@ static void drawText(JNIEnv* env, jclass, jintArray pixels, jint width, jint hei
     if(paintStyle<0 || paintStyle>2 || !std::isfinite(strokeWidth) || strokeWidth<0 || strokeWidth>512 || cap<0 || cap>2 || join<0 || join>2 || !std::isfinite(miter) || miter<0 || miter>1024){error(env,"java/lang/IllegalArgumentException","Invalid text stroke parameters");return;}
     try {
         Text input(env, text); if (!input.chars) return;
-        auto selected = font(env, family, style); if (!selected) return;
+        auto selected = font(env, family, style, size); if (!selected) return;
         auto& face = *selected; std::lock_guard<std::mutex> lock(shapingMutex); face.variations(env,tags,values); if(env->ExceptionCheck())return; if (!face.size(size)) return;
         struct Stroker {FT_Stroker value=nullptr;~Stroker(){if(value)FT_Stroker_Done(value);}} stroker;
         if(paintStyle!=0){
@@ -649,7 +651,7 @@ static jintArray textBounds(JNIEnv* env,jclass,jstring text,jfloat size,jstring 
         if(!text){error(env,"java/lang/NullPointerException","text");return nullptr;}
         if(!std::isfinite(skew)||std::abs(skew)>16||!std::isfinite(scaleX)||scaleX<0||scaleX>16||(hinting!=0&&hinting!=1))throw std::invalid_argument("Text bounds parameters");
         Text input(env,text);if(!input.chars)return nullptr;
-        auto selected=font(env,family,style);if(!selected)return nullptr;
+        auto selected=font(env,family,style,size);if(!selected)return nullptr;
         auto& face=*selected;std::lock_guard<std::mutex> lock(shapingMutex);face.variations(env,tags,values);if(env->ExceptionCheck())return nullptr;
         jint bounds[4]={0,0,0,0};bool any=false;
         if(face.size(size)&&scaleX!=0){
@@ -694,7 +696,7 @@ extern "C" JNIEXPORT jfloatArray JNICALL Java_shiraz_runtime_NativeText_clusters
     if(!text){error(env,"java/lang/NullPointerException","text");return nullptr;}
     try {
         Text input(env,text);if(!input.chars)return nullptr;
-        auto selected=font(env,family,style);if(!selected)return nullptr;
+        auto selected=font(env,family,style,size);if(!selected)return nullptr;
         std::lock_guard<std::mutex> lock(shapingMutex);selected->variations(env,tags,values);if(env->ExceptionCheck())return nullptr;
         bool nonzero=selected->size(size);if(!nonzero)selected->size(1);
         Run run(*selected,input,nonzero?size:1,spacing,levels,featureSettings);

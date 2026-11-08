@@ -489,6 +489,8 @@ public class TextView extends View {
         int origin=renderOffset;
         if(singleLine||ellipsize!=null&&maxLines==1||value.isEmpty()){append(value);return;}
         if(breakStrategy!=0){optimalParagraph(value,width);return;}
+        // Avoid building a glyph-cluster search tree for the common one-line case.
+        if(advance(value,0,value.length(),origin)<=width){append(value);return;}
         // Measure exponentially growing prefixes, then binary search cluster boundaries.
         ArrayList<Integer> ends=new shiraz.runtime.TextGeometry(value,paint).boundaries();
         int start=0;
@@ -580,10 +582,15 @@ public class TextView extends View {
     }
     @Override protected void onMeasure(int widthSpec,int heightSpec){
         autoSizeForBounds(widthSpec,heightSpec);
+        int measured;
+        if(MeasureSpec.getMode(widthSpec)==MeasureSpec.EXACTLY)measured=MeasureSpec.getSize(widthSpec);
+        else {
         float widest=0;int origin=0;for(String part:displayed().split("\n",-1)){widest=Math.max(widest,advance(part,0,part.length(),origin));origin+=part.length()+1;}
         int desired=dimension((long)Math.max((int)Math.ceil(widest),Math.max(dw(compoundTop),dw(compoundBottom)))+getCompoundPaddingLeft()+getCompoundPaddingRight());
         desired=Math.max(widthLimit(textMinWidth,minWidthEms),Math.min(widthLimit(textMaxWidth,maxWidthEms),desired));
-        int measured=resolveSizeAndState(Math.max(getSuggestedMinimumWidth(),desired),widthSpec,0),width=measured&MEASURED_SIZE_MASK;
+        measured=resolveSizeAndState(Math.max(getSuggestedMinimumWidth(),desired),widthSpec,0);
+        }
+        int width=measured&MEASURED_SIZE_MASK;
         ensure(available(width));int lineCount=Math.min(lines.size(),maxLines);
         int height=dimension((long)Math.max(contentHeight,Math.max(dh(leftDrawable()),dh(rightDrawable())))+getCompoundPaddingTop()+getCompoundPaddingBottom());
         if(maxHeightPixels)height=Math.min(height,textMaxHeight);if(minHeightPixels)height=Math.max(height,textMinHeight);else if(lineCount<minLines)height=dimension((long)height+(long)getLineHeight()*(minLines-lineCount));

@@ -21,6 +21,11 @@ public final class NativeBitmap {
     public static native void drawEffects(int[] destination,int width,int height,int[] source,int sourceWidth,int sourceHeight,
         int left,int top,int right,int bottom,float destLeft,float destTop,float destRight,float destBottom,boolean filter,int alpha,
         int clipLeft,int clipTop,int clipRight,int clipBottom,int tint,int mode,float[] matrix);
+    /** Replace every pixel, including transparent RGB; this is not source-over blending. */
+    public static native void clear(int[] pixels,int color);
+    public static native void outlineShadow(int[] pixels,int width,int height,int l,int t,int r,int b,
+        float sx,float sy,float tx,float ty,int left,int top,int right,int bottom,float radius,boolean oval,
+        float sigma,float offset,float opacity);
     public static native void fillRect(int[] pixels,int width,int height,double left,double top,double right,double bottom,int color,boolean antialias,int clipLeft,int clipTop,int clipRight,int clipBottom);
     public static native void applyClip(int[] destination,int width,int height,int[] rendered,int rw,int rh,int left,int top,byte[] mask,int mw,int mh,int ml,int mt);
     public static native int filterColorMatrix(int color,float[] matrix);

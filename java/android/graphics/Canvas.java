@@ -87,27 +87,11 @@ public class Canvas {
         Bitmap target=target();Rect rect=outline.shirazBounds();double spread=3.0*sigma;
         int l=Math.max(state.left,edge(x((float)(rect.left-spread)),target.width)),r=Math.min(state.right,edge(x((float)(rect.right+spread)),target.width));
         int t=Math.max(state.top,edge(y((float)(rect.top+offset-spread)),target.height)),b=Math.min(state.bottom,edge(y((float)(rect.bottom+offset+spread)),target.height));
-        double halfW=((long)rect.right-rect.left)/2.0,halfH=((long)rect.bottom-rect.top)/2.0,cx=rect.left+halfW,cy=rect.top+halfH;
+        double halfW=((long)rect.right-rect.left)/2.0,halfH=((long)rect.bottom-rect.top)/2.0;
         double radius=Math.min(Math.max(0,outline.getRadius()),Math.min(halfW,halfH));
-        boolean oval=outline.shirazIsOval();
-        for(int py=t;py<b;py++){
-          double dy=Math.abs((py+.5-state.ty)/state.sy-offset-cy),qy=dy-(halfH-radius);
-          for(int px=l;px<r;px++){
-            double dx=Math.abs((px+.5-state.tx)/state.sx-cx),distance;
-            if(oval)distance=(Math.sqrt(dx*dx/(halfW*halfW)+dy*dy/(halfH*halfH))-1)*Math.min(halfW,halfH);
-            else{
-                double qx=dx-(halfW-radius);
-                // Away from a rounded corner one hypot operand is zero.
-                // Its exact result is the other operand; avoid the library call.
-                double outside=qx<=0?Math.max(0,qy):qy<=0?qx:Math.hypot(qx,qy);
-                distance=outside+Math.min(Math.max(qx,qy),0)-radius;
-            }
-            // Smooth coverage across the edge, with a Gaussian falloff outside it.
-            double coverage=distance>=0?.5*Math.exp(-distance*distance/(2*sigma*sigma)):1-.5*Math.exp(-distance*distance/(2*sigma*sigma));
-            int alpha=(int)Math.round(255*opacity*coverage);if(alpha==0)continue;
-            int index=py*target.width+px;target.pixels[index]=over(alpha<<24,target.pixels[index]);
-          }
-        }
+        shiraz.runtime.NativeBitmap.outlineShadow(target.pixels,target.width,target.height,l,t,r,b,
+            state.sx,state.sy,state.tx,state.ty,rect.left,rect.top,rect.right,rect.bottom,
+            (float)radius,outline.shirazIsOval(),sigma,offset,opacity);
     }
     private static float finite(float value) { if (!Float.isFinite(value)) throw new IllegalArgumentException("Non-finite canvas coordinate"); return value; }
     private boolean affine() { return state.kx!=0 || state.ky!=0 || state.sx<=0 || state.sy<=0; }

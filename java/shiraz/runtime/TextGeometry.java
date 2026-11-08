@@ -3,7 +3,7 @@ package shiraz.runtime;
 
 import android.graphics.Paint;
 import java.util.ArrayList;
-import java.util.TreeSet;
+import java.util.Arrays;
 
 /** Visual geometry from the same glyph plan used by measurement and drawing. */
 public final class TextGeometry {
@@ -58,5 +58,13 @@ public final class TextGeometry {
         }
         float[] values=new float[result.size()];for(int i=0;i<values.length;i++)values[i]=result.get(i);return values;
     }
-    public ArrayList<Integer> boundaries(){TreeSet<Integer> values=new TreeSet<Integer>();values.add(0);values.add(length);for(int i=0;i<clusters.length;i+=5){values.add((int)clusters[i]);values.add((int)clusters[i+1]);}return new ArrayList<Integer>(values);}
+    public ArrayList<Integer> boundaries(){
+        // Primitive sorting avoids a boxed red-black tree for every wrapped label.
+        int[] values=new int[2+clusters.length/5*2];int used=0;
+        values[used++]=0;values[used++]=length;
+        for(int i=0;i<clusters.length;i+=5){values[used++]=(int)clusters[i];values[used++]=(int)clusters[i+1];}
+        Arrays.sort(values,0,used);ArrayList<Integer> result=new ArrayList<Integer>();
+        for(int i=0;i<used;i++)if(i==0||values[i]!=values[i-1])result.add(values[i]);
+        return result;
+    }
 }

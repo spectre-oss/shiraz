@@ -229,7 +229,7 @@ public final class Bitmap {
     }
     public int getPixel(int x, int y) { cpuRead(); return logicalColor(pixels[index(x, y)]); }
     public void setPixel(int x, int y, int color) { requireMutable(); pixels[index(x, y)] = logicalColor(color); }
-    public void eraseColor(int color) { requireLive();if(!mutable)throw new IllegalStateException("Bitmap is immutable");if(gpuDirty&&gpuThread==Thread.currentThread()&&shiraz.runtime.NativeGpu.valid(gpu)){changed();shiraz.runtime.NativeGpu.clear(gpu,logicalColor(color));}else {cpuWrite();Arrays.fill(pixels,logicalColor(color));} }
+    public void eraseColor(int color) { requireLive();if(!mutable)throw new IllegalStateException("Bitmap is immutable");if(gpuDirty&&gpuThread==Thread.currentThread()&&shiraz.runtime.NativeGpu.valid(gpu)){changed();shiraz.runtime.NativeGpu.clear(gpu,logicalColor(color));}else {cpuWrite();shiraz.runtime.NativeBitmap.clear(pixels,logicalColor(color));} }
     public void setPixels(int[] source,int offset,int stride,int x,int y,int w,int h) {
         requireMutable();if(source==null)throw new NullPointerException("source");
         if(stride<0)throw new UnsupportedOperationException("Negative row strides are not implemented");

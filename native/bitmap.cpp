@@ -308,3 +308,58 @@ extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeBitmap_applyClip(JNI
     }catch(const std::bad_alloc&){error(env,"java/lang/OutOfMemoryError","Clip scratch");}
      catch(const std::exception& issue){error(env,"java/lang/IllegalArgumentException",issue.what());}
 }
+
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeBitmap_clear(JNIEnv* env,jclass,jintArray pixels,jint color) {
+    if(!pixels){error(env,"java/lang/NullPointerException","pixels");return;}
+    const jsize count=env->GetArrayLength(pixels);
+    if(count>32*1024*1024){error(env,"java/lang/IllegalArgumentException","Bitmap clear exceeds render pixel budget");return;}
+    // A bounded row keeps the clear cheap even when ART cannot pin primitive arrays.
+    jint block[4096];std::fill(std::begin(block),std::end(block),color);
+    for(jsize at=0;at<count;at+=4096){
+        env->SetIntArrayRegion(pixels,at,std::min<jsize>(4096,count-at),block);
+        if(env->ExceptionCheck())return;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeBitmap_outlineShadow(JNIEnv* env,jclass,
+    jintArray pixels,jint width,jint height,jint l,jint t,jint r,jint b,
+    jfloat sx,jfloat sy,jfloat tx,jfloat ty,jint left,jint top,jint right,jint bottom,jfloat radius,jboolean oval,
+    jfloat sigma,jfloat offset,jfloat opacity) {
+    if(!pixels){error(env,"java/lang/NullPointerException","pixels");return;}
+    if(width<=0||height<=0||width>8192||height>8192||int64_t(width)*height>32*1024*1024||
+       env->GetArrayLength(pixels)!=int64_t(width)*height||l<0||r<0||t<0||b<0||l>width||r>width||t>height||b>height||
+       right<=left||bottom<=top||!std::isfinite(sx)||!std::isfinite(sy)||sx<=0||sy<=0||
+       !std::isfinite(tx)||!std::isfinite(ty)||!std::isfinite(radius)||radius<0||
+       !std::isfinite(sigma)||sigma<=0||sigma>8192||2*sigma*sigma==0||!std::isfinite(offset)||!std::isfinite(opacity)||opacity<0||opacity>1) {
+        error(env,"java/lang/IllegalArgumentException","Invalid outline shadow geometry");return;
+    }
+    if(r<=l||b<=t||opacity==0)return;
+    try {
+        double halfW=(int64_t(right)-left)/2.0,halfH=(int64_t(bottom)-top)/2.0;
+        double cx=left+halfW,cy=top+halfH;
+        std::vector<jint> row(r-l);
+        for(int py=t;py<b;++py) {
+            env->GetIntArrayRegion(pixels,py*width+l,r-l,row.data());if(env->ExceptionCheck())return;
+            double dy=std::abs((py+.5-ty)/sy-offset-cy),qy=dy-(halfH-radius);
+            for(int px=l;px<r;++px) {
+                double dx=std::abs((px+.5-tx)/sx-cx),distance;
+                if(oval)distance=(std::sqrt(dx*dx/(halfW*halfW)+dy*dy/(halfH*halfH))-1)*std::min(halfW,halfH);
+                else {
+                    double qx=dx-(halfW-radius);
+                    double outside=qx<=0?std::max(0.0,qy):qy<=0?qx:std::hypot(qx,qy);
+                    distance=outside+std::min(std::max(qx,qy),0.0)-radius;
+                }
+                double coverage=distance>=0?.5*std::exp(-distance*distance/(2*sigma*sigma)):1-.5*std::exp(-distance*distance/(2*sigma*sigma));
+                unsigned alpha=static_cast<unsigned>(std::floor(255*opacity*coverage+.5));if(alpha==0)continue;
+                uint32_t dst=static_cast<uint32_t>(row[px-l]);unsigned da=dst>>24;
+                if(alpha==255||da==0){row[px-l]=static_cast<jint>(alpha<<24);continue;}
+                unsigned remainder=(da*(255-alpha)+127)/255,outAlpha=alpha+remainder;
+                uint32_t color=outAlpha<<24;
+                for(unsigned shift=0;shift<24;shift+=8)
+                    color|=(( ((dst>>shift)&255)*remainder+outAlpha/2)/outAlpha)<<shift;
+                row[px-l]=static_cast<jint>(color);
+            }
+            env->SetIntArrayRegion(pixels,py*width+l,r-l,row.data());if(env->ExceptionCheck())return;
+        }
+    }catch(const std::bad_alloc&){error(env,"java/lang/OutOfMemoryError","Outline shadow row");}
+}
