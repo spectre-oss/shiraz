@@ -40,6 +40,60 @@ __attribute__((constructor)) static void setup(void) {
       constructor_destructors == 1 && !pthread_key_delete(constructor_key))
     initialized = 17;
 }
+// Separate ART native entries must share per-thread state until native teardown.
+static _Thread_local int persistence_word = 619;
+static pthread_key_t persistence_key;
+static pthread_once_t persistence_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t persistence_gate = PTHREAD_MUTEX_INITIALIZER;
+static int persistence_keys, persistence_cxx, persistence_errors;
+struct Persistence { int value, cxx_done; int *word; };
+static void persistence_cxx_destructor(void *opaque) {
+  struct Persistence *value = opaque;
+  value->cxx_done = 1;
+  pthread_mutex_lock(&persistence_gate);
+  if (value->word != &persistence_word || persistence_word != 731) ++persistence_errors;
+  ++persistence_cxx;
+  pthread_mutex_unlock(&persistence_gate);
+}
+static void persistence_key_destructor(void *opaque) {
+  struct Persistence *value = opaque;
+  pthread_mutex_lock(&persistence_gate);
+  if (!value->cxx_done || value->value != 731) ++persistence_errors;
+  ++persistence_keys;
+  pthread_mutex_unlock(&persistence_gate);
+  free(value);
+}
+static void persistence_initialize(void) {
+  if (pthread_key_create(&persistence_key, persistence_key_destructor))
+    persistence_errors = 1;
+}
+JNIEXPORT jlong Java_GuestJniFixture_tlsBegin(JNIEnv *env, jclass klass) {
+  (void)env; (void)klass;
+  if (pthread_once(&persistence_once, persistence_initialize) ||
+      pthread_getspecific(persistence_key)) return 0;
+  struct Persistence *value = malloc(sizeof(*value));
+  if (!value) return 0;
+  if (persistence_word != 619) { free(value); return 0; }
+  persistence_word = 731;
+  value->value = 731; value->cxx_done = 0; value->word = &persistence_word;
+  if (pthread_setspecific(persistence_key, value)) { free(value); return 0; }
+  if (__cxa_thread_atexit_impl(persistence_cxx_destructor, value, 0)) return 0;
+  return (jlong)(uintptr_t)value;
+}
+JNIEXPORT jint Java_GuestJniFixture_tlsCheck(JNIEnv *env, jclass klass, jlong address) {
+  (void)env; (void)klass;
+  struct Persistence *value = pthread_getspecific(persistence_key);
+  return value && (uintptr_t)value == (uintptr_t)address &&
+         value->value == 731 && !value->cxx_done &&
+         value->word == &persistence_word && persistence_word == 731 ? 73 : -1;
+}
+JNIEXPORT jint Java_GuestJniFixture_tlsSummary(JNIEnv *env, jclass klass) {
+  (void)env; (void)klass;
+  pthread_mutex_lock(&persistence_gate);
+  int result = persistence_errors ? -1 : persistence_keys * 100 + persistence_cxx;
+  pthread_mutex_unlock(&persistence_gate);
+  return result;
+}
 static const char signature[] = "(IDBFSDIDIDIDIDIDIDIDIDID)D";
 static jlong sum(jint a, jint b, jint c, jint d, jint e, jint f, jint g, jint h,
                  jint i, jint j, jint k, jint l) {

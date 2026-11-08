@@ -5,6 +5,10 @@ public class GuestJniFixture {
         System.load(System.getProperty("guest.host.fixture"));
     }
     static native int hostCheck();
+    static native long tlsBegin();
+    static native int tlsCheck(long address);
+    static native int tlsSummary();
+    static native int hostLateTls();
     static native byte narrowByte();
     static native short narrowShort();
     static native char narrowChar();
@@ -56,6 +60,30 @@ public class GuestJniFixture {
         check(fileRoundtrip(System.getProperty("guest.io.file")) == 73, "file adapters under real ART");
         check(mappedMemory() == 79, "owned memory mappings under real ART");
         check(createdThreads() == 83, "guest-created threads attach/detach and reattach");
+        final Throwable[] tlsFailure = new Throwable[1];
+        Thread tlsThread = new Thread(new Runnable() { public void run() {
+            try {
+                long address = tlsBegin();
+                check(address != 0, "TLS state created");
+                for (int i = 0; i < 8; ++i)
+                    check(tlsCheck(address) == 73 && tlsSummary() == 0,
+                          "TLS persists across separate JNI entries without early destruction");
+            } catch (Throwable error) { tlsFailure[0] = error; }
+        }});
+        tlsThread.start(); tlsThread.join();
+        if (tlsFailure[0] != null) throw new AssertionError(tlsFailure[0]);
+        // Java join observes ART termination before native TSD necessarily finishes.
+        long tlsDeadline = System.nanoTime() + 2000000000L;
+        while (tlsSummary() == 0 && System.nanoTime() < tlsDeadline) Thread.sleep(1);
+        check(tlsSummary() == 101, "TLS destructors complete on Java Thread exit");
+        System.out.println("M5_ART_TLS_PERSISTENCE_PASS entries=8 emutls=1 key_dtors=1 cxx_dtors=1");
+        if (Boolean.getBoolean("guest.test.late.tls")) {
+            check(hostLateTls() == 73, "native final-round callback enters real JNI");
+            int summary = tlsSummary();
+            System.out.println("M5_ART_TLS_LATE_ENTRY_OBSERVED summary=" + summary);
+            check(summary == 202, "final-round JNI TLS destructors complete before join");
+            System.out.println("M5_ART_TLS_LATE_ENTRY_PASS native_rounds=4 key_dtors=1 cxx_dtors=1");
+        }
         android.graphics.Bitmap pixels = new android.graphics.Bitmap();
         check(bitmap(pixels) == 89 && pixels.preparations == 1 &&
               pixels.pixels[0] == 0x80ff4000 && pixels.pixels[1] == 0x8000ff00,

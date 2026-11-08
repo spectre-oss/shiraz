@@ -49,6 +49,11 @@ def main():
         action="store_true",
         help="stage strict native closure and manifest without signing or execution",
     )
+    parser.add_argument(
+        "--late-tls",
+        action="store_true",
+        help="also require cleanup after first real JNI entry in final native TSD round",
+    )
     args = parser.parse_args()
     WORK.mkdir(parents=True, exist_ok=True)
     env = environment(WORK)
@@ -109,6 +114,7 @@ def main():
         archive.writestr(entry, dex.read_bytes())
     modes = ("adhoc", "hardened") if args.mode == "both" else (args.mode,)
     for mode in modes:
+        run_name = mode + (".late-tls" if args.late_tls else "")
         io_directory = Path(tempfile.mkdtemp(prefix=f"native-io-{mode}-", dir=WORK))
         io_file = io_directory / "roundtrip.bin"
         vm = HOST / "bin/dalvikvm"
@@ -192,6 +198,7 @@ def main():
             "-Xforce-nb-testing",
             "-Djava.library.path=" + str(runtime_host / "lib64"),
             "-Dguest.fixture=" + str(ROOT / "build/macos/m5/jni-fixture.so"),
+            "-Dguest.test.late.tls=" + str(args.late_tls).lower(),
             "-Dguest.host.fixture=" + str(host_fixture),
             "-Dguest.io.file=" + str(io_file),
             "-cp",
@@ -209,8 +216,8 @@ def main():
             timeout=60,
             check=False,
         )
-        (WORK / (mode + ".log")).write_text(result.stdout + result.stderr)
-        (WORK / (mode + ".command.json")).write_text(
+        (WORK / (run_name + ".log")).write_text(result.stdout + result.stderr)
+        (WORK / (run_name + ".command.json")).write_text(
             json.dumps(list(map(str, command)), indent=2) + "\n"
         )
         inventory = None
@@ -220,7 +227,7 @@ def main():
                 inventory = validate_native_inventory(
                     result.stdout, closure, [vm, bridge, host_fixture]
                 )
-                (WORK / (mode + ".native-closure.log")).write_text(
+                (WORK / (run_name + ".native-closure.log")).write_text(
                     inventory["raw_report"]
                 )
             except (OSError, ValueError, KeyError, TypeError) as error:
@@ -232,6 +239,8 @@ def main():
             write_manifest(closure)
         evidence = {
             "mode": mode,
+            "late_tls_requested": args.late_tls,
+            "late_tls_verified": "M5_ART_TLS_LATE_ENTRY_PASS " in result.stdout,
             "hardened_verified": False,
             "execution_verified": False,
             "native_image_inventory": inventory,
@@ -256,7 +265,7 @@ def main():
                 )
             },
         }
-        (WORK / (mode + ".result.json")).write_text(
+        (WORK / (run_name + ".result.json")).write_text(
             json.dumps(evidence, indent=2) + "\n"
         )
         print(result.stdout, end="")
@@ -268,13 +277,20 @@ def main():
             or "SHIRAZ_GUEST_ELF_LOADED constructors=1" not in result.stderr
         ):
             raise SystemExit(
-                f"{mode} guest ART JNI failed (exit {result.returncode}); see {WORK / (mode + '.log')}"
+                f"{mode} guest ART JNI failed (exit {result.returncode}); see {WORK / (run_name + '.log')}"
             )
         if (
             "M5_ART_BITMAP_PASS shadow_env=1 rgba=1 nested=1 writeback=1"
             not in result.stdout
         ):
             raise SystemExit("guest libjnigraphics JNI/pixel gate failed")
+        if (
+            "M5_ART_TLS_PERSISTENCE_PASS entries=8 emutls=1 key_dtors=1 cxx_dtors=1"
+            not in result.stdout
+        ):
+            raise SystemExit("guest TLS persistence/termination gate failed")
+        if args.late_tls and "M5_ART_TLS_LATE_ENTRY_PASS " not in result.stdout:
+            raise SystemExit("guest final-native-round JNI TLS cleanup gate failed")
         rewritten = re.search(
             r"SHIRAZ_GUEST_TPIDR_REWRITTEN sites=(\d+)", result.stderr
         )
@@ -296,7 +312,7 @@ def main():
             )
             write_manifest(closure)
         evidence.update(execution_verified=True, hardened_verified=mode == "hardened")
-        (WORK / (mode + ".result.json")).write_text(
+        (WORK / (run_name + ".result.json")).write_text(
             json.dumps(evidence, indent=2) + "\n"
         )
         suffix = (

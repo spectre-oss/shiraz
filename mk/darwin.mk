@@ -707,8 +707,8 @@ $(MACOS_OUT)/m5/jni-fixture.o: tests/darwin/guest/jni_fixture.c $(MACOS_GUEST_AR
 	mkdir -p $(dir $@)
 	xcrun clang --target=aarch64-linux-android24 -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -funwind-tables -fstack-protector-all -O2 -Wall -Wextra -Werror -c $< -o $@
 .PHONY: macos-guest-jni-fixture macos-guest-jni-check
-macos-guest-jni-fixture: macos-guest-toolchain $(MACOS_OUT)/m5/jni-fixture.o $(MACOS_OUT)/m5/deps/libc-link.so $(MACOS_OUT)/m5/deps/libjnigraphics-link.so
-	.deps/guest-toolchain/bin/ld.lld -shared --hash-style=both --eh-frame-hdr --no-undefined -z now -z max-page-size=16384 -soname libshiraz_jni_fixture.so $(MACOS_OUT)/m5/jni-fixture.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -l:libjnigraphics-link.so -o $(MACOS_OUT)/m5/jni-fixture.so
+macos-guest-jni-fixture: macos-guest-toolchain macos-guest-emutls-source $(MACOS_OUT)/m5/deps/emutls.o $(MACOS_OUT)/m5/jni-fixture.o $(MACOS_OUT)/m5/deps/libc-link.so $(MACOS_OUT)/m5/deps/libjnigraphics-link.so
+	.deps/guest-toolchain/bin/ld.lld -shared --hash-style=both --eh-frame-hdr --no-undefined -z now -z max-page-size=16384 -soname libshiraz_jni_fixture.so $(MACOS_OUT)/m5/jni-fixture.o $(MACOS_GUEST_DEP_DIR)/emutls.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -l:libjnigraphics-link.so -o $(MACOS_OUT)/m5/jni-fixture.so
 $(MACOS_OUT)/m5/native-closure-inventory.o: tests/darwin/guest/native_closure_inventory.c $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h
 	mkdir -p $(dir $@)
 	xcrun clang -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -std=c11 -O2 -Wall -Wextra -Werror -c $< -o $@
@@ -717,6 +717,12 @@ $(MACOS_OUT)/m5/host-fixture.so: tests/darwin/guest/host_fixture.c $(MACOS_GUEST
 	xcrun clang -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -dynamiclib -O2 -Wall -Wextra -Werror $< $(MACOS_OUT)/m5/native-closure-inventory.o -o $@
 macos-guest-jni-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
 	uv run --no-project python scripts/macos_guest_jni_smoke.py
+
+# Dedicated known-failing lifecycle regression; ordinary JNI success does not
+# satisfy this final-native-TSD-round cleanup gate.
+.PHONY: macos-guest-jni-late-tls-check
+macos-guest-jni-late-tls-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_jni_smoke.py --late-tls
 
 .PHONY: macos-guest-jni-adhoc-check
 macos-guest-jni-adhoc-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so

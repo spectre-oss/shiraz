@@ -136,7 +136,8 @@ def main():
     source_hash = digest(source)
     linker = ROOT / ".deps/guest-toolchain/bin/ld.lld"
     providers = [ROOT / ("build/macos/m5/deps/" + name) for name in ("libc-link.so", "libjnigraphics-link.so")]
-    dependency_hashes = {str(p): digest(p) for p in [linker, *providers]}
+    emutls = ROOT / "build/macos/m5/deps/emutls.o"
+    dependency_hashes = {str(p): digest(p) for p in [linker, emutls, *providers]}
     runs = []
     for name, signature in {"positive": None, **CASES}.items():
         directory = work / name
@@ -151,7 +152,7 @@ def main():
         subprocess.run([*command, "-c", str(source), "-o", str(obj)], check=True, env=env, timeout=60)
         subprocess.run([str(linker), "-shared", "--hash-style=both", "--eh-frame-hdr", "--no-undefined",
                         "-z", "now", "-z", "max-page-size=16384", "-soname", "libshiraz_jni_fixture.so",
-                        str(obj), *map(str, providers), "-o", str(elf)], check=True, env=env, timeout=60)
+                        str(obj), str(emutls), *map(str, providers), "-o", str(elf)], check=True, env=env, timeout=60)
         command = ["-Dguest.fixture=" + str(elf) if item.startswith("-Dguest.fixture=")
                    else "-Dguest.io.file=" + str(directory / "roundtrip.bin")
                    if item.startswith("-Dguest.io.file=") else item for item in original_command]
