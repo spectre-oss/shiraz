@@ -30,6 +30,28 @@ def self_binding():
     }
 
 
+def window_binding(entry_offset=0x200, cold_offset=0x800):
+    binding = self_binding()
+    record = binding["native_target"]
+    code = bytearray(256)
+    code[:64] = bytes.fromhex(record["prefix_hex"])
+    delta = cold_offset - (entry_offset + 72)
+    assert delta % 4 == 0 and -(1 << 27) <= delta < (1 << 27)
+    struct.pack_into("<I", code, 72, 0x94000000 | ((delta // 4) & ((1 << 26) - 1)))
+    record.update({
+        "profile": 2, "verification": "resolved-system-image-code-windows",
+        "entry_offset": entry_offset, "cold_call_offset": 72,
+        "complete_control_flow_verified": False,
+        "code_windows": [
+            {"role": "entry", "symbol": "pthread_self", "entry_offset": entry_offset,
+             "byte_count": 256, "prefix_hex": code.hex()},
+            {"role": "cold-error", "symbol": "pthread_self.cold.1", "entry_offset": cold_offset,
+             "byte_count": 128, "prefix_hex": "89abcdef" * 32},
+        ],
+    })
+    return binding
+
+
 def self_fixture():
     fixture = BindingElfFixture()
     fixture.data[0x1301:0x130E] = b"pthread_self\0"
@@ -52,6 +74,121 @@ def self_fixture():
 
 
 class NativeTargetTests(unittest.TestCase):
+    def test_code_windows_validate_forward_and_backward_edges_without_effect_grants(self):
+        for binding in (window_binding(), window_binding(0x800, 0x200)):
+            original = copy.deepcopy(binding)
+            result = validate_native_target(binding)
+            self.assertEqual(binding, original)
+            self.assertIsNot(result["code_windows"], binding["native_target"]["code_windows"])
+            self.assertIs(result["execution_claim"], False)
+            self.assertIs(result["semantic_effects_verified"], False)
+            self.assertIs(result["complete_control_flow_verified"], False)
+            for window in result["code_windows"]:
+                self.assertEqual(window["mapped_window_sha256"], hashlib.sha256(
+                    bytes.fromhex(window["prefix_hex"])).hexdigest())
+            binding["native_target"] = result
+            self.assertEqual(validate_native_target(binding), result)
+            result["code_windows"][0]["mapped_window_sha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "digest"):
+                validate_native_target(binding)
+
+    def test_code_window_schema_sizes_offsets_roles_and_claims_are_strict(self):
+        for field, value in (
+            ("profile", 3), ("cold_call_offset", True), ("cold_call_offset", 68),
+            ("complete_control_flow_verified", True), ("complete_control_flow_verified", 0),
+            ("semantic_effects_verified", True), ("execution_claim", True),
+            ("verification", "resolved-system-image-prefix"),
+            ("code_windows", None), ("code_windows", []), ("code_windows", {}),
+        ):
+            binding = window_binding()
+            binding["native_target"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                validate_native_target(binding)
+        for index in (0, 1):
+            for field, value in (
+                ("role", "other"), ("symbol", "other"), ("byte_count", True),
+                ("byte_count", 64), ("byte_count", 1 << 64),
+                ("entry_offset", True), ("entry_offset", -4), ("entry_offset", 3),
+                ("entry_offset", (1 << 64) - 4),
+                ("prefix_hex", "a" * 126), ("prefix_hex", "G" * 512),
+                ("prefix_hex", None), ("mapped_window_sha256", "0" * 64),
+                ("extra", False),
+            ):
+                binding = window_binding()
+                binding["native_target"]["code_windows"][index][field] = value
+                with self.subTest(index=index, field=field, value=value), self.assertRaises(ValueError):
+                    validate_native_target(binding)
+            binding = window_binding()
+            binding["native_target"]["code_windows"][index] = None
+            with self.assertRaisesRegex(ValueError, "schema"):
+                validate_native_target(binding)
+        for windows in (
+            [window_binding()["native_target"]["code_windows"][0]] * 2,
+            window_binding()["native_target"]["code_windows"][::-1],
+            window_binding()["native_target"]["code_windows"] * 2,
+        ):
+            binding = window_binding()
+            binding["native_target"]["code_windows"] = windows
+            with self.assertRaises(ValueError):
+                validate_native_target(binding)
+
+    def test_code_window_prefix_overlap_and_branch_targets_are_independently_checked(self):
+        for mutate in (
+            lambda r: r["code_windows"][0].update(entry_offset=0x204),
+            lambda r: r["code_windows"][0].update(prefix_hex="00" + r["code_windows"][0]["prefix_hex"][2:]),
+            lambda r: r["code_windows"][1].update(entry_offset=0x280),
+            lambda r: r["code_windows"][1].update(entry_offset=0x804),
+            lambda r: r["code_windows"][0].update(prefix_hex=(
+                r["code_windows"][0]["prefix_hex"][:144] + "00000014" +
+                r["code_windows"][0]["prefix_hex"][152:])),
+        ):
+            binding = window_binding()
+            mutate(binding["native_target"])
+            with self.assertRaises(ValueError):
+                validate_native_target(binding)
+        # These encoded branches must not wrap uintptr_t to reach an otherwise
+        # valid bounded cold window at the opposite end of the address space.
+        for entry_offset, cold_offset, instruction in (
+            (0, (1 << 64) - 128, 0x97FFFFCE),
+            ((1 << 64) - 256, 0, 0x9400002E),
+        ):
+            binding = window_binding()
+            record = binding["native_target"]
+            record["entry_offset"] = entry_offset
+            record["code_windows"][0]["entry_offset"] = entry_offset
+            record["code_windows"][1]["entry_offset"] = cold_offset
+            code = bytearray.fromhex(record["code_windows"][0]["prefix_hex"])
+            struct.pack_into("<I", code, 72, instruction)
+            record["code_windows"][0]["prefix_hex"] = code.hex()
+            with self.assertRaisesRegex(ValueError, "direct edge"):
+                validate_native_target(binding)
+
+    def test_code_windows_remain_identity_only_with_trusted_bridge_and_valid_import(self):
+        fixture = self_fixture()
+        with tempfile.TemporaryDirectory() as temporary:
+            bridge = Path(temporary) / "bridge.so"
+            bridge.write_bytes(b"synthetic first-party window identity only")
+            proof = fixture.proof()
+            proof["modules"][0]["bindings"] = [window_binding()]
+            proof["native_bridge"] = {
+                "path": str(bridge.resolve()),
+                "sha256": hashlib.sha256(bridge.read_bytes()).hexdigest(),
+                "verification": "observed-before-and-after-process",
+            }
+            result = fixture.metadata(proof).resolve(0x1500)
+            self.assertEqual(result["reason"], "native-target-identity-untrusted")
+            result = fixture.metadata(proof, bridge).resolve(0x1500)
+            self.assertEqual(result["reason"], "native-target-identity-only-no-effect-contract")
+            self.assertIsNone(result["target"])
+            self.assertNotIn("effect", result)
+            self.assertFalse(result["native_target"]["semantic_effects_verified"])
+            self.assertFalse(result["native_target"]["complete_control_flow_verified"])
+            for field in ("execution_claim", "semantic_effects_verified", "complete_control_flow_verified"):
+                changed = copy.deepcopy(proof)
+                changed["modules"][0]["bindings"][0]["native_target"][field] = True
+                with self.subTest(field=field), self.assertRaises(ValueError):
+                    fixture.metadata(changed, bridge)
+
     def test_identity_digest_is_derived_without_an_effect_or_execution_grant(self):
         binding = self_binding()
         result = validate_native_target(binding)

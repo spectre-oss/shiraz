@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <tuple>
 #include <unistd.h>
+#include <vector>
 
 namespace shiraz::guest {
 namespace {
@@ -58,6 +59,38 @@ bool mapped(const Elf &elf, uint64_t address, uint64_t width) {
         width <= segment.memory_size - (address - segment.address)) return true;
   return false;
 }
+struct NativeCodeSegment { uint64_t start, size; };
+bool native_code_segment(const std::vector<NativeCodeSegment> &segments,
+                         uintptr_t address, size_t bytes) {
+  if (!bytes || bytes > UINTPTR_MAX - address) return false;
+  for (const auto &segment : segments)
+    if (address >= segment.start && address - segment.start <= segment.size &&
+        bytes <= segment.size - (address - segment.start)) return true;
+  return false;
+}
+bool native_code_mapping(uintptr_t address, size_t bytes) {
+  if (!bytes || bytes > UINTPTR_MAX - address) return false;
+  natural_t depth = 0;
+  for (unsigned attempt = 0; attempt < 32; ++attempt) {
+    mach_vm_address_t region_start = address;
+    mach_vm_size_t region_size = 0;
+    vm_region_submap_info_data_64_t region{};
+    mach_msg_type_number_t region_count = VM_REGION_SUBMAP_INFO_V0_COUNT_64;
+    const auto status = mach_vm_region_recurse(mach_task_self(), &region_start, &region_size,
+                                               &depth,
+                                               reinterpret_cast<vm_region_recurse_info_t>(&region),
+                                               &region_count);
+    if (status != KERN_SUCCESS || region_count != VM_REGION_SUBMAP_INFO_V0_COUNT_64 ||
+        depth > 32 || address < region_start || address - region_start > region_size ||
+        bytes > region_size - (address - region_start)) return false;
+    // Shared-cache enclosing submaps may report READ alone. Inspect only the
+    // leaf covering the entire requested span; never advance to another map.
+    if (region.is_submap) { ++depth; continue; }
+    return (region.protection & (VM_PROT_READ | VM_PROT_EXECUTE)) ==
+               (VM_PROT_READ | VM_PROT_EXECUTE) && !(region.protection & VM_PROT_WRITE);
+  }
+  return false;
+}
 void native_self_identity(Json &json, const Binding &binding, uintptr_t slot) {
   // This identifies a mapped prefix, not the function's complete control flow
   // or effects. In particular, pthread_self has native PAC failure paths.
@@ -89,7 +122,8 @@ void native_self_identity(Json &json, const Binding &binding, uintptr_t slot) {
   constexpr size_t prefix_size = 64;
   const auto *commands = reinterpret_cast<const uint8_t *>(header + 1);
   size_t offset = 0;
-  bool executable = false, have_uuid = false;
+  bool have_uuid = false;
+  std::vector<NativeCodeSegment> code_segments;
   uint8_t uuid[16]{};
   for (uint32_t index = 0; index < header->ncmds; ++index) {
     if (offset > header->sizeofcmds || sizeof(load_command) > header->sizeofcmds - offset)
@@ -118,49 +152,63 @@ void native_self_identity(Json &json, const Binding &binding, uintptr_t slot) {
         if (segment.vmaddr < magnitude) throw ElfError("native identity segment slide underflow");
         start = segment.vmaddr - magnitude;
       }
-      if (entry >= start && entry - start <= segment.vmsize &&
-          prefix_size <= segment.vmsize - (entry - start) &&
-          (segment.initprot & (VM_PROT_READ | VM_PROT_EXECUTE)) ==
+      if ((segment.initprot & (VM_PROT_READ | VM_PROT_EXECUTE)) ==
               (VM_PROT_READ | VM_PROT_EXECUTE) && !(segment.initprot & VM_PROT_WRITE))
-        executable = true;
+        code_segments.push_back({start, segment.vmsize});
     }
     offset += command.cmdsize;
   }
   const uintptr_t base = reinterpret_cast<uintptr_t>(header);
-  if (offset != header->sizeofcmds || !have_uuid || !executable || entry < base || (entry & 3))
+  if (offset != header->sizeofcmds || !have_uuid || entry < base || (entry & 3) ||
+      !native_code_segment(code_segments, entry, prefix_size))
     throw ElfError("native identity requires owned executable prefix and UUID");
   // Segment initprot is only a declaration. Check the current mapping before
   // reading the prefix; this is still a snapshot, not a future-protection or
   // complete native-body guarantee. The loaded system Mach header is trusted.
-  natural_t depth = 0;
-  bool live_executable = false;
-  for (unsigned attempt = 0; attempt < 32; ++attempt) {
-    mach_vm_address_t region_start = entry;
-    mach_vm_size_t region_size = 0;
-    vm_region_submap_info_data_64_t region{};
-    // Request the stable v0 layout: only protection and is_submap are needed.
-    mach_msg_type_number_t region_count = VM_REGION_SUBMAP_INFO_V0_COUNT_64;
-    auto status = mach_vm_region_recurse(mach_task_self(), &region_start, &region_size,
-                                         &depth,
-                                         reinterpret_cast<vm_region_recurse_info_t>(&region),
-                                         &region_count);
-    if (status != KERN_SUCCESS || region_count != VM_REGION_SUBMAP_INFO_V0_COUNT_64 ||
-        depth > 32 || entry < region_start || entry - region_start > region_size ||
-        prefix_size > region_size - (entry - region_start))
-      throw ElfError("native identity VM region bounds/query failure");
-    // A shared-cache enclosing submap may report READ alone. Descend to the
-    // leaf containing this exact entry, never to the next region in the map.
-    if (region.is_submap) {
-      ++depth;
-      continue;
-    }
-    live_executable = (region.protection & (VM_PROT_READ | VM_PROT_EXECUTE)) ==
-                          (VM_PROT_READ | VM_PROT_EXECUTE) &&
-                      !(region.protection & VM_PROT_WRITE);
-    break;
-  }
-  if (!live_executable)
+  if (!native_code_mapping(entry, prefix_size))
     throw ElfError("native identity prefix is not currently readable executable memory");
+  uint8_t prefix[prefix_size];
+  std::memcpy(prefix, reinterpret_cast<const void *>(entry), prefix_size);
+  // Optional, bounded identity windows only. They are neither symbol extents
+  // nor complete CFG/effect certificates. Unsupported layouts keep profile1.
+  constexpr size_t entry_size = 256, cold_size = 128, call_offset = 72;
+  uint8_t entry_window[entry_size]{}, cold_window[cold_size]{};
+  uintptr_t cold = 0;
+  bool extended = false;
+  if (native_code_segment(code_segments, entry, entry_size) &&
+      native_code_mapping(entry, entry_size)) {
+    std::memcpy(entry_window, reinterpret_cast<const void *>(entry), entry_size);
+    uint32_t word;
+    std::memcpy(&word, entry_window + call_offset, sizeof(word));
+    if (!std::memcmp(prefix, entry_window, prefix_size) && (word & 0xfc000000u) == 0x94000000u) {
+      const int64_t immediate = int64_t(word & 0x03ffffffu);
+      const int64_t delta = (immediate & (int64_t(1) << 25)
+                               ? immediate - (int64_t(1) << 26) : immediate) * 4;
+      const uintptr_t pc = entry + call_offset; // entry_size was checked above.
+      bool target_valid = false;
+      if (delta >= 0 && uint64_t(delta) <= UINTPTR_MAX - pc) {
+        cold = pc + uintptr_t(delta);
+        target_valid = true;
+      } else if (delta < 0 && uint64_t(-delta) <= pc) {
+        cold = pc - uintptr_t(-delta);
+        target_valid = true;
+      }
+      Dl_info cold_info{};
+      if (target_valid && cold >= base && !(cold & 3) &&
+          native_code_segment(code_segments, cold, cold_size) &&
+          // Both spans have checked ends; do not admit overlapping windows.
+          (cold >= entry + entry_size || cold + cold_size <= entry) &&
+          dladdr(reinterpret_cast<const void *>(cold), &cold_info) &&
+          cold_info.dli_fname && cold_info.dli_sname && cold_info.dli_fbase == info.dli_fbase &&
+          cold_info.dli_saddr == reinterpret_cast<const void *>(cold) &&
+          !std::strcmp(cold_info.dli_fname, info.dli_fname) &&
+          !std::strcmp(cold_info.dli_sname, "pthread_self.cold.1") &&
+          native_code_mapping(cold, cold_size)) {
+        std::memcpy(cold_window, reinterpret_cast<const void *>(cold), cold_size);
+        extended = true;
+      }
+    }
+  }
   auto hex = [](const uint8_t *bytes, size_t size) {
     std::string result;
     for (size_t index = 0; index < size; ++index) {
@@ -170,11 +218,28 @@ void native_self_identity(Json &json, const Binding &binding, uintptr_t slot) {
     }
     return result;
   };
-  json.add(",\"native_target\":{\"profile\":1,\"verification\":\"resolved-system-image-prefix\",\"image\":");
+  json.add(",\"native_target\":{\"profile\":" + std::to_string(extended ? 2 : 1) + ",\"verification\":");
+  json.string(extended ? "resolved-system-image-code-windows" : "resolved-system-image-prefix");
+  json.add(",\"image\":");
   json.string(info.dli_fname);
   json.add(",\"image_uuid\":"); json.string(hex(uuid, sizeof(uuid)));
   json.add(",\"symbol\":\"pthread_self\",\"entry_offset\":" + std::to_string(entry - base));
-  json.add(",\"prefix_hex\":"); json.string(hex(reinterpret_cast<const uint8_t *>(entry), prefix_size));
+  json.add(",\"prefix_hex\":"); json.string(hex(prefix, prefix_size));
+  if (extended) {
+    json.add(",\"cold_call_offset\":72,\"complete_control_flow_verified\":false,\"code_windows\":[");
+    auto window = [&](const char *role, const char *symbol, uintptr_t address,
+                      const uint8_t *bytes, size_t size) {
+      json.add("{\"role\":"); json.string(role);
+      json.add(",\"symbol\":"); json.string(symbol);
+      json.add(",\"entry_offset\":" + std::to_string(address - base));
+      json.add(",\"byte_count\":" + std::to_string(size) + ",\"prefix_hex\":");
+      json.string(hex(bytes, size)); json.add("}");
+    };
+    window("entry", "pthread_self", entry, entry_window, entry_size);
+    json.add(",");
+    window("cold-error", "pthread_self.cold.1", cold, cold_window, cold_size);
+    json.add("]");
+  }
   json.add(",\"execution_claim\":false,\"semantic_effects_verified\":false}");
 }
 }
