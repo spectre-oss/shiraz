@@ -20,13 +20,14 @@ public final class NetworkRuntimeMain {
         "tls_verified", "tls_untrusted", "tls_hostname", "tls_handshake",
              "tls_engine_verified", "tls_engine_untrusted", "tls_engine_hostname",
              "local_stream", "local_timeout", "local_rebind", "local_close_read", "local_close_accept",
-             "ipv6_tcp", "ipv6_udp", "ipv6_http", "ipv6_tls", "tls_stream_clean", "tls_stream_abrupt", "tls_stream_timeout", "android_trust_chain", "network_identity", "network_dns", "network_socket", "network_http", "network_bind", "network_unknown", "network_https", "network_cleartext_policy"};
+             "nio_tcp", "nio_udp", "nio_selector", "ipv6_tcp", "ipv6_udp", "ipv6_http", "ipv6_tls", "tls_stream_clean", "tls_stream_abrupt", "tls_stream_timeout", "android_trust_chain", "network_identity", "network_dns", "network_socket", "network_http", "network_bind", "network_unknown", "network_https", "network_cleartext_policy"};
     int failed = 0;
     for (String name : cases) {
       String id = "network." + name;
       try {
         String detail;
-        if (name.startsWith("ipv6_")) detail=Ipv6Checks.run(id,android.net.ConnectivityManager.shirazForHost(),asset -> new FileInputStream(new File(args[0],asset)));
+        if (name.startsWith("nio_")) detail=NioNetworkChecks.run(id);
+        else if (name.startsWith("ipv6_")) detail=Ipv6Checks.run(id,android.net.ConnectivityManager.shirazForHost(),asset -> new FileInputStream(new File(args[0],asset)));
         else if (name.startsWith("tls_stream_")) detail=TlsStreamChecks.run(id,asset -> new FileInputStream(new File(args[0],asset)));
         else if (name.equals("android_trust_chain")) detail=TrustManagerChecks.run(asset -> new FileInputStream(new File(args[0],asset)));
         else if (name.equals("network_cleartext_policy")) detail = NetworkApiChecks.runPolicy(true);

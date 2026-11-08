@@ -168,7 +168,10 @@ support for every Android networking API. IPv6 loopback probes exercise TCP, UDP
 HTTP and verified HTTPS/TLS with compressed and expanded IP identities. IP SANs
 are compared as numeric address bytes without DNS. Darwin TLS descriptors use
 `SO_NOSIGPIPE`, so disconnected peers report I/O errors without terminating the app.
-These tests do not establish an external IPv6 route.
+These tests do not establish an external IPv6 route. Nonblocking TCP and UDP channel
+probes exercise selector readiness, direct buffers, connection completion,
+half-close/EOF, cancellation, connected datagrams and peer identity. The selector
+probe also checks pipe readiness, cross-thread wakeup and closed-state errors.
 The public `Network` adapter exposes only the host's current default network.
 Its DNS, socket factory and HTTP/HTTPS methods use that route; unknown network
 IDs fail without falling back to it. Handles and Parcelable identity round-trip.
