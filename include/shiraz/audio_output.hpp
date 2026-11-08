@@ -7,6 +7,9 @@
 #include <unordered_map>
 struct _snd_pcm;
 namespace shiraz::audio {
+#if defined(__APPLE__)
+struct AudioDevice;
+#endif
 class Pool {
 public:
     explicit Pool(int streams);
@@ -26,7 +29,11 @@ private:
     std::unordered_map<int, std::shared_ptr<const Clip>> sounds_;
     std::size_t decodedSamples_ = 0;
     bool closed_ = false, failed_ = false;
+#if defined(__APPLE__)
+    AudioDevice* device_ = nullptr;
+#else
     _snd_pcm* pcm_ = nullptr;
+#endif
     std::thread worker_;
 };
 }

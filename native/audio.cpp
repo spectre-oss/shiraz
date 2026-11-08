@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/audio.hpp"
+#if defined(__APPLE__)
+#include "darwin/audio_decode.hpp"
+#else
 #include <sndfile.h>
+#endif
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -9,6 +13,7 @@
 
 namespace shiraz::audio {
 namespace {
+#if !defined(__APPLE__)
 struct MemoryFile { const std::vector<std::uint8_t>& bytes; sf_count_t position = 0; };
 sf_count_t length(void* opaque) { return static_cast<sf_count_t>(static_cast<MemoryFile*>(opaque)->bytes.size()); }
 sf_count_t tell(void* opaque) { return static_cast<MemoryFile*>(opaque)->position; }
@@ -27,6 +32,7 @@ sf_count_t read(void* target, sf_count_t requested, void* opaque) {
     file.position += count; return count;
 }
 sf_count_t write(const void*, sf_count_t, void*) { return 0; }
+#endif
 void gains(float left, float right) {
     if (!std::isfinite(left) || !std::isfinite(right) || left < 0 || left > 1 || right < 0 || right > 1)
         throw std::invalid_argument("Audio gains must be finite and between zero and one");
@@ -44,6 +50,9 @@ void validClip(const Clip& clip) {
 }
 std::shared_ptr<const Clip> decode(const std::vector<std::uint8_t>& encoded) {
     if (encoded.empty() || encoded.size() > maxEncodedBytes) throw std::invalid_argument("Invalid encoded sound size");
+#if defined(__APPLE__)
+    auto result = darwinDecode(encoded);
+#else
     MemoryFile memory{encoded}; SF_INFO info{};
     SF_VIRTUAL_IO io{length, seek, read, write, tell};
     std::unique_ptr<SNDFILE, decltype(&sf_close)> file(sf_open_virtual(&io, SFM_READ, &info, &memory), sf_close);
@@ -71,6 +80,7 @@ std::shared_ptr<const Clip> decode(const std::vector<std::uint8_t>& encoded) {
     float extra[2];
     if (sf_readf_float(file.get(), extra, 1) != 0 || sf_error(file.get()) != SF_ERR_NO_ERROR)
         throw std::invalid_argument("Encoded sound frame count mismatch");
+#endif
     // Lossy codecs and floating-point files can decode beyond full scale.
     // Saturate finite samples at the decoder boundary; malformed non-finite
     // values must still fail rather than entering the mixer.
