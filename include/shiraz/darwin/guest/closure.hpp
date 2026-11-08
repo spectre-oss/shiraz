@@ -15,6 +15,12 @@ struct Capture {
 };
 // Process-lifetime entry points: callers may retain JNI pointers until VM exit.
 void *closure(std::function<void(Capture &)> handler);
+// Opt-in for handlers whose complete result fits x0/x1 and q0/q1. Clears
+// x2..x17, v2..v7, v16..v31 and the upper halves of v8..v15 on normal return.
+// Preserves x18, callee-saved state and all result carriers. Not for larger
+// homogeneous FP/vector aggregate results or x8 indirect results; no
+// native-stack or async purity claim. The guarantee is at normal return only.
+void *scalar_closure(std::function<void(Capture &)> handler);
 // Each native/guest transition gets a unique per-thread token. A nonlocal
 // jump may stay within the current guest invocation, but must never bypass
 // a live native provider/ABI-dispatch frame and its C++ destructors.

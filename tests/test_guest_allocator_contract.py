@@ -9,25 +9,31 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from guest_allocator_contract import MALLOC_ABI, managed_malloc_binding
+from guest_allocator_contract import (
+    MALLOC_ABI,
+    MALLOC_CLEAR_SCRATCH_ABI,
+    managed_malloc_binding,
+)
 from test_guest_native_target import self_fixture
 from test_guest_tpidr_audit import BindingElfFixture, I, M, R, audit, instruction
 
 
-def malloc_binding():
+def malloc_binding(abi=MALLOC_ABI):
     return {
         "relocation": 0x1500, "relocation_type": 1026, "addend": 0,
         "symbol": "malloc", "version": "", "provider": "libc.so",
         "provider_elf_sha256": None, "target": None, "kind": "function",
-        "abi": MALLOC_ABI, "nonreturning": False,
+        "abi": abi, "nonreturning": False,
     }
 
 
 class AllocatorBindingTests(unittest.TestCase):
     def test_contract_requires_exact_native_row_and_types(self):
-        self.assertTrue(managed_malloc_binding(malloc_binding()))
-        self.assertTrue(managed_malloc_binding({**malloc_binding(), "version": "LIBC"}))
+        for abi in (MALLOC_ABI, MALLOC_CLEAR_SCRATCH_ABI):
+            self.assertTrue(managed_malloc_binding(malloc_binding(abi)))
+            self.assertTrue(managed_malloc_binding({**malloc_binding(abi), "version": "LIBC"}))
         self.assertFalse(managed_malloc_binding({**malloc_binding(), "abi": "fixed/errno-null"}))
+        self.assertFalse(managed_malloc_binding(malloc_binding("heap/managed-malloc-v200")))
         for field, value in (
             ("symbol", "calloc"), ("version", "LIBC_O"), ("provider", "other.so"),
             ("kind", "object"), ("target", 0), ("provider_elf_sha256", "a" * 64),
@@ -35,8 +41,40 @@ class AllocatorBindingTests(unittest.TestCase):
             ("relocation_type", 257), ("nonreturning", True), ("nonreturning", 0),
             ("native_target", None),
         ):
-            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
-                managed_malloc_binding({**malloc_binding(), field: value})
+            for abi in (MALLOC_ABI, MALLOC_CLEAR_SCRATCH_ABI):
+                with self.subTest(abi=abi, field=field, value=value), self.assertRaises(ValueError):
+                    managed_malloc_binding({**malloc_binding(abi), field: value})
+
+    def test_scratch_contract_requires_trust_and_retains_exact_version(self):
+        fixture = BindingElfFixture()
+        fixture.data[0x1301:0x1308] = b"malloc\0"
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge = Path(tmp) / "bridge.so"
+            bridge.write_bytes(b"synthetic identity only; not an executable bridge")
+
+            def proof(abi):
+                result = fixture.proof()
+                result["modules"][0]["bindings"] = [malloc_binding(abi)]
+                result["native_bridge"] = {
+                    "path": str(bridge.resolve()),
+                    "sha256": hashlib.sha256(bridge.read_bytes()).hexdigest(),
+                    "verification": "observed-before-and-after-process",
+                }
+                return result
+
+            for abi in (MALLOC_ABI, MALLOC_CLEAR_SCRATCH_ABI):
+                value = proof(abi)
+                self.assertEqual(fixture.metadata(value).resolve(0x1500)["reason"],
+                                 "managed-malloc-contract-untrusted")
+                selected = fixture.metadata(value, bridge).resolve(0x1500)
+                self.assertEqual(selected["effect"], "managed-malloc")
+                self.assertEqual(selected["abi"], abi)
+            unknown = fixture.metadata(proof("heap/managed-malloc-v200"), bridge).resolve(0x1500)
+            self.assertNotIn("effect", unknown)
+            stale = proof(MALLOC_CLEAR_SCRATCH_ABI)
+            bridge.write_bytes(b"different identity")
+            with self.assertRaisesRegex(ValueError, "bridge identity"):
+                fixture.metadata(stale, bridge)
 
     def test_resolver_needs_explicit_bridge_and_independent_elf_binding(self):
         fixture = BindingElfFixture()
@@ -104,7 +142,7 @@ class AllocatorBindingTests(unittest.TestCase):
 
 
 class ManagedMallocAuditTests(unittest.TestCase):
-    def report(self, body, *, profile=True, initial=None, plt=100, atomic=None):
+    def report(self, body, *, profile=True, initial=None, plt=100, atomic=None, abi=MALLOC_ABI):
         graph = {item.address: item for item in body}
         graph[plt] = instruction(plt, "adrp", R("x16"), I(0x8000))
 
@@ -116,7 +154,7 @@ class ManagedMallocAuditTests(unittest.TestCase):
                 return graph.get(pc)
 
             def plt(self, pc):
-                return ({"target": None, "effect": "managed-malloc", "reason": "synthetic-contract"}
+                return ({"target": None, "effect": "managed-malloc", "reason": "synthetic-contract", "abi": abi}
                         if pc == plt else None)
 
             def mrs_stack_window(self, pc):
@@ -162,6 +200,61 @@ class ManagedMallocAuditTests(unittest.TestCase):
         self.assertEqual(effect["kind"], "conditional-managed-malloc")
         self.assertTrue(effect["assumptions"])
         self.assertIn("no heap", effect["result"])
+
+    @staticmethod
+    def two_calls(size_source="xzr"):
+        return [instruction(0, "mrs", R("x19")),
+                instruction(4, "str", R("x30"), M("sp", 16)),
+                instruction(8, "str", R("x19"), M("sp", 24)),
+                instruction(12, "bl", I(100)),
+                instruction(16, "mov", R("x0"), R(size_source)),
+                instruction(20, "bl", I(100)),
+                instruction(24, "ldr", R("x8"), M("x19", 40)),
+                instruction(28, "mov", R("x19"), R("xzr")),
+                instruction(32, "str", R("xzr"), M("sp", 24)),
+                instruction(36, "ldr", R("x30"), M("sp", 16)), instruction(40, "ret")]
+
+    def test_only_version_two_clears_simd_facts_for_another_call(self):
+        legacy = self.report(self.two_calls())
+        self.assertEqual(len(legacy["conditional_managed_malloc"]), 1)
+        self.assertIn("managed-malloc-simd-facts-unmodelled", self.reasons(legacy))
+        cleared = self.report(self.two_calls(), abi=MALLOC_CLEAR_SCRATCH_ABI)
+        # The second admission scans every b/h/s/d/q/v alias, so incomplete
+        # cleanup of any first-call scratch SIMD fact still refuses the call.
+        self.assertEqual(len(cleared["conditional_managed_malloc"]), 2)
+        self.assertNotIn("managed-malloc-simd-facts-unmodelled", self.reasons(cleared))
+        self.assertIn("native-callee-spills-return-needs-caller-context", self.reasons(cleared))
+        self.assertEqual(cleared["classification"], "unknown")
+
+    def test_version_two_clears_only_declared_integer_scratch_facts(self):
+        for register in range(1, 18):
+            with self.subTest(register=register):
+                report = self.report(self.two_calls(f"x{register}"), abi=MALLOC_CLEAR_SCRATCH_ABI)
+                self.assertEqual(len(report["conditional_managed_malloc"]), 2)
+                self.assertIn("native-callee-spills-return-needs-caller-context", self.reasons(report))
+                self.assertEqual(report["classification"], "unknown")
+        for register in ("x18", "x30"):
+            with self.subTest(register=register):
+                report = self.report(self.two_calls(register), abi=MALLOC_CLEAR_SCRATCH_ABI)
+                self.assertEqual(len(report["conditional_managed_malloc"]), 1)
+                self.assertIn("managed-malloc-size-has-pointer-or-control-fact", self.reasons(report))
+
+    def test_version_two_retains_hidden_native_memory_and_retired_stack_refusals(self):
+        report = self.report([
+            instruction(0, "mrs", R("x19")),
+            instruction(4, "str", R("x30"), M("sp", 16)),
+            instruction(8, "bl", I(100)),
+            instruction(12, "mov", R("x19"), R("xzr")),
+            instruction(16, "ldr", R("x8"), M("sp", -8)),
+            instruction(20, "ldr", R("x9"), M("x0")),
+            instruction(24, "ldr", R("x30"), M("sp", 16)), instruction(28, "ret"),
+        ], abi=MALLOC_CLEAR_SCRATCH_ABI)
+        self.assertTrue(report["conditional_managed_malloc"])
+        reasons = self.reasons(report)
+        self.assertIn("native-callee-stack-spill-reload-unproved", reasons)
+        self.assertIn("unmodelled-load-may-alias-thread-pointer-stack-spill", reasons)
+        self.assertIn("native-callee-spills-return-needs-caller-context", reasons)
+        self.assertEqual(report["classification"], "unknown")
 
     def test_missing_window_and_retired_or_outside_facts_reject_crossing(self):
         report = self.report(self.basic(), profile=False)
@@ -355,11 +448,12 @@ class ManagedMallocAuditTests(unittest.TestCase):
     def test_all_simd_alias_fact_kinds_refuse_native_crossing(self):
         for name in ("b0", "h7", "s8", "d8", "d15", "q8", "v8", "q31", "v31"):
             for field in ("registers", "aliases", "return_values"):
-                with self.subTest(register=name, field=field):
-                    initial = audit.State(**{field: {name: frozenset({0})}})
-                    report = self.report(self.basic(), initial=initial)
-                    self.assertFalse(report["conditional_managed_malloc"])
-                    self.assertIn("managed-malloc-simd-facts-unmodelled", self.reasons(report))
+                for abi in (MALLOC_ABI, MALLOC_CLEAR_SCRATCH_ABI):
+                    with self.subTest(abi=abi, register=name, field=field):
+                        initial = audit.State(**{field: {name: frozenset({0})}})
+                        report = self.report(self.basic(), initial=initial, abi=abi)
+                        self.assertFalse(report["conditional_managed_malloc"])
+                        self.assertIn("managed-malloc-simd-facts-unmodelled", self.reasons(report))
 
     def test_native_spill_uncertainty_survives_clearing_visible_tp_and_literal_read(self):
         report = self.report([

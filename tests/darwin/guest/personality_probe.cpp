@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "guest_errno.hpp"
 #include "shiraz/darwin/guest/providers.hpp"
+#include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
+#include <cstddef>
 #include <condition_variable>
 #include <csignal>
 #include <sys/wait.h>
@@ -12,12 +14,257 @@
 #include <cstring>
 #include <cstdlib>
 #include <thread>
+#include <unwind.h>
 
 using namespace shiraz::guest;
 static void require(bool value, const char *message) {
   if (!value)
     throw std::runtime_error(message);
 }
+// Raw machine observations precede any C++ instruction after the call. This
+// fixture checks declared register effects, not hidden native spill contents.
+struct alignas(16) ScalarScratchSnapshot {
+  uint64_t integers[2];
+  uint8_t vectors[2][16];
+  uint64_t scratch[16];
+  uint8_t simd[30][16];
+  uint64_t before_x18, after_x18, before_sp, after_sp;
+  uint64_t before_x29, after_x29, after_x20, after_lr;
+};
+static_assert(offsetof(ScalarScratchSnapshot, vectors) == 16);
+static_assert(offsetof(ScalarScratchSnapshot, scratch) == 48);
+static_assert(offsetof(ScalarScratchSnapshot, simd) == 176);
+static_assert(offsetof(ScalarScratchSnapshot, before_x18) == 656);
+static_assert(offsetof(ScalarScratchSnapshot, before_sp) == 672);
+static_assert(offsetof(ScalarScratchSnapshot, before_x29) == 688);
+static_assert(offsetof(ScalarScratchSnapshot, after_x20) == 704);
+static_assert(offsetof(ScalarScratchSnapshot, after_lr) == 712);
+static_assert(sizeof(ScalarScratchSnapshot) == 720);
+extern "C" void shiraz_test_scalar_scratch(void *, ScalarScratchSnapshot *, uint64_t);
+extern "C" uintptr_t shiraz_test_scalar_scratch_return_pc();
+asm(R"SHIRAZ_ASM(
+.text
+.p2align 2
+.globl _shiraz_test_scalar_scratch
+_shiraz_test_scalar_scratch:
+.cfi_startproc
+    sub sp, sp, #96
+.cfi_def_cfa_offset 96
+    stp x19, x20, [sp, #0]
+.cfi_offset 19, -96
+.cfi_offset 20, -88
+    stp x29, x30, [sp, #16]
+.cfi_offset 29, -80
+.cfi_offset 30, -72
+    stp d8, d9, [sp, #32]
+.cfi_offset 72, -64
+.cfi_offset 73, -56
+    stp d10, d11, [sp, #48]
+.cfi_offset 74, -48
+.cfi_offset 75, -40
+    stp d12, d13, [sp, #64]
+.cfi_offset 76, -32
+.cfi_offset 77, -24
+    stp d14, d15, [sp, #80]
+.cfi_offset 78, -16
+.cfi_offset 79, -8
+    mov x20, x0
+    mov x19, x1
+    mov x0, x2
+    str x18, [x19, #656]
+    mov x9, sp
+    str x9, [x19, #672]
+    str x29, [x19, #688]
+    mov x2, #0x5a5a
+    movk x2, #0x5a5a, lsl #16
+    movk x2, #0x5a5a, lsl #32
+    movk x2, #0x5a5a, lsl #48
+    mov x3, x2
+    mov x4, x2
+    mov x5, x2
+    mov x6, x2
+    mov x7, x2
+    mov x8, x2
+    mov x9, x2
+    mov x10, x2
+    mov x11, x2
+    mov x12, x2
+    mov x13, x2
+    mov x14, x2
+    mov x15, x2
+    mov x16, x2
+    mov x17, x2
+    movi v2.16b, #0x5a
+    movi v3.16b, #0x5a
+    movi v4.16b, #0x5a
+    movi v5.16b, #0x5a
+    movi v6.16b, #0x5a
+    movi v7.16b, #0x5a
+    movi v8.16b, #0x5a
+    movi v9.16b, #0x5a
+    movi v10.16b, #0x5a
+    movi v11.16b, #0x5a
+    movi v12.16b, #0x5a
+    movi v13.16b, #0x5a
+    movi v14.16b, #0x5a
+    movi v15.16b, #0x5a
+    movi v16.16b, #0x5a
+    movi v17.16b, #0x5a
+    movi v18.16b, #0x5a
+    movi v19.16b, #0x5a
+    movi v20.16b, #0x5a
+    movi v21.16b, #0x5a
+    movi v22.16b, #0x5a
+    movi v23.16b, #0x5a
+    movi v24.16b, #0x5a
+    movi v25.16b, #0x5a
+    movi v26.16b, #0x5a
+    movi v27.16b, #0x5a
+    movi v28.16b, #0x5a
+    movi v29.16b, #0x5a
+    movi v30.16b, #0x5a
+    movi v31.16b, #0x5a
+    blr x20
+Lshiraz_scalar_scratch_return:
+    stp x0, x1, [x19, #0]
+    stp q0, q1, [x19, #16]
+    stp x2, x3, [x19, #48]
+    stp x4, x5, [x19, #64]
+    stp x6, x7, [x19, #80]
+    stp x8, x9, [x19, #96]
+    stp x10, x11, [x19, #112]
+    stp x12, x13, [x19, #128]
+    stp x14, x15, [x19, #144]
+    stp x16, x17, [x19, #160]
+    stp q2, q3, [x19, #176]
+    stp q4, q5, [x19, #208]
+    stp q6, q7, [x19, #240]
+    stp q8, q9, [x19, #272]
+    stp q10, q11, [x19, #304]
+    stp q12, q13, [x19, #336]
+    stp q14, q15, [x19, #368]
+    stp q16, q17, [x19, #400]
+    stp q18, q19, [x19, #432]
+    stp q20, q21, [x19, #464]
+    stp q22, q23, [x19, #496]
+    stp q24, q25, [x19, #528]
+    stp q26, q27, [x19, #560]
+    stp q28, q29, [x19, #592]
+    stp q30, q31, [x19, #624]
+    str x18, [x19, #664]
+    mov x9, sp
+    str x9, [x19, #680]
+    str x29, [x19, #696]
+    str x20, [x19, #704]
+    str x30, [x19, #712]
+    ldp d8, d9, [sp, #32]
+.cfi_restore 72
+.cfi_restore 73
+    ldp d10, d11, [sp, #48]
+.cfi_restore 74
+.cfi_restore 75
+    ldp d12, d13, [sp, #64]
+.cfi_restore 76
+.cfi_restore 77
+    ldp d14, d15, [sp, #80]
+.cfi_restore 78
+.cfi_restore 79
+    ldp x19, x20, [sp, #0]
+.cfi_restore 19
+.cfi_restore 20
+    ldp x29, x30, [sp, #16]
+.cfi_restore 29
+.cfi_restore 30
+    add sp, sp, #96
+.cfi_def_cfa_offset 0
+    ret
+.cfi_endproc
+.p2align 2
+.globl _shiraz_test_scalar_scratch_return_pc
+_shiraz_test_scalar_scratch_return_pc:
+    adr x0, Lshiraz_scalar_scratch_return
+    ret
+)SHIRAZ_ASM");
+
+struct ScalarUnwindProbe { unsigned frames = 0; bool caller = false; };
+static _Unwind_Reason_Code scalar_unwind_frame(_Unwind_Context *context, void *opaque) {
+  auto &probe = *static_cast<ScalarUnwindProbe *>(opaque);
+  if (_Unwind_GetIP(context) == shiraz_test_scalar_scratch_return_pc()) {
+    probe.caller = true;
+    return _URC_END_OF_STACK;
+  }
+  return ++probe.frames < 64 ? _URC_NO_REASON : _URC_END_OF_STACK;
+}
+
+static void scalar_scratch_tests(const Providers &registry) {
+  constexpr uint64_t first = 0x13579bdf2468ace0ULL;
+  constexpr uint64_t second = 0xfedcba9876543210ULL;
+  auto *function = scalar_closure([](Capture &capture) {
+    ScalarUnwindProbe unwind;
+    (void)_Unwind_Backtrace(scalar_unwind_frame, &unwind);
+    require(unwind.caller, "native unwind traverses scalar closure to exact caller continuation");
+    capture.frame.result_integers[0] = first;
+    capture.frame.result_integers[1] = second;
+    for (unsigned byte = 0; byte < 16; ++byte) {
+      capture.frame.result_vectors[0][byte] = uint8_t(0xa0 + byte);
+      capture.frame.result_vectors[1][byte] = uint8_t(0xb0 + byte);
+    }
+  });
+  auto check = [&](const ScalarScratchSnapshot &snapshot, void *entry) {
+    for (auto value : snapshot.scratch)
+      require(value == 0, "scalar closure clears x2-x17 at actual return");
+    for (unsigned reg = 2; reg < 32; ++reg)
+      for (unsigned byte = 0; byte < 16; ++byte) {
+        const uint8_t expected = reg >= 8 && reg <= 15 && byte < 8 ? 0x5a : 0;
+        require(snapshot.simd[reg - 2][byte] == expected,
+                "scalar closure clears caller SIMD while preserving d8-d15 low halves");
+      }
+    require(snapshot.before_x18 == snapshot.after_x18, "scalar closure preserves Darwin x18");
+    require(snapshot.before_sp == snapshot.after_sp && !(snapshot.after_sp & 15),
+            "scalar closure restores aligned SP");
+    require(snapshot.before_x29 == snapshot.after_x29 &&
+                snapshot.after_x20 == reinterpret_cast<uintptr_t>(entry),
+            "scalar closure preserves callee frame and function registers");
+    require(snapshot.after_lr == shiraz_test_scalar_scratch_return_pc(),
+            "scalar closure restores exact native continuation");
+  };
+  prepare_guest_tls();
+  ScalarScratchSnapshot snapshot{};
+  shiraz_test_scalar_scratch(function, &snapshot, 64);
+  check(snapshot, function);
+  require(snapshot.integers[0] == first && snapshot.integers[1] == second,
+          "scalar cleanup retains both integer result carriers");
+  for (unsigned byte = 0; byte < 16; ++byte)
+    require(snapshot.vectors[0][byte] == uint8_t(0xa0 + byte) &&
+                snapshot.vectors[1][byte] == uint8_t(0xb0 + byte),
+            "scalar cleanup retains both complete vector result carriers");
+
+  uintptr_t allocate = 0, release = 0;
+  for (const auto &entry : registry.modules().at("libc.so").exports) {
+    if (entry.name == "malloc") allocate = entry.address;
+    if (entry.name == "free") release = entry.address;
+  }
+  require(allocate && release, "actual managed allocator exports available");
+  snapshot = {};
+  function = reinterpret_cast<void *>(allocate);
+  shiraz_test_scalar_scratch(function, &snapshot, 64);
+  check(snapshot, function);
+  require(snapshot.integers[0] &&
+              registered_guest_heap_contains(snapshot.integers[0], 64),
+          "actual managed malloc returns registered payload");
+  require(snapshot.integers[1] == 0, "managed malloc's unused integer result stays zero");
+  for (const auto &vector : snapshot.vectors)
+    for (auto byte : vector)
+      require(byte == 0, "managed malloc's unused vector result carriers stay zero");
+  invoke(reinterpret_cast<void *>(release),
+         {Argument::integer(int64_t(snapshot.integers[0]), ArgumentType::Int64)});
+  require(!registered_guest_heap_contains(snapshot.integers[0], 1),
+          "actual managed scratch-test allocation is released");
+  std::cout << "M5_SCALAR_SCRATCH_PASS typed_fixture=1 managed_malloc=1 gprs=16 "
+               "simd_full=22 simd_upper=8 result_carriers=4 platform_x18=1 "
+               "sp=1 continuation=1 callee_d_low=8 native_unwind=1 native_spill_proof=0\n" << std::flush;
+}
+
 static void host_returns() {}
 static long host_fail() {
   errno = EAGAIN;
@@ -52,6 +299,7 @@ int main(int argc, char **argv) {
     require(rejected_object && rejected_null && rejected_empty,
             "nonreturning metadata rejects objects, null pointers and empty closures");
     auto registry = core_personality();
+    scalar_scratch_tests(registry);
     Provider helper{"libfixture_host.so", {}, {}, false};
     helper.exports.push_back(
         fixed_export("host_fail", "", &host_fail, ErrnoPolicy::MinusOne));

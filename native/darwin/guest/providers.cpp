@@ -189,7 +189,7 @@ void managed_free(void *pointer) {
   state->retire_reused(base, span, state->entries.end());
 }
 ProviderExport managed_malloc_export() {
-  void *address = closure([](Capture &capture) {
+  void *address = scalar_closure([](Capture &capture) {
     auto *guest_error = guest_errno_location();
     const auto storage = capture_boundary_storage();
     // This admission is about normal returned calls. The entry boundary may
@@ -208,7 +208,7 @@ ProviderExport managed_malloc_export() {
     return_value(capture, result);
   });
   return {"malloc", "LIBC", reinterpret_cast<uintptr_t>(address), SymbolKind::Function,
-          "heap/managed-malloc-v1", false};
+          "heap/managed-malloc-v2", false};
 }
 void *memory_find(const void *pointer, int value, size_t length) {
   return const_cast<void *>(std::memchr(pointer, value, length));

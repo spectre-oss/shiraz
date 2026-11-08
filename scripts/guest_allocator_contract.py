@@ -2,10 +2,12 @@
 """Exact first-party allocator ABI contract; not native-body authentication."""
 
 MALLOC_ABI = "heap/managed-malloc-v1"
+# Exact post-return scratch values only; native memory effects stay unproved.
+MALLOC_CLEAR_SCRATCH_ABI = "heap/managed-malloc-v2"
 
 
 def managed_malloc_binding(binding):
-    if binding.get("abi") != MALLOC_ABI:
+    if binding.get("abi") not in (MALLOC_ABI, MALLOC_CLEAR_SCRATCH_ABI):
         return False
     if (
         binding.get("symbol") != "malloc"

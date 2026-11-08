@@ -30,6 +30,7 @@ CaptureBoundaryStorage capture_boundary_storage() noexcept {
   return {reinterpret_cast<uintptr_t>(&boundary), sizeof(boundary)};
 }
 extern "C" void shiraz_guest_closure_entry();
+extern "C" void shiraz_guest_scalar_closure_entry();
 static_assert(offsetof(Capture, stack) == 240);
 static_assert(offsetof(Capture, native_stack_remaining) == 248 && sizeof(Capture) == 256);
 extern "C" void
@@ -55,7 +56,7 @@ shiraz_guest_closure_dispatch(std::function<void(Capture &)> *handler,
     std::abort();
   }
 }
-void *closure(std::function<void(Capture &)> handler) {
+static void *make_closure(std::function<void(Capture &)> handler, bool scalar) {
   if (!pthread_jit_write_protect_supported_np())
     throw std::runtime_error("JIT write protection unavailable");
   struct Pool {
@@ -85,7 +86,8 @@ void *closure(std::function<void(Capture &)> handler) {
   auto context =
       std::make_unique<std::function<void(Capture &)>>(std::move(handler));
   uintptr_t pointer = reinterpret_cast<uintptr_t>(context.get());
-  uintptr_t entry = reinterpret_cast<uintptr_t>(&shiraz_guest_closure_entry);
+  uintptr_t entry = scalar ? reinterpret_cast<uintptr_t>(&shiraz_guest_scalar_closure_entry)
+                           : reinterpret_cast<uintptr_t>(&shiraz_guest_closure_entry);
   pool->handlers.push_back(std::move(context));
   uint8_t *code = pool->pages.back() + pool->used;
   // ldr x17,[pc,#16]; ldr x16,[pc,#20]; br x16; nop; context; entry.
@@ -100,6 +102,12 @@ void *closure(std::function<void(Capture &)> handler) {
   sys_icache_invalidate(code, 32);
   pool->used += 32;
   return code;
+}
+void *closure(std::function<void(Capture &)> handler) {
+  return make_closure(std::move(handler), false);
+}
+void *scalar_closure(std::function<void(Capture &)> handler) {
+  return make_closure(std::move(handler), true);
 }
 CallCursor::CallCursor(const Capture &capture, Convention convention)
     : capture_(capture), convention_(convention),

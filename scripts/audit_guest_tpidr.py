@@ -790,23 +790,31 @@ class Audit:
                         post.native_memory_may_contain_tp |= any(
                             tainted(value) for value in (*state.registers.values(), *state.stack.values()))
                         poison = OPAQUE_VALUE if post.native_memory_may_contain_tp else CLEAN
+                        clear_scratch = binding.get("abi") == guest_allocator_contract.MALLOC_CLEAR_SCRATCH_ABI
                         for index in (*range(19), 30):
                             # Clobbered does not mean independent of TP: an
                             # unspecified scratch result may retain/copy input
-                            # bits. Only malloc's defined x0 result is clean.
-                            post.set(f"x{index}", CLEAN if index == 0 else poison)
+                            # bits. V2 adds exact normal-return clearing while
+                            # retaining platform x18 and LR uncertainty.
+                            clean = index == 0 or (clear_scratch and 1 <= index <= 17)
+                            post.set(f"x{index}", CLEAN if clean else poison)
                             post.set_alias(f"x{index}", CLEAN)
                         for index in range(32):
                             for prefix in ("b", "h", "s", "d", "q", "v"):
                                 if 8 <= index <= 15 and prefix in ("b", "h", "s", "d"):
                                     continue  # Preserved low 64 bits, checked clean above.
-                                post.set(f"{prefix}{index}", poison)
+                                # Only this typed malloc handler writes x0;
+                                # its x1/q0/q1 result cells stay initialized.
+                                # Other vector bytes are scrubbed, or admitted
+                                # clean low halves preserved by the ABI.
+                                post.set(f"{prefix}{index}", CLEAN if clear_scratch else poison)
                                 post.set_alias(f"{prefix}{index}", CLEAN)
                         callee_effects[pc] = {
                             "entry": hex(pc), "kind": "conditional-managed-malloc",
                             "binding": dict(binding), "assumptions": list(guest_allocator_contract.ASSUMPTIONS),
                             "explicit_cell_admission": "native errno/guest errno/boundary span outside current prepared stack",
                             "result": "opaque; no heap, disjointness or readable-byte fact",
+                            "normal_return_scratch_cleared": clear_scratch,
                         }
                         managed_malloc_observations.add((
                             pc, state.sp, return_pc, bool(protected),
@@ -2343,7 +2351,7 @@ class ElfBindingMetadata:
             if (addend != 0 or proof.get("relocation_type") != kind or info & 15 != 2 or
                     (required_library is not None and proof["provider"] != required_library)):
                 return {**result, "reason": "managed-malloc-binding-mismatch"}
-            return {**result, "effect": "managed-malloc",
+            return {**result, "effect": "managed-malloc", "abi": proof["abi"],
                     "bridge_sha256": self.provider_bridge["sha256"],
                     "reason": "explicit-first-party-managed-malloc-contract"}
         if proof.get("native_target") is not None:
