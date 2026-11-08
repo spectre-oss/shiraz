@@ -16,6 +16,13 @@ public final class SensorDiscoverySmoke {
         throw new AssertionError("Unverifiable discovery was reported as empty");
     }
     public static void main(String[] args) throws Exception {
+        if (shiraz.runtime.HostOs.darwin()) {
+            HostSensorManager manager = new HostSensorManager();
+            if (!manager.getSensorList(-1).isEmpty() || manager.getDefaultSensor(1) != null ||
+                manager.registerListener(null, null, 0) || manager.flush(null))
+                throw new AssertionError("Darwin advertised an unavailable sensor bridge");
+            System.out.println("DARWIN_SENSOR_UNAVAILABLE_OK");
+        }
         Path root = Files.createTempDirectory(Paths.get(args[0]), "discovery-");
         try {
             invalid(() -> new HostSensorManager(root.toFile()));

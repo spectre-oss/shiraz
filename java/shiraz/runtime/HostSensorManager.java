@@ -9,9 +9,14 @@ import java.util.List;
 
 /** Enumerates supported Android sensors; detected but unbridged Linux devices are unavailable. */
 public final class HostSensorManager extends SensorManager {
-    public HostSensorManager() { this(new File("/sys")); }
-    public HostSensorManager(File sysRoot) {
+    public HostSensorManager() { this(new File("/sys"), HostOs.darwin()); }
+    public HostSensorManager(File sysRoot) { this(sysRoot, false); }
+    private HostSensorManager(File sysRoot, boolean darwin) {
         if (DeviceProfile.selected()) return; // The selected virtual device has no bridged sensors.
+        if (darwin) {
+            System.err.println("SHIRAZ_UNSUPPORTED sensors: Darwin sensor event bridge unavailable; no Android sensors advertised");
+            return;
+        }
         try {
             File iio = new File(sysRoot, "bus/iio/devices"), inputs = new File(sysRoot, "class/input");
             if (!iio.isDirectory() && !inputs.isDirectory()) throw new IOException("Linux sensor discovery interfaces are unavailable");
