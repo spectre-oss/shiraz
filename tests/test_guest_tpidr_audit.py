@@ -318,6 +318,52 @@ class TpidrAuditTests(unittest.TestCase):
         ])
         self.assertIn("unproved-return-address", self.reasons(result))
 
+    def test_sxtw_overwrites_destination_instead_of_reading_old_facts(self):
+        for source in ("w1", "wzr"):
+            for old in ("sp", "x19"):
+                result = self.run_graph([
+                    instruction(0, "mrs", R("x19")),
+                    instruction(4, "mov", R("x0"), R(old)),
+                    instruction(8, "sxtw", R("x0"), R(source), reads=("x0", source), writes=("x0",)),
+                    instruction(12, "ldr", R("x8"), M("x19", 40)),
+                    instruction(16, "mov", R("x19"), R("xzr")), instruction(20, "ret"),
+                ])
+                self.assertEqual(result["classification"], "guard-only")
+                self.assertFalse(result["reasons"])
+
+    def test_sxtw_narrowing_cannot_launder_tp_or_stack_addresses(self):
+        for destination in ("x0", "x19"):
+            result = self.run_graph([
+                instruction(0, "mrs", R("x19")),
+                instruction(4, "sxtw", R(destination), R("w19")),
+                instruction(8, "ldr", R("x8"), M(destination, 40)), instruction(12, "ret"),
+            ])
+            self.assertIn("narrowed-thread-pointer", self.reasons(result))
+            self.assertIn("opaque-thread-pointer-memory-base", self.reasons(result))
+            self.assertFalse(any(row["kind"] == "guard" for row in result["accesses"]))
+        for destination in ("x0", "x29"):
+            result = self.run_graph([
+                instruction(0, "mrs", R("x19")),
+                instruction(4, "mov", R("x1"), R("sp")),
+                instruction(8, "sxtw", R(destination), R("w1")), instruction(12, "ret"),
+            ])
+            self.assertIn("narrowed-stack-address-unmodelled", self.reasons(result))
+
+    def test_sxtw_rejects_unmodelled_forms_and_allows_discarded_results(self):
+        for operands in ((R("w0"), R("w1")), (R("sp"), R("w1")),
+                         (R("x0"), R("x1")), (R("x0"), I(1)), (R("x0"),)):
+            result = self.run_graph([
+                instruction(0, "mrs", R("x19")),
+                instruction(4, "sxtw", *operands), instruction(8, "ret"),
+            ])
+            self.assertIn("unsupported-sxtw-form", self.reasons(result))
+        result = self.run_graph([
+            instruction(0, "mrs", R("x19")), instruction(4, "sxtw", R("xzr"), R("w1")),
+            instruction(8, "ldr", R("x8"), M("x19", 40)),
+            instruction(12, "mov", R("x19"), R("xzr")), instruction(16, "ret"),
+        ])
+        self.assertEqual(result["classification"], "guard-only")
+
     def run_graph(
         self,
         body,

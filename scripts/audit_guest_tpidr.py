@@ -1007,7 +1007,29 @@ class Audit:
                         post.fp = next(iter(alias)) if len(alias) == 1 and None not in alias else None
                     enqueue(next_pc, returns, post)
                 continue
-            if op == "mov" and len(operands) == 2 and operands[0].kind == "reg":
+            if op == "sxtw":
+                # Capstone 5 can include the overwritten X destination in
+                # regs_access(). The architectural input is only Wn. Never
+                # mistake an old destination fact for an input dependency.
+                if (len(operands) != 2 or any(item.kind != "reg" for item in operands)
+                        or not (full_width_gpr(operands[0].value) or operands[0].value == "xzr")
+                        or not operands[1].value.startswith("w")
+                        or reg(operands[1].value) not in {f"x{i}" for i in range(31)} | {"xzr"}):
+                    problem(pc, "unsupported-sxtw-form")
+                    continue
+                destination, source = operands
+                value = state.value(source.value)
+                if tainted(value):
+                    problem(pc, "narrowed-thread-pointer")
+                if tainted(state.alias(source.value)):
+                    problem(pc, "narrowed-stack-address-unmodelled")
+                if reg(source.value) in state.return_signatures:
+                    problem(pc, "narrowed-authenticated-return")
+                state.set(destination.value, OPAQUE_VALUE if tainted(value) else CLEAN)
+                state.set_alias(destination.value, CLEAN)
+                if reg(destination.value) == "x29":
+                    state.fp = None
+            elif op == "mov" and len(operands) == 2 and operands[0].kind == "reg":
                 destination, source = operands
                 image = state.image(source.value) if source.kind == "reg" else None
                 control = state.control(source.value) if source.kind == "reg" else CLEAN
