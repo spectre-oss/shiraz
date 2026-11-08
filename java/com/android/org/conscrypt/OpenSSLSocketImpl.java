@@ -62,7 +62,7 @@ public final class OpenSSLSocketImpl extends SSLSocket {
         if(verified)return;
         try{
             if(wireApplicationProtocols.length>0)extension("setAlpnProtocols",byte[].class,wireApplicationProtocols.clone());
-            delegate.startHandshake();
+            try(shiraz.runtime.ApplicationTrustManager.Peer scope=shiraz.runtime.ApplicationTrustManager.peer(peerHost)){try{delegate.startHandshake();}catch(IOException error){throw scope.explain(error);}}
             if(endpointAlgorithm!=null&&!endpointAlgorithm.isEmpty()){
                 HostnameVerifier verifier;
                 try{verifier=(HostnameVerifier)Class.forName("com.android.okhttp.internal.tls.OkHostnameVerifier").getField("INSTANCE").get(null);}

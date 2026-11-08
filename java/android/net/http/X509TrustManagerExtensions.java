@@ -13,6 +13,15 @@ public final class X509TrustManagerExtensions {
         try{check=manager.getClass().getMethod("checkServerTrusted",X509Certificate[].class,String.class,String.class);}
         catch(NoSuchMethodException failure){throw new IllegalArgumentException("Trust manager has no Android chain validation API",failure);}
     }
+    /** No Android user-CA store is configured in Shiraz. APK anchors are not user-added CAs. */
+    public boolean isUserAddedCertificate(X509Certificate certificate){if(certificate==null)throw new NullPointerException("certificate");return false;}
+    public boolean isSameTrustConfiguration(String hostname1,String hostname2){
+        if(hostname1==null||hostname2==null)throw new NullPointerException("hostname");
+        try{return (Boolean)manager.getClass().getMethod("isSameTrustConfiguration",String.class,String.class).invoke(manager,hostname1,hostname2);}
+        catch(NoSuchMethodException absent){return true;} // A uniform non-Android trust manager.
+        catch(InvocationTargetException error){Throwable cause=error.getCause();if(cause instanceof RuntimeException)throw (RuntimeException)cause;if(cause instanceof Error)throw (Error)cause;throw new IllegalStateException("Trust configuration lookup failed",cause);}
+        catch(IllegalAccessException error){throw new IllegalStateException("Trust configuration API inaccessible",error);}
+    }
     @SuppressWarnings("unchecked")
     public List<X509Certificate> checkServerTrusted(X509Certificate[] chain,String authType,String host)throws CertificateException{
         try{return (List<X509Certificate>)check.invoke(manager,chain,authType,host);}

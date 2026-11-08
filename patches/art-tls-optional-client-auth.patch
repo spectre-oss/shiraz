@@ -1,0 +1,50 @@
+--- a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLEngineHelper.java
++++ b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLEngineHelper.java
+@@ -504,7 +504,7 @@
+             WolfSSLDebug.log(getClass(), WolfSSLDebug.INFO,
+                 "Using checkClientTrusted/ServerTrusted() for verification");
+             wicb = new WolfSSLInternalVerifyCb(authStore.getX509TrustManager(),
+-                                               this.clientMode);
++                                               this.clientMode, this.params.getNeedClientAuth());
+             this.ssl.setVerify(mask, wicb);
+         }
+     }
+--- a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLInternalVerifyCb.java
++++ b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLInternalVerifyCb.java
+@@ -49,6 +49,7 @@
+
+     private X509TrustManager tm = null;
+     private boolean clientMode;
++    private boolean requireClientCertificate;
+
+     /**
+      * Create new WolfSSLInternalVerifyCb
+@@ -57,8 +58,14 @@
+      * @param client boolean representing if this is client side
+      */
+     public WolfSSLInternalVerifyCb(X509TrustManager xtm, boolean client) {
++        this(xtm, client, true);
++    }
++
++    public WolfSSLInternalVerifyCb(X509TrustManager xtm, boolean client,
++            boolean requireClientCertificate) {
+         this.tm = xtm;
+         this.clientMode = client;
++        this.requireClientCertificate = requireClientCertificate;
+     }
+
+     /**
+@@ -93,6 +100,13 @@
+             WolfSSLX509StoreCtx store =
+                 new WolfSSLX509StoreCtx(x509StorePtr);
+             certs = store.getCerts();
++            // Optional server-side client authentication permits an absent
++            // certificate. Retrieval failures still enter the rejection path,
++            // and a presented certificate must always pass checkClientTrusted.
++            if (!clientMode && !requireClientCertificate &&
++                    (certs == null || certs.length == 0)) {
++                return 1;
++            }
+
+         } catch (WolfSSLException e) {
+             /* failed to get certs from native, give app null array */

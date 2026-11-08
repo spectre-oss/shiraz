@@ -8,6 +8,7 @@ import java.util.Properties;
 /** Install application policy atomically before loading any application classes. */
 public final class HostNetworkPolicy {
     private HostNetworkPolicy() { }
+    static NetworkSecurityConfig configuration(){libcore.net.NetworkSecurityPolicy policy=libcore.net.NetworkSecurityPolicy.getInstance();return policy instanceof Applied?((Applied)policy).config:null;}
     public static void install(Properties metadata) {
         String config=metadata.getProperty("networkSecurityConfig");
         boolean custom=config!=null&&!config.equals("@null")&&!config.equals("@0x00000000")&&!config.equals("0");
@@ -19,19 +20,23 @@ public final class HostNetworkPolicy {
         if(apk==null)throw new IllegalArgumentException("Network policy requires APK resources");
         final Resources resources=Resources.shirazOpen(apk,360,640);
         try{
-            NetworkSecurityConfig.Booleans resolver=new NetworkSecurityConfig.Booleans(){public boolean resolve(BinaryXml.Value value){
+            NetworkSecurityConfig.ResourceValues resolver=new NetworkSecurityConfig.ResourceValues(){public boolean booleanValue(BinaryXml.Value value){
                 return NetworkPolicyResources.booleanValue(resources,value);
+            }
+            public byte[] certificateResource(BinaryXml.Value value){
+                if(!"raw".equals(resources.getResourceTypeName(value.data)))throw new IllegalArgumentException("Certificate source must be a raw resource");
+                return resources.shirazReadResourceFile(value.data,new TypedValue());
             }};
             if(custom){
                 // With XML present Android ignores usesCleartextTraffic and uses
                 // the target-SDK default for values not inherited from XML.
                 Properties defaults=new Properties();defaults.putAll(metadata);defaults.remove("usesCleartextTraffic");
                 byte[] xml=resources.shirazReadResourceFile(NetworkPolicyResources.resource(resources,metadata,config,"xml"),new TypedValue());
-                NetworkSecurityConfig parsed=NetworkSecurityConfig.parse(xml,ManifestNetworkPolicy.cleartextPermitted(defaults),resolver);
+                NetworkSecurityConfig parsed=NetworkSecurityConfig.parse(xml,ManifestNetworkPolicy.cleartextPermitted(defaults),resolver,"true".equals(metadata.getProperty("debuggable")));
                 libcore.net.NetworkSecurityPolicy.setInstance(new Applied(false,parsed));
             }else{
                 TypedValue value=new TypedValue();resources.getValue(NetworkPolicyResources.resource(resources,metadata,explicit,"bool"),value,true);
-                boolean permitted=resolver.resolve(new BinaryXml.Value(value.type,value.data,null));
+                boolean permitted=resolver.booleanValue(new BinaryXml.Value(value.type,value.data,null));
                 libcore.net.NetworkSecurityPolicy.setInstance(new Applied(permitted,null));
             }
         }finally{resources.shirazClose();}

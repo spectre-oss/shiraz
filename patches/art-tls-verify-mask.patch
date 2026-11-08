@@ -1,0 +1,10 @@
+--- a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLEngineHelper.java
++++ b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLEngineHelper.java
+@@ -505,6 +505,6 @@
+                 "Using checkClientTrusted/ServerTrusted() for verification");
+             wicb = new WolfSSLInternalVerifyCb(authStore.getX509TrustManager(),
+                                                this.clientMode);
+-            this.ssl.setVerify(WolfSSL.SSL_VERIFY_PEER, wicb);
++            this.ssl.setVerify(mask, wicb);
+         }
+     }

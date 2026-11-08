@@ -108,6 +108,16 @@ PATCHES = {
         ('art-tls-stream-lifetime.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java': '06338beb576fff593cc422c1600aa852fafecde8d3f64d400cfe3ba4122d34e9',
         }),
+        ('art-tls-verify-mask.patch', {
+            'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLEngineHelper.java': '09dd5dc1da457c7cb43b4ecf0f1ad2f9a823e55bc02fc012a52365529e4afcd8',
+        }),
+        ('art-tls-optional-client-auth.patch', {
+            'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLEngineHelper.java': '9e9bc3ce0622b4d898824b66a54597b695f50a3cbd40159cf0d4d9d17f7cff5e',
+            'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLInternalVerifyCb.java': '5d1473e1915c9cce275373661b4b05634668c9a594cb40a8054cabc99cc721c2',
+        }),
+        ('art-tls-peer-chain-order.patch', {
+            'external/wolfssljni/native/com_wolfssl_WolfSSLX509StoreCtx.c': 'b5dfcda9bd2b91a79cef950376936098061f792d4b0352e005e94b330b33ef5b',
+        }),
         ('art-tls-eof.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java': 'd956fb49de6ad1628a38dfd9159d2e2c63115ab3276f6bc9309624f08cb62656',
         }),

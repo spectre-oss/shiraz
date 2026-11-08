@@ -172,14 +172,31 @@ allow cleartext and newer targets deny it. Both the public Android policy API an
 libcore HTTP enforce the decision. `make network-policy-smoke` checks allow/deny
 behavior and verifies that denied HTTP never reaches the server. Compiled
 `networkSecurityConfig` XML supports base/domain cleartext rules, nested
-inheritance, longest domain matching, `includeSubdomains`, and system-only trust
-anchor declarations. Resource-valued boolean flags are resolved from the APK.
+inheritance, longest domain matching, and `includeSubdomains`. Trust anchors may
+use system roots or APK PEM/DER certificates. Resource-valued boolean flags are resolved from the APK.
 XML policies use target-SDK defaults and take precedence over the manifest
 cleartext flag. Duplicate domains, malformed values, and unsupported directives
-fail before replacing the installed policy. Custom/user anchors, pinning, debug
-overrides and newer trust directives still fail explicitly at startup; their TLS
-enforcement is unfinished. The smoke uses compiled APK resources and checks
-wire-level domain denial. XML cursors preserve domain text and mixed content.
+fail before replacing the installed policy.
+
+APK anchors, SHA-256/SHA-512 public-key pins, expiration, inheritance,
+backup pins, `overridePins`, and debuggable-only anchor overrides are enforced
+through PKIX path building in bundled Bouncy Castle before TLS exposes
+application data. Paths can use a trusted root while ignoring an irrelevant
+cross-signed branch; pins apply only to the validated path. The peer
+hostname is scoped around socket/engine handshake callbacks and restored on
+failure; missing peer identity fails for a domain policy. Default factories
+created before policy installation still consult the installed policy. Explicit
+caller-supplied trust managers retain their own behavior. `make network-trust-smoke`
+checks these rules with controlled TLS sockets, HTTPS and engines, including
+concurrent peer scopes and server observation of accepted requests. Android
+chain-extension APIs return validated chains and distinguish domain trust
+configurations. No Android user-CA store is configured; `src="user"`, certificate
+transparency and newer trust directives still fail explicitly. The cleartext
+smoke checks compiled resources and wire-level domain denial. XML cursors
+preserve domain text and mixed content. Controlled TLS tests verify clean
+`close_notify` EOF. A backend zero-byte read was observed after abrupt peer
+shutdown; its normalization remains unfinished.
+
 The fixture certificate and key are generated only under `build/`, expire after
 two days, and are regenerated when building the probe. Never commit those files
 or the resulting APK. Host JVM checks validate the assertions; ART checks and

@@ -20,11 +20,14 @@ ifeq ($(shell uname -s),Darwin)
 macos-network: build/macos/libshiraz-trust.so
 endif
 
-.PHONY: network-policy-smoke
+.PHONY: network-policy-smoke network-trust-smoke
 ifeq ($(shell uname -s),Darwin)
-network-policy-smoke: macos-framework build/macos/libshiraz-trust.so build/macos/libshiraz-host.so
+network-policy-smoke network-trust-smoke: macos-framework build/macos/libshiraz-trust.so build/macos/libshiraz-host.so
 else
-network-policy-smoke: framework build/libshiraz-host.so
+network-policy-smoke network-trust-smoke: framework build/libshiraz-host.so
 endif
 network-policy-smoke:
 	uv run --no-project python scripts/network_policy_smoke.py
+
+network-trust-smoke:
+	uv run --no-project python scripts/network_trust_smoke.py

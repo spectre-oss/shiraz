@@ -44,7 +44,8 @@ final class HostTlsEngine extends SSLEngine {
         healthy();
         int position = dst.position();
         try {
-            SSLEngineResult result = delegate.wrap(src, offset, length, dst);
+            SSLEngineResult result;
+            try(ApplicationTrustManager.Peer scope=ApplicationTrustManager.peer(getPeerHost())){try{result=delegate.wrap(src,offset,length,dst);}catch(SSLException error){throw scope.explain(error);}}
             verify(result);
             return result;
         } catch (SSLException error) { dst.position(position); throw failed(error); }
@@ -60,7 +61,8 @@ final class HostTlsEngine extends SSLEngine {
         int[] positions = new int[length];
         for (int i = 0; i < length; i++) positions[i] = dst[offset + i].position();
         try {
-            SSLEngineResult result = delegate.unwrap(src, dst, offset, length);
+            SSLEngineResult result;
+            try(ApplicationTrustManager.Peer scope=ApplicationTrustManager.peer(getPeerHost())){try{result=delegate.unwrap(src,dst,offset,length);}catch(SSLException error){throw scope.explain(error);}}
             verify(result);
             return result;
         } catch (SSLException error) {
@@ -88,7 +90,10 @@ final class HostTlsEngine extends SSLEngine {
         if (verified) throw new SSLException("TLS engine renegotiation is not supported");
         delegate.beginHandshake();
     }
-    public Runnable getDelegatedTask() { return delegate.getDelegatedTask(); }
+    public Runnable getDelegatedTask() {
+        final Runnable task=delegate.getDelegatedTask();if(task==null)return null;
+        return new Runnable(){public void run(){try(ApplicationTrustManager.Peer ignored=ApplicationTrustManager.peer(getPeerHost())){task.run();}}};
+    }
     public SSLEngineResult.HandshakeStatus getHandshakeStatus() {
         // FINISHED belongs only in wrap/unwrap results, never this query.
         SSLEngineResult.HandshakeStatus status = delegate.getHandshakeStatus();

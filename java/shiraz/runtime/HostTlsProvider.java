@@ -71,7 +71,9 @@ public final class HostTlsProvider extends Provider {
         private X509TrustManager trust;
         Context(String protocol){try{delegate=SSLContext.getInstance(protocol,"wolfJSSE");}catch(GeneralSecurityException failure){throw new IllegalStateException("Pinned TLS backend unavailable",failure);}}
         protected void engineInit(KeyManager[] keys,TrustManager[] managers,SecureRandom random)throws KeyManagementException{
+            boolean defaults=managers==null;
             if(managers==null){try{TrustManagerFactory factory=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());factory.init((KeyStore)null);managers=factory.getTrustManagers();}catch(GeneralSecurityException failure){throw new KeyManagementException("Default trust initialization failed",failure);}}
+            if(defaults){managers=managers.clone();for(int i=0;i<managers.length;i++)if(managers[i] instanceof X509TrustManager&&!(managers[i] instanceof ApplicationTrustManager))managers[i]=new ApplicationTrustManager((X509TrustManager)managers[i]);}
             X509TrustManager next=null;for(TrustManager manager:managers)if(manager instanceof X509TrustManager){next=(X509TrustManager)manager;break;}
             delegate.init(keys,managers,random);
             // Pinned wolfJSSE SessionStore(0) evicts every entry. Its host+port-only

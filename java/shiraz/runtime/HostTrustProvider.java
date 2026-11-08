@@ -9,7 +9,7 @@ import javax.net.ssl.*;
 /** Default macOS trust anchors. Caller-supplied stores retain wolfJSSE behavior. */
 public final class HostTrustProvider extends Provider {
     private HostTrustProvider() {
-        super("ShirazTrust", 1.0, "macOS system certificate anchors with wolfJSSE validation");
+        super("ShirazTrust", 1.0, "macOS public anchors with application PKIX trust");
         put("TrustManagerFactory.PKIX", Factory.class.getName());
         put("Alg.Alias.TrustManagerFactory.X509", "PKIX");
         put("Alg.Alias.TrustManagerFactory.SunX509", "PKIX");
@@ -22,11 +22,13 @@ public final class HostTrustProvider extends Provider {
     private static native byte[][] anchors() throws CertificateException;
     public static final class Factory extends TrustManagerFactorySpi {
         private TrustManagerFactory delegate;
+        private boolean applicationDefault;
         protected void engineInit(KeyStore store) throws KeyStoreException {
             try {
                 // Preserve explicit javax.net.ssl.trustStore settings, including
                 // the backend's error for an unreadable or invalid store.
-                if (store == null && System.getProperty("javax.net.ssl.trustStore") == null) {
+                boolean useApplicationDefault=store==null&&System.getProperty("javax.net.ssl.trustStore")==null;
+                if (useApplicationDefault) {
                     byte[][] certificates = anchors();
                     if (certificates == null || certificates.length == 0)
                         throw new KeyStoreException("macOS returned no system trust anchors");
@@ -40,6 +42,7 @@ public final class HostTrustProvider extends Provider {
                 TrustManagerFactory next = TrustManagerFactory.getInstance("PKIX", "wolfJSSE");
                 next.init(store);
                 delegate = next;
+                applicationDefault=useApplicationDefault;
             } catch (Exception error) {
                 throw new KeyStoreException("Cannot initialize macOS certificate trust", error);
             }
@@ -50,7 +53,9 @@ public final class HostTrustProvider extends Provider {
         }
         protected TrustManager[] engineGetTrustManagers() {
             if (delegate == null) throw new IllegalStateException("Trust manager is not initialized");
-            return delegate.getTrustManagers();
+            TrustManager[] managers=delegate.getTrustManagers();
+            if(applicationDefault)for(int i=0;i<managers.length;i++)if(managers[i] instanceof X509TrustManager)managers[i]=new ApplicationTrustManager((X509TrustManager)managers[i]);
+            return managers;
         }
     }
 }
