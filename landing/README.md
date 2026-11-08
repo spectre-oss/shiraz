@@ -55,3 +55,31 @@ APKs, private logs, credentials, or personal app data to the catalog. New public
 reports must follow the repository documentation allowlist rules. `npm run check`
 validates unique IDs, required fields, status values and evidence paths before
 checking the Svelte app. This catalog is source code under the project GPL license.
+
+## Android coverage tracker
+
+The compatibility page also reads `src/lib/android-support.json` (maintained
+subsystem notes) and `src/lib/android-inventory.json` (generated inventories).
+Keep host scope and verification level explicit; `Partial` does not certify
+an entire subsystem. Add evidence paths and update the review date when notes
+change. Do not put private logs, account data, payloads or APKs in either file.
+
+From the repository root, `make landing-compatibility-data` rebuilds the framework
+and regenerates class-name presence against the checksum-pinned Android API 35
+SDK plus current planned probe counts. The runtime's advertised API 27 level is
+a separate fact. Class-name presence is not method, signature, behavior or CTS
+coverage; do not label it as an overall Android compatibility percentage.
+
+To import a behavioral report, pass both its report and exact probe source
+snapshot to `uv run --no-project python scripts/update_compatibility_tracker.py
+--probe-report <report.json> --probe-source <probe-source-directory>`. The importer
+verifies the source fingerprint and case definitions, then exports only category
+counts. Unrun cases become `NOT_RUN`, distinct from `SKIPPED`. It does not copy
+result details, device identity, run IDs or account information. A normal update
+preserves the last imported snapshot and labels it separately from the current
+catalog. Do not relabel historical or targeted results as a fresh full run.
+
+`bun run check` inside `landing/` validates the inventories, planned case counts,
+subsystem evidence paths and public snapshot schema. Run the compatibility-page
+browser tests after changing tracker controls. Updating source does not publish
+the site: the Pages workflow deploys `main` after its checks and build succeed.

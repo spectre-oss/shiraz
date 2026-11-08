@@ -1640,3 +1640,12 @@ launcher:
 	cd go-server && task run
 
 include mk/network.mk
+
+# Regenerate measured inventories after rebuilding the local framework. No app data is imported.
+.PHONY: landing-compatibility-data
+ifeq ($(shell uname -s),Darwin)
+landing-compatibility-data: macos-framework
+else
+landing-compatibility-data: framework
+endif
+	uv run --no-project python scripts/update_compatibility_tracker.py

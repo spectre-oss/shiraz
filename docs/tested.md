@@ -93,3 +93,81 @@ A separate read-only timing diagnostic reported time scale 1, approximately
 0.016-second frame deltas and focused state; this does not identify the stall's
 cause. Optional virtual mouse-to-touch input did not resolve it. Do not interpret
 the rendered game screen as full compatibility.
+
+## Telegram 13.2.1 — macOS ARM64, partial compatibility
+
+Recorded on 2026-11-08 using the unchanged `org.telegram.messenger.web` APK,
+version 13.2.1 (72919), SHA-256
+`2b73067f429a5cc20cf060e84c9296a18a04b77f1aa02739fa6457c6b5a508d2`.
+The environment was an Apple Silicon macOS host with standalone ARM64 ART, SDL
+presentation and the experimental guest ELF/JNI loader. This is a development
+checkout result on `feat/macos` (source baseline `be412cb`, VERSION 0.338.0,
+with additional uncommitted compatibility changes), not a released build or
+a Linux/AppImage acceptance result.
+
+### Observed in the actual APK
+
+- The Telegram native library initializes, runs all 18 expected constructors and
+  completes `JNI_OnLoad`. This is native initialization evidence, not a claim
+  that every native API or syscall is implemented.
+- The welcome screen, login form, country picker, country search/selection and
+  text input were exercised through normal app input. Portrait/landscape
+  resizing and a restart were exercised; saved authenticated login was not.
+- A user-controlled login reached successful `auth.sendCode` and authentication
+  response callbacks. Phone numbers, codes and passwords stayed in the app.
+  No account details, private screenshots or session data are published here.
+- A missing `CLOCK_BOOTTIME` mapping was reproduced in a guest regression and
+  repaired. Telegram uses this clock for network timing. Initial MTProto
+  handshake probes also passed on both the host and the guest socket bridge;
+  neither result alone establishes full messaging compatibility.
+- Authentication was followed by a missing `MediaRouter` crash during media
+  initialization. The local default-audio route API was added, its component
+  tests pass, and the actual APK's media initializer passes a pre-login check.
+  The signed-in chat screen has not yet been verified after this repair.
+
+### Component results and remaining limits
+
+OpenJDK and ART component tests cover PCM playback, WAV/AAC decoding, AAC
+encoding, synthetic MPEG-4 output, playback timestamps, JPEG encoding/rotation,
+local audio-route metadata and capture-consent rejection. These use synthetic
+media or bounded bridge tests; they are not microphone/camera acceptance inside
+Telegram. Audio-only recording APIs exist, while video recording and remote/cast
+routing remain unsupported. Physical microphone/camera capture, voice messages,
+calls and video calls remain unverified.
+
+App storage is persistent per package, separate from per-APK build/run artifacts.
+Synthetic preferences survive separate OpenJDK and ART processes, including
+queued writes drained at clean shutdown. Telegram returning to its login screen
+after the crash does not prove app data was erased: the crash occurred in a
+login-success cleanup path that can run before the current user is saved.
+**Telegram login persistence across restart remains unverified.**
+
+Still required: reach the signed-in chat UI, verify saved login after a clean
+restart, exercise messaging with an authorized test destination, and validate
+actual microphone/camera use and calls. Earlier intro-animation gaps and
+short-landscape keypad clipping also remain open. Public results must be updated
+after those flows are observed; successful server authentication or component
+tests must not be relabeled as full Telegram support.
+
+## Android coverage tracker — measurement boundaries
+
+The website's Android coverage table separates maintained subsystem notes from
+class inventory and behavioral assertions. Its initial development snapshot
+records 933 of 4,445 matching `android.*` class names against the pinned Android
+15 / API 35 SDK, excluding resource classes. This is a class-name inventory,
+not a percentage of Android behavior that works. The runtime advertises API 27;
+that declaration does not establish certification at either API level.
+
+The current probe catalog defines 239 assertions. A separately imported,
+fingerprint-verified suite 0.333.2 snapshot contains 233 cases, with 49 Network
+passes and 184 cases not run. No failures in that targeted run does not mean the
+unrun areas passed. The exported report does not record the host platform, so
+none is inferred from its synthetic device model. The website retains explicit
+PASS, FAIL, UNSUPPORTED, SKIPPED, TIMEOUT and NOT_RUN counts and labels the snapshot
+historical. Later maintenance may change these counts; the versioned website
+inventory and exact source fingerprint identify each published measurement.
+
+Framework/API work should update the maintained support notes and regenerate
+inventories using the workflow in `landing/README.md`. App-flow results stay in
+the app directory and their reports. Physical capture, account persistence and
+complete messaging/calling require their own real-app acceptance evidence.
