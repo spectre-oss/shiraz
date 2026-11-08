@@ -160,6 +160,9 @@ void island_checks(const std::vector<uint8_t> &bytes) {
       const uintptr_t island = image.load_bias() + image.elf().first_page +
                                image.elf().span + index * 64;
       const auto accessor = &island_access;
+      const uint32_t custom_accessor_kind = 0;
+      std::memcpy(reinterpret_cast<void *>(island + 52), &custom_accessor_kind,
+                  sizeof(custom_accessor_kind));
       std::memcpy(reinterpret_cast<void *>(island + 56), &accessor, sizeof(accessor));
     }
   }

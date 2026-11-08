@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/tls.hpp"
+#include "shiraz/darwin/guest/instruction.hpp"
 #include "guest_io.hpp"
 #include "guest_tls_layout.hpp"
 #include <array>
@@ -13,6 +14,7 @@
 #include <utility>
 #include <pthread.h>
 #include <stdexcept>
+#include <unistd.h>
 
 // Apple libpthread private/pthread/private.h: int result, 0 or 1; macOS 11+.
 // Weak linkage gives unsupported hosts an explicit failure, never an assumed
@@ -31,8 +33,11 @@ struct Destructor { void *function, *object; };
 // thread: doing so could allocate TLS from inside the signal handler.
 std::array<std::atomic<pthread_t>, 4096> prepared_threads{};
 std::array<std::atomic<uintptr_t>, 4096> prepared_stack_low{}, prepared_stack_high{};
+std::array<std::atomic<uintptr_t>, 4096> prepared_guest_bases{};
+std::array<std::atomic<uint64_t>, 4096> prepared_native_ids{};
 static_assert(std::atomic<pthread_t>::is_always_lock_free);
 static_assert(std::atomic<uintptr_t>::is_always_lock_free);
+static_assert(std::atomic<uint64_t>::is_always_lock_free);
 struct MemoryDomains {
   std::mutex mutex;
   std::map<uintptr_t, uintptr_t> images;
@@ -101,6 +106,9 @@ struct ThreadState {
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
     const auto thread = pthread_self();
+    uint64_t native_id = 0;
+    if (pthread_threadid_np(nullptr, &native_id) || !native_id)
+      throw ElfError("native thread identity unavailable");
     const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(thread));
     const auto size = pthread_get_stacksize_np(thread);
     if (!size || high <= size) {
@@ -128,6 +136,8 @@ struct ThreadState {
         prepared_index = i;
         prepared_stack_low[i].store(high - size, std::memory_order_relaxed);
         prepared_stack_high[i].store(high, std::memory_order_relaxed);
+        prepared_native_ids[i].store(native_id, std::memory_order_relaxed);
+        prepared_guest_bases[i].store(reinterpret_cast<uintptr_t>(slots.base()), std::memory_order_relaxed);
         prepared_threads[i].store(thread, std::memory_order_release);
         return;
       }
@@ -192,6 +202,10 @@ struct ThreadState {
       const auto high = prepared_stack_high[prepared_index].load(std::memory_order_relaxed);
       auto stack = domains.stacks.find(low);
       if (stack == domains.stacks.end() || stack->second != high) std::abort();
+      // Keep this cache live through all guest cleanup above, then invalidate
+      // it while we still own the row and domains lock, before any row reuse.
+      prepared_guest_bases[prepared_index].store(0, std::memory_order_relaxed);
+      prepared_native_ids[prepared_index].store(0, std::memory_order_relaxed);
       prepared_threads[prepared_index].store(nullptr, std::memory_order_release);
       domains.stacks.erase(stack);
     }
@@ -221,6 +235,10 @@ ThreadState &live_state() {
 }
 [[noreturn]] void stack_fail() {
   std::fprintf(stderr, "SHIRAZ_GUEST_FATAL stack guard check failed\n");
+  std::abort();
+}
+template <size_t N> [[noreturn]] void mrs_failure(const char (&message)[N]) noexcept {
+  (void)::write(STDERR_FILENO, message, N - 1);
   std::abort();
 }
 } // namespace
@@ -343,6 +361,41 @@ void *guest_tls_base() {
   auto *result = current.slots.base(); // Complete state initialization first.
   current.publish();
   return result;
+}
+// The shared MRS entry forwards original SP in x7. This path reads only the
+// already-published cache: it never initializes TLS, publishes a row, or takes
+// a registry lock. It is a snapshot under the existing guest-entry lifetime
+// preflight, not a lifetime lease or an asynchronous/native-spill proof.
+extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
+                                        uint64_t, uint64_t, uint64_t, uintptr_t original_sp) noexcept {
+  int *const host_error = &errno;
+  const int saved_error = *host_error;
+  const auto current = pthread_self();
+  uint64_t native_id = 0;
+  const int identity_error = pthread_threadid_np(nullptr, &native_id);
+  // Restore errno before loading the guest TP, without a destructor or a
+  // further authored native call on the successful return path after it.
+  *host_error = saved_error;
+  if (identity_error || !native_id)
+    mrs_failure("SHIRAZ_GUEST_FATAL MRS native thread identity unavailable\n");
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    if (prepared_threads[i].load(std::memory_order_acquire) != current ||
+        prepared_native_ids[i].load(std::memory_order_relaxed) != native_id) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    // Recheck both ownership observations before the final pointer load.
+    // Native IDs also distinguish ordinary native pthread-handle reuse.
+    if (prepared_threads[i].load(std::memory_order_acquire) != current ||
+        prepared_native_ids[i].load(std::memory_order_acquire) != native_id) continue;
+    if ((original_sp & 15) || original_sp < low || original_sp >= high)
+      mrs_failure("SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
+    if (kMrsStackBytesBefore > original_sp - low || kMrsStackBytesAfter > high - original_sp)
+      mrs_failure("SHIRAZ_GUEST_FATAL MRS spill window outside prepared native stack extent\n");
+    const auto base = prepared_guest_bases[i].load(std::memory_order_acquire);
+    if (!base) mrs_failure("SHIRAZ_GUEST_FATAL MRS prepared TLS cache unavailable\n");
+    return reinterpret_cast<void *>(base);
+  }
+  mrs_failure("SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
 }
 bool guest_tls_prepared() noexcept {
   pthread_t current = pthread_self();

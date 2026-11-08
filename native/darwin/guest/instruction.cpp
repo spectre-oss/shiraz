@@ -9,22 +9,7 @@ extern "C" void shiraz_guest_tpidr_entry();
 // The shared assembly forwards the original guest SP in the otherwise unused
 // eighth integer argument. x0..x6 retain their Linux syscall dispatch meaning.
 extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
-                                        uint64_t, uint64_t, uint64_t, uintptr_t original_sp) noexcept {
-  try {
-    HostErrno preserve;
-    if ((original_sp & 15) || !prepared_guest_stack_contains(original_sp)) {
-      constexpr char message[] = "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n";
-      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
-      std::abort();
-    }
-    if (!prepared_guest_stack_window(original_sp, kMrsStackBytesBefore, kMrsStackBytesAfter)) {
-      constexpr char message[] = "SHIRAZ_GUEST_FATAL MRS spill window outside prepared native stack extent\n";
-      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
-      std::abort();
-    }
-    return guest_tls_base();
-  } catch (...) { std::abort(); }
-}
+                                        uint64_t, uint64_t, uint64_t, uintptr_t original_sp) noexcept;
 namespace {
 uint32_t branch(uintptr_t from, uintptr_t to) {
   if ((from | to) & 3) throw ElfError("unaligned guest TLS branch");
@@ -71,8 +56,12 @@ ThreadPointerPatch plan_thread_pointer(uintptr_t site, uint32_t original,
   put(result, 32, reinterpret_cast<uintptr_t>(&shiraz_guest_tpidr_entry));
   put(result, 40, island + 16);
   put(result, 48, target);
-  put(result, 56, accessor ? reinterpret_cast<uintptr_t>(accessor)
-                          : reinterpret_cast<uintptr_t>(&shiraz_guest_tls_access));
+  const auto callback = accessor ? reinterpret_cast<uintptr_t>(accessor)
+                                : reinterpret_cast<uintptr_t>(&shiraz_guest_tls_access);
+  // Context+12 identifies the prepared TLS path. Other accessors retain the
+  // generic argument ABI; syscall planning explicitly clears this word.
+  put(result, 52, uint32_t(callback == reinterpret_cast<uintptr_t>(&shiraz_guest_tls_access)));
+  put(result, 56, callback);
   return result;
 }
 ThreadPointerPatch plan_system_call(uintptr_t site, uint32_t original,
@@ -80,6 +69,7 @@ ThreadPointerPatch plan_system_call(uintptr_t site, uint32_t original,
   if (original != 0xd4000001u || !dispatcher)
     throw ElfError("guest SVC #0 requires a Linux syscall dispatcher");
   auto result = plan_thread_pointer(site, 0xd53bd040u, island);
+  put(result, 52, uint32_t(0));
   put(result, 56, dispatcher);
   return result;
 }

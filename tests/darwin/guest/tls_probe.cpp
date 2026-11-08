@@ -20,6 +20,22 @@
 #include <sys/wait.h>
 #include <unistd.h>
 using namespace shiraz::guest;
+extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
+                                        uint64_t, uint64_t, uint64_t, uintptr_t) noexcept;
+static bool prepared_mrs_cache_matches() {
+  // Direct accessor lifecycle check only. Rewritten instruction/register
+  // execution is covered separately by tpidr-probe.
+  if (!guest_tls_prepared()) return false;
+  const int saved_errno = errno;
+  void *expected = guest_tls_base();
+  uintptr_t native_sp;
+  __asm__ volatile("mov %0, sp" : "=r"(native_sp));
+  errno = ELOOP;
+  void *observed = shiraz_guest_tls_access(0, 0, 0, 0, 0, 0, 0, native_sp);
+  const bool matches = observed == expected && errno == ELOOP;
+  errno = saved_errno;
+  return matches;
+}
 static Loader *resident;
 static std::atomic<int> late_errors{0}, late_callbacks{0}, host_late_calls{0};
 static uintptr_t late_registration, late_destructor, late_first_use;
@@ -104,6 +120,7 @@ struct HostLateCleanup {
     GuestTlsCleanupScope cleanup;
     prepare_guest_tls();
     if (!guest_tls_prepared()) ++late_errors;
+    if (!prepared_mrs_cache_matches()) ++late_errors;
     auto result = invoke(reinterpret_cast<void *>(late_registration), {
         Argument::integer(late_destructor, ArgumentType::Int64),
         Argument::integer(0, ArgumentType::Int64), Argument::integer(0, ArgumentType::Int64)});
@@ -116,6 +133,7 @@ static void late_host_cleanup(void *) {
   GuestTlsCleanupScope cleanup;
   prepare_guest_tls();
   if (!guest_tls_prepared()) ++late_errors;
+  if (!prepared_mrs_cache_matches()) ++late_errors;
   auto result = invoke(reinterpret_cast<void *>(late_registration), {
       Argument::integer(late_destructor, ArgumentType::Int64),
       Argument::integer(0, ArgumentType::Int64), Argument::integer(0, ArgumentType::Int64)});
@@ -391,7 +409,7 @@ int main(int argc, char **argv) {
         saved[size_t(slot - bionic::kTlsMinSlot)] = slots[slot];
       for (int64_t slot = bionic::kTlsMinSlot; slot <= bionic::kTlsMaxSlot; ++slot)
         slots[slot] = uintptr_t(0x51a70000 + i * 0x100 + slot - bionic::kTlsMinSlot);
-      bool backing_ok = true;
+      bool backing_ok = prepared_mrs_cache_matches();
       for (int64_t slot = bionic::kTlsMinSlot; slot <= bionic::kTlsMaxSlot; ++slot)
         backing_ok &= slots[slot] == uintptr_t(0x51a70000 + i * 0x100 + slot - bionic::kTlsMinSlot);
       for (int64_t slot = bionic::kTlsMinSlot; slot <= bionic::kTlsMaxSlot; ++slot)
@@ -491,6 +509,8 @@ int main(int argc, char **argv) {
     int status;
     require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 97,
             "stack-check failure aborts instead of reporting success");
+    std::cout << "M5_TLS_MRS_CACHE_PASS direct_accessor=1 ordinary_threads=4 "
+                 "late_native_key_rounds=4 host_late_cleanup=1 errno=1 lifetime_lease=0\n";
     std::cout << "M5_TLS_PASS emutls=upstream peer_dso=1 templates=1 zero=1 alignment=128 "
                  "threads=8 destructors=24 lifo=1 register_during_exit=1 isolated_blocks=1 guard_nonzero=1 "
                  "late_native_key_rounds=4 scoped_late_reentry=1 late_nested_destructors=10 "

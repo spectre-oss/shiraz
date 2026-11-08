@@ -3,6 +3,9 @@
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/jit.hpp"
 #include <atomic>
+#include <chrono>
+#include <poll.h>
+#include <string>
 #include <cstring>
 #include <iostream>
 #include <libkern/OSCacheControl.h>
@@ -74,7 +77,74 @@ static void verify(const Result &result, unsigned target, uintptr_t tls) {
     for (unsigned byte = 0; byte < 16; ++byte)
       require(result.vectors[reg][byte] == 0x40 + reg, "all 128 vector bits preserved");
 }
-static void check_mrs_window() {
+class MrsChildDisposition {
+  struct sigaction previous{};
+public:
+  MrsChildDisposition() {
+    require(!sigaction(SIGCHLD, nullptr, &previous), "snapshot MRS child disposition");
+    struct sigaction action{};
+    sigemptyset(&action.sa_mask);
+    action.sa_handler = SIG_DFL;
+    require(!sigaction(SIGCHLD, &action, nullptr), "keep MRS child waitable");
+  }
+  ~MrsChildDisposition() { if (sigaction(SIGCHLD, &previous, nullptr)) _exit(95); }
+};
+static void mrs_refusal(const char *executable, const char *mode, const char *expected) {
+  MrsChildDisposition disposition;
+  int descriptors[2];
+  require(!pipe(descriptors), "MRS refusal pipe");
+  char *arguments[] = {const_cast<char *>(executable), const_cast<char *>(mode), nullptr};
+  const auto child = fork();
+  require(child >= 0, "MRS refusal fork");
+  if (!child) {
+    close(descriptors[0]);
+    if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
+    close(descriptors[1]);
+    execv(executable, arguments);
+    _exit(96);
+  }
+  close(descriptors[1]);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  std::string diagnostic;
+  char buffer[512];
+  ssize_t count = -1;
+  bool failed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    pollfd input{descriptors[0], POLLIN | POLLHUP, 0};
+    const auto ready = poll(&input, 1, 100);
+    if (ready < 0 && errno == EINTR) continue;
+    if (ready < 0) { failed = true; break; }
+    if (!ready) continue;
+    count = read(descriptors[0], buffer, sizeof(buffer));
+    if (count < 0 && errno == EINTR) continue;
+    if (count <= 0) break;
+    diagnostic.append(buffer, size_t(count));
+    if (diagnostic.size() > 8192) { failed = true; break; }
+  }
+  close(descriptors[0]);
+  int status = -1, wait_error = 0;
+  pid_t waited = 0;
+  while (std::chrono::steady_clock::now() < deadline) {
+    waited = waitpid(child, &status, WNOHANG);
+    wait_error = waited < 0 ? errno : 0;
+    if (waited == child || (waited < 0 && wait_error != EINTR)) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (waited != child) {
+    failed = true;
+    if (waited == 0 || (waited < 0 && wait_error == EINTR)) {
+      kill(child, SIGKILL);
+      do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+    }
+  }
+  const bool refused = !failed && waited == child && WIFEXITED(status) &&
+      WEXITSTATUS(status) == 97 && count == 0 && diagnostic == expected;
+  if (!refused) std::cerr << "MRS refusal mode=" << mode << " status=" << status
+      << " read=" << count << " failed=" << failed << " wait_errno=" << wait_error
+      << " diagnostic=" << diagnostic << std::endl;
+  require(refused, "fresh MRS refusal child reaches exact fatal diagnostic");
+}
+static void check_mrs_window(const char *executable) {
   const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
   const auto low = high - pthread_get_stacksize_np(pthread_self());
   require(prepared_guest_stack_window(low + kMrsStackBytesBefore, kMrsStackBytesBefore, kMrsStackBytesAfter) &&
@@ -87,39 +157,17 @@ static void check_mrs_window() {
               !prepared_guest_stack_window(high - kMrsStackBytesAfter, 0, UINT64_MAX) &&
               !prepared_guest_stack_window(UINTPTR_MAX, UINT64_MAX, UINT64_MAX),
           "MRS window rejects one-byte boundary crossing and overflow without reading memory");
-  for (const auto anchor : {low + kMrsStackBytesBefore - 16, high - kMrsStackBytesAfter + 16}) {
-    require(!(anchor & 15) && prepared_guest_stack_contains(anchor), "negative window anchor is an aligned native-stack member");
-    int descriptors[2];
-    require(pipe(descriptors) == 0, "MRS window diagnostic pipe");
-    const pid_t child = fork();
-    require(child >= 0, "MRS window child");
-    if (!child) {
-      close(descriptors[0]);
-      if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
-      close(descriptors[1]);
-      std::signal(SIGABRT, [](int) { _exit(97); });
-      (void)shiraz_guest_tls_access(0, 0, 0, 0, 0, 0, 0, anchor);
-      _exit(98);
-    }
-    close(descriptors[1]);
-    std::string diagnostic;
-    char buffer[256]; ssize_t count;
-    while ((count = read(descriptors[0], buffer, sizeof(buffer))) > 0) {
-      diagnostic.append(buffer, size_t(count));
-      if (diagnostic.size() > 8192) { kill(child, SIGKILL); break; }
-    }
-    close(descriptors[0]);
-    int status;
-    require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 97 &&
-                count == 0 && diagnostic == "SHIRAZ_GUEST_FATAL MRS spill window outside prepared native stack extent\n",
-            "production MRS accessor refuses incomplete windows even when anchor itself is valid");
-  }
+  mrs_refusal(executable, "--mrs-window-low",
+              "SHIRAZ_GUEST_FATAL MRS spill window outside prepared native stack extent\n");
+  mrs_refusal(executable, "--mrs-window-high",
+              "SHIRAZ_GUEST_FATAL MRS spill window outside prepared native stack extent\n");
   std::cout << "M5_MRS_WINDOW_PASS profile=" << kMrsStackWindowProfile
             << " before=" << kMrsStackBytesBefore << " after=" << kMrsStackBytesAfter
             << " exact_boundaries=1 lower_refusal=1 upper_refusal=1 overflow=1\n";
 }
-int main() {
+int main(int argc, char **argv) {
   try {
+    require(argc == 1 || (argc == 2 && !std::strncmp(argv[1], "--mrs-", 6)), "TPIDR probe mode");
     constexpr size_t size = 256 * 1024;
     auto *memory = static_cast<uint8_t *>(mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                                                MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0));
@@ -128,7 +176,7 @@ int main() {
     size_t site_offset = uintptr_t(shiraz_tpidr_test_site) - uintptr_t(shiraz_tpidr_test_start);
     require(length < 4096 && site_offset + 4 < length, "bounded native test template");
     using Function = void (*)(Result *);
-    struct Program { Function function; unsigned target; };
+    struct Program { Function function; unsigned target; bool production; };
     std::vector<Program> programs;
     using Protected = int (*)(int);
     Protected protected_function = nullptr;
@@ -155,12 +203,16 @@ int main() {
         std::memcpy(site, &patch.replacement, 4);
         if (patch.uses_island) {
           uintptr_t unwind_pc = 0;
+          uint32_t accessor_kind = 0;
           std::memcpy(&unwind_pc, patch.island.data() + 24, sizeof(unwind_pc));
+          std::memcpy(&accessor_kind, patch.island.data() + 52, sizeof(accessor_kind));
           require(unwind_pc == uintptr_t(site) + 4,
                   "island unwind PC must be the exact guest continuation");
+          require(accessor_kind == (stress == 0 ? 1u : 0u),
+                  "only production MRS islands select register quarantine");
           std::memcpy(island, patch.island.data(), patch.island.size());
         }
-        programs.push_back({reinterpret_cast<Function>(start), target});
+        programs.push_back({reinterpret_cast<Function>(start), target, stress == 0});
       }
       auto *start = memory + used;
       size_t guard_length = uintptr_t(shiraz_tpidr_guard_end) - uintptr_t(shiraz_tpidr_guard_start);
@@ -183,9 +235,52 @@ int main() {
       used = size_t(island - memory);
     }
     sys_icache_invalidate(memory, used);
+    auto kind = [](const ThreadPointerPatch &patch) {
+      uint32_t result = 0;
+      std::memcpy(&result, patch.island.data() + 52, sizeof(result));
+      return result;
+    };
+    const auto default_accessor = reinterpret_cast<ThreadPointerAccessor>(
+        reinterpret_cast<uintptr_t>(&shiraz_guest_tls_access));
+    require(kind(plan_thread_pointer(0x100000000, 0xd53bd040u, 0x100001000, default_accessor)) == 1,
+            "explicit production accessor selects the same quarantined path");
+    require(kind(plan_system_call(0x100000000, 0xd4000001u, 0x100001000,
+                                 reinterpret_cast<uintptr_t>(&shiraz_guest_tls_access))) == 0,
+            "syscall kind stays generic even when dispatcher address equals TLS accessor");
     prepare_guest_tls();
     uintptr_t tls = reinterpret_cast<uintptr_t>(guest_tls_base());
-    check_mrs_window();
+    if (argc == 2) {
+      require(std::signal(SIGABRT, [](int) { _exit(97); }) != SIG_ERR, "MRS child abort observer");
+      const std::string mode = argv[1];
+      if (mode == "--mrs-window-low" || mode == "--mrs-window-high") {
+        const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+        const auto low = high - pthread_get_stacksize_np(pthread_self());
+        const auto anchor = mode == "--mrs-window-low" ? low + kMrsStackBytesBefore - 16
+                                                       : high - kMrsStackBytesAfter + 16;
+        require(!(anchor & 15) && prepared_guest_stack_contains(anchor), "fresh window anchor is in native extent");
+        (void)shiraz_guest_tls_access(0, 0, 0, 0, 0, 0, 0, anchor);
+      } else if (mode == "--mrs-corrupt") {
+        protected_function(1);
+      } else if (mode == "--mrs-released") {
+        { GuestTlsCleanupScope cleanup; }
+        require(!guest_tls_prepared(), "fresh child really releases prepared cache epoch");
+        Result result{};
+        programs.front().function(&result);
+      } else if (mode == "--mrs-foreign") {
+        constexpr size_t bytes = 256 * 1024;
+        void *stack = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        require(stack != MAP_FAILED, "fresh foreign MRS stack allocation");
+        Result result{};
+        ForeignCall call{programs.front().function, &result};
+#ifdef SHIRAZ_ASAN_FIBER_TEST
+        void *suspended_fake_stack = nullptr;
+        __sanitizer_start_switch_fiber(&suspended_fake_stack, stack, bytes);
+#endif
+        shiraz_test_other_stack(static_cast<uint8_t *>(stack) + bytes - 16, &foreign_mrs, &call);
+      } else require(false, "known MRS child mode");
+      return 98;
+    }
+    check_mrs_window(argv[0]);
     for (const auto &program : programs) {
       Result result{};
       errno = ELOOP;
@@ -193,7 +288,7 @@ int main() {
       verify(result, program.target, tls);
       require(errno == ELOOP, "TLS accessor preserves host errno");
     }
-    std::atomic<int> passed{0}, ready{0};
+    std::atomic<int> passed{0}, ready{0}, epochs{0};
     uintptr_t bases[4]{};
     std::vector<std::thread> threads;
     for (int i = 0; i < 4; ++i) threads.emplace_back([&, i] {
@@ -215,11 +310,30 @@ int main() {
           program.function(&result);
           verify(result, program.target, own);
         }
+        // Each owned scope drains its state. Re-read the actual rewritten
+        // production MRS after publication in the next epoch, without assuming
+        // whether the native allocator reuses the previous TLS address.
+        for (int epoch = 0; epoch < 4; ++epoch) {
+          {
+            GuestTlsCleanupScope cleanup;
+            prepare_guest_tls();
+            const auto current = reinterpret_cast<uintptr_t>(guest_tls_base());
+            for (const auto &program : programs) if (program.production) {
+              Result result{};
+              errno = ELOOP;
+              program.function(&result);
+              verify(result, program.target, current);
+              require(errno == ELOOP, "prepared MRS cache preserves errno across owned epochs");
+            }
+          }
+          require(!guest_tls_prepared(), "owned epoch removes prepared MRS readiness");
+          ++epochs;
+        }
         ++passed;
       } catch (...) { if (!arrived) ++ready; }
     });
     for (auto &thread : threads) thread.join();
-    require(passed == 4, "concurrent state-preserving TPIDR reads");
+    require(passed == 4 && epochs == 16, "concurrent state-preserving TPIDR reads and owned cache epochs");
     for (int i = 0; i < 4; ++i) for (int j = 0; j < i; ++j)
       require(bases[i] != bases[j], "concurrent guest TLS blocks are distinct");
     unsigned rejected = 0;
@@ -236,62 +350,17 @@ int main() {
     reject(0x108000010, 0xd53bd040, 0x100000000); // negative range
     require(rejected == 6, "bounded TPIDR plan rejection cases");
     require(protected_function(0) == 73, "actual rewritten stack-guard check returns normally");
-    pid_t child = fork();
-    require(child >= 0, "stack-guard corruption child");
-    if (!child) {
-      std::signal(SIGABRT, [](int) { _exit(97); });
-      protected_function(1);
-      _exit(98);
-    }
-    int status;
-    require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 97,
-            "corrupting the saved stack guard triggers actual failure");
-    constexpr size_t foreign_size = 256 * 1024;
-    void *foreign_stack = mmap(nullptr, foreign_size, PROT_READ | PROT_WRITE,
-                                MAP_PRIVATE | MAP_ANON, -1, 0);
-    require(foreign_stack != MAP_FAILED, "foreign MRS stack allocation");
-    Result foreign_result{};
-    ForeignCall call{programs.front().function, &foreign_result};
-    int descriptors[2];
-    require(pipe(descriptors) == 0, "foreign MRS diagnostic pipe");
-    child = fork();
-    require(child >= 0, "foreign MRS child");
-    if (!child) {
-      close(descriptors[0]);
-      if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
-      close(descriptors[1]);
-      std::signal(SIGABRT, [](int) { _exit(97); });
-#ifdef SHIRAZ_ASAN_FIBER_TEST
-      // Preserve the suspended native fake stack: call/result may reside in
-      // it. This child must abort on the new stack and never resumes it.
-      void *suspended_fake_stack = nullptr;
-      __sanitizer_start_switch_fiber(&suspended_fake_stack, foreign_stack, foreign_size);
-#endif
-      shiraz_test_other_stack(static_cast<uint8_t *>(foreign_stack) + foreign_size - 16,
-                             &foreign_mrs, &call);
-      _exit(98);
-    }
-    close(descriptors[1]);
-    std::string diagnostic;
-    char buffer[512];
-    ssize_t count;
-    while ((count = read(descriptors[0], buffer, sizeof(buffer))) > 0) {
-      diagnostic.append(buffer, size_t(count));
-      if (diagnostic.size() > 8192) { kill(child, SIGKILL); break; }
-    }
-    close(descriptors[0]);
-    require(waitpid(child, &status, 0) == child, "collect foreign MRS child");
-    if (diagnostic != "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n")
-      std::cerr << "foreign MRS status=" << status << " diagnostic=" << diagnostic;
-    require(WIFEXITED(status) && WEXITSTATUS(status) == 97 &&
-                count == 0 && diagnostic == "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n",
-            "real rewritten MRS on a foreign stack reaches the exact extent refusal");
-    require(munmap(foreign_stack, foreign_size) == 0, "foreign MRS stack cleanup");
+    mrs_refusal(argv[0], "--mrs-corrupt", "SHIRAZ_GUEST_FATAL stack guard check failed\n");
+    mrs_refusal(argv[0], "--mrs-foreign", "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
+    mrs_refusal(argv[0], "--mrs-released", "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
     require(munmap(memory, size) == 0, "TPIDR test cleanup");
     std::cout << "M5_TPIDR_THUNK_PASS targets=31 accessors=2 gpr=31 vector_bits=4096 "
                  "flags=NZCV,FPCR,FPSR sp=1 lr=1 pac=1 threads=4 malformed=6 guard=1 corruption_abort=1 "
                  "host_tpidr_written=0 elf_auto_rewrite=0 unwind_verified=0\n";
     std::cout << "M5_TPIDR_STACK_PASS foreign_stack_rejected=1 original_sp=1 syscall_arguments=7\n";
+    std::cout << "M5_MRS_PREPARED_CACHE_PASS actual_rewritten_mrs=1 threads=4 owned_epochs=16 "
+                 "all_default_targets=31 errno=1 kind_flag=1 syscall_same_address_generic=1 "
+                 "released_epoch_refused=1 fresh_refusals=5 native_memory_purity=0 lifetime_lease=0\n";
   } catch (const std::exception &error) {
     std::cerr << "FAIL " << error.what() << '\n';
     return 1;
