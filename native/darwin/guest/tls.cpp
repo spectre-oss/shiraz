@@ -69,9 +69,26 @@ uintptr_t guard() {
   }();
   return value;
 }
+struct TlsSlotStorage {
+  static_assert(bionic::kTlsMinSlot >= -16 && bionic::kTlsMinSlot <= 0 &&
+                bionic::kTlsMaxSlot >= 0 && bionic::kTlsMaxSlot <= 63);
+  static_assert(bionic::kTlsSlotCount == bionic::kTlsMaxSlot - bionic::kTlsMinSlot + 1);
+  static_assert(bionic::kTlsPointerBytes == sizeof(uintptr_t) && sizeof(uintptr_t) == 8);
+  static_assert(bionic::kTlsStackGuardSlot >= bionic::kTlsMinSlot &&
+                bionic::kTlsStackGuardSlot <= bionic::kTlsMaxSlot);
+  // The returned TP addresses logical slot0, not the start of the object.
+  // Round the prefix to whole16-byte units to retain TP alignment even when
+  // the pinned arm64 ABI reserves a negative slot. Extra prefix is padding,
+  // not an additional advertised TLS slot.
+  static constexpr size_t prefix = (size_t(-bionic::kTlsMinSlot) + 1) & ~size_t(1);
+  static constexpr size_t count = prefix + size_t(bionic::kTlsMaxSlot) + 1;
+  alignas(16) std::array<uintptr_t, count> words{};
+  uintptr_t *base() noexcept { return words.data() + prefix; }
+};
 struct ThreadState {
-  // Owned canary storage, not a complete bionic TCB/private-slot personality.
-  alignas(16) std::array<uintptr_t, 64> slots{};
+  // Backing covers the pinned slot range; private slot contents remain
+  // unimplemented. This is still a canary-only personality, not a bionic TCB.
+  TlsSlotStorage slots;
   std::vector<Destructor> destructors;
   std::map<GuestThreadKeyHandle, const void *, std::owner_less<GuestThreadKeyHandle>> key_values;
   size_t registrations = 0;
@@ -79,9 +96,7 @@ struct ThreadState {
   bool draining = false;
   size_t prepared_index = prepared_threads.size();
   ThreadState() {
-    static_assert(bionic::kTlsPointerBytes == sizeof(uintptr_t));
-    static_assert(bionic::kTlsStackGuardSlot >= 0 && bionic::kTlsStackGuardSlot < 64);
-    slots[size_t(bionic::kTlsStackGuardSlot)] = guard();
+    slots.base()[bionic::kTlsStackGuardSlot] = guard();
   }
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
@@ -325,7 +340,7 @@ void prepare_guest_tls() {
 }
 void *guest_tls_base() {
   auto &current = live_state();
-  auto *result = current.slots.data(); // Complete TLV initialization first.
+  auto *result = current.slots.base(); // Complete state initialization first.
   current.publish();
   return result;
 }

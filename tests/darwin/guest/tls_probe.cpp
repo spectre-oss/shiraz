@@ -3,6 +3,7 @@
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/image.hpp"
+#include "guest_tls_layout.hpp"
 #include <fstream>
 #include <chrono>
 #include <array>
@@ -382,11 +383,22 @@ int main(int argc, char **argv) {
       prepare_guest_tls();
       auto *slots = static_cast<uintptr_t *>(guest_tls_base());
       bases[i] = reinterpret_cast<uintptr_t>(slots);
-      guards[i] = slots[5];
-      slots[10] = uintptr_t(i + 17);
+      guards[i] = slots[bionic::kTlsStackGuardSlot];
+      // Backing-only check: save/restore every logical slot before guest code
+      // runs. This does not install private thread/DTV/ART slot semantics.
+      std::array<uintptr_t, size_t(bionic::kTlsSlotCount)> saved{};
+      for (int64_t slot = bionic::kTlsMinSlot; slot <= bionic::kTlsMaxSlot; ++slot)
+        saved[size_t(slot - bionic::kTlsMinSlot)] = slots[slot];
+      for (int64_t slot = bionic::kTlsMinSlot; slot <= bionic::kTlsMaxSlot; ++slot)
+        slots[slot] = uintptr_t(0x51a70000 + i * 0x100 + slot - bionic::kTlsMinSlot);
+      bool backing_ok = true;
+      for (int64_t slot = bionic::kTlsMinSlot; slot <= bionic::kTlsMaxSlot; ++slot)
+        backing_ok &= slots[slot] == uintptr_t(0x51a70000 + i * 0x100 + slot - bionic::kTlsMinSlot);
+      for (int64_t slot = bionic::kTlsMinSlot; slot <= bionic::kTlsMaxSlot; ++slot)
+        slots[slot] = saved[size_t(slot - bionic::kTlsMinSlot)];
       results[i] = int(invoke(reinterpret_cast<void *>(exercise), {Argument::integer(i)})
                          .result_integers[0]);
-      if (slots[10] != uintptr_t(i + 17)) results[i] = -1;
+      if (!backing_ok || slots[bionic::kTlsStackGuardSlot] != guards[i]) results[i] = -1;
     });
     for (auto &thread : threads) thread.join();
     for (int i = 0; i < 4; ++i) {
@@ -394,6 +406,9 @@ int main(int argc, char **argv) {
                   guards[i] == guards[0], "isolated TLS storage and nonzero process guard");
       for (int j = 0; j < i; ++j) require(bases[i] != bases[j], "distinct concurrent TLS blocks");
     }
+    std::cout << "M5_TLS_SLOT_BACKING_PASS min=" << bionic::kTlsMinSlot
+              << " max=" << bionic::kTlsMaxSlot << " slots=" << bionic::kTlsSlotCount
+              << " alignment=16 threads=4 restored_before_guest=1 private_slot_semantics=0\n";
     auto call = [&](const char *name) {
       return int(invoke(reinterpret_cast<void *>(loader.symbol(module, name).address), {})
                      .result_integers[0]);
