@@ -4,21 +4,20 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import re
 import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
-import tempfile
 import xml.etree.ElementTree as ElementTree
 import zipfile
-from .architecture import native_abi, supports_native_abis
 from .apk import FormatError, inspect_apk
-from .host_layout import host_out_dir
+from .architecture import native_abi, supports_native_abis
+from .host_layout import darwin_socket_directory, host_out_dir
 from .native_payload import extract_native
 
 
@@ -575,7 +574,7 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
         env.update({'ANDROID_ROOT': str(host), 'ANDROID_DATA': str(work / 'android-data'),
                     'XDG_CACHE_HOME': str(work / 'cache'), 'BOOTCLASSPATH': boot,
                     'SHIRAZ_FONT_DIR': str(root / '.local/share/shiraz/fonts'),
-                    'SHIRAZ_LOCAL_SOCKET_DIR': str(root / '.local/sockets'),
+                    'SHIRAZ_LOCAL_SOCKET_DIR': str(darwin_socket_directory(root)),
                     # The in-tree fonts.conf (make macos-graphics-deps): bundled
                     # fonts plus read-only system font directories, cache in .local.
                     'FONTCONFIG_FILE': str(root / DARWIN_FONTCONFIG_FILE),

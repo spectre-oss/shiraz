@@ -8,18 +8,19 @@ import json
 import os
 import platform
 import shutil
-from pathlib import Path
-import subprocess
 import struct
+import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from shiraz.host_layout import host_out_dir  # noqa: E402
+from shiraz import host_layout  # noqa: E402
+
 DARWIN = platform.system() == 'Darwin'
 ART = ROOT / 'context/art_standalone'
-HOST = host_out_dir(ART)  # out/host/linux-x86, or out/host/darwin-x86 on macOS
+HOST = host_layout.host_out_dir(ART)  # out/host/linux-x86, or out/host/darwin-x86 on macOS
 JARS = ('core-oj-hostdex.jar', 'core-libart-hostdex.jar', 'okhttp-hostdex.jar', 'bouncycastle-hostdex.jar', 'wolfssljni-hostdex.jar')
 # Shiraz JNI libraries: build/ on Linux, build/macos/ (Mach-O, .so names) on macOS.
 NATIVE = ROOT / 'build/macos' if DARWIN else ROOT / 'build'
@@ -34,7 +35,7 @@ def environment(work):
            'XDG_DATA_DIRS': str(ROOT / '.local/share') + ':/usr/share',
            'BOOTCLASSPATH': ':'.join(str(HOST / 'framework' / jar) for jar in JARS)}
     if DARWIN:
-        env['SHIRAZ_LOCAL_SOCKET_DIR'] = str(ROOT / '.local/sockets')
+        env['SHIRAZ_LOCAL_SOCKET_DIR'] = str(host_layout.darwin_socket_directory(ROOT))
         # dyld resolves ART and Shiraz libraries through @rpath and absolute
         # java.library.path entries; no search-path variables (and no DYLD_*).
         del env['LD_LIBRARY_PATH']

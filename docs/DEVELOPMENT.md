@@ -151,13 +151,17 @@ The optional `--url https://f-droid.org/repo/entry.json` adds a public HTTPS
 fetch, whose success is reported separately from the controlled loopback tests.
 
 The default trust provider imports public system anchors through
-Security.framework and validates chains with wolfJSSE. Caller-supplied trust
+Security.framework. Default application trust builds PKIX paths with bundled
+Bouncy Castle; wolfSSL supplies TLS. Caller-supplied trust
 stores and per-connection TLS factories remain supported. There is no trust-all
 fallback. User keychain trust overrides and platform revocation policy are not
 yet modeled. The TLS bridge also supports nonblocking SSLEngine handshakes and
 HTTPS peer identification, tested with in-memory client/server engines. Local
 stream sockets use AF_UNIX; macOS maps abstract names into a private runtime
-directory while Linux uses its native abstract namespace. Descriptor passing,
+directory while Linux uses its native abstract namespace. Short macOS checkout
+paths retain `.local/sockets`; long paths use a short per-user/per-checkout
+private directory under `/tmp` to stay within the Unix socket path limit. The
+runtime and smoke launchers select the same directory. Descriptor passing,
 Darwin reserved socket services, seqpacket on macOS, and custom TLS SNI/algorithm
 constraints still fail explicitly. Passing the tested subset does not establish
 support for every Android networking API.
