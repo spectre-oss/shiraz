@@ -127,6 +127,13 @@ class Instruction:
     control_transfer: bool = False
 
 
+@dataclass(frozen=True)
+class ReturnSignature:
+    tokens: frozenset
+    sp: int
+    key: str
+
+
 @dataclass
 class State:
     registers: dict = field(default_factory=dict)
@@ -142,6 +149,9 @@ class State:
     # Unknown pointer contents loaded from image data do not acquire a fact.
     image_addresses: dict = field(default_factory=dict)
     stack_images: dict = field(default_factory=dict)
+    # Symbolic identities, not PAC bits or a cryptographic validation claim.
+    return_signatures: dict = field(default_factory=dict)
+    stack_signatures: dict = field(default_factory=dict)
 
     def copy(self):
         return State(
@@ -155,6 +165,8 @@ class State:
             dict(self.stack_returns),
             dict(self.image_addresses),
             dict(self.stack_images),
+            dict(self.return_signatures),
+            dict(self.stack_signatures),
         )
 
     def fingerprint(self):
@@ -175,6 +187,8 @@ class State:
                     self.stack_returns,
                     self.image_addresses,
                     self.stack_images,
+                    self.return_signatures,
+                    self.stack_signatures,
                 )
             ),
         )
@@ -186,6 +200,17 @@ class State:
         name = reg(name)
         if name not in {"xzr", "wzr", "sp"}:
             self.return_values[name] = value
+            self.return_signatures.pop(name, None)
+
+    def signature(self, name):
+        return self.return_signatures.get(reg(name)) if full_width_gpr(name) else None
+
+    def set_signature(self, name, signature):
+        normalized = reg(name)
+        self.return_signatures.pop(normalized, None)
+        if full_width_gpr(name) and isinstance(signature, ReturnSignature):
+            self.return_signatures[normalized] = signature
+            self.return_values[normalized] = CLEAN
 
     def value(self, name):
         return self.registers.get(reg(name), CLEAN)
@@ -209,6 +234,7 @@ class State:
             self.registers[name] = value
             self.return_values[name] = CLEAN
             self.image_addresses.pop(name, None)
+            self.return_signatures.pop(name, None)
 
     def image(self, name):
         return self.image_addresses.get(reg(name)) if full_width_gpr(name) else None
@@ -246,8 +272,12 @@ def caller_prologue(decode, root, caller):
         if item is None:
             raise MetadataUnavailable("caller prelude undecodable")
         op, operands = item.mnemonic, item.operands
-        if op in {"nop", "bti", "paciasp", "pacibsp"}:
+        if op in {"nop", "bti"}:
             continue
+        if op in {"paciasp", "pacibsp", "autiasp", "autibsp"}:
+            # A sized symbol/FDE proves no value for the outer caller's LR.
+            # Do not turn an untracked signed return into an unsigned fact.
+            raise MetadataUnavailable("caller prelude untracked authenticated return")
         if (
             op == "mov"
             and len(operands) == 2
@@ -340,6 +370,7 @@ class Audit:
         plt_bindings = {}
         callee_effects = {}
         owned_image_accesses = set()
+        return_authentication = set()
         states = {}
         pending = deque()
         steps = 0
@@ -363,6 +394,14 @@ class Audit:
             # arbitrary MRS with no independently proved native-stack entry;
             # earlier guest code could have pivoted SP into this very image.
             # Retain the observation without suppressing alias uncertainty.
+
+        def adjust_image_address(origin, delta):
+            if origin is None:
+                return None
+            if hasattr(self.decode, "adjust_image_address"):
+                return self.decode.adjust_image_address(origin, delta)
+            value = origin + delta
+            return value if 0 <= value < 1 << 64 else None
 
         def enqueue(pc, returns, state):
             # A union at a join loses correlations between register values,
@@ -514,6 +553,7 @@ class Audit:
                     for saved in state.stack_aliases:
                         state.stack_aliases[saved] = CLEAN
                     state.stack_images.clear()
+                    state.stack_signatures.clear()
                 else:
                     for saved in set(state.stack) | set(state.stack_aliases):
                         if (
@@ -537,6 +577,9 @@ class Audit:
                     for saved in list(state.stack_images):
                         if slot < saved + 8 and saved < slot + summary.rmw_width:
                             del state.stack_images[saved]
+                    for saved in list(state.stack_signatures):
+                        if slot < saved + 8 and saved < slot + summary.rmw_width:
+                            del state.stack_signatures[saved]
                 # Keep every explicit path, including CAS initial mismatch
                 # retaining x17 and a mismatch after a failed exclusive store
                 # clobbering it. Memory may-write effects above conservatively
@@ -612,6 +655,61 @@ class Audit:
                 problem(pc, "malformed-ordered-scalar-transfer")
                 continue
             next_pc = pc + 4
+            if op == "msr" and (state.return_signatures or state.stack_signatures):
+                # An understood path must not silently assume authentication
+                # keys/system state stayed fixed. Even FP-only MSR forms need
+                # a separately verified effect before crossing this barrier.
+                problem(pc, "return-auth-system-state-write")
+                state.return_signatures.clear()
+                state.stack_signatures.clear()
+                continue
+            if op == "xpaclri":
+                problem(pc, "unmodelled-return-authentication:xpaclri")
+                state.set("x30", CLEAN)
+                continue
+            if op in {"paciasp", "pacibsp", "autiasp", "autibsp"}:
+                profile = getattr(self.decode, "return_auth_profile", None)
+                if (
+                    not isinstance(profile, dict)
+                    or type(profile.get("feature_pauth")) is not int
+                    or profile["feature_pauth"] != 1
+                    or type(profile.get("feature_pauth_lr")) is not int
+                    or profile["feature_pauth_lr"] != 0
+                ):
+                    problem(pc, "return-auth-profile-unproved")
+                    continue
+                if operands:
+                    problem(pc, "unsupported-return-authentication-form")
+                    continue
+                if tainted(state.value("x30")) or tainted(state.alias("x30")):
+                    problem(pc, "return-authentication-of-traced-pointer")
+                    continue
+                key = "A" if op in {"paciasp", "autiasp"} else "B"
+                signature = state.signature("x30")
+                if op in {"paciasp", "pacibsp"}:
+                    if signature is not None:
+                        problem(pc, "return-auth-double-sign")
+                        continue
+                    tokens = state.control("x30")
+                    if not tokens or any(type(token) is not int or not 0 <= token < 1 << 64
+                                         for token in tokens):
+                        problem(pc, "return-auth-missing-unsigned-token")
+                        continue
+                    state.set("x30", CLEAN)
+                    state.set_signature("x30", ReturnSignature(tokens, state.sp, key))
+                else:
+                    if signature is None:
+                        problem(pc, "return-auth-missing-signature")
+                        continue
+                    if signature.key != key or signature.sp != state.sp:
+                        problem(pc, "return-auth-key-or-sp-mismatch")
+                        continue
+                    tokens = signature.tokens
+                    state.set("x30", CLEAN)
+                    state.set_control("x30", tokens)
+                return_authentication.add((pc, op, key, state.sp, tuple(sorted(tokens))))
+                enqueue(next_pc, returns, state)
+                continue
             if op == "ret":
                 return_register = (
                     operands[0].value
@@ -626,6 +724,9 @@ class Audit:
                     continue
                 if return_register != "x30":
                     problem(pc, "unproved-nonstandard-return-register")
+                    continue
+                if state.signature(return_register) is not None:
+                    problem(pc, "authenticated-return-not-authenticated")
                     continue
                 if returns:
                     return_pc, expected_sp = returns[-1]
@@ -708,15 +809,19 @@ class Audit:
                         state.value(source.value), state.alias(source.value), state.control(source.value)
                     )
                     image = state.image(source.value)
+                    signature = state.signature(source.value)
                     if width == "w":
                         if tainted(value):
                             problem(pc, "narrowed-thread-pointer")
                         if tainted(alias):
                             problem(pc, "narrowed-stack-address-unmodelled")
                         value = alias = control = CLEAN
+                        if reg(source.value) in state.return_signatures:
+                            problem(pc, "narrowed-authenticated-return")
                     post.set(destination.value, value)
                     post.set_alias(destination.value, alias)
                     post.set_control(destination.value, control)
+                    post.set_signature(destination.value, signature if width == "x" else None)
                     post.set_image(destination.value, image if width == "x" else None)
                     if reg(destination.value) == "x29":
                         post.fp = next(iter(alias)) if len(alias) == 1 and None not in alias else None
@@ -726,8 +831,11 @@ class Audit:
                 destination, source = operands
                 image = state.image(source.value) if source.kind == "reg" else None
                 control = state.control(source.value) if source.kind == "reg" else CLEAN
+                signature = state.signature(source.value) if source.kind == "reg" else None
                 if destination.value.startswith("w"):
                     control = CLEAN
+                    if source.kind == "reg" and reg(source.value) in state.return_signatures:
+                        problem(pc, "narrowed-authenticated-return")
                 if destination.value == "wsp":
                     problem(pc, "narrowed-stack-pointer-write-unmodelled")
                     continue
@@ -763,6 +871,7 @@ class Audit:
                         values[1] if not destination.value.startswith("w") else CLEAN,
                     )
                 state.set_control(destination.value, control)
+                state.set_signature(destination.value, signature if full_width_gpr(destination.value) else None)
                 state.set_image(destination.value, image)
             elif (
                 op in {"add", "sub"}
@@ -770,6 +879,8 @@ class Audit:
                 and operands[2].kind == "imm"
             ):
                 destination, source, immediate = operands
+                if source.kind == "reg" and reg(source.value) in state.return_signatures:
+                    problem(pc, "authenticated-return-arithmetic")
                 image = state.image(source.value) if source.kind == "reg" else None
                 if destination.value == "wsp":
                     problem(pc, "narrowed-stack-pointer-write-unmodelled")
@@ -815,7 +926,21 @@ class Audit:
                         continue
                     state.set(destination.value, value)
                 if full_width_gpr(destination.value) and image is not None:
-                    state.set_image(destination.value, image + delta)
+                    state.set_image(destination.value, adjust_image_address(image, delta))
+            elif op in {"ldr", "ldrsw"} and len(operands) == 2 and operands[1].kind != "mem":
+                # Capstone represents a PC-relative literal address as an
+                # immediate, not a memory operand. It still reads memory and
+                # may alias a saved TP if initial stack origin is unproved.
+                if operands[0].kind != "reg" or operands[1].kind != "imm":
+                    problem(pc, "unsupported-literal-memory-form")
+                    continue
+                observe_owned_image_access(pc, operands[1].value, instruction.width, True, False)
+                if any(tainted(value) for value in state.stack.values()):
+                    problem(pc, "unmodelled-literal-load-may-alias-thread-pointer-stack-spill")
+                state.set(operands[0].value, CLEAN)
+                state.set_alias(operands[0].value, CLEAN)
+                if reg(operands[0].value) == "x29":
+                    state.fp = None
             elif any(item.kind == "mem" for item in operands):
                 memory = next(item for item in operands if item.kind == "mem")
                 base_value = state.value(memory.base)
@@ -903,6 +1028,7 @@ class Audit:
                     for saved in state.stack_aliases:
                         state.stack_aliases[saved] = CLEAN
                     state.stack_images.clear()
+                    state.stack_signatures.clear()
                 for index, item in enumerate(data):
                     key = None if slot is None else slot + index * instruction.width
                     if store and key is not None:
@@ -912,6 +1038,9 @@ class Audit:
                         for saved in list(state.stack_images):
                             if key < saved + 8 and saved < key + instruction.width:
                                 del state.stack_images[saved]
+                        for saved in list(state.stack_signatures):
+                            if key < saved + 8 and saved < key + instruction.width:
+                                del state.stack_signatures[saved]
                     if key is not None:
                         for known in set(state.stack) | set(state.stack_aliases):
                             value = state.stack.get(
@@ -928,6 +1057,16 @@ class Audit:
                                     "partial-overlap-with-thread-pointer-stack-spill",
                                 )
                     if load:
+                        signature = (
+                            state.stack_signatures.get(key)
+                            if key is not None and instruction.width == 8
+                            else None
+                        )
+                        if key is not None:
+                            for saved in state.stack_signatures:
+                                if (key < saved + 8 and saved < key + instruction.width
+                                        and (key != saved or instruction.width != 8)):
+                                    problem(pc, "partial-overlap-with-authenticated-return")
                         image = (
                             state.stack_images.get(key)
                             if key is not None and instruction.width == 8
@@ -952,6 +1091,7 @@ class Audit:
                             if key is not None and instruction.width == 8
                             else CLEAN,
                         )
+                        state.set_signature(item.value, signature if full_width_gpr(item.value) else None)
                         state.set_image(item.value, image)
                         if reg(item.value) == "x29":
                             state.fp = (
@@ -971,6 +1111,9 @@ class Audit:
                             state.stack[key] = value
                             state.stack_aliases[key] = state.alias(item.value)
                             state.stack_returns[key] = state.control(item.value)
+                            signature = state.signature(item.value)
+                            if signature is not None:
+                                state.stack_signatures[key] = signature
                             image = state.image(item.value)
                             if image is not None:
                                 state.stack_images[key] = image
@@ -1006,9 +1149,11 @@ class Audit:
                         )
                         state.set_image(
                             memory.base,
-                            image_base + delta if image_base is not None else None,
+                            adjust_image_address(image_base, delta),
                         )
             else:
+                if any(reg(name) in state.return_signatures for name in instruction.reads):
+                    problem(pc, "unmodelled-authenticated-return-consumer:" + op)
                 if (
                     live
                     and any(reg(name) in {"sp", "x29"} for name in instruction.reads)
@@ -1056,6 +1201,11 @@ class Audit:
                 for pc, target in sorted(callees)
             ],
             "callee_effects": [callee_effects[key] for key in sorted(callee_effects)],
+            "return_authentication": [
+                {"pc": hex(pc), "instruction": op, "key": key, "sp": sp,
+                 "return_tokens": [hex(token) for token in tokens]}
+                for pc, op, key, sp, tokens in sorted(return_authentication)
+            ],
             "owned_image_accesses": [
                 {"pc": hex(pc), "address": hex(start), "width": width,
                  "read": load, "write": store,
@@ -1080,12 +1230,24 @@ class MetadataUnavailable(ValueError):
 class ElfBindingMetadata:
     """Independent bounded cross-check of loader binding evidence against bytes.
 
-    A sectionless ELF or imported named version remains unsupported here. Neither
+    A sectionless ELF remains unsupported here. Neither
     symbol visibility nor an unversioned name is used to guess namespace binding.
     """
 
+    @property
+    def data(self):
+        return self._data
+
+    @property
+    def elf_sha256(self):
+        return self._elf_sha256
+
     def __init__(self, data, fallback_name, provider_bridge=None):
-        self.data = data
+        if not isinstance(data, (bytes, bytearray)) or not 64 <= len(data) <= MAX_BYTES:
+            raise ValueError("binding metadata requires bounded ELF64 AArch64")
+        self._data = bytes(data)
+        data = self._data
+        self._elf_sha256 = hashlib.sha256(data).hexdigest()
         self.loads = []
         self.relocations = {}
         self.proof = {}
@@ -1093,6 +1255,7 @@ class ElfBindingMetadata:
         self.provider_bridge = None
         self.trusted_provider_contracts = False
         self.version_requirements = None
+        self.version_definitions = None
         if provider_bridge is not None:
             provider_bridge = Path(provider_bridge).resolve(strict=True)
             if (
@@ -1576,7 +1739,7 @@ class ElfBindingMetadata:
             self.trusted_provider_contracts = True
         if own is None:
             return
-        if own["elf_sha256"] != hashlib.sha256(self.data).hexdigest():
+        if own["elf_sha256"] != self.elf_sha256:
             raise ValueError("binding evidence ELF hash mismatch")
         bindings = own.get("bindings")
         if not isinstance(bindings, list) or len(bindings) > 200000:
@@ -1672,9 +1835,12 @@ class ElfBindingMetadata:
 
     def defined_version(self, index):
         """Read a named definition independently; never infer it from the proof."""
+        if self.version_definitions is not None:
+            return self.version_definitions.get(index)
         start = self.tags.get(0x6FFFFFFC, 0)
         count = self.tags.get(0x6FFFFFFD, 0)
         if not start or not count:
+            self.version_definitions = {}
             return None
         if not 0 < count <= 4096:
             raise ValueError("version definition count bound")
@@ -1719,6 +1885,7 @@ class ElfBindingMetadata:
                 cursor += following
             elif following:
                 raise ValueError("unterminated version definition chain")
+        self.version_definitions = definitions
         return definitions.get(index)
 
     def resolve(self, slot):
@@ -1792,7 +1959,7 @@ class ElfBindingMetadata:
             }
         if (
             proof["provider"] != self.name
-            or proof.get("provider_elf_sha256") != hashlib.sha256(self.data).hexdigest()
+            or proof.get("provider_elf_sha256") != self.elf_sha256
         ):
             return {**result, "reason": "external-or-preempted-namespace-binding"}
         if (
@@ -1891,6 +2058,7 @@ def plt_stub(decode, address, bindings):
 class ElfDecoder:
     def __init__(self, path, binding_report=None, provider_bridge=None):
         import capstone
+        import guest_return_auth_profile
         from capstone import arm64
 
         if capstone.__version__ != "5.0.3":
@@ -1901,8 +2069,13 @@ class ElfDecoder:
         with path.open("rb") as stream:
             self.data = stream.read(MAX_BYTES + 1)
         library = Path(capstone._cs._name)
+        self.return_auth_profile = guest_return_auth_profile.host_return_auth_profile()
         self.identity = {
             "version": capstone.__version__,
+            "return_auth_profile": self.return_auth_profile,
+            "return_auth_profile_sha256": hashlib.sha256(
+                Path(guest_return_auth_profile.__file__).read_bytes()
+            ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()
             ).hexdigest(),
@@ -2146,12 +2319,24 @@ def main():
         type=Path,
         help="explicit trusted first-party bridge image matching provider contracts in the binding report",
     )
+    parser.add_argument(
+        "--guest-library-dir", type=Path,
+        help="explicit directory of all hash-matched recorded guest ELFs; enables bounded cross-ELF body traversal",
+    )
     args = parser.parse_args()
     if args.caller is not None and (not args.site or len(args.site) != 1):
         parser.error("--caller requires exactly one --site")
     if args.provider_bridge is not None and args.bindings is None:
         parser.error("--provider-bridge requires an actual binding report")
-    decoder = ElfDecoder(args.elf, args.bindings, args.provider_bridge)
+    if args.guest_library_dir is not None:
+        if args.bindings is None:
+            parser.error("--guest-library-dir requires an actual binding report")
+        from guest_namespace import NamespaceDecoder
+
+        decoder = NamespaceDecoder(args.elf, args.bindings, args.guest_library_dir,
+                                   ElfDecoder, args.provider_bridge)
+    else:
+        decoder = ElfDecoder(args.elf, args.bindings, args.provider_bridge)
     candidates = args.site if args.site else decoder.sites()
     if len(candidates) > MAX_SITES:
         parser.error("too many requested candidate sites")
@@ -2179,6 +2364,7 @@ def main():
         "analyzer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "decoder": "capstone-5.0.3",
         "decoder_identity": decoder.identity,
+        "analysis_address_space": getattr(decoder, "address_space", None),
         "provider_bridge_identity": decoder.bindings.provider_bridge
         if decoder.bindings
         else None,

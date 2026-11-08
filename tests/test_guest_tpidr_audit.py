@@ -34,6 +34,25 @@ def instruction(pc, mnemonic, *operands, reads=(), writes=()):
 
 
 class TpidrAuditTests(unittest.TestCase):
+    def test_literal_load_cannot_forget_tp_spilled_into_an_unproved_initial_stack(self):
+        result = self.run_graph([
+            instruction(0, "mrs", R("x19")), instruction(4, "ldr", R("x8"), M("x19", 40)),
+            instruction(8, "str", R("x19"), M("sp")),
+            instruction(12, "ldr", R("x12"), I(0x4020)),
+            instruction(16, "mov", R("x19"), R("xzr")),
+            instruction(20, "str", R("xzr"), M("sp")),
+            instruction(24, "ldr", R("x13"), M("x12", 8)), instruction(28, "ret"),
+        ])
+        self.assertEqual(result["classification"], "unknown")
+        self.assertIn("unmodelled-literal-load-may-alias-thread-pointer-stack-spill", self.reasons(result))
+
+    def test_literal_load_without_a_saved_tp_does_not_invent_a_pointer_fact(self):
+        result = self.run_graph([
+            instruction(0, "mrs", R("x19")), instruction(4, "ldr", R("x8"), M("x19", 40)),
+            instruction(8, "ldr", R("x19"), I(0x4020)), instruction(12, "ret"),
+        ])
+        self.assertEqual(result["classification"], "guard-only")
+
     def image_graph(self, middle, owned=None):
         body = [instruction(0, "mrs", R("x19")),
                 instruction(4, "ldr", R("x8"), M("x19", 40)),
@@ -1784,6 +1803,34 @@ class PltBindingAuditTests(unittest.TestCase):
         binding["version"] = "WRONG"
         with self.assertRaisesRegex(ValueError, "symbol/version"):
             fixture.metadata(proof).resolve(0x1500)
+
+    def test_version_definitions_parse_once_for_all_requested_indices(self):
+        metadata = self.versioned_fixture().metadata()
+        original_read, reads = metadata.read, []
+
+        def counted_read(address, size):
+            reads.append((address, size))
+            return original_read(address, size)
+
+        metadata.read = counted_read
+        self.assertEqual(metadata.defined_version(2), "local_function")
+        first = len(reads)
+        self.assertGreater(first, 0)
+        for index in (2, 99, 2, 1):
+            metadata.defined_version(index)
+        self.assertEqual(len(reads), first)
+
+    def test_metadata_snapshots_mutable_input_and_keeps_digest_readonly(self):
+        fixture = BindingElfFixture()
+        metadata = audit.ElfBindingMetadata(fixture.data, "libfixture.so")
+        digest = metadata.elf_sha256
+        fixture.data[0] = 0
+        self.assertEqual(metadata.data[0], 0x7F)
+        self.assertEqual(metadata.elf_sha256, digest)
+        with self.assertRaises(AttributeError):
+            metadata.data = bytes(fixture.data)
+        with self.assertRaises(AttributeError):
+            metadata.elf_sha256 = "0" * 64
 
     def test_version_definition_rejects_bad_chains_and_counts(self):
         for offset, fmt, value, message in [

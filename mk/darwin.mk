@@ -2014,3 +2014,19 @@ macos-guest-atomic-effects-check: $(MACOS_GUEST_DEP_DIR)/libatomic-effects.so $(
 	$(MACOS_OUT)/m5/atomic-effects-hardened $(MACOS_GUEST_DEP_DIR)
 	ASAN_OPTIONS=detect_leaks=0 $(MACOS_OUT)/m5/atomic-effects-sanitized $(MACOS_GUEST_DEP_DIR)
 macos-guest-check: macos-guest-atomic-effects-check
+
+# Guest ELF compilation only; reuse existing host probes without building or
+# signing them. This target deliberately is not part of the signing aggregate.
+$(MACOS_OUT)/m5/return-auth/a/atomic-effects.o: tests/darwin/guest/atomic_effects.S | macos-guest-toolchain
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -DSHIRAZ_RETURN_AUTH_A -c $< -o $@
+$(MACOS_OUT)/m5/return-auth/b/atomic-effects.o: tests/darwin/guest/atomic_effects.S | macos-guest-toolchain
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -DSHIRAZ_RETURN_AUTH_B -c $< -o $@
+$(MACOS_OUT)/m5/return-auth/a/libatomic-effects.so: $(MACOS_OUT)/m5/return-auth/a/atomic-effects.o | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --eh-frame-hdr --no-undefined -soname libatomic-effects.so $< -o $@
+$(MACOS_OUT)/m5/return-auth/b/libatomic-effects.so: $(MACOS_OUT)/m5/return-auth/b/atomic-effects.o | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --eh-frame-hdr --no-undefined -soname libatomic-effects.so $< -o $@
+.PHONY: macos-guest-return-auth-local-check
+macos-guest-return-auth-local-check: $(MACOS_OUT)/m5/return-auth/a/libatomic-effects.so $(MACOS_OUT)/m5/return-auth/b/libatomic-effects.so
+	uv run --no-project python scripts/macos_guest_return_auth_local.py --directory $(MACOS_OUT)/m5/return-auth --output $(MACOS_OUT)/m5/return-auth/result.json

@@ -1,6 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // First-party architectural effect fixture. No Android library is copied here.
 // The protected entry binds locally so a PLT cannot clobber test sentinels.
+.macro return_auth_enter
+#if defined(SHIRAZ_RETURN_AUTH_A)
+ .inst 0xd503233f                    // paciasp
+ .cfi_negate_ra_state
+#elif defined(SHIRAZ_RETURN_AUTH_B)
+ .cfi_b_key_frame
+ .inst 0xd503237f                    // pacibsp
+ .cfi_negate_ra_state
+#endif
+.endm
+.macro return_auth_leave
+#if defined(SHIRAZ_RETURN_AUTH_A)
+ .inst 0xd50323bf                    // autiasp
+ .cfi_negate_ra_state
+#elif defined(SHIRAZ_RETURN_AUTH_B)
+ .inst 0xd50323ff                    // autibsp
+ .cfi_negate_ra_state
+#endif
+.endm
 .text
 .balign 16
 .global atomic_effects_add32
@@ -32,6 +51,7 @@ atomic_effects_add32:
 .type atomic_effects_capture, %function
 atomic_effects_capture:
  .cfi_startproc
+ return_auth_enter
  stp x29, x30, [sp, #-64]!
  .cfi_def_cfa_offset 64
  .cfi_offset 29, -64
@@ -102,6 +122,7 @@ atomic_effects_capture:
  .cfi_restore 30
  add sp, sp, #64
  .cfi_def_cfa_offset 0
+ return_auth_leave
  ret
  .cfi_endproc
 .size atomic_effects_capture, .-atomic_effects_capture
@@ -155,6 +176,7 @@ cas_helper atomic_effects_casal64, casal, ldaxr, stlxr
 .type atomic_effects_cas_capture, %function
 atomic_effects_cas_capture:
  .cfi_startproc
+ return_auth_enter
  stp x29, x30, [sp, #-48]!
  .cfi_def_cfa_offset 48
  .cfi_offset 29, -48
@@ -238,6 +260,7 @@ atomic_effects_cas_capture:
  .cfi_restore 30
  add sp, sp, #48
  .cfi_def_cfa_offset 0
+ return_auth_leave
  ret
  .cfi_endproc
 .size atomic_effects_cas_capture, .-atomic_effects_cas_capture
