@@ -264,7 +264,7 @@ def main():
             write_manifest(closure)
         signal_marker = (
             f"M5_ART_NATIVEBRIDGE_SIGNAL_PASS queries={signal.NSIG - 1} "
-            f"signal={signal.SIGWINCH} deliveries=1"
+            f"signal={signal.SIGWINCH} deliveries=2 handled=1 forwarded=1"
         )
         # ART's logger can leave NUL separators before the bridge's stderr
         # line. Accept those separators, but still require an exact marker.

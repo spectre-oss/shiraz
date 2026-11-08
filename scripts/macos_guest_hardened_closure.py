@@ -76,7 +76,7 @@ def regular_macho(path):
         raise ValueError(f"strict closure requires thin 64-bit Mach-O: {path}")
 
 
-def stage_closure(root, host, work, env, *, extra_images=()):
+def stage_closure(root, host, work, env, *, extra_images=(), main_executable=None):
     """Copy first, then rewrite only owned copies; originals remain untouched."""
     root, host, work = root.resolve(), host.resolve(), work.resolve()
     tree = Path(tempfile.mkdtemp(prefix="hardened-closure-", dir=work))
@@ -123,7 +123,8 @@ def stage_closure(root, host, work, env, *, extra_images=()):
         by_name[destination.name] = item
         return item
 
-    main = add(host / "bin/dalvikvm", executable=True)
+    main = add(Path(main_executable) if main_executable is not None else host / "bin/dalvikvm",
+               executable=True)
     # ART dynamically opens some libraries without a static load command. Copy
     # every current lib64 image, including those libraries, as an explicit seed.
     for source in sorted((host / "lib64").iterdir()):
@@ -143,11 +144,11 @@ def stage_closure(root, host, work, env, *, extra_images=()):
         if value == "@loader_path":
             return source.parent
         if value == "@executable_path":
-            return host / "bin"
+            return Path(main["source"]).parent
         if value.startswith("@loader_path/"):
             return source.parent / value.removeprefix("@loader_path/")
         if value.startswith("@executable_path/"):
-            return host / "bin" / value.removeprefix("@executable_path/")
+            return Path(main["source"]).parent / value.removeprefix("@executable_path/")
         if value.startswith("/"):
             return Path(value)
         raise ValueError(f"unsupported native dependency/rpath: {value}")

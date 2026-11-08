@@ -722,6 +722,13 @@ macos-guest-jni-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $
 macos-guest-jni-signal-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so macos-guest-io-abi-check
 	uv run --no-project python scripts/macos_guest_jni_smoke.py --signal-chain-check
 
+$(MACOS_OUT)/m5/signal-lifetime-probe: tests/darwin/guest/signal_lifetime_probe.cpp
+	mkdir -p $(dir $@)
+	$(CXX) -I$(MACOS_GUEST_ART)/system/core/libnativebridge/include -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -I$(MACOS_GUEST_ART)/art/sigchainlib -std=c++17 -O2 -g -Wall -Wextra -Werror $< -Wl,-headerpad_max_install_names -o $@
+.PHONY: macos-guest-signal-lifetime-check
+macos-guest-signal-lifetime-check: $(MACOS_OUT)/m5/signal-lifetime-probe $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_signal_lifetime.py
+
 # Dedicated known-failing lifecycle regression; ordinary JNI success does not
 # satisfy this final-native-TSD-round cleanup gate.
 .PHONY: macos-guest-jni-late-tls-check

@@ -198,16 +198,51 @@ const android::NativeBridgeRuntimeValues *environment(const char *) {
 // managed signal handlers. Keep the probe process-resident, like the bridge;
 // never remove a special handler while ART threads might dispatch through it.
 std::atomic<unsigned> signal_probe_deliveries{0}, signal_probe_queries{0};
-static_assert(std::atomic<unsigned>::is_always_lock_free);
+std::atomic<unsigned> signal_probe_handled{0}, signal_probe_forwarded{0};
+std::atomic<bool> signal_probe_claim{true};
+static_assert(std::atomic<unsigned>::is_always_lock_free &&
+              std::atomic<bool>::is_always_lock_free);
+void signal_probe_fallback(int number) {
+  if (number == SIGWINCH)
+    signal_probe_forwarded.fetch_add(1, std::memory_order_relaxed);
+}
 bool signal_probe(int number, siginfo_t *, void *) {
   if (number != SIGWINCH) return false;
   signal_probe_deliveries.fetch_add(1, std::memory_order_relaxed);
-  return true;
+  const bool claim = signal_probe_claim.load(std::memory_order_relaxed);
+  if (claim) signal_probe_handled.fetch_add(1, std::memory_order_relaxed);
+  return claim;
 }
 android::NativeBridgeSignalHandlerFn signal_handler(int number) {
   static const bool probe = [] {
     const char *value = std::getenv("SHIRAZ_GUEST_SIGNAL_CHAIN_CHECK");
-    return value && !std::strcmp(value, "1");
+    if (!value || std::strcmp(value, "1")) return false;
+    struct sigaction previous{}, fallback{};
+    if (::sigaction(SIGWINCH, nullptr, &previous) ||
+        (previous.sa_flags & SA_SIGINFO) ||
+        (previous.sa_handler != SIG_DFL && previous.sa_handler != SIG_IGN)) {
+      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_FAIL foreign signal owner\n");
+      return false;
+    }
+    // libsigchain retains callback pointers. Keep one reference to this exact
+    // already loaded image for process lifetime, even if its owner dlcloses it.
+    // NOLOAD forbids loading another image or falling back to a host search.
+    Dl_info image{};
+    if (!dladdr(reinterpret_cast<const void *>(signal_probe), &image) || !image.dli_fname ||
+        !dlopen(image.dli_fname, RTLD_NOLOAD | RTLD_LAZY)) {
+      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_FAIL callback image retention\n");
+      return false;
+    }
+    fallback.sa_handler = signal_probe_fallback;
+    fallback.sa_flags = SA_RESTART;
+    sigemptyset(&fallback.sa_mask);
+    // Install before ART claims this signal, so it captures this native user
+    // action behind the special handler. Refuse unrelated pre-existing owners.
+    if (::sigaction(SIGWINCH, &fallback, nullptr)) {
+      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_FAIL fallback installation\n");
+      return false;
+    }
+    return true;
   }();
   if (!probe) return nullptr;
   signal_probe_queries.fetch_add(1, std::memory_order_relaxed);
@@ -216,15 +251,20 @@ android::NativeBridgeSignalHandlerFn signal_handler(int number) {
   // thread; the callback itself uses only a lock-free counter.
   static_assert(SIGWINCH < NSIG - 1);
   if (number == NSIG - 1) {
-    const int status = ::raise(SIGWINCH);
+    const int first = ::raise(SIGWINCH);
+    signal_probe_claim.store(false, std::memory_order_relaxed);
+    const int second = ::raise(SIGWINCH);
     const auto queries = signal_probe_queries.load(std::memory_order_relaxed);
     const auto deliveries = signal_probe_deliveries.load(std::memory_order_relaxed);
-    if (!status && queries == NSIG - 1 && deliveries == 1)
-      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_PASS queries=%u signal=%d deliveries=1\n",
+    const auto handled = signal_probe_handled.load(std::memory_order_relaxed);
+    const auto forwarded = signal_probe_forwarded.load(std::memory_order_relaxed);
+    if (!first && !second && queries == NSIG - 1 && deliveries == 2 &&
+        handled == 1 && forwarded == 1)
+      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_PASS queries=%u signal=%d deliveries=2 handled=1 forwarded=1\n",
                    queries, SIGWINCH);
     else
-      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_FAIL queries=%u signal=%d deliveries=%u status=%d\n",
-                   queries, SIGWINCH, deliveries, status);
+      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_FAIL queries=%u signal=%d deliveries=%u handled=%u forwarded=%u statuses=%d,%d\n",
+                   queries, SIGWINCH, deliveries, handled, forwarded, first, second);
   }
   return number == SIGWINCH ? signal_probe : nullptr;
 }
@@ -243,6 +283,16 @@ bool is_guest_code(const void *pointer) {
 }
 } // namespace shiraz::guest
 extern "C" {
+// Opt-in probe observation for the standalone reference-drop fixture. It is
+// never a guest implementation or an arbitrary asynchronous teardown promise.
+__attribute__((visibility("default"))) uint64_t shiraz_guest_signal_probe_snapshot() {
+  const uint64_t queries = signal_probe_queries.load(std::memory_order_relaxed);
+  const uint64_t deliveries = signal_probe_deliveries.load(std::memory_order_relaxed);
+  const uint64_t handled = signal_probe_handled.load(std::memory_order_relaxed);
+  const uint64_t forwarded = signal_probe_forwarded.load(std::memory_order_relaxed);
+  if ((queries | deliveries | handled | forwarded) > 0xffff) return UINT64_MAX;
+  return (queries << 48) | (deliveries << 32) | (handled << 16) | forwarded;
+}
 __attribute__((visibility(
     "default"))) android::NativeBridgeCallbacks NativeBridgeItf = [] {
   android::NativeBridgeCallbacks table{};

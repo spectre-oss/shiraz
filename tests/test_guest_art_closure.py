@@ -17,6 +17,16 @@ SPEC.loader.exec_module(closure)
 
 
 class GuestArtClosureTests(unittest.TestCase):
+    def test_custom_main_outside_approved_native_roots_is_refused(self):
+        host, work = self.root / "host", self.root / "work"
+        work.mkdir()
+        foreign = self.root / "foreign-main"
+        foreign.write_bytes(b"not an approved native input")
+        with patch.object(closure, "regular_macho") as inspect_native:
+            with self.assertRaisesRegex(ValueError, "outside approved source roots"):
+                closure.stage_closure(self.root, host, work, {}, main_executable=foreign)
+            inspect_native.assert_not_called()
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
