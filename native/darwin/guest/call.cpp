@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/call.hpp"
 #include "shiraz/darwin/guest/closure.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
 #include <cstddef>
 #include <cstring>
 #include <stdexcept>
@@ -55,6 +56,16 @@ CallFrame invoke(void *entry, const std::vector<Argument> &arguments) {
   if (stack.size() % 2)
     stack.push_back(0);
   CaptureBoundary transition;
+  if (!guest_tls_prepared()) prepare_guest_tls();
+  uintptr_t sp;
+  __asm__ volatile("mov %0, sp" : "=r"(sp));
+  // invoke.S reserves 32 bytes for its saved registers before copying the
+  // rounded argument area. This bounds that outgoing frame, not the guest's
+  // later stack use or the host frames already entered to reach this check.
+  const uint64_t reserved = 32 + stack.size() * sizeof(uint64_t);
+  if ((sp & 15) || reserved > sp || !prepared_guest_stack_contains(sp) ||
+      !prepared_guest_stack_contains(sp - reserved))
+    throw std::invalid_argument("guest call stack outside prepared native extent");
   shiraz_guest_invoke_asm(&frame, entry, stack.data(),
                           stack.size() * sizeof(uint64_t));
   return frame;

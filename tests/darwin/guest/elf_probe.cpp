@@ -3,6 +3,7 @@
 #include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/image.hpp"
 #include "shiraz/darwin/guest/jit.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/va_list.hpp"
 #include <cstring>
 #include <fstream>
@@ -14,6 +15,17 @@
 #include <vector>
 
 using namespace shiraz::guest;
+extern "C" int shiraz_test_other_stack(void *, int (*)(void *), void *);
+static int reject_other_stack(void *entry) {
+  try {
+    invoke(entry, {});
+  } catch (const std::invalid_argument &error) {
+    return std::strcmp(error.what(), "guest call stack outside prepared native extent") == 0;
+  } catch (...) {
+    return 0;
+  }
+  return 0;
+}
 static void require(bool value, const char *label) {
   if (!value)
     throw std::runtime_error(label);
@@ -67,6 +79,17 @@ int main(int argc, char **argv) {
     require(*static_cast<long *>(second.symbol("guest_state")) == 0,
             "second image isolation");
     require(second.initialize() == 1, "second constructor");
+    constexpr size_t other_stack_bytes = 256 * 1024;
+    void *other_stack = mmap(nullptr, other_stack_bytes, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANON, -1, 0);
+    require(other_stack != MAP_FAILED, "temporary alternate stack allocation");
+    void *other_top = static_cast<uint8_t *>(other_stack) + other_stack_bytes - 16;
+    require(!prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(other_top)),
+            "alternate stack lies outside the prepared pthread extent");
+    int rejected = shiraz_test_other_stack(other_top, &reject_other_stack, first.symbol("guest_leaf"));
+    require(munmap(other_stack, other_stack_bytes) == 0, "temporary alternate stack cleanup");
+    require(rejected == 1 && !capture_boundary_token(),
+            "real alternate-stack invocation refuses before guest entry and restores boundary");
     std::vector<Argument> twelve;
     for (int i = 1; i <= 12; ++i)
       twelve.push_back(Argument::integer(i % 2 ? i : -i));
@@ -136,6 +159,7 @@ int main(int argc, char **argv) {
     require(invoke(first.symbol("guest_callback"), callback).double_result() ==
                 expected,
             "guest-to-host AAPCS64 va_list conversion");
+    std::cout << "M5_STACK_ENTRY_PASS alternate_stack_rejected=1 boundary_restored=1\n";
     std::cout << "M5_ELF_ABI_PASS images=2 constructors=2 integer12=1 "
                  "mixed24=1 variadic25=1 callback_va_list=1 closure=1 dyld=0\n";
   } catch (const std::exception &error) {
