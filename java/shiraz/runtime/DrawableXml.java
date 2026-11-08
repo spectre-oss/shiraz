@@ -146,8 +146,8 @@ public final class DrawableXml {
         }
         if(n.name.equals("selector")||n.name.equals("animated-selector")){
             boolean animated=n.name.equals("animated-selector");
-            // Width/height are not StateListDrawable styleable fields in Android; children determine size.
-            attrs(n,"visible variablePadding constantSize dither enterFadeDuration exitFadeDuration autoMirrored width height");
+            // Width/height/shape are not StateListDrawable styleable fields in Android (ignored there); children determine size.
+            attrs(n,"visible variablePadding constantSize dither enterFadeDuration exitFadeDuration autoMirrored width height shape");
             if(n.children.size()>256)throw new IllegalArgumentException("Selector child limit");
             StateListDrawable result=animated?new AnimatedStateListDrawable():new StateListDrawable();result.shirazSetSizing(integer(n,"variablePadding",0)!=0,integer(n,"constantSize",0)!=0);result.setEnterFadeDuration(integer(n,"enterFadeDuration",0));result.setExitFadeDuration(integer(n,"exitFadeDuration",0));
             for(BinaryXml.Node item:n.children){
@@ -179,6 +179,17 @@ public final class DrawableXml {
             int[] dimensions=new int[4];float[] fractions=new float[4];String[] names={"insetLeft","insetTop","insetRight","insetBottom"};
             for(int i=0;i<4;i++){BinaryXml.Value value=resolve(n.android(names[i])==null?n.android("inset"):n.android(names[i]));if(value!=null&&n.android(names[i])!=null&&value.type==5&&TypedValue.complexToDimensionPixelOffset(value.data,resources.getDisplayMetrics())==0)value=resolve(n.android("inset"));if(value==null)continue;if(value.type==6)fractions[i]=TypedValue.complexToFloat(value.data);else if(value.type==5){float dimension=TypedValue.complexToDimension(value.data,resources.getDisplayMetrics());if(!Float.isFinite(dimension)||Math.abs(dimension)>8192)throw new IllegalArgumentException("Inset dimension bound");dimensions[i]=(int)dimension;}else if(value.type>=16&&value.type<=31&&value.data==0)dimensions[i]=0;else throw new IllegalArgumentException("Inset requires dimension or fraction");}
             InsetDrawable result=InsetDrawable.shirazCreate(child,dimensions,fractions);result.setVisible(integer(n,"visible",1)!=0,true);return result;
+        }
+        if(n.name.equals("animated-rotate")){
+            // Drawn as a still RotateDrawable at its start angle; the frame-stepped
+            // spin (framesCount/frameDuration) is not animated yet.
+            attrs(n,"drawable visible pivotX pivotY framesCount frameDuration");BinaryXml.Value ref=n.android("drawable");Drawable child;
+            if(ref!=null){if(!n.children.isEmpty())throw new IllegalArgumentException("Duplicate animated-rotate drawable");child=reference(ref);}else{if(n.children.size()!=1)throw new IllegalArgumentException("Animated-rotate requires one drawable");child=node(n.children.get(0),depth+1);}
+            RotateDrawable result=new RotateDrawable();result.setDrawable(child);result.setFromDegrees(0);result.setToDegrees(360);
+            BinaryXml.Value x=resolve(n.android("pivotX")),y=resolve(n.android("pivotY"));
+            result.setPivotXRelative(x==null||x.type==6);result.setPivotYRelative(y==null||y.type==6);
+            result.setPivotX(decimal(n,"pivotX",.5f));result.setPivotY(decimal(n,"pivotY",.5f));
+            result.setVisible(integer(n,"visible",1)!=0,true);return result;
         }
         if(n.name.equals("rotate")){
             attrs(n,"drawable visible fromDegrees toDegrees pivotX pivotY");BinaryXml.Value ref=n.android("drawable");Drawable child;

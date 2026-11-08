@@ -532,7 +532,7 @@ public class Resources {
                 int flags=value.changingConfigurations;
                 for(int depth=0;value.type==1||value.type==2;depth++) {
                     if(depth>=32)throw new NotFoundException("Attribute reference cycle/depth");
-                    if(value.type==1){if(value.data==0){value.type=0;value.resourceId=0;break;}resourceValue(value.data,0,true,true,value);if(value.type==1)break;}
+                    if(value.type==1){if(value.data==0){value.type=0;value.resourceId=0;break;}int ref=value.data;try{resourceValue(ref,0,true,true,value);}catch(NotFoundException e){NotFoundException named=new NotFoundException("Attribute 0x"+Integer.toHexString(attrs[i])+" references missing resource 0x"+Integer.toHexString(ref));named.initCause(e);throw named;}if(value.type==1)break;}
                     else {if(base==null)break;int id=value.data;if(!base.resolveAttribute(id,value,false))break;}
                     flags|=value.changingConfigurations;
                 }

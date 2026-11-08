@@ -43,27 +43,30 @@ public abstract class ActionBar {
     public abstract boolean isShowing();
     public int getHeight(){return 0;}
 
+
     static final class Impl extends ActionBar {
         private final Activity activity;
         private View custom;
         private CharSequence title,subtitle;
         private int options=DISPLAY_SHOW_HOME|DISPLAY_SHOW_TITLE;
         private boolean showing=true;
-        Impl(Activity activity){this.activity=activity;title=activity.getTitle();}
+        private final android.widget.Toolbar bar;
+        Impl(Activity activity){this.activity=activity;title=activity.getTitle();bar=activity.getWindow().shirazActionBarView();}
         @Override public void setCustomView(View view){custom=view;}
         @Override public void setCustomView(int resource){Context context=activity;custom=LayoutInflater.from(context).inflate(resource,null,false);}
         @Override public View getCustomView(){return custom;}
         @Override public void setTitle(CharSequence value){title=value;activity.setTitle(value);}
         @Override public void setTitle(int resource){setTitle(activity.getString(resource));}
         @Override public CharSequence getTitle(){return title;}
-        @Override public void setSubtitle(CharSequence value){subtitle=value;}
+        @Override public void setSubtitle(CharSequence value){subtitle=value;if(bar!=null)bar.setSubtitle(value);}
         @Override public void setSubtitle(int resource){setSubtitle(activity.getString(resource));}
         @Override public CharSequence getSubtitle(){return subtitle;}
         @Override public void setDisplayOptions(int value){options=value;}
         @Override public void setDisplayOptions(int value,int mask){options=(options&~mask)|(value&mask);}
         @Override public int getDisplayOptions(){return options;}
-        @Override public void show(){showing=true;}
-        @Override public void hide(){showing=false;}
+        @Override public void show(){showing=true;activity.getWindow().shirazSetActionBarShown(true);}
+        @Override public void hide(){showing=false;activity.getWindow().shirazSetActionBarShown(false);}
         @Override public boolean isShowing(){return showing;}
+        @Override public int getHeight(){return bar==null||!showing?0:bar.getHeight();}
     }
 }

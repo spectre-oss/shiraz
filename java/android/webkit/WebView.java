@@ -46,16 +46,27 @@ public class WebView extends FrameLayout {
    throw new UnsupportedOperationException("WebView HTTP requests require a web engine");
   loadUrl(url);
  }
+ private boolean inPageCallback;
  public void loadUrl(String url){
+  // A load requested from a page callback runs after that callback returns,
+  // as on Android where page events come from the message loop. Apps that
+  // reload from onPageFinished would otherwise recurse without bound.
+  if(inPageCallback){final String next=url;post(new Runnable(){public void run(){loadUrl(next);}});return;}
+  // javascript: URLs run script in the current page on Android: no navigation
+  // and no page events. There is no script engine here, so they do nothing.
+  if(url!=null&&url.regionMatches(true,0,"javascript:",0,11)){evaluateJavascript(url.substring(11),null);return;}
   this.url=url==null?"":url;
   progress=0;
   title=null;
-  if(client!=null)client.onPageStarted(this,this.url,null);
-  CharSequence page=fetch(this.url);
-  show(page);
-  progress=100;
-  if(client!=null)client.onPageFinished(this,this.url);
-  if(chrome!=null){chrome.onProgressChanged(this,100);if(title!=null)chrome.onReceivedTitle(this,title);}
+  inPageCallback=true;
+  try{
+   if(client!=null)client.onPageStarted(this,this.url,null);
+   CharSequence page=fetch(this.url);
+   show(page);
+   progress=100;
+   if(client!=null)client.onPageFinished(this,this.url);
+   if(chrome!=null){chrome.onProgressChanged(this,100);if(title!=null)chrome.onReceivedTitle(this,title);}
+  }finally{inPageCallback=false;}
  }
  public void loadData(String data,String mimeType,String encoding){loadDataWithBaseURL(null,data,mimeType,encoding,null);}
  public void loadDataWithBaseURL(String baseUrl,String data,String mimeType,String encoding,String historyUrl){

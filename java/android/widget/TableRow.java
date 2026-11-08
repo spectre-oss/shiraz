@@ -9,6 +9,7 @@ public class TableRow extends LinearLayout {
     static final int LIMIT=256;
     private int[] columns;
     public static class LayoutParams extends LinearLayout.LayoutParams {
+        @Override protected boolean shirazDefaultsMissingSize(){return true;}
         public int column=-1,span=1;
         public LayoutParams(){super(MATCH_PARENT,WRAP_CONTENT);}
         public LayoutParams(int column){this();this.column=column;}

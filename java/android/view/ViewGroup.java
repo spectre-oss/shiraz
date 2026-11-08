@@ -78,7 +78,9 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
             this.width=width; this.height=height;
         }
         public LayoutParams(LayoutParams other) { this(other.width,other.height); }
-        public LayoutParams(Context context,AttributeSet attrs) {this(WRAP_CONTENT,WRAP_CONTENT);shiraz.runtime.XmlAttributes a=new shiraz.runtime.XmlAttributes(context,attrs);if(!a.has("layout_width")||!a.has("layout_height"))throw new IllegalArgumentException("XML layout width and height are required");width=a.dimension("layout_width",WRAP_CONTENT,true);height=a.dimension("layout_height",WRAP_CONTENT,true);if(width< -2||height< -2)throw new IllegalArgumentException("XML layout dimensions");}
+        public LayoutParams(Context context,AttributeSet attrs) {this(WRAP_CONTENT,WRAP_CONTENT);shiraz.runtime.XmlAttributes a=new shiraz.runtime.XmlAttributes(context,attrs);if((!a.has("layout_width")||!a.has("layout_height"))&&!shirazDefaultsMissingSize())throw new IllegalArgumentException("XML layout width and height are required");width=a.dimension("layout_width",WRAP_CONTENT,true);height=a.dimension("layout_height",WRAP_CONTENT,true);if(width< -2||height< -2)throw new IllegalArgumentException("XML layout dimensions");}
+        /** TableLayout and TableRow children may omit layout_width/height (WRAP_CONTENT, then the table forces width). */
+        protected boolean shirazDefaultsMissingSize() { return false; }
         public void resolveLayoutDirection(int direction) { }
     }
     public static class MarginLayoutParams extends LayoutParams {

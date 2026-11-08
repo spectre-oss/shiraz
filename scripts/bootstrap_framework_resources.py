@@ -80,7 +80,13 @@ def main():
     files = source_files(archive)
     if source_content_sha256(files) != CONTENT_SHA256:
         raise ValueError('framework source content checksum mismatch')
-    index = ResourceIndex(files); source_count = len(index.nodes); selected, generated = index.closure(seeds)
+    index = ResourceIndex(files); source_count = len(index.nodes)
+    if not args.seed:
+        # Apps reference public @android:color values (holo_*, white) and
+        # android.R.layout rows (simple_spinner_item, simple_list_item_1)
+        # directly; seed every public color and layout so the closure keeps them.
+        seeds += sorted(key for key in index.public if key[0] in ('color', 'layout') and key not in seeds)
+    selected, generated = index.closure(seeds)
     outputs, provenance = index.emit(selected, generated)
     build = ROOT / 'build/framework-res'; build.mkdir(parents=True, exist_ok=True)
     source = build / 'source'

@@ -109,7 +109,9 @@ class RuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(FormatError, 'API profile'):
                     run_activity(Path('missing.apk'), report)
             self.report['native_abis'] = ['armeabi-v7a']
-            with self.assertRaisesRegex(FormatError, 'native ABI'):
+            # Linux refuses foreign ABIs; macOS runs the Java side (test_runtime_launch).
+            with patch('shiraz.runtime.host_system', return_value='Linux'), \
+                    self.assertRaisesRegex(FormatError, 'native ABI'):
                 run_activity(Path('missing.apk'), self.report)
 
     def test_native_abi_is_checked_on_current_host_not_cached_report(self):

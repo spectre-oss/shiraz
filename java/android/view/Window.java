@@ -101,7 +101,7 @@ public class Window {
  public void shirazDestroy(){synchronized(frameObservers){destroyed=true;for(FrameObserver observer:frameObservers){observer.active=false;observer.pending=null;observer.handler.removeCallbacks(observer);}frameObservers.clear();}if(menuHandler!=null)menuHandler.removeCallbacks(invalidateMenu);invalidateMenu.run();}
  private String title="";private int titleColor;
  public static String shirazTitle(CharSequence value){if(value==null)return "";if(value.length()>4096)throw new IllegalArgumentException("Window title length");String text=value.toString();if(text.length()>4096||text.indexOf('\0')>=0)throw new IllegalArgumentException("Invalid window title");return text;}
- public void setTitle(CharSequence value){title=shirazTitle(value);}
+ public void setTitle(CharSequence value){title=shirazTitle(value);if(actionBar!=null)actionBar.setTitle(title);}
  public void setTitleColor(int color){titleColor=color;}
  public final String shirazGetTitle(){return title;}
  public final int shirazGetTitleColor(){return titleColor;}
@@ -110,6 +110,27 @@ public class Window {
  public final void setCallback(Callback callback){this.callback=callback;}
  public final Callback getCallback(){return callback;}
  public final void shirazSetRootListener(Runnable listener){rootListener=listener;}
+ // Action bar for themes with windowActionBar and without windowNoTitle: a
+ // Toolbar with id android:id/action_bar above the content (as Material's
+ // decor does). Title follows the window title; no menu items are drawn.
+ private android.widget.Toolbar actionBar;
+ private int actionBarHeight;
+ private boolean themeFlag(int attr,boolean fallback){android.util.TypedValue v=new android.util.TypedValue();if(!context.getTheme().resolveAttribute(attr,v,true))return fallback;if(v.type!=0x12)return fallback;return v.data!=0;}
+ private void installActionBar(){
+  // Only activity windows carry an action bar; dialogs and popups do not.
+  if(!(context instanceof android.app.Activity)||hasFeature(FEATURE_NO_TITLE)||themeFlag(0x01010056,false)||!themeFlag(0x010102cd,false))return;
+  android.util.DisplayMetrics metrics=context.getResources().getDisplayMetrics();
+  android.util.TypedValue v=new android.util.TypedValue();
+  actionBarHeight=context.getTheme().resolveAttribute(0x010102eb,v,true)&&v.type==5?android.util.TypedValue.complexToDimensionPixelSize(v.data,metrics):(int)(56*metrics.density);
+  int color=context.getTheme().resolveAttribute(0x01010433,v,true)&&v.type>=0x1c&&v.type<=0x1f?v.data:0xff607d8b;
+  actionBar=new android.widget.Toolbar(context);actionBar.setId(0x0102004d);actionBar.setBackground(new android.graphics.drawable.ColorDrawable(color));
+  int r=(color>>16)&255,g=(color>>8)&255,b=color&255;boolean dark=(r*299+g*587+b*114)/1000<150;
+  actionBar.setTitleTextColor(dark?0xffffffff:0xde000000);actionBar.setSubtitleTextColor(dark?0xb3ffffff:0x8a000000);actionBar.setTitle(title);
+  decor.addView(actionBar,new FrameLayout.LayoutParams(-1,actionBarHeight));
+  ((FrameLayout.LayoutParams)content.getLayoutParams()).topMargin=actionBarHeight;
+ }
+ public final android.widget.Toolbar shirazActionBarView(){getDecorView();return actionBar;}
+ public final void shirazSetActionBarShown(boolean shown){if(actionBar==null)return;actionBar.setVisibility(shown?View.VISIBLE:View.GONE);((FrameLayout.LayoutParams)content.getLayoutParams()).topMargin=shown?actionBarHeight:0;content.requestLayout();}
  private Drawable themeBackground(){
   android.util.TypedValue value=new android.util.TypedValue();
   if(!context.getTheme().resolveAttribute(0x01010054,value,true))return null;
@@ -121,7 +142,7 @@ public class Window {
  public void setNavigationBarContrastEnforced(boolean value){}
  public void setStatusBarContrastEnforced(boolean value){}
  public View getDecorView(){
-  if(decor==null){decor=new FrameLayout(context){@Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(callback!=null&&!destroyed)callback.onWindowFocusChanged(focused);}};decor.setLayoutDirection(View.LAYOUT_DIRECTION_LOCALE);content=new FrameLayout(context);content.setId(16908290);decor.addView(content,new FrameLayout.LayoutParams(-1,-1));if(background==null)background=themeBackground();if(background!=null)decor.setBackground(background);if(rootListener!=null)rootListener.run();}return decor;
+  if(decor==null){decor=new FrameLayout(context){@Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(callback!=null&&!destroyed)callback.onWindowFocusChanged(focused);}};decor.setLayoutDirection(View.LAYOUT_DIRECTION_LOCALE);content=new FrameLayout(context);content.setId(16908290);decor.addView(content,new FrameLayout.LayoutParams(-1,-1));installActionBar();if(background==null)background=themeBackground();if(background!=null)decor.setBackground(background);if(rootListener!=null)rootListener.run();}return decor;
  }
  public View peekDecorView(){return decor;}
  public LayoutInflater getLayoutInflater(){return LayoutInflater.from(context);}

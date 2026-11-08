@@ -9,6 +9,7 @@ public class TableLayout extends LinearLayout {
     private final boolean[] stretch=new boolean[TableRow.LIMIT],shrink=new boolean[TableRow.LIMIT],collapsed=new boolean[TableRow.LIMIT];
     private boolean stretchAll,shrinkAll;
     public static class LayoutParams extends LinearLayout.LayoutParams {
+        @Override protected boolean shirazDefaultsMissingSize(){return true;}
         public LayoutParams(){super(MATCH_PARENT,WRAP_CONTENT);}
         public LayoutParams(int w,int h){super(MATCH_PARENT,h);}
         public LayoutParams(int w,int h,float weight){super(MATCH_PARENT,h,weight);}

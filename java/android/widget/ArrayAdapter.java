@@ -25,6 +25,7 @@ public class ArrayAdapter<T> extends BaseAdapter implements Filterable {
  public void sort(Comparator<? super T> comparator){synchronized(lock){Collections.sort(source(),comparator);}changed();}
  public void setNotifyOnChange(boolean value){notify=value;}public void notifyDataSetChanged(){super.notifyDataSetChanged();notify=true;}
  public void setDropDownViewResource(int value){dropResource=value;}
+ public static ArrayAdapter<CharSequence> createFromResource(Context context,int textArrayResId,int textViewResId){return new ArrayAdapter<CharSequence>(context,textViewResId,0,context.getResources().getTextArray(textArrayResId));}
  private View row(int position,View reused,ViewGroup parent,int layout){View view=reused==null?LayoutInflater.from(context).inflate(layout,parent,false):reused;View target=textId==0?view:view.findViewById(textId);if(!(target instanceof TextView))throw new IllegalStateException("ArrayAdapter requires a TextView row or text field ID");T item=getItem(position);((TextView)target).setText(item instanceof CharSequence?(CharSequence)item:item==null?"":item.toString());return view;}
  public View getView(int position,View reused,ViewGroup parent){return row(position,reused,parent,resource);}
  public View getDropDownView(int position,View reused,ViewGroup parent){return row(position,reused,parent,dropResource);}
