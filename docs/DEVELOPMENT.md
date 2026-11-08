@@ -154,8 +154,13 @@ The default trust provider imports public system anchors through
 Security.framework and validates chains with wolfJSSE. Caller-supplied trust
 stores and per-connection TLS factories remain supported. There is no trust-all
 fallback. User keychain trust overrides and platform revocation policy are not
-yet modeled. SSLEngine remains explicitly unsupported by the Android TLS bridge;
-its test must not be treated as passed merely because socket-based HTTPS works.
+yet modeled. The TLS bridge also supports nonblocking SSLEngine handshakes and
+HTTPS peer identification, tested with in-memory client/server engines. Local
+stream sockets use AF_UNIX; macOS maps abstract names into a private runtime
+directory while Linux uses its native abstract namespace. Descriptor passing,
+Darwin reserved socket services, seqpacket on macOS, and custom TLS SNI/algorithm
+constraints still fail explicitly. Passing the tested subset does not establish
+support for every Android networking API.
 The fixture certificate and key are generated only under `build/`, expire after
 two days, and are regenerated when building the probe. Never commit those files
 or the resulting APK. Host JVM checks validate the assertions; ART checks and

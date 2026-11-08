@@ -573,6 +573,7 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
         env.update({'ANDROID_ROOT': str(host), 'ANDROID_DATA': str(work / 'android-data'),
                     'XDG_CACHE_HOME': str(work / 'cache'), 'BOOTCLASSPATH': boot,
                     'SHIRAZ_FONT_DIR': str(root / '.local/share/shiraz/fonts'),
+                    'SHIRAZ_LOCAL_SOCKET_DIR': str(root / '.local/sockets'),
                     # The in-tree fonts.conf (make macos-graphics-deps): bundled
                     # fonts plus read-only system font directories, cache in .local.
                     'FONTCONFIG_FILE': str(root / DARWIN_FONTCONFIG_FILE),

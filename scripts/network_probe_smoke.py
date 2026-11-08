@@ -3,6 +3,7 @@
 """Execute shared networking assertions (optionally from the API probe APK) on ART."""
 import argparse
 import fcntl
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -29,9 +30,11 @@ def main():
     tls_fixtures(assets)
     framework = ROOT / 'build/shiraz-framework.jar'
     source = ROOT / 'tests/api-probe-host/NetworkRuntimeMain.java'
-    subprocess.run(['javac', '--release', '8', '-d', str(classes), str(source),
+    subprocess.run(['javac', '--release', '8', '-cp', str(ROOT / 'build/framework/classes'), '-d', str(classes), str(source),
                     str(ROOT / 'tests/api-probe/NetworkChecks.java'),
-                    str(ROOT / 'tests/api-probe/TlsNetworkChecks.java')], check=True, timeout=30)
+                    str(ROOT / 'tests/api-probe/TlsNetworkChecks.java'),
+                    str(ROOT / 'tests/api-probe/TlsEngineChecks.java'),
+                    str(ROOT / 'tests/api-probe/LocalSocketChecks.java')], check=True, timeout=30)
     jar = work / 'runner.jar'
     subprocess.run(['jar', 'cf', str(jar), '-C', str(classes), '.'], check=True, timeout=30)
     dex = work / 'runner-dex.jar'
@@ -45,10 +48,21 @@ def main():
                '-Djava.library.path=' + str(NATIVE) + ':' + str(HOST / 'lib64'), '-cp',
                ':'.join(map(str, (framework, *([apk] if apk else []), dex))),
                'org.shiraz.apiprobe.NetworkRuntimeMain', str(assets)]
-    if args.url:
-        if not args.url.startswith('https://'):
-            parser.error('--url must use HTTPS')
-        command.append(args.url)
+    if args.url and not args.url.startswith('https://'):
+        parser.error('--url must use HTTPS')
+    command.append(args.url or '-')
+    fingerprint = '-'
+    if apk:
+        digest = hashlib.sha256()
+        source = ROOT / 'tests/api-probe'
+        for path in sorted(source.rglob('*')):
+            if path.is_file():
+                digest.update(path.relative_to(source).as_posix().encode())
+                digest.update(b'\0')
+                digest.update(path.read_bytes())
+                digest.update(b'\0')
+        fingerprint = digest.hexdigest()
+    command.append(fingerprint)
     result = subprocess.run(command, check=False, env=environment(work), text=True, capture_output=True, timeout=90)
     (work / 'stdout.log').write_text(result.stdout)
     (work / 'stderr.log').write_text(result.stderr)
@@ -61,7 +75,7 @@ def main():
     (work / 'result.json').write_text(json.dumps({'runtime': 'art',
         'apk': str(apk) if apk else None, 'internet_url': args.url,
         'internet_pass': 'NETWORK_INTERNET_PASS ' in result.stdout, 'returncode': result.returncode, 'cases': cases}, indent=2) + '\n')
-    if result.returncode or len(cases) != 12 or any(c['status'] != 'PASS' for c in cases):
+    if result.returncode or len(cases) != 20 or any(c['status'] != 'PASS' for c in cases):
         raise SystemExit('ART network probe failed; inspect build/network-probe-runtime/')
     for line in result.stdout.splitlines():
         if line.startswith('NETWORK_INTERNET_PASS '):

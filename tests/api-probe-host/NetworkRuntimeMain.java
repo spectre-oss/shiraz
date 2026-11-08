@@ -6,15 +6,25 @@ import java.io.*;
 /** Execute the exact APK's network assertions on ART, preserving every failure. */
 public final class NetworkRuntimeMain {
   public static void main(String[] args) throws Exception {
+    if (args.length > 2 && !args[2].equals("-")) {
+      java.lang.reflect.Field fingerprint = Class.forName("org.shiraz.apiprobe.BuildConfig")
+          .getDeclaredField("FINGERPRINT");
+      fingerprint.setAccessible(true);
+      if (!args[2].equals(fingerprint.get(null)))
+        throw new IllegalStateException("API probe APK does not match the current suite sources; rebuild it");
+      System.out.println("NETWORK_PROBE_APK_FINGERPRINT_VERIFIED " + args[2]);
+    }
     Class.forName("shiraz.runtime.HostTlsProvider").getMethod("install").invoke(null);
     String[] cases = {"dns_localhost", "tcp_half_close", "http_chunked", "http_error_body",
         "http_post", "http_redirect", "http_read_timeout", "tls_socket_factory", "trust_manager",
-        "tls_verified", "tls_untrusted", "tls_hostname"};
+        "tls_verified", "tls_untrusted", "tls_hostname",
+             "tls_engine_verified", "tls_engine_untrusted", "tls_engine_hostname",
+             "local_stream", "local_timeout", "local_rebind", "local_close_read", "local_close_accept"};
     int failed = 0;
     for (String name : cases) {
       String id = "network." + name;
       try {
-        String detail = name.startsWith("tls_") && !name.equals("tls_socket_factory")
+        String detail = name.startsWith("local_") ? LocalSocketChecks.run(id) : name.startsWith("tls_") && !name.equals("tls_socket_factory")
             ? TlsNetworkChecks.run(id, asset -> new FileInputStream(new File(args[0], asset)))
             : NetworkChecks.run(id);
         System.out.println("NETWORK_RESULT\t" + id + "\tPASS\t" + detail);
@@ -25,7 +35,7 @@ public final class NetworkRuntimeMain {
       }
     }
     System.out.println("NETWORK_SUMMARY " + (cases.length - failed) + "/" + cases.length);
-    if (args.length > 1) {
+    if (args.length > 1 && !args[1].equals("-")) {
       javax.net.ssl.HttpsURLConnection c = (javax.net.ssl.HttpsURLConnection)
           new java.net.URL(args[1]).openConnection(java.net.Proxy.NO_PROXY);
       c.setConnectTimeout(10000); c.setReadTimeout(10000);

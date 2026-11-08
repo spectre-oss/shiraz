@@ -25,6 +25,7 @@ class NetworkProbeAssertions(unittest.TestCase):
             subprocess.run(['javac', '--release', '8', '-d', str(work),
                             str(ROOT / 'tests/api-probe/NetworkChecks.java'),
                             str(ROOT / 'tests/api-probe/TlsNetworkChecks.java'),
+                            str(ROOT / 'tests/api-probe/TlsEngineChecks.java'),
                             str(ROOT / 'tests/api-probe-host/NetworkHostTest.java')],
                            check=True, timeout=60)
             subprocess.run(['java', '-cp', str(work), 'org.shiraz.apiprobe.NetworkHostTest',

@@ -83,8 +83,8 @@ public final class HostTlsProvider extends Provider {
         }
         protected SSLSocketFactory engineGetSocketFactory(){return new OpenSSLSocketFactoryImpl(delegate.getSocketFactory(),trust);}
         protected SSLServerSocketFactory engineGetServerSocketFactory(){return delegate.getServerSocketFactory();}
-        protected SSLEngine engineCreateSSLEngine(){throw new UnsupportedOperationException("Android TLS bridge currently supports sockets only");}
-        protected SSLEngine engineCreateSSLEngine(String host,int port){throw new UnsupportedOperationException("Android TLS bridge currently supports sockets only");}
+        protected SSLEngine engineCreateSSLEngine(){return new HostTlsEngine(delegate.createSSLEngine(),null,-1);}
+        protected SSLEngine engineCreateSSLEngine(String host,int port){return new HostTlsEngine(delegate.createSSLEngine(host,port),host,port);}
         protected SSLSessionContext engineGetClientSessionContext(){return new NoResumptionContext(delegate.getClientSessionContext());}
         protected SSLSessionContext engineGetServerSessionContext(){return new NoResumptionContext(delegate.getServerSessionContext());}
         protected SSLParameters engineGetDefaultSSLParameters(){return delegate.getDefaultSSLParameters();}

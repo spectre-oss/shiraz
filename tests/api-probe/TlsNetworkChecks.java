@@ -29,6 +29,9 @@ final class TlsNetworkChecks {
     return context;
   }
   static String run(String id, Assets assets) throws Exception {
+    if (!java.util.Arrays.asList("network.tls_verified", "network.tls_untrusted", "network.tls_hostname",
+            "network.tls_engine_verified", "network.tls_engine_untrusted", "network.tls_engine_hostname").contains(id))
+      throw new IllegalArgumentException("Unknown TLS case: " + id);
     X509Certificate cert;
     try (InputStream in = assets.open("loopback-cert.pem")) {
       cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(in);
@@ -49,9 +52,11 @@ final class TlsNetworkChecks {
     TrustManagerFactory tm = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
     tm.init(trust);
     SSLContext serverContext = context(km.getKeyManagers(), null);
-    boolean untrusted = id.equals("network.tls_untrusted");
-    boolean mismatch = id.equals("network.tls_hostname");
+    boolean untrusted = id.endsWith("_untrusted");
+    boolean mismatch = id.endsWith("_hostname");
     SSLContext clientContext = context(null, untrusted ? null : tm.getTrustManagers());
+    if (id.startsWith("network.tls_engine_"))
+      return TlsEngineChecks.run(clientContext, serverContext, mismatch ? "127.0.0.1" : "localhost", untrusted || mismatch);
     try (SSLServerSocket server = (SSLServerSocket) serverContext.getServerSocketFactory()
              .createServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
       server.setSoTimeout(2000);

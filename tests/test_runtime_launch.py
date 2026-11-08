@@ -150,6 +150,7 @@ class LaunchCommandTests(unittest.TestCase):
                           'FONTCONFIG_PATH': str(self.root / '.local/etc/fonts')})
         self.assertEqual(env['SHIRAZ_FONT_DIR'], str(self.root / '.local/share/shiraz/fonts'))
         self.assertEqual(env['BOOTCLASSPATH'], self.expand(DARWIN_BOOT, host))
+        self.assertEqual(env['SHIRAZ_LOCAL_SOCKET_DIR'], str(self.root / '.local/sockets'))
         self.assertEqual(env['ANDROID_ROOT'], str(host))
         self.assertEqual(env['ANDROID_DATA'], str(self.root / RUN / 'android-data'))
         self.assertEqual(env['XDG_CACHE_HOME'], str(self.root / RUN / 'cache'))

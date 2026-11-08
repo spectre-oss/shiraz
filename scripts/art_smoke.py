@@ -34,6 +34,7 @@ def environment(work):
            'XDG_DATA_DIRS': str(ROOT / '.local/share') + ':/usr/share',
            'BOOTCLASSPATH': ':'.join(str(HOST / 'framework' / jar) for jar in JARS)}
     if DARWIN:
+        env['SHIRAZ_LOCAL_SOCKET_DIR'] = str(ROOT / '.local/sockets')
         # dyld resolves ART and Shiraz libraries through @rpath and absolute
         # java.library.path entries; no search-path variables (and no DYLD_*).
         del env['LD_LIBRARY_PATH']
