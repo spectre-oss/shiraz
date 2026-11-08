@@ -4,6 +4,7 @@
 // register layout follows its 32-word capacity without adopting Android's
 // shadow-call-stack register or exposing a Darwin sigset_t as guest sigset_t.
 #include "shiraz/darwin/guest/jump.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -55,6 +56,8 @@ extern "C" void shiraz_guest_jump_record(void *address, int save_mask) noexcept 
   auto *words = buffer(address);
   uint64_t token = capture_boundary_token();
   if (!token) fail("setjmp outside an active guest invocation");
+  if ((words[3] & 15) || !prepared_guest_stack_contains(words[3]))
+    fail("saved SP outside prepared native stack extent");
   words[0] = kMagic | (save_mask ? 1 : 0);
   words[1] = 0;
   if (save_mask) {
@@ -80,6 +83,8 @@ extern "C" void shiraz_guest_jump_validate(void *address, uintptr_t current_sp) 
     fail("jump would cross a native ABI/provider frame or expired guest invocation");
   if ((words[3] & 15) || words[3] < current_sp || !words[2])
     fail("invalid or expired guest stack context");
+  if (!prepared_guest_stack_contains(current_sp) || !prepared_guest_stack_contains(words[3]))
+    fail("saved/current SP outside prepared native stack extent");
   if (words[0] & 1) {
     sigset_t mask{};
     std::memcpy(&mask, &words[1], sizeof(mask));

@@ -20,7 +20,9 @@ struct Destructor { void *function, *object; };
 // The async readiness query must not touch a Mach-O TLV on an unprepared
 // thread: doing so could allocate TLS from inside the signal handler.
 std::array<std::atomic<pthread_t>, 4096> prepared_threads{};
+std::array<std::atomic<uintptr_t>, 4096> prepared_stack_low{}, prepared_stack_high{};
 static_assert(std::atomic<pthread_t>::is_always_lock_free);
+static_assert(std::atomic<uintptr_t>::is_always_lock_free);
 uintptr_t guard() {
   // Android's stack guard is a process value copied into each thread's TLS.
   static const uintptr_t value = [] {
@@ -42,12 +44,21 @@ struct ThreadState {
   ThreadState() { slots[5] = guard(); }
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
+    const auto thread = pthread_self();
+    const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(thread));
+    const auto size = pthread_get_stacksize_np(thread);
+    if (!size || high <= size) {
+      std::fprintf(stderr, "SHIRAZ_GUEST_FATAL native stack extent unavailable\n");
+      std::abort();
+    }
     for (size_t i = 0; i < prepared_threads.size(); ++i) {
       pthread_t empty = nullptr;
       if (prepared_threads[i].compare_exchange_strong(empty, reinterpret_cast<pthread_t>(uintptr_t(1)),
                                                      std::memory_order_acq_rel)) {
         prepared_index = i;
-        prepared_threads[i].store(pthread_self(), std::memory_order_release);
+        prepared_stack_low[i].store(high - size, std::memory_order_relaxed);
+        prepared_stack_high[i].store(high, std::memory_order_relaxed);
+        prepared_threads[i].store(thread, std::memory_order_release);
         return;
       }
     }
@@ -169,6 +180,14 @@ bool guest_tls_prepared() noexcept {
   pthread_t current = pthread_self();
   for (auto &thread : prepared_threads)
     if (thread.load(std::memory_order_acquire) == current) return true;
+  return false;
+}
+bool prepared_guest_stack_contains(uintptr_t pointer) noexcept {
+  const auto current = pthread_self();
+  for (size_t i = 0; i < prepared_threads.size(); ++i)
+    if (prepared_threads[i].load(std::memory_order_acquire) == current)
+      return pointer >= prepared_stack_low[i].load(std::memory_order_relaxed) &&
+             pointer < prepared_stack_high[i].load(std::memory_order_relaxed);
   return false;
 }
 GuestThreadKeyHandle make_guest_thread_key(void *destructor) {

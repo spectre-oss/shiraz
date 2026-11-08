@@ -18,6 +18,10 @@ void prepare_guest_tls();
 void *guest_tls_base();
 // Async-signal-safe readiness query only; never initializes native TLS.
 bool guest_tls_prepared() noexcept;
+// Cached pthread-reported extent, published with TLS readiness. This query
+// does not allocate or ask pthread for stack metadata on a signal path.
+// Membership is not proof of mapped pages or continuous guest SP residence.
+bool prepared_guest_stack_contains(uintptr_t pointer) noexcept;
 // Handles have namespace-independent identity and stay alive while any thread
 // retains a value. Deletion suppresses future selections, never invokes a
 // destructor. A callback already selected during concurrent deletion may finish.
