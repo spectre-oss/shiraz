@@ -163,6 +163,24 @@ class OpaqueLoadTests(unittest.TestCase):
             self.assertEqual(report["classification"], "unknown")
             self.assertIn("atomic-flag-load-may-alias-thread-pointer-stack-spill", self.reasons(report))
 
+    def test_scalar_simd_partial_store_cannot_erase_a_pointer_spill(self):
+        for name, expected in (("b0", 1), ("h0", 2), ("s0", 4), ("d0", 8), ("q0", 16)):
+            opcodes = ("ldr", "str", "ldur", "stur")
+            if expected >= 4:
+                opcodes += ("ldp", "stp")
+            for opcode in opcodes:
+                self.assertEqual(a.memory_width(opcode, name), expected)
+        for name in ("b0", "h0"):
+            for opcode in ("str", "stur"):
+                for experimental in (False, True):
+                    report = self.run_case(
+                        [ins(16, opcode, r(name), mem("sp"), width=a.memory_width(opcode, name))],
+                        load=ins(12, "mov", r("x10"), r("xzr")),
+                        experimental=experimental,
+                    )
+                    self.assertEqual(report["classification"], "unknown")
+                    self.assertIn("partial-overlap-with-thread-pointer-stack-spill", self.reasons(report))
+
 
 if __name__ == "__main__":
     unittest.main()

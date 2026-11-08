@@ -74,6 +74,10 @@ def memory_width(mnemonic, destination):
             return 2
     if destination.startswith(("w", "s")):
         return 4
+    if destination.startswith("b"):
+        return 1
+    if destination.startswith("h"):
+        return 2
     if destination.startswith("q"):
         return 16
     return 8
