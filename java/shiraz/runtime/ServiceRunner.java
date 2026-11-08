@@ -15,6 +15,7 @@ public final class ServiceRunner {
   String pkg=args[0],process=args[7].startsWith(":")?args[0]+args[7]:args[7];Application.shirazSetProcessName(process);ServiceProcess.configure(args);
   Properties metadata=new Properties();try(Reader reader=new InputStreamReader(new FileInputStream(args[8]),StandardCharsets.UTF_8)){metadata.load(reader);}
   if(!pkg.equals(metadata.getProperty("package")))throw new IllegalArgumentException("Service package mismatch");
+  HostNetworkPolicy.install(metadata);
   System.err.println("SHIRAZ_SERVICE_START pid="+android.os.Process.myPid()+" process="+process+" component="+args[2]);
   boolean declared=false;int count=Integer.parseInt(metadata.getProperty("service.count","0"));if(count<0||count>256)throw new IllegalArgumentException("Service declaration limit");
   for(int i=0;i<count;i++)if(args[2].equals(metadata.getProperty("service."+i+".name"))){String key="service."+i+".";String expected=metadata.getProperty(key+"process",pkg);if(expected.startsWith(":"))expected=pkg+expected;

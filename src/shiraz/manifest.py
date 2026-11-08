@@ -173,6 +173,9 @@ def inspect_manifest(data):
         return package + name if name.startswith('.') else package + '.' + name if '.' not in name else name
     sdk = root.find('uses-sdk')
     app = root.find('application')
+    cleartext = attr(app, 'usesCleartextTraffic') if app is not None else None
+    if cleartext not in (None, 'true', 'false') and not cleartext.startswith('@'):
+        raise ManifestError('invalid usesCleartextTraffic boolean')
     launchers = []
     if app is not None:
         for activity in app:
@@ -416,6 +419,8 @@ def inspect_manifest(data):
             'application_enabled': attr(app, 'enabled') if app is not None else None,
             'application_debuggable': attr(app, 'debuggable') if app is not None else None,
             'application_has_code': attr(app, 'hasCode') if app is not None else None,
+            'application_uses_cleartext_traffic': cleartext,
+            'application_network_security_config': attr(app, 'networkSecurityConfig') if app is not None else None,
             'launcher_activities': launchers, 'services': services, 'receivers': receivers, 'providers': providers, 'activities': activities,
             'defined_permissions': [{'name': attr(x, 'name'), 'protection': enum_value(x, 'protectionLevel', {'normal': 0, 'dangerous': 1, 'signature': 2, 'signatureOrSystem': 3, 'privileged': 16}, 0, True)} for x in root.findall('permission')],
             'permissions': sorted({attr(x, 'name') for x in root.findall('uses-permission') if attr(x, 'name')})}

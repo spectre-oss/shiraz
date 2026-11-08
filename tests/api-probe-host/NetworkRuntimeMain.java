@@ -20,13 +20,14 @@ public final class NetworkRuntimeMain {
         "tls_verified", "tls_untrusted", "tls_hostname", "tls_handshake",
              "tls_engine_verified", "tls_engine_untrusted", "tls_engine_hostname",
              "local_stream", "local_timeout", "local_rebind", "local_close_read", "local_close_accept",
-             "network_identity", "network_dns", "network_socket", "network_http", "network_bind", "network_unknown", "network_https"};
+             "network_identity", "network_dns", "network_socket", "network_http", "network_bind", "network_unknown", "network_https", "network_cleartext_policy"};
     int failed = 0;
     for (String name : cases) {
       String id = "network." + name;
       try {
         String detail;
-        if (name.equals("network_https"))
+        if (name.equals("network_cleartext_policy")) detail = NetworkApiChecks.runPolicy(true);
+        else if (name.equals("network_https"))
           detail = NetworkApiChecks.runTls(android.net.ConnectivityManager.shirazForHost(),
               asset -> new FileInputStream(new File(args[0], asset)));
         else if (name.startsWith("network_"))

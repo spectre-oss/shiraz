@@ -272,6 +272,7 @@ public final class ActivityRunner {
         Properties metadata = new Properties();
         try (InputStreamReader reader = new InputStreamReader(new FileInputStream(args[8]), StandardCharsets.UTF_8)) { metadata.load(reader); }
         if (!name.equals(metadata.getProperty("package"))) throw new IllegalArgumentException("Package metadata identity mismatch");
+        HostNetworkPolicy.install(metadata);
         HostStorage storage = new HostStorage(new File(args[6]), name);
         android.os.Environment.shirazInitialize(storage);
         HostKeyStoreProvider.install(storage.files());

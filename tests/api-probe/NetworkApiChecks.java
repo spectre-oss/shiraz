@@ -9,6 +9,12 @@ import java.net.*;
 
 /** Exercises public Network APIs rather than reaching through to java.net directly. */
 final class NetworkApiChecks {
+    static String runPolicy(boolean expected) {
+        android.security.NetworkSecurityPolicy policy = android.security.NetworkSecurityPolicy.getInstance();
+        NetworkChecks.require(policy.isCleartextTrafficPermitted() == expected, "application cleartext policy");
+        NetworkChecks.require(policy.isCleartextTrafficPermitted("localhost") == expected, "host cleartext policy");
+        return "Public cleartext policy agrees with the application manifest flag";
+    }
     static Network unknown() {
         Parcel p = Parcel.obtain();
         try { p.writeInt(Integer.MAX_VALUE); p.setDataPosition(0); return Network.CREATOR.createFromParcel(p); }

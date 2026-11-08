@@ -5,12 +5,17 @@ import argparse
 import fcntl
 import http.server
 import json
-from pathlib import Path
-import subprocess
 import ssl
+import subprocess
 import tempfile
 import threading
+from pathlib import Path
+
 from art_smoke import HOST, JARS, NATIVE, ROOT, environment
+
+from shiraz.apk import inspect_apk
+from shiraz.runtime import application_metadata, properties_text
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     requests=[]
@@ -93,26 +98,39 @@ ssl_context.set_servername_callback(lambda sock,name,ctx: sni_names.append(name)
 tls_server.socket=ssl_context.wrap_socket(tls_server.socket,server_side=True)
 tls_thread=threading.Thread(target=tls_server.serve_forever,daemon=True)
 tls_thread.start()
+http_server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+http_thread=threading.Thread(target=http_server.serve_forever,daemon=True)
+http_thread.start()
 try:
     command = [str(vm), '-Xbootclasspath:'+':'.join(str(HOST/'framework'/name) for name in JARS), '-Xint', '-Xusejit:false', '-Xnoimage-dex2oat', '-Xcompiler:'+str(HOST/'bin/dex2oat'), '-Djava.library.path='+str(NATIVE)+':'+str(HOST/'lib64'), '-cp', str(ROOT/'build/shiraz-framework.jar')+':'+str(jar), 'AndroidTlsSmoke', str(tls_server.server_port), str(cert)]
     custom=subprocess.run(command[:-2]+['custom'],env=environment(work),capture_output=True,text=True,timeout=20)
     (work/'custom-stdout.log').write_text(custom.stdout)
     (work/'custom-stderr.log').write_text(custom.stderr)
     if custom.returncode or 'CUSTOM_TLS_DEFAULTS_PRESERVED' not in custom.stdout: raise SystemExit('Custom TLS defaults test failed')
-    if args.apk: command.append(str(args.apk.resolve()))
+    if args.apk:
+        apk=args.apk.resolve()
+        facts=application_metadata(inspect_apk(apk)['manifest'],apk,work/'apk-data')
+        metadata=work/'application.properties'
+        metadata.write_text(properties_text(facts))
+        command.extend([str(apk), f'http://127.0.0.1:{http_server.server_port}', str(metadata)])
     result = subprocess.run(command, env=environment(work), capture_output=True, text=True, timeout=30)
     (work/'server.json').write_text(json.dumps({'sni':sni_names,'errors':tls_server.handshake_errors,'requests':Handler.requests},indent=2)+'\n')
     (work/'stdout.log').write_text(result.stdout)
     (work/'stderr.log').write_text(result.stderr)
     if result.returncode or 'ANDROID_TLS_BRIDGE_VERIFIED' not in result.stdout.splitlines():
         raise SystemExit('ART TLS bridge smoke failed; inspect '+str(work)+' logs')
-    if args.apk: assert 'EXACT_APK_TLS_VERIFIED' in result.stdout.splitlines()
+    if args.apk:
+        assert 'EXACT_APK_TLS_VERIFIED' in result.stdout.splitlines()
+        assert 'EXACT_APK_HTTP_VERIFIED' in result.stdout.splitlines()
     assert 'localhost' in sni_names, sni_names
     assert '/forbidden' not in Handler.requests, Handler.requests
 finally:
     tls_server.shutdown()
     tls_server.server_close()
     tls_thread.join()
+    http_server.shutdown()
+    http_server.server_close()
+    http_thread.join()
     temporary.cleanup()
-(work/'result.json').write_text(json.dumps({'runtime':'art','exact_apk':bool(args.apk),'bridge_default_factories':True,'trusted_body':True,'untrusted_rejected':True,'https_endpoint_explicit_and_implicit_rejected':True,'invalid_failed_session':True,'alpn':'http/1.1','sni_names':sni_names,'forbidden_http_request_observed':False},indent=2)+'\n')
+(work/'result.json').write_text(json.dumps({'runtime':'art','exact_apk':bool(args.apk),'exact_apk_http':bool(args.apk),'bridge_default_factories':True,'trusted_body':True,'untrusted_rejected':True,'https_endpoint_explicit_and_implicit_rejected':True,'invalid_failed_session':True,'alpn':'http/1.1','sni_names':sni_names,'forbidden_http_request_observed':False},indent=2)+'\n')
 print('ANDROID_TLS_BRIDGE_VERIFIED art')

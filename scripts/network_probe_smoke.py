@@ -77,7 +77,7 @@ def main():
     (work / 'result.json').write_text(json.dumps({'runtime': 'art',
         'apk': str(apk) if apk else None, 'internet_url': args.url,
         'internet_pass': 'NETWORK_INTERNET_PASS ' in result.stdout, 'returncode': result.returncode, 'cases': cases}, indent=2) + '\n')
-    if result.returncode or len(cases) != 28 or any(c['status'] != 'PASS' for c in cases):
+    if result.returncode or len(cases) != 29 or any(c['status'] != 'PASS' for c in cases):
         raise SystemExit('ART network probe failed; inspect build/network-probe-runtime/')
     for line in result.stdout.splitlines():
         if line.startswith('NETWORK_INTERNET_PASS '):

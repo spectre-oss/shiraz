@@ -465,6 +465,7 @@ public final class HostPackageManager extends PackageManager {
         info.minSdkVersion = integer("minSdk", 1); info.targetSdkVersion = integer("targetSdk", info.minSdkVersion);
         info.enabled = bool("enabled", true);
         info.flags = (bool("debuggable", false) ? ApplicationInfo.FLAG_DEBUGGABLE : 0) | (bool("hasCode", true) ? ApplicationInfo.FLAG_HAS_CODE : 0);
+        if(ManifestNetworkPolicy.cleartextPermitted(values))info.flags |= ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC;
         String label = values.getProperty("label");
         info.labelRes = resourceId("labelRes");
         if (info.labelRes == 0) info.nonLocalizedLabel = label;

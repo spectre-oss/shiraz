@@ -3,7 +3,7 @@ package android.content.pm;
 import android.os.Parcel;
 import android.os.Parcelable;
 public class ApplicationInfo extends PackageItemInfo implements Parcelable {
-    public static final int FLAG_DEBUGGABLE = 2, FLAG_HAS_CODE = 4;
+    public static final int FLAG_DEBUGGABLE = 2, FLAG_HAS_CODE = 4, FLAG_USES_CLEARTEXT_TRAFFIC = 1 << 27;
     public String className, processName, sourceDir, publicSourceDir, dataDir, nativeLibraryDir;
     public String[] splitSourceDirs, splitPublicSourceDirs;
     public String backupAgentName, manageSpaceActivityName, appComponentFactory, permission, taskAffinity;

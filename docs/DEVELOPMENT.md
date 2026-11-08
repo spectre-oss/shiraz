@@ -166,6 +166,13 @@ Its DNS, socket factory and HTTP/HTTPS methods use that route; unknown network
 IDs fail without falling back to it. Handles and Parcelable identity round-trip.
 Socket binding validates unconnected IP sockets against this default adapter;
 it does not create Android netd or independent per-interface/process routing.
+Application cleartext decisions are installed before application classes load.
+Explicit `usesCleartextTraffic` flags are honored; without one, targets below 28
+allow cleartext and newer targets deny it. Both the public Android policy API and
+libcore HTTP enforce the decision. `make network-policy-smoke` checks allow/deny
+behavior and verifies that denied HTTP never reaches the server. Custom
+`networkSecurityConfig` XML and resource-valued cleartext flags are not yet
+implemented: startup fails explicitly instead of ignoring application policy.
 The fixture certificate and key are generated only under `build/`, expire after
 two days, and are regenerated when building the probe. Never commit those files
 or the resulting APK. Host JVM checks validate the assertions; ART checks and

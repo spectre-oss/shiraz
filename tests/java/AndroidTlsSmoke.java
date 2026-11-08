@@ -89,6 +89,9 @@ public final class AndroidTlsSmoke {
   try(OpenSSLSocketImpl socket=socket(context,"wrong.example",port)){try{socket.getInputStream().read();throw new AssertionError("Implicit wrong host read accepted");}catch(SSLHandshakeException expected){}}
   try(OpenSSLSocketImpl socket=socket(context,"wrong.example",port)){SSLSession session=socket.getSession();check(!session.isValid()&&session.getCipherSuite().equals("SSL_NULL_WITH_NULL_NULL"),"implicit session failure remains invalid");check(socket.isClosed(),"session failure closes transport");}
   if(args.length>2){
+   java.util.Properties actualPolicy=new java.util.Properties();
+   if(args.length>4)try(Reader reader=new InputStreamReader(new FileInputStream(args[4]),"UTF-8")){actualPolicy.load(reader);}
+   shiraz.runtime.HostNetworkPolicy.install(actualPolicy);
    ClassLoader loader=(ClassLoader)Class.forName("dalvik.system.PathClassLoader").getConstructor(String.class,ClassLoader.class).newInstance(args[2],AndroidTlsSmoke.class.getClassLoader());
    Class<?> platform=loader.loadClass("okhttp3.internal.platform.Platform");Object companion=platform.getField("Companion").get(null);Object platformInstance=companion.getClass().getMethod("get").invoke(companion);check(platformInstance!=null,"exact APK platform initialized");
    Class<?> builderClass=loader.loadClass("okhttp3.OkHttpClient$Builder");Object defaultBuilder=builderClass.newInstance();Object defaultClient=builderClass.getMethod("build").invoke(defaultBuilder);try{apkRequest(loader,defaultClient,"https://localhost:"+port+"/forbidden");throw new AssertionError("Exact APK untrusted certificate accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof SSLException,"exact APK untrusted rejection");}
@@ -97,6 +100,15 @@ public final class AndroidTlsSmoke {
    Object client=builderClass.getMethod("build").invoke(builder);
    check(apkRequest(loader,client,"https://localhost:"+port+"/body").equals("shiraz-network-body"),"exact APK verified TLS body");
    try{apkRequest(loader,client,"https://127.0.0.1:"+port+"/forbidden");throw new AssertionError("Exact APK wrong hostname accepted");}catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof SSLException,"exact APK hostname rejection");}
+   if(args.length>3){
+    check(apkRequest(loader,defaultClient,args[3]+"/redirect").equals("shiraz-network-body"),"Exact APK HTTP redirect/body");
+    java.util.Properties denied=new java.util.Properties();denied.setProperty("targetSdk","35");denied.setProperty("usesCleartextTraffic","false");
+    shiraz.runtime.HostNetworkPolicy.install(denied);
+    try{apkRequest(loader,defaultClient,args[3]+"/forbidden");throw new AssertionError("Exact APK ignored cleartext denial");}
+    catch(java.lang.reflect.InvocationTargetException expected){check(expected.getCause() instanceof UnknownServiceException&&expected.getCause().getMessage().toLowerCase(java.util.Locale.ROOT).contains("cleartext"),"Exact APK cleartext rejection");}
+    finally{shiraz.runtime.HostNetworkPolicy.install(actualPolicy);}
+    System.out.println("EXACT_APK_HTTP_VERIFIED");
+   }
    System.out.println("EXACT_APK_TLS_VERIFIED");
   }
   check(!context.getClientSessionContext().getIds().hasMoreElements(),"no client session is cached after mixed ALPN connections");

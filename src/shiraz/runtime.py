@@ -263,7 +263,9 @@ def application_metadata(manifest, apk, data):
             'icon': manifest.get('application_icon', 0), 'logo': manifest.get('application_logo', 0), 'banner': manifest.get('application_banner', 0),
             'sourceDir': str(apk), 'dataDir': str(data), 'label': manifest.get('application_label'),
             'enabled': manifest.get('application_enabled'), 'debuggable': manifest.get('application_debuggable'),
-            'hasCode': manifest.get('application_has_code')}
+            'hasCode': manifest.get('application_has_code'),
+            'usesCleartextTraffic': manifest.get('application_uses_cleartext_traffic'),
+            'networkSecurityConfig': manifest.get('application_network_security_config')}
     for field in ('backupAgent', 'manageSpaceActivity', 'appComponentFactory', 'permission', 'processName', 'taskAffinity', 'descriptionRes', 'uiOptions', 'category', 'requiresSmallestWidthDp', 'compatibleWidthLimitDp', 'largestWidthLimitDp', 'compileSdkVersion', 'compileSdkVersionCodename'):
         values['applicationInfo.' + field] = manifest.get('application_info', {}).get(field)
     metadata = manifest.get('application_metadata', [])
