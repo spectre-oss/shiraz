@@ -190,7 +190,7 @@ PATCHES_DARWIN = {
         }),
         ('art-darwin-support.patch', {  # 25382 bytes
             'art/libartbase/base/time_utils.cc': 'cd92619e980d867ab0e5c0c670fad8384f965430b1502c4b81586e3df822536d',
-            'art/sigchainlib/sigchain.cc': 'ff66e220f125f503a9acadd478c5e0ff2af88ec788a19b222f050af92bee7f49',
+            'art/sigchainlib/sigchain.cc': '37379c623ccaf0579ee17e4d2c4d0768336e29a9e051c3cf0a4175f0dc4ca234',
             'art/sigchainlib/sigchain.h': '2f4a3284abc715d44602d9fe1c313d634d031c02d4ae276b40b5276963523518',
             'libandroidfw/include/android/asset_manager.h': '1d05e599de4cc688e0436e15e0f259093a6f70dd51a121c7c8fec6570fb8a082',
             'libandroidfw/include/androidfw/androidfw_c_api.h': '3877a7ea59d070c4b19d57ce72a965c0c035916fb4d55016f9042dd42ec46b38',

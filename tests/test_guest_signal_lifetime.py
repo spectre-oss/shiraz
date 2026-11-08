@@ -37,7 +37,7 @@ class SignalLifetimeEvidenceTests(unittest.TestCase):
                 self.assertEqual(current["phase"], "preparing" if step == "stage" else "signing")
 
     def test_timeout_or_launch_failure_cannot_leave_prior_success(self):
-        for failing_call in (1, 2):
+        for failing_call in (1, 2, 3):
             for error in (subprocess.TimeoutExpired(["fixture"], 60), OSError("launch failed")):
                 with self.subTest(call=failing_call, error=type(error).__name__), tempfile.TemporaryDirectory() as tmp:
                     work = Path(tmp)
@@ -57,7 +57,8 @@ class SignalLifetimeEvidenceTests(unittest.TestCase):
                         self.assertEqual(current["native_closure"], str(work / "closure.json"))
                         if calls == failing_call:
                             raise error
-                        return SimpleNamespace(returncode=0, stdout=runner.MARKER + "\n", stderr="")
+                        marker = runner.REFUSAL_MARKER if calls == 2 else runner.MARKER
+                        return SimpleNamespace(returncode=0, stdout=marker + "\n", stderr="")
 
                     with (
                         patch.object(runner, "WORK", work),

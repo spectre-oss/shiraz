@@ -6,6 +6,8 @@
 #include <dlfcn.h>
 #include <atomic>
 #include <mach-o/dyld.h>
+#include <pthread.h>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -46,8 +48,10 @@ static void foreign_handler(int number) {
 }
 int main(int argc, char **argv) {
   try {
-    require(argc == 3 || (argc == 4 && !std::strcmp(argv[3], "--foreign-owner")),
-            "usage: signal-lifetime-probe bridge sigchain [--foreign-owner]");
+    const bool foreign_owner = argc == 4 && !std::strcmp(argv[3], "--foreign-owner");
+    const bool exhaust_keys = argc == 4 && !std::strcmp(argv[3], "--exhaust-keys");
+    require(argc == 3 || foreign_owner || exhaust_keys,
+            "usage: signal-lifetime-probe bridge sigchain [--foreign-owner|--exhaust-keys]");
     require(!setenv("SHIRAZ_GUEST_SIGNAL_CHAIN_CHECK", "1", 1), "probe environment");
     // Keep sigchain resident: its kernel handler still owns the disposition.
     auto chain = dlopen(argv[2], RTLD_NOW | RTLD_GLOBAL);
@@ -62,7 +66,7 @@ int main(int argc, char **argv) {
         dlsym(owner, "shiraz_guest_signal_probe_snapshot"));
     require(table && table->version >= 2 && table->getSignalHandler && snapshot,
             "real bridge callbacks and snapshot");
-    if (argc == 4) {
+    if (foreign_owner) {
       struct sigaction action{}, actual{};
       action.sa_handler = foreign_handler;
       sigemptyset(&action.sa_mask);
@@ -79,6 +83,21 @@ int main(int argc, char **argv) {
     }
     Dl_info before{};
     require(dladdr(reinterpret_cast<void *>(snapshot), &before), "initial bridge ownership");
+    std::vector<pthread_key_t> keys;
+    if (exhaust_keys) {
+      // Exhaust only this subprocess's remaining keys after loading both
+      // libraries, before any chain callback is registered or delivered.
+      keys.reserve(65536);
+      bool exhausted = false;
+      for (unsigned index = 0; index < 65536; ++index) {
+        pthread_key_t key;
+        const int error = pthread_key_create(&key, nullptr);
+        if (error == EAGAIN) { exhausted = true; break; }
+        require(!error, "unexpected pthread key allocation error");
+        keys.push_back(key);
+      }
+      require(exhausted, "pthread key exhaustion fixture bound");
+    }
     for (int number = 1; number < NSIG; ++number) {
       auto handler = table->getSignalHandler(number);
       if (!handler) continue;
@@ -100,8 +119,11 @@ int main(int argc, char **argv) {
     require(!raise(SIGWINCH), "signal after reference drop");
     require(snapshot() == (prefix | (uint64_t(3) << 32) | (uint64_t(1) << 16) | 2),
             "retained special and native fallback callbacks survive reference drop");
+    for (auto key : keys) require(!pthread_key_delete(key), "release fixture-owned keys");
     emit_inventory();
     std::puts("M5_SIGNAL_LIFETIME_PASS claimed=1 declined=2 forwarded=2 owner_reference_dropped=1");
+    if (exhaust_keys)
+      std::printf("M5_SIGNAL_KEY_EXHAUSTION_PASS keys=%zu first_signal_delivered=1\n", keys.size());
   } catch (const std::exception &error) {
     std::fprintf(stderr, "FAIL %s\n", error.what());
     return 1;

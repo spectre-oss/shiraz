@@ -70,17 +70,71 @@ index aa6c987669db9d5601210663b4a14b64660a2352..75af93cab6bac3536a7063bca66bc398
      UNUSED(clock);
      timeval tv;
 diff --git a/art/sigchainlib/sigchain.cc b/art/sigchainlib/sigchain.cc
-index f2e8f23ef874652b673b17395a9a01ad9797b553..93b64d95098ab976616531d79918bf1ec4b33259 100644
 --- a/art/sigchainlib/sigchain.cc
 +++ b/art/sigchainlib/sigchain.cc
-@@ -34,7 +34,6 @@
- 
+@@ -25,6 +25,7 @@
+
+ #include <algorithm>
+ #include <initializer_list>
++#include <atomic>
+ #include <mutex>
+ #include <type_traits>
+ #include <utility>
+@@ -34,7 +35,6 @@
+
  #if defined(__APPLE__)
  #define _NSIG NSIG
 -#define sighandler_t sig_t
- 
+
  // Darwin has an #error when ucontext.h is included without _XOPEN_SOURCE defined.
  #define _XOPEN_SOURCE
+@@ -94,6 +94,11 @@
+ static decltype(&sigaction) linked_sigaction;
+ static decltype(&sigprocmask) linked_sigprocmask;
+
++// Published before any handler can be registered; handler Get/Set never
++// initialize a key or enter a once guard.
++static std::atomic<pthread_key_t> handling_signal_key{0};
++static_assert(std::atomic<pthread_key_t>::is_always_lock_free);
++
+ #if defined(__BIONIC__)
+ static decltype(&sigaction64) linked_sigaction64;
+ static decltype(&sigprocmask64) linked_sigprocmask64;
+@@ -121,28 +126,24 @@
+     lookup_next_symbol(&linked_sigaction64, sigaction64, "sigaction64");
+     lookup_next_symbol(&linked_sigprocmask64, sigprocmask64, "sigprocmask64");
+ #endif
+-  });
+-}
+-
+-static pthread_key_t GetHandlingSignalKey() {
+-  static pthread_key_t key;
+-  static std::once_flag once;
+-  std::call_once(once, []() {
++    // Both public handler-publication paths initialize the chain first.
++    // Reserve the process key here, never on first signal delivery.
++    pthread_key_t key;
+     int rc = pthread_key_create(&key, nullptr);
+     if (rc != 0) {
+       fatal("failed to create sigchain pthread key: %s", strerror(rc));
+     }
++    handling_signal_key.store(key, std::memory_order_release);
+   });
+-  return key;
+ }
+
+ static bool GetHandlingSignal() {
+-  void* result = pthread_getspecific(GetHandlingSignalKey());
++  void* result = pthread_getspecific(handling_signal_key.load(std::memory_order_acquire));
+   return reinterpret_cast<uintptr_t>(result);
+ }
+
+ static void SetHandlingSignal(bool value) {
+-  pthread_setspecific(GetHandlingSignalKey(),
++  pthread_setspecific(handling_signal_key.load(std::memory_order_acquire),
+                       reinterpret_cast<void*>(static_cast<uintptr_t>(value)));
+ }
+
 diff --git a/art/sigchainlib/sigchain.h b/art/sigchainlib/sigchain.h
 index fcb47c2f374ab3d98afc6e00563fdc9b73135e67..2e733f11e7dbf1d5638f54745257b6cdfc9e0264 100644
 --- a/art/sigchainlib/sigchain.h
