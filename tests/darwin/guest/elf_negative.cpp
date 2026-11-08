@@ -119,6 +119,43 @@ int main(int argc, char **argv) {
     });
     reject("dynamic terminator", [](Bytes &b) { put(b, tag(b, 0) - 8, 21); });
     reject("duplicate dynamic", [](Bytes &b) { put(b, tag(b, 11) - 8, 6); });
+    // SYSV hash remains present, so replacing the optional GNU hash metadata
+    // with an unrelated tag is otherwise a valid parser input. The same
+    // replacement with a legacy Android RELR tag must refuse before attempting
+    // to interpret a zero, out-of-file or overflowing relocation-table address.
+    for (uint64_t value : {uint64_t(0), uint64_t(1), UINT64_MAX}) {
+      Bytes unknown = original;
+      size_t p = tag(unknown, 0x6ffffef5);
+      put(unknown, p - 8, 0x70000078);
+      put(unknown, p, value);
+      parse_elf(unknown, 16384);
+      for (uint64_t legacy : {uint64_t(0x6fffe000), uint64_t(0x6fffe001),
+                              uint64_t(0x6fffe003), uint64_t(0x6fffe005)}) {
+        reject("legacy Android RELR metadata", [=](Bytes &b) {
+          size_t entry = tag(b, 0x6ffffef5);
+          put(b, entry - 8, legacy);
+          put(b, entry, value);
+        });
+      }
+    }
+    for (bool populated : {false, true}) {
+      auto bundle = [=](Bytes &b, bool legacy) {
+        const size_t pointer = tag(b, 0x6ffffef5);
+        const size_t size = tag(b, 25), stride = tag(b, 27);
+        // Removing both optional init-array entries keeps the control input
+        // valid while making room for a complete legacy RELR triplet.
+        put(b, pointer - 8, legacy ? 0x6fffe000 : 0x70000078);
+        put(b, pointer, populated ? read(b, tag(b, 7), 8) : 0);
+        put(b, size - 8, legacy ? 0x6fffe001 : 0x70000079);
+        put(b, size, populated ? 8 : 0);
+        put(b, stride - 8, legacy ? 0x6fffe003 : 0x7000007a);
+        put(b, stride, populated ? 8 : 0);
+      };
+      Bytes control = original;
+      bundle(control, false);
+      parse_elf(control, 16384);
+      reject("legacy Android RELR triplet", [=](Bytes &b) { bundle(b, true); });
+    }
     reject("missing SYSV hash", [](Bytes &b) { put(b, tag(b, 4), 0); });
     auto reject_gnu = [&](const char *label, const std::function<void(Bytes &)> &mutate) {
       reject(label, [&](Bytes &b) { gnu_only(b); mutate(b); });

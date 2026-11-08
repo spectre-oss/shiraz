@@ -186,6 +186,25 @@ class NamespaceDecoder:
     def cas64(self, address):
         return self.atomic(address, "cas64")
 
+    def byte_jump_table(self, address):
+        located = self.locate(address)
+        if located is None:
+            return None
+        index, local, decoder = located
+        lookup = getattr(decoder, "byte_jump_table", None)
+        summary = lookup(local) if lookup else None
+        if summary is None:
+            return None
+        addresses = (summary.entry, summary.default_target, summary.table_address, summary.branch_base, *summary.targets)
+        if (any(type(value) is not int or not 0 <= value < STRIDE for value in addresses)
+                or summary.entry + summary.body_size > STRIDE
+                or summary.table_address + len(summary.table_bytes) > STRIDE):
+            return None
+        bias = index * STRIDE
+        return replace(summary, entry=address, default_target=bias + summary.default_target,
+                       table_address=bias + summary.table_address, branch_base=bias + summary.branch_base,
+                       targets=tuple(bias + target for target in summary.targets))
+
     def caller_frame(self, address):
         located = self.locate(address)
         if located is None:

@@ -217,6 +217,13 @@ Elf parse_elf(const std::vector<uint8_t> &bytes, uint64_t page_size) {
   if (tag(17) || tag(18) || tag(19) || tag(35) || tag(36) || tag(37) ||
       tag(0x6000000f) || tag(0x60000011))
     bad("ELF relocation encoding not implemented");
+  // Android's pre-standard RELR encoding uses different dynamic tags. Even
+  // zero-valued metadata advertises an unsupported encoding; never silently
+  // treat such a DSO as if its required relative relocations were absent.
+  // Constants are DT_ANDROID_RELR/RELRSZ/RELRENT/RELRCOUNT from bionic elf.h.
+  if (tags.count(0x6fffe000) || tags.count(0x6fffe001) ||
+      tags.count(0x6fffe003) || tags.count(0x6fffe005))
+    bad("ELF legacy Android RELR relocation encoding not implemented");
   uint64_t strsz = tag(10), strbase = file_address(elf, tag(5), strsz);
   if (!strsz || strsz > (64ull << 20) || r.u(strbase, 1))
     bad("invalid ELF string table");

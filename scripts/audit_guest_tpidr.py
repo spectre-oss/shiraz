@@ -25,6 +25,7 @@ from pathlib import Path
 
 import guest_allocator_contract
 import guest_callee_effects
+import guest_jump_table
 import guest_mrs_window
 import guest_native_target
 
@@ -429,6 +430,7 @@ class Audit:
         stack_windows = {"thread_pointer": None, "protected_facts": None}
         image_stack_separation = set()
         managed_malloc_observations = set()
+        jump_tables = {}
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -587,6 +589,41 @@ class Audit:
                 if reg(destination) == "x29":
                     state.fp = None
                 enqueue(pc + 4, returns, state)
+                continue
+            jump = (self.decode.byte_jump_table(pc)
+                    if instruction.mnemonic == "cmp" and hasattr(self.decode, "byte_jump_table") else None)
+            if jump is not None:
+                # Only entry at the exact CMP acquires the unsigned bound.
+                # Default executes no table access or body register writes.
+                state.set("nzcv", CLEAN)
+                enqueue(jump.default_target, returns, state.copy())
+                source = jump.index_source
+                if (tainted(state.value(source)) or tainted(state.alias(source))
+                        or state.signature(source) is not None
+                        or reg(source) in state.return_signatures):
+                    problem(pc, "jump-table-index-has-pointer-or-signature-fact")
+                    continue
+                observe_owned_image_access(pc, jump.table_address, len(jump.table_bytes), True, False)
+                if ((state.native_memory_may_contain_tp or any(tainted(v) for v in state.stack.values()))
+                        and not image_read_disjoint(pc, state, jump.table_address, len(jump.table_bytes))):
+                    problem(pc, "jump-table-load-may-alias-thread-pointer-stack-spill")
+                    continue
+                jump_tables[pc] = {
+                    "entry": hex(pc), "kind": "bounded-readonly-byte-jump-table",
+                    "body_sha256": jump.body_sha256, "table_sha256": jump.table_sha256,
+                    "table": hex(jump.table_address), "bytes": len(jump.table_bytes),
+                    "default": hex(jump.default_target),
+                    "targets": [hex(target) for target in sorted(set(jump.targets))],
+                    "scope": "explicit trusted sealed-Image bytes; normal/owned synchronous lifetime only",
+                }
+                for target in sorted(set(jump.targets)):
+                    post = state.copy()
+                    for name in (jump.index_register, jump.table_register, jump.offset_register, jump.branch_register):
+                        post.set(name, CLEAN)
+                        post.set_alias(name, CLEAN)
+                    post.set_image(jump.table_register, jump.table_address)
+                    post.set_image(jump.branch_register, target)
+                    enqueue(target, returns, post)
                 continue
             summary = (
                 self.decode.atomic32(pc)
@@ -1470,6 +1507,7 @@ class Audit:
                  "scope": "conditional call crossing only; native spill footprint and full lifetime unproved"}
                 for pc, sp, continuation, has_facts, low, high in sorted(managed_malloc_observations)
             ],
+            "bounded_jump_tables": list(jump_tables.values()),
             "observed_stack_fact_window": {
                 "anchor": "first-mrs-sp",
                 "abstract_anchor_sp": anchor_sp,
@@ -1546,6 +1584,8 @@ class ElfBindingMetadata:
         self._elf_sha256 = hashlib.sha256(data).hexdigest()
         self.loads = []
         self.relocations = {}
+        self.relocation_writes = set()
+        self.static_rodata_safe = True
         self.proof = {}
         self.proof_hash = None
         self.provider_bridge = None
@@ -1637,8 +1677,11 @@ class ElfBindingMetadata:
                 10,
                 11,
                 14,
+                17, 18, 19, 22, 30, 35, 36, 37,
                 20,
                 23,
+                0x6000000F, 0x60000010, 0x60000011, 0x60000012,
+                0x6FFFE000, 0x6FFFE001, 0x6FFFE003, 0x6FFFE005,
                 0x6FFFFFF0,
                 0x6FFFFFFC,
                 0x6FFFFFFD,
@@ -1650,6 +1693,13 @@ class ElfBindingMetadata:
                 self.tags[tag] = value
         if not terminated:
             raise ValueError("unterminated dynamic table")
+        if (22 in self.tags or self.tags.get(30, 0) & 4 or any(
+                tag in self.tags for tag in (17, 18, 19, 35, 36, 37,
+                                            0x6000000F, 0x60000010, 0x60000011, 0x60000012,
+                                            0x6FFFE000, 0x6FFFE001, 0x6FFFE003, 0x6FFFE005))):
+            # Existing binding diagnostics are not a complete relocation
+            # parser. They cannot certify original bytes for these encodings.
+            self.static_rodata_safe = False
         if (
             self.tags.get(11) != 24
             or not self.tags.get(5)
@@ -1730,12 +1780,35 @@ class ElfBindingMetadata:
                     raise ValueError("duplicate relocation address")
                 seen.add(slot)
                 kind, index = info & 0xFFFFFFFF, info >> 32
+                if kind not in {257, 1025, 1026, 1027} or slot > (1 << 64) - 8 or not any(
+                        flags & 2 and begin <= slot and slot + 8 <= end
+                        for begin, end, _, _, flags in self.loads):
+                    self.static_rodata_safe = False
+                else:
+                    self.relocation_writes.add(slot)
                 if kind not in {1025, 1026}:
                     continue
                 if index >= self.symbol_count or slot & 7:
                     raise ValueError("PLT/GOT relocation symbol/alignment")
                 self.offset(slot, 8)
                 self.relocations[slot] = (index, addend, kind)
+
+    def readonly_jump_table_bytes(self, address, size):
+        # Conditional normal/owned synchronous sealed-Image contract. The
+        # trusted loader seals R/non-W data before constructors; guest mmap
+        # services cannot remap Image reservations. Hash identity alone does
+        # not grant immutability against arbitrary native mutation/teardown.
+        if (not self.trusted_provider_contracts or not self.static_rodata_safe
+                or type(address) is not int or type(size) is not int
+                or address < 0 or not 0 < size <= 64 or address + size >= 1 << 64):
+            return None
+        if any(address < slot + 8 and slot < address + size for slot in self.relocation_writes):
+            return None
+        for begin, _, offset, file_size, flags in self.loads:
+            if flags & 7 == 4 and begin <= address and address + size <= begin + file_size:
+                start = offset + address - begin
+                return self.data[start:start + size]
+        return None
 
     def caller_function(self, caller, *, with_source=False):
         """Unique sized symbol entry, or independently checked FDE fallback."""
@@ -2417,6 +2490,9 @@ class ElfDecoder:
             "allocator_contract_reader_sha256": hashlib.sha256(
                 Path(guest_allocator_contract.__file__).read_bytes()
             ).hexdigest(),
+            "jump_table_reader_sha256": hashlib.sha256(
+                Path(guest_jump_table.__file__).read_bytes()
+            ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()
             ).hexdigest(),
@@ -2473,6 +2549,7 @@ class ElfDecoder:
         }
         self.cache = {}
         self.plt_cache = {}
+        self.jump_table_cache = {}
         self.bindings = None
         self.binding_metadata_unavailable = None
         if binding_report is not None:
@@ -2493,6 +2570,24 @@ class ElfDecoder:
 
     def atomic32(self, address):
         return self.atomic_effect(address, guest_callee_effects.recognize_atomic32)
+
+    def byte_jump_table(self, address):
+        if address in self.jump_table_cache:
+            return self.jump_table_cache[address]
+        if self.bindings is None:
+            return None
+
+        def word(pc):
+            raw = self.word(pc)
+            return int.from_bytes(raw, "little") if raw is not None else None
+
+        result = guest_jump_table.recognize_byte_jump_table(
+            word, address, self.bindings.readonly_jump_table_bytes)
+        if result is not None and any(self.word(target) is None for target in (*result.targets, result.default_target)):
+            result = None
+        if len(self.jump_table_cache) < 1 << 20:
+            self.jump_table_cache[address] = result
+        return result
 
     def cas64(self, address):
         return self.atomic_effect(address, guest_callee_effects.recognize_cas64)
