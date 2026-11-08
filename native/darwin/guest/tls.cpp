@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <iterator>
+#include <mutex>
 #include <vector>
 #include <pthread.h>
 #include <stdexcept>
@@ -30,6 +32,21 @@ std::array<std::atomic<pthread_t>, 4096> prepared_threads{};
 std::array<std::atomic<uintptr_t>, 4096> prepared_stack_low{}, prepared_stack_high{};
 static_assert(std::atomic<pthread_t>::is_always_lock_free);
 static_assert(std::atomic<uintptr_t>::is_always_lock_free);
+struct MemoryDomains {
+  std::mutex mutex;
+  std::map<uintptr_t, uintptr_t> images;
+};
+MemoryDomains &memory_domains() {
+  // Native teardown and Image destruction may run after ordinary static
+  // destructors. Keep only the registry shell resident; owners remove entries.
+  static auto *value = new MemoryDomains;
+  return *value;
+}
+bool overlaps_image(const MemoryDomains &domains, uintptr_t low, uintptr_t high) {
+  auto next = domains.images.lower_bound(low);
+  return (next != domains.images.end() && next->first < high) ||
+         (next != domains.images.begin() && std::prev(next)->second > low);
+}
 uintptr_t guard() {
   // Android's stack guard is a process value copied into each thread's TLS.
   static const uintptr_t value = [] {
@@ -63,6 +80,10 @@ struct ThreadState {
       std::fprintf(stderr, "SHIRAZ_GUEST_FATAL native stack extent unavailable\n");
       std::abort();
     }
+    auto &domains = memory_domains();
+    std::lock_guard<std::mutex> lock(domains.mutex);
+    if (overlaps_image(domains, high - size, high))
+      throw ElfError("native stack overlaps guest image reservation");
     for (size_t i = 0; i < prepared_threads.size(); ++i) {
       pthread_t empty = nullptr;
       if (prepared_threads[i].compare_exchange_strong(empty, reinterpret_cast<pthread_t>(uintptr_t(1)),
@@ -127,8 +148,11 @@ struct ThreadState {
     // Discard residual slots after the fixed guest pass budget; do not schedule
     // additional native callbacks or dereference application-owned payloads.
     key_values.clear();
-    if (prepared_index != prepared_threads.size())
+    if (prepared_index != prepared_threads.size()) {
+      auto &domains = memory_domains();
+      std::lock_guard<std::mutex> lock(domains.mutex);
       prepared_threads[prepared_index].store(nullptr, std::memory_order_release);
+    }
   }
 };
 pthread_key_t state_key;
@@ -158,6 +182,32 @@ ThreadState &live_state() {
   std::abort();
 }
 } // namespace
+GuestImageReservation::GuestImageReservation(uintptr_t base, uint64_t bytes) : base_(base) {
+  if (!base || !bytes || bytes > UINTPTR_MAX - base)
+    throw ElfError("invalid guest image reservation extent");
+  const uintptr_t high = base + bytes;
+  auto &domains = memory_domains();
+  std::lock_guard<std::mutex> lock(domains.mutex);
+  if (domains.images.size() >= 4096)
+    throw ElfError("guest image reservation limit");
+  if (overlaps_image(domains, base, high))
+    throw ElfError("overlapping guest image reservations");
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    if (!prepared_threads[i].load(std::memory_order_acquire)) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto end = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (base < end && low < high)
+      throw ElfError("guest image overlaps prepared native stack extent");
+  }
+  // map::emplace has the strong exception guarantee. Nothing is published
+  // when allocation fails; the constructor's owner can unmap and roll back.
+  domains.images.emplace(base, high);
+}
+GuestImageReservation::~GuestImageReservation() {
+  auto &domains = memory_domains();
+  std::lock_guard<std::mutex> lock(domains.mutex);
+  if (domains.images.erase(base_) != 1) std::abort();
+}
 extern "C" [[noreturn]] void shiraz_guest_stack_check_fail() { stack_fail(); }
 GuestTlsCleanupScope::GuestTlsCleanupScope() noexcept {
   try {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/image.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/call.hpp"
 #include "shiraz/darwin/guest/jit.hpp"
 #include "shiraz/darwin/guest/instruction.hpp"
@@ -7,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
 #include <libkern/OSCacheControl.h>
 #include <pthread.h>
 #include <sys/mman.h>
@@ -86,6 +88,7 @@ Image::Image(const std::vector<uint8_t> &bytes, Mapping mode, uintptr_t syscall_
     system_error("reserve guest image");
   }
   try {
+    reservation_ = std::make_unique<GuestImageReservation>(reinterpret_cast<uintptr_t>(base_), mapping_size_);
     for (uint64_t i = 0; i < flags.size();) {
       if (flags[i] & 1) {
         ++i;
@@ -116,7 +119,7 @@ Image::Image(const std::vector<uint8_t> &bytes, Mapping mode, uintptr_t syscall_
     }
   } catch (...) {
     unwind_->reset();
-    munmap(base_, mapping_size_);
+    if (munmap(base_, mapping_size_)) std::abort();
     base_ = nullptr;
     throw;
   }
@@ -221,8 +224,8 @@ uintptr_t Image::address(size_t index) const {
 
 Image::~Image() {
   if (unwind_) unwind_->reset();
-  if (base_)
-    munmap(base_, mapping_size_);
+  // reservation_ remains registered until member destruction after unmapping.
+  if (base_ && munmap(base_, mapping_size_)) std::abort();
 }
 
 void *Image::at(uint64_t address, uint64_t size) const {

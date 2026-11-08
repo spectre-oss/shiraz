@@ -18,6 +18,17 @@ public:
 // Ordinary native entries preserve state for the entire pthread lifetime.
 // Uses an explicitly admitted Darwin exit-state SPI; missing capability fails.
 void require_guest_tls_lifetime();
+// Register an entire owned Image reservation, including islands and gaps.
+// Registration and native-stack publication share one exclusion lock. The
+// owner must retain this token until after unmapping the reservation.
+class GuestImageReservation {
+  uintptr_t base_;
+public:
+  GuestImageReservation(uintptr_t base, uint64_t bytes);
+  ~GuestImageReservation();
+  GuestImageReservation(const GuestImageReservation &) = delete;
+  GuestImageReservation &operator=(const GuestImageReservation &) = delete;
+};
 void prepare_guest_tls();
 void *guest_tls_base();
 // Async-signal-safe readiness query only; never initializes native TLS.

@@ -2,6 +2,9 @@
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/closure.hpp"
+#include "shiraz/darwin/guest/image.hpp"
+#include <fstream>
+#include <chrono>
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -140,12 +143,114 @@ static void unowned_host_cleanup(void *) {
 static void require(bool value, const char *message) {
   if (!value) throw std::runtime_error(message);
 }
+template <class Ready> static void domain_wait(Ready ready) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!ready()) {
+    if (std::chrono::steady_clock::now() >= deadline) std::abort();
+    std::this_thread::yield();
+  }
+}
+// Synthetic reservation tokens test exclusion only; they do not map images
+// over a live stack or claim any ELF execution/stack-liveness proof.
+static void memory_domain_tests(const std::filesystem::path &directory) {
+  prepare_guest_tls();
+  alignas(16) uint64_t main_word = 0;
+  bool stack_first_refused = false;
+  try { GuestImageReservation overlap(reinterpret_cast<uintptr_t>(&main_word), sizeof(main_word)); }
+  catch (const ElfError &error) {
+    stack_first_refused = !std::strcmp(error.what(), "guest image overlaps prepared native stack extent");
+  }
+  require(stack_first_refused, "prepared stack excludes a new image reservation");
+  std::atomic<uintptr_t> address{0};
+  std::atomic<bool> start{false}, done{false}, retry{false};
+  bool image_first_refused = false, retry_ready = false;
+  std::thread worker([&] {
+    alignas(16) uint64_t word = 0;
+    address.store(reinterpret_cast<uintptr_t>(&word), std::memory_order_release);
+    domain_wait([&] { return start.load(std::memory_order_acquire); });
+    try { prepare_guest_tls(); }
+    catch (const ElfError &error) {
+      image_first_refused = !std::strcmp(error.what(), "native stack overlaps guest image reservation") &&
+                            !guest_tls_prepared();
+    }
+    done.store(true, std::memory_order_release);
+    domain_wait([&] { return retry.load(std::memory_order_acquire); });
+    try { prepare_guest_tls(); retry_ready = guest_tls_prepared(); }
+    catch (...) { retry_ready = false; }
+  });
+  domain_wait([&] { return address.load(std::memory_order_acquire) != 0; });
+  {
+    GuestImageReservation claimed(address.load(std::memory_order_relaxed), 8);
+    start.store(true, std::memory_order_release);
+    domain_wait([&] { return done.load(std::memory_order_acquire); });
+  }
+  retry.store(true, std::memory_order_release);
+  worker.join();
+  require(image_first_refused && retry_ready,
+          "stack publication fails without readiness leak, then retries after reservation release");
+  for (int iteration = 0; iteration < 32; ++iteration) {
+    address.store(0); start.store(false); done.store(false);
+    std::atomic<bool> main_done{false};
+    bool prepared = false, refused = false;
+    std::thread racer([&] {
+      alignas(16) uint64_t word = 0;
+      address.store(reinterpret_cast<uintptr_t>(&word), std::memory_order_release);
+      domain_wait([&] { return start.load(std::memory_order_acquire); });
+      try { prepare_guest_tls(); prepared = guest_tls_prepared(); }
+      catch (const ElfError &error) {
+        refused = !std::strcmp(error.what(), "native stack overlaps guest image reservation");
+      }
+      done.store(true, std::memory_order_release);
+      // Retain a successful publication until the competing insertion finishes.
+      domain_wait([&] { return main_done.load(std::memory_order_acquire); });
+    });
+    domain_wait([&] { return address.load(std::memory_order_acquire) != 0; });
+    start.store(true, std::memory_order_release);
+    std::unique_ptr<GuestImageReservation> claimed;
+    bool reservation_refused = false;
+    try { claimed = std::make_unique<GuestImageReservation>(address.load(), 8); }
+    catch (const ElfError &error) {
+      reservation_refused = !std::strcmp(error.what(), "guest image overlaps prepared native stack extent");
+    }
+    main_done.store(true, std::memory_order_release);
+    domain_wait([&] { return done.load(std::memory_order_acquire); });
+    racer.join();
+    require((bool(claimed) && refused && !prepared) ||
+                (!claimed && reservation_refused && prepared),
+            "racing image/stack insertion admits exactly one overlapping owner");
+  }
+  std::ifstream input(directory / "libtls-fixture.so", std::ios::binary);
+  std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)), {});
+  require(!bytes.empty(), "non-executing image reservation fixture bytes");
+  uintptr_t retired = 0;
+  {
+    Image mapped(bytes, Image::Mapping::Deferred);
+    retired = reinterpret_cast<uintptr_t>(mapped.symbol("tls_exercise"));
+    bool duplicate_refused = false;
+    try { GuestImageReservation overlap(retired, 4); }
+    catch (const ElfError &error) {
+      duplicate_refused = !std::strcmp(error.what(), "overlapping guest image reservations");
+    }
+    require(duplicate_refused, "actual Image mapping registers its full reservation before execution");
+  }
+  // No mapping is made here: token insertion proves the retired Image released
+  // its exclusion entry after unmapping, rather than leaking a stale owner.
+  { GuestImageReservation released(retired, 4); }
+  bool overflow_refused = false;
+  try { GuestImageReservation overflow(UINTPTR_MAX - 7, 16); }
+  catch (const ElfError &error) {
+    overflow_refused = !std::strcmp(error.what(), "invalid guest image reservation extent");
+  }
+  require(overflow_refused, "overflow cannot publish a reservation");
+  std::cout << "M5_MEMORY_DOMAIN_PASS stack_first=1 image_first=1 retry=1 races=32 image_lifetime=1 overflow=1\n";
+}
 int main(int argc, char **argv) {
   try {
     require(argc == 2, "usage: tls-probe fixture-directory");
     resident = new Loader({std::filesystem::canonical(argv[1])}, allocation_tracking_personality());
     auto &loader = *resident;
     auto *module = loader.open("libtls-fixture.so");
+    memory_domain_tests(std::filesystem::canonical(argv[1]));
     require(loader.image_count() == 3,
             "genuine guest fixture, peer DSO and unchanged compiler-rt execute");
     auto exercise = loader.symbol(module, "tls_exercise").address;

@@ -8,6 +8,7 @@
 #include <string_view>
 
 namespace shiraz::guest {
+class GuestImageReservation;
 // Monotonic wall durations for completed stages, in nanoseconds. Rewrite includes
 // decoder/site analysis and patching; map includes protections/unwind registration.
 struct ImageMetrics {
@@ -47,6 +48,7 @@ private:
   ThreadPointerAnalysis analysis_;
   uintptr_t syscall_dispatcher_ = 0;
   std::unique_ptr<UnwindRegistration> unwind_;
+  std::unique_ptr<GuestImageReservation> reservation_;
   uint64_t mapping_size_ = 0;
   uint8_t *base_ = nullptr;
   std::vector<unsigned> page_flags_;

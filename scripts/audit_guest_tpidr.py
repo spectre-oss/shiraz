@@ -402,6 +402,7 @@ class Audit:
         states = {}
         pending = deque()
         steps = 0
+        stack_windows = {"thread_pointer": None, "protected_facts": None}
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -431,7 +432,27 @@ class Audit:
             value = origin + delta
             return value if 0 <= value < 1 << 64 else None
 
+        def observe_stack_facts(state):
+            traced = {slot for slot, value in state.stack.items() if tainted(value)}
+            protected = traced | {
+                slot for mapping in (state.stack_aliases, state.stack_returns)
+                for slot, value in mapping.items() if tainted(value)
+            } | set(state.stack_images) | set(state.stack_signatures)
+            for kind, slots in (("thread_pointer", traced), ("protected_facts", protected)):
+                if not slots:
+                    continue
+                # These are the analyzer's eight-byte saved facts, not all
+                # memory accesses or a complete footprint of unresolved paths.
+                low = min(slots) - anchor_sp
+                high = max(slots) + 8 - anchor_sp
+                previous = stack_windows[kind]
+                stack_windows[kind] = (
+                    (low, high) if previous is None else
+                    (min(low, previous[0]), max(high, previous[1]))
+                )
+
         def enqueue(pc, returns, state):
+            observe_stack_facts(state)
             # A union at a join loses correlations between register values,
             # spill contents and stack addresses. Keep each exact abstract state
             # separately; an unsafe path remains a sticky problem for the site.
@@ -500,6 +521,7 @@ class Audit:
         initial.set_alias(first.operands[0].value, CLEAN)
         if reg(first.operands[0].value) == "x29":
             initial.fp = None
+        anchor_sp = initial.sp
         enqueue(address + 4, returns, initial)
         while pending:
             if steps >= self.max_steps:
@@ -1282,6 +1304,17 @@ class Audit:
             "steps": steps,
             "analysis_strategy": "bounded-exact-state-partitions",
             "state_partitions": len(states),
+            "observed_stack_fact_window": {
+                "anchor": "first-mrs-sp",
+                "abstract_anchor_sp": anchor_sp,
+                "fact_width_bytes": 8,
+                "runtime_enforced": False,
+                "scope": "observed abstract facts only; unresolved paths and complete memory footprint unproved",
+                "windows": {
+                    kind: None if bounds is None else {"min_offset": bounds[0], "end_offset": bounds[1]}
+                    for kind, bounds in stack_windows.items()
+                },
+            },
             "accesses": [
                 {"pc": hex(pc), "offset": None if offset is OPAQUE else offset,
                  "instruction": op, "kind": kind,
