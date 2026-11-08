@@ -28,11 +28,11 @@ public final class NetworkPolicySmoke {
         for (String config : new String[] {"@xml/policy", "@0x7f010001"}) {
             Properties p = facts(35, "true"); p.setProperty("networkSecurityConfig", config);
             try { HostNetworkPolicy.install(p); throw new AssertionError("custom trust policy ignored"); }
-            catch (UnsupportedOperationException expected) { }
+            catch (IllegalArgumentException expected) { }
             check(!NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(), "failed install replaced deny policy");
         }
         try { HostNetworkPolicy.install(facts(27, "@bool/cleartext")); throw new AssertionError("unresolved policy boolean ignored"); }
-        catch (UnsupportedOperationException expected) { }
+        catch (IllegalArgumentException expected) { }
         HttpURLConnection denied = (HttpURLConnection)new URL(args[0]+"/forbidden").openConnection();
         denied.setConnectTimeout(1000); denied.setReadTimeout(1000);
         try {
@@ -46,6 +46,7 @@ public final class NetworkPolicySmoke {
             check(allowed.getResponseCode() == 200, "allowed HTTP status");
             try (InputStream in = allowed.getInputStream()) { check(in.read() == 42 && in.read() == -1, "allowed HTTP body"); }
         } finally { allowed.disconnect(); }
+        NetworkConfigSmoke.run(args[1],args[0]);
         System.out.println("NETWORK_POLICY_VERIFIED");
     }
 }

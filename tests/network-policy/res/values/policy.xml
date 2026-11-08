@@ -1,0 +1,2 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<resources><bool name="cleartext">true</bool><bool name="deny">false</bool><string name="not_boolean">true</string></resources>

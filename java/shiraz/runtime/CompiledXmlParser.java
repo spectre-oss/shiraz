@@ -7,8 +7,8 @@ import java.util.*;
 
 /** Owned compiled-resource pull cursor and typed AttributeSet; resource references remain references. */
 public final class CompiledXmlParser implements XmlResourceParser {
-    private static final class Event {final BinaryXml.Node node;final int type,depth;Event(BinaryXml.Node n,int t,int d){node=n;type=t;depth=d;}}
-    private final ArrayList<Event> events=new ArrayList<Event>();private int at,resource;private final int encodedSize;private boolean closed,started;
+    private static final class Event {final BinaryXml.Node node;final int type,depth;final String text;Event(BinaryXml.Node n,int t,int d){this(n,t,d,null);}Event(BinaryXml.Node n,int t,int d,String value){node=n;type=t;depth=d;text=value;}}
+    private final ArrayList<Event> events=new ArrayList<Event>();private int at,resource;private final int encodedSize;private boolean closed;
     public CompiledXmlParser(byte[] bytes,int resource){this.resource=resource;encodedSize=bytes.length;BinaryXml.Node root=BinaryXml.parse(bytes);events.add(new Event(null,START_DOCUMENT,0));flatten(root,1);events.add(new Event(null,END_DOCUMENT,0));}
     private final Object sourceKey=new Object();
     private Object sharedKey;
@@ -17,7 +17,7 @@ public final class CompiledXmlParser implements XmlResourceParser {
     public CompiledXmlParser shirazFork(){event();return new CompiledXmlParser(this);}
     public Object shirazSourceKey(){return sharedKey==null?sourceKey:sharedKey;}
     public int shirazPosition(){event();return at;}
-    private void flatten(BinaryXml.Node n,int depth){events.add(new Event(n,START_TAG,depth));for(BinaryXml.Node child:n.children)flatten(child,depth+1);events.add(new Event(n,END_TAG,depth));}
+    private void flatten(BinaryXml.Node n,int depth){events.add(new Event(n,START_TAG,depth));for(Object item:n.content)if(item instanceof BinaryXml.Node)flatten((BinaryXml.Node)item,depth+1);else events.add(new Event(n,TEXT,depth,(String)item));events.add(new Event(n,END_TAG,depth));}
     private Event event(){if(closed)throw new IllegalStateException("Compiled XML parser is closed");return events.get(at);}
     public int shirazEncodedSize(){return encodedSize;}
     public BinaryXml.Node shirazNode(){return event().node;}
@@ -25,13 +25,13 @@ public final class CompiledXmlParser implements XmlResourceParser {
     private int index(String ns,String name){Event e=event();if(e.type!=START_TAG)return -1;for(int i=0;i<e.node.attributes.size();i++){BinaryXml.Attribute a=e.node.attributes.get(i);if(a.name.equals(name)&&(ns==null||a.namespace.equals(ns)))return i;}return -1;}
     public void close(){closed=true;events.clear();at=0;}
     public int getEventType(){return event().type;}
-    public int next(){event();if(!started){started=true;return START_DOCUMENT;}if(at<events.size()-1)at++;return event().type;}
+    public int next(){event();if(at<events.size()-1)at++;return event().type;}
     public int nextToken(){return next();}
     public int getDepth(){return event().depth;}
-    public String getName(){return event().node==null?null:event().node.name;}
-    public String getNamespace(){return event().node==null?null:event().node.namespace;}
+    public String getName(){Event e=event();return e.type==START_TAG||e.type==END_TAG?e.node.name:null;}
+    public String getNamespace(){Event e=event();return e.type==START_TAG||e.type==END_TAG?e.node.namespace:null;}
     private String prefix(String uri){if(uri.isEmpty())return null;List<BinaryXml.Namespace> ns=event().node.namespaces;for(int i=ns.size()-1;i>=0;i--)if(ns.get(i).uri.equals(uri))return ns.get(i).prefix.isEmpty()?null:ns.get(i).prefix;return null;}
-    public String getPrefix(){return event().node==null?null:prefix(event().node.namespace);}
+    public String getPrefix(){return getName()==null?null:prefix(event().node.namespace);}
     public int getLineNumber(){return event().node==null?-1:event().type==END_TAG?event().node.endLine:event().node.line;}
     public int getColumnNumber(){return -1;}
     public String getPositionDescription(){return "Binary XML resource #"+Integer.toHexString(resource)+" line "+getLineNumber();}
@@ -40,9 +40,9 @@ public final class CompiledXmlParser implements XmlResourceParser {
     public String getNamespaceUri(int pos){return event().node.namespaces.get(pos).uri;}
     public String getNamespace(String prefix){if(prefix==null)prefix="";if(prefix.equals("xml"))return "http://www.w3.org/XML/1998/namespace";if(prefix.equals("xmlns"))return "http://www.w3.org/2000/xmlns/";if(event().node==null)return null;List<BinaryXml.Namespace> list=event().node.namespaces;for(int i=list.size()-1;i>=0;i--)if(list.get(i).prefix.equals(prefix))return list.get(i).uri;return null;}
     public boolean isEmptyElementTag(){event();return false;}
-    public String getText(){event();return null;}
-    public char[] getTextCharacters(int[] holder){event();if(holder==null||holder.length<2)throw new IllegalArgumentException("Text holder");holder[0]=holder[1]=0;return null;}
-    public boolean isWhitespace()throws XmlPullParserException{throw new XmlPullParserException("Current event is not text");}
+    public String getText(){return event().text;}
+    public char[] getTextCharacters(int[] holder){event();if(holder==null||holder.length<2)throw new IllegalArgumentException("Text holder");String text=getText();holder[0]=0;holder[1]=text==null?0:text.length();return text==null?null:text.toCharArray();}
+    public boolean isWhitespace()throws XmlPullParserException{if(getEventType()!=TEXT)throw new XmlPullParserException("Current event is not text");return getText().trim().isEmpty();}
     public String getInputEncoding(){return null;}
     public void setFeature(String name,boolean enabled)throws XmlPullParserException{if(FEATURE_PROCESS_NAMESPACES.equals(name)&&enabled)return;if((FEATURE_REPORT_NAMESPACE_ATTRIBUTES.equals(name)||FEATURE_VALIDATION.equals(name)||FEATURE_PROCESS_DOCDECL.equals(name))&&!enabled)return;throw new XmlPullParserException("Compiled XML feature "+name);}
     public boolean getFeature(String name){return FEATURE_PROCESS_NAMESPACES.equals(name);}
@@ -52,8 +52,8 @@ public final class CompiledXmlParser implements XmlResourceParser {
     public void setInput(java.io.InputStream in,String encoding)throws XmlPullParserException{throw new XmlPullParserException("Resource parser input is owned");}
     public void defineEntityReplacementText(String name,String text)throws XmlPullParserException{throw new XmlPullParserException("Compiled XML has no entity substitutions");}
     public void require(int type,String ns,String name)throws XmlPullParserException{if(getEventType()!=type||ns!=null&&!ns.equals(getNamespace())||name!=null&&!name.equals(getName()))throw new XmlPullParserException("Unexpected event at "+getPositionDescription());}
-    public int nextTag()throws XmlPullParserException{int type=next();if(type!=START_TAG&&type!=END_TAG)throw new XmlPullParserException("Expected tag");return type;}
-    public String nextText()throws XmlPullParserException{require(START_TAG,null,null);if(next()!=END_TAG)throw new XmlPullParserException("Element contains child tags");return "";}
+    public int nextTag()throws XmlPullParserException{int type=next();while(type==TEXT&&isWhitespace())type=next();if(type!=START_TAG&&type!=END_TAG)throw new XmlPullParserException("Expected tag");return type;}
+    public String nextText()throws XmlPullParserException{require(START_TAG,null,null);StringBuilder text=new StringBuilder();int type;while((type=next())==TEXT)text.append(getText());if(type!=END_TAG)throw new XmlPullParserException("Element contains child tags");return text.toString();}
     public int getAttributeCount(){Event e=event();return e.type==START_TAG?e.node.attributes.size():-1;}
     public String getAttributeName(int index){return attribute(index).name;}
     public String getAttributeNamespace(int index){return attribute(index).namespace;}

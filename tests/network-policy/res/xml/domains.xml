@@ -1,0 +1,13 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="@bool/cleartext">
+        <domain includeSubdomains="true">EXAMPLE.COM</domain>
+        <domain-config cleartextTrafficPermitted="false">
+            <domain includeSubdomains="true">secure.example.com</domain>
+            <domain-config><domain>inherited.example.com</domain></domain-config>
+        </domain-config>
+    </domain-config>
+    <domain-config><domain>default.example.org</domain></domain-config>
+    <domain-config cleartextTrafficPermitted="true"><domain>127.0.0.1</domain></domain-config>
+    <base-config cleartextTrafficPermitted="@bool/deny"><trust-anchors><certificates src="system"/></trust-anchors></base-config>
+</network-security-config>

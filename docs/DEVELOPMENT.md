@@ -170,9 +170,16 @@ Application cleartext decisions are installed before application classes load.
 Explicit `usesCleartextTraffic` flags are honored; without one, targets below 28
 allow cleartext and newer targets deny it. Both the public Android policy API and
 libcore HTTP enforce the decision. `make network-policy-smoke` checks allow/deny
-behavior and verifies that denied HTTP never reaches the server. Custom
-`networkSecurityConfig` XML and resource-valued cleartext flags are not yet
-implemented: startup fails explicitly instead of ignoring application policy.
+behavior and verifies that denied HTTP never reaches the server. Compiled
+`networkSecurityConfig` XML supports base/domain cleartext rules, nested
+inheritance, longest domain matching, `includeSubdomains`, and system-only trust
+anchor declarations. Resource-valued boolean flags are resolved from the APK.
+XML policies use target-SDK defaults and take precedence over the manifest
+cleartext flag. Duplicate domains, malformed values, and unsupported directives
+fail before replacing the installed policy. Custom/user anchors, pinning, debug
+overrides and newer trust directives still fail explicitly at startup; their TLS
+enforcement is unfinished. The smoke uses compiled APK resources and checks
+wire-level domain denial. XML cursors preserve domain text and mixed content.
 The fixture certificate and key are generated only under `build/`, expire after
 two days, and are regenerated when building the probe. Never commit those files
 or the resulting APK. Host JVM checks validate the assertions; ART checks and

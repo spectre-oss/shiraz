@@ -1,0 +1,2 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<network-security-config><base-config><pin-set><pin digest="SHA-256">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</pin></pin-set></base-config></network-security-config>

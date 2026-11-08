@@ -43,7 +43,16 @@ public final class NetworkRuntimeMain {
         error.printStackTrace(System.err);
       }
     }
-    System.out.println("NETWORK_SUMMARY " + (cases.length - failed) + "/" + cases.length);
+    int total=cases.length;
+    if(args.length>3&&!args[3].equals("-")){
+      total++;
+      try{
+        android.content.res.Resources resources=android.content.res.Resources.shirazOpen(args[3],360,640);
+        String detail;try{detail=NetworkXmlChecks.run(resources,"org.shiraz.apiprobe");}finally{resources.shirazClose();}
+        System.out.println("NETWORK_RESULT\tnetwork.network_xml\tPASS\t"+detail);
+      }catch(Throwable error){failed++;System.out.println("NETWORK_RESULT\tnetwork.network_xml\tFAIL\t"+error);error.printStackTrace(System.err);}
+    }
+    System.out.println("NETWORK_SUMMARY " + (total - failed) + "/" + total);
     if (args.length > 1 && !args[1].equals("-")) {
       javax.net.ssl.HttpsURLConnection c = (javax.net.ssl.HttpsURLConnection)
           new java.net.URL(args[1]).openConnection(java.net.Proxy.NO_PROXY);

@@ -21,6 +21,8 @@ public final class BinaryXml {
         public int line,endLine,idIndex=-1,classIndex=-1,styleIndex=-1; public Node parent; public final List<Namespace> namespaces=new ArrayList<Namespace>();
         public final List<Attribute> attributes=new ArrayList<Attribute>();
         public final List<Node> children=new ArrayList<Node>();
+        /** Ordered child elements and text strings, preserving mixed XML content. */
+        public final List<Object> content=new ArrayList<Object>();
         Node(String namespace,String name) { this.namespace=namespace; this.name=name; }
         public Value android(String name) { for (Attribute a:attributes) if (ANDROID.equals(a.namespace) && name.equals(a.name)) return a.value; return null; }
     }
@@ -100,11 +102,19 @@ public final class BinaryXml {
                         for (Attribute old:node.attributes) if (old.namespace.equals(ns) && old.name.equals(key)) throw bad();
                         node.attributes.add(new Attribute(ns,key,new Value(type,data,type == 3 ? string(data) : raw == -1 ? null : string(raw)),resourceIds!=null&&nameIndex<resourceIds.length?resourceIds[nameIndex]:0));
                     }
-                    if (stack.isEmpty()) { if (root != null) throw bad(); root=node; } else stack.get(stack.size()-1).children.add(node); stack.add(node);
+                    if (stack.isEmpty()) { if (root != null) throw bad(); root=node; } else { Node parent=stack.get(stack.size()-1);parent.children.add(node);parent.content.add(node); } stack.add(node);
                 } else if (kind == 0x103) {
                     if (stack.isEmpty()) throw bad(); Node node=stack.remove(stack.size()-1);node.endLine=i32(at+8,end);
                     if (!node.name.equals(name(i32(at+20,end))) || !node.namespace.equals(string(i32(at+16,end)))) throw bad();
-                } else if (kind == 0x104) { if (!string(i32(at+16,end)).trim().isEmpty()) throw new UnsupportedOperationException("Compiled XML text nodes are not implemented"); }
+                } else if (kind == 0x104) {
+                    if (stack.isEmpty() || size != 28 || bytes[at+22] != 0) throw bad();
+                    int typedSize=u16(at+20,end);
+                    if (typedSize != 8 && !(typedSize == 0 && i32(at+20,end) == 0 && i32(at+24,end) == 0)) throw bad();
+                    String text=string(i32(at+16,end));
+                    int type=bytes[at+23]&255,data=i32(at+24,end);
+                    if (type == 3 && !string(data).equals(text)) throw bad();
+                    stack.get(stack.size()-1).content.add(text);
+                }
                 else throw bad();
             }
             at=end;
