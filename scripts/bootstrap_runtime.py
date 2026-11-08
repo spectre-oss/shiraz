@@ -121,6 +121,9 @@ PATCHES = {
         ('art-tls-eof.patch', {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java': 'd956fb49de6ad1628a38dfd9159d2e2c63115ab3276f6bc9309624f08cb62656',
         }),
+        ('art-tls-stream-reads.patch', {
+            'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java': '13f4f126d86c40e12aa7e5e5462de59191660b115e505fcea96b87bed4d1a973',
+        }),
         ('art-host-unload.patch', {
             'libcore/luni/src/main/native/Register.cpp':
                 '1baba7f2fb38514ba57955287d7a28ca9478a985d3fd9bce411111837d36b9de',

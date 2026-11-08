@@ -128,8 +128,8 @@ public final class OpenSSLSocketImpl extends SSLSocket {
     public InputStream getInputStream()throws IOException{
         final InputStream input=delegate.getInputStream();return new FilterInputStream(input){
             public int read()throws IOException{startHandshake();return in.read();}
-            public int read(byte[] data,int offset,int count)throws IOException{startHandshake();return in.read(data,offset,count);}
-            public long skip(long count)throws IOException{startHandshake();return in.skip(count);}
+            public int read(byte[] data,int offset,int count)throws IOException{if(data==null)throw new NullPointerException("data");if(offset<0||count<0||offset>data.length-count)throw new IndexOutOfBoundsException("TLS input range");if(count==0)return 0;startHandshake();return in.read(data,offset,count);}
+            public long skip(long count)throws IOException{if(count<=0)return 0;startHandshake();return in.skip(count);}
             public int available()throws IOException{startHandshake();return in.available();}
         };
     }

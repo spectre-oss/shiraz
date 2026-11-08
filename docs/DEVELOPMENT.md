@@ -194,8 +194,12 @@ configurations. No Android user-CA store is configured; `src="user"`, certificat
 transparency and newer trust directives still fail explicitly. The cleartext
 smoke checks compiled resources and wire-level domain denial. XML cursors
 preserve domain text and mixed content. Controlled TLS tests verify clean
-`close_notify` EOF. A backend zero-byte read was observed after abrupt peer
-shutdown; its normalization remains unfinished.
+`close_notify` EOF. Abrupt shutdown yields EOF or an I/O exception, never
+zero progress or an invented NUL byte. TLS reads validate buffer ranges;
+empty reads and nonpositive skips do not start a handshake. The stream probes
+exercise the socket bridge and pinned provider under TLS 1.2/1.3, including
+read-timeout recovery. The pinned API-27 URL handler negotiates TLS 1.2; its
+fixed-length HTTPS body probe rejects truncation.
 
 The fixture certificate and key are generated only under `build/`, expire after
 two days, and are regenerated when building the probe. Never commit those files

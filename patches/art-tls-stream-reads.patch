@@ -1,0 +1,44 @@
+--- a/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java
++++ b/external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLSocket.java
+@@ -1799,6 +1799,12 @@
+             if (b == null) {
+                 throw new NullPointerException("Input array is null");
+             }
++            if (off < 0 || len < 0 || off > b.length - len) {
++                throw new IndexOutOfBoundsException("Array index out of bounds");
++            }
++            if (len == 0) {
++                return 0;
++            }
+
+             WolfSSLDebug.log(getClass(), WolfSSLDebug.INFO,
+                              "thread trying to get readLock");
+@@ -1829,14 +1835,6 @@
+                     throw e;
+                 }
+
+-                if (b.length == 0 || len == 0) {
+-                    return 0;
+-                }
+-
+-                if (off < 0 || len < 0 || len > (b.length - off)) {
+-                    throw new IndexOutOfBoundsException("Array index out of bounds");
+-                }
+-
+                 if (off != 0) {
+                     /* create new tmp buffer to read data into */
+                     data = new byte[len];
+@@ -1865,6 +1863,13 @@
+
+                         /* End of stream */
+                         return -1;
++                    }
++
++                    if (ret == 0) {
++                        // A nonempty blocking InputStream read may not return
++                        // zero. Known clean/peer EOF was handled above; do not
++                        // turn an unclassified transport closure into a NUL byte.
++                        throw new javax.net.ssl.SSLException("TLS read made no progress (error code: " + err + ")");
+                     }
+
+                     if (ret < 0) {
