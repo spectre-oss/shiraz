@@ -18,6 +18,9 @@ public:
 // Ordinary native entries preserve state for the entire pthread lifetime.
 // Uses an explicitly admitted Darwin exit-state SPI; missing capability fails.
 void require_guest_tls_lifetime();
+// Versioned admission contract: live Image reservations and prepared native
+// stack extents cannot overlap. This does not describe arbitrary host memory.
+inline constexpr uint32_t kImageStackExclusionProfile = 1;
 // Register an entire owned Image reservation, including islands and gaps.
 // Registration and native-stack publication share one exclusion lock. The
 // owner must retain this token until after unmapping the reservation.

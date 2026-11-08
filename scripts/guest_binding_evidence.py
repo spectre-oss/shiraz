@@ -167,13 +167,17 @@ def augment_binding_report(
                     "native/unknown binding must not expose a guest target"
                 )
             binding["provider_elf_sha256"] = provider_hash
-        if verify_inventory:
+        if verify_inventory or "mrs_stack_window" in module:
             from audit_guest_tpidr import ElfBindingMetadata
+            from guest_mrs_window import validate_mrs_window_record
 
             metadata = ElfBindingMetadata(bounded_read(library_directory / module["name"], 256 << 20), module["name"])
             if metadata.elf_sha256 != hashes[module["name"]]:
                 raise ValueError("binding inventory ELF changed since APK verification")
-            verify_relocation_inventory(metadata, bindings)
+            if "mrs_stack_window" in module:
+                validate_mrs_window_record(metadata, module["mrs_stack_window"])
+            if verify_inventory:
+                verify_relocation_inventory(metadata, bindings)
     if verify_inventory:
         report["relocation_inventory_verification"] = "exact-named-GLOB_DAT-JUMP_SLOT-ELF-metadata"
     if bridge_identity is not None:

@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 
 import guest_callee_effects
+import guest_mrs_window
 
 MAX_BYTES = 256 << 20
 MAX_SITES = 131072
@@ -264,6 +265,15 @@ def tainted(value):
     return any(item is not None for item in value)
 
 
+def stack_fact_slots(state):
+    traced = {slot for slot, value in state.stack.items() if tainted(value)}
+    protected = traced | {
+        slot for mapping in (state.stack_aliases, state.stack_returns)
+        for slot, value in mapping.items() if tainted(value)
+    } | set(state.stack_images) | set(state.stack_signatures)
+    return traced, protected
+
+
 def shift_pointer_offset(value, delta):
     return value if value is None or value is OPAQUE else value + delta
 
@@ -403,6 +413,7 @@ class Audit:
         pending = deque()
         steps = 0
         stack_windows = {"thread_pointer": None, "protected_facts": None}
+        image_stack_separation = set()
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -419,10 +430,9 @@ class Audit:
             ):
                 return
             owned_image_accesses.add((pc, start, width, load, store))
-            # Ownership is not stack disjointness. This audit starts at an
-            # arbitrary MRS with no independently proved native-stack entry;
-            # earlier guest code could have pivoted SP into this very image.
-            # Retain the observation without suppressing alias uncertainty.
+            # Ownership alone is not stack disjointness. Keep this observation
+            # independent of image_read_disjoint, which also requires a trusted
+            # runtime admission/exclusion record and covered protected facts.
 
         def adjust_image_address(origin, delta):
             if origin is None:
@@ -433,11 +443,7 @@ class Audit:
             return value if 0 <= value < 1 << 64 else None
 
         def observe_stack_facts(state):
-            traced = {slot for slot, value in state.stack.items() if tainted(value)}
-            protected = traced | {
-                slot for mapping in (state.stack_aliases, state.stack_returns)
-                for slot, value in mapping.items() if tainted(value)
-            } | set(state.stack_images) | set(state.stack_signatures)
+            traced, protected = stack_fact_slots(state)
             for kind, slots in (("thread_pointer", traced), ("protected_facts", protected)):
                 if not slots:
                     continue
@@ -450,6 +456,23 @@ class Audit:
                     (low, high) if previous is None else
                     (min(low, previous[0]), max(high, previous[1]))
                 )
+
+        def image_read_disjoint(pc, state, start, width):
+            if (mrs_window is None or type(start) is not int or type(width) is not int or width <= 0
+                    or not hasattr(self.decode, "owned_image_data")
+                    or self.decode.owned_image_data(start, width) is not True):
+                return False
+            traced, protected = stack_fact_slots(state)
+            if not traced:
+                return False
+            low, high = min(protected) - anchor_sp, max(protected) + 8 - anchor_sp
+            if low < -mrs_window["before"] or high > mrs_window["after"]:
+                return False
+            # Conditional first-party contract: the recorded default accessor
+            # enforces this window, and live Image/stack reservations exclude
+            # one another. This waives reads only, never arbitrary writes/RMW.
+            image_stack_separation.add((pc, start, width, low, high))
+            return True
 
         def enqueue(pc, returns, state):
             observe_stack_facts(state)
@@ -483,6 +506,7 @@ class Audit:
                 "classification": "unknown",
                 "reasons": ["not-decoded-mrs"],
             }
+        mrs_window = self.decode.mrs_stack_window(address) if hasattr(self.decode, "mrs_stack_window") else None
         initial = State()
         caller_frame = None
         entry_frame = None
@@ -601,7 +625,8 @@ class Audit:
                 image = state.image(summary.memory_base)
                 # The helper's capability flag is also a memory read. An ELF
                 # ownership check does not prove separation from initial SP.
-                if any(tainted(value) for value in state.stack.values()):
+                if (any(tainted(value) for value in state.stack.values()) and
+                        not image_read_disjoint(pc, state, summary.flag_address, summary.flag_width)):
                     problem(pc, "atomic-flag-load-may-alias-thread-pointer-stack-spill")
                 if (
                     not tainted(base)
@@ -1013,7 +1038,8 @@ class Audit:
                     continue
                 observe_owned_image_access(pc, operands[1].value, instruction.width, True, False)
                 value = CLEAN
-                if any(tainted(saved) for saved in state.stack.values()):
+                if (any(tainted(saved) for saved in state.stack.values()) and
+                        not image_read_disjoint(pc, state, operands[1].value, instruction.width)):
                     if (self.track_opaque_loads and instruction.width in (1, 2, 4, 8)
                             and opaque_load_register(operands[0].value)):
                         value = OPAQUE_VALUE
@@ -1053,6 +1079,7 @@ class Audit:
                     else stack_base + memory.displacement
                 )
                 image_base = state.image(memory.base)
+                image_disjoint = False
                 if (
                     (load or store)
                     and bool(data)
@@ -1065,6 +1092,9 @@ class Audit:
                         pc, image_base + memory.displacement,
                         instruction.width * len(data), load, store,
                     )
+                    if load:
+                        image_disjoint = image_read_disjoint(
+                            pc, state, image_base + memory.displacement, instruction.width * len(data))
                 # CLEAN means "not traced to this MRS", not "cannot alias
                 # our stack". A preexisting unknown argument may point at a
                 # spilled TP even though exact materialized aliases are tracked.
@@ -1074,6 +1104,7 @@ class Audit:
                     and slot is None
                     and not tainted(base_value)
                     and not tainted(index_value)
+                    and not image_disjoint
                     and any(tainted(value) for value in state.stack.values())
                 )
                 opaque_source = False
@@ -1304,6 +1335,12 @@ class Audit:
             "steps": steps,
             "analysis_strategy": "bounded-exact-state-partitions",
             "state_partitions": len(states),
+            "mrs_window_record": mrs_window,
+            "conditional_image_stack_separation": [
+                {"pc": hex(pc), "analysis_image_address": hex(start), "read_width": width,
+                 "protected_min_offset": low, "protected_end_offset": high}
+                for pc, start, width, low, high in sorted(image_stack_separation)
+            ],
             "observed_stack_fact_window": {
                 "anchor": "first-mrs-sp",
                 "abstract_anchor_sp": anchor_sp,
@@ -1384,6 +1421,7 @@ class ElfBindingMetadata:
         self.proof_hash = None
         self.provider_bridge = None
         self.trusted_provider_contracts = False
+        self.mrs_window_record = None
         self.version_requirements = None
         self.version_definitions = None
         if provider_bridge is not None:
@@ -1818,6 +1856,7 @@ class ElfBindingMetadata:
         return value
 
     def load_proof(self, report, report_hash):
+        self.mrs_window_record = None
         if (
             not isinstance(report, dict)
             or type(report.get("schema")) is not int
@@ -1871,6 +1910,9 @@ class ElfBindingMetadata:
             return
         if own["elf_sha256"] != self.elf_sha256:
             raise ValueError("binding evidence ELF hash mismatch")
+        validated_window = None
+        if "mrs_stack_window" in own:
+            validated_window = guest_mrs_window.validate_mrs_window_record(self, own["mrs_stack_window"])
         bindings = own.get("bindings")
         if not isinstance(bindings, list) or len(bindings) > 200000:
             raise ValueError("binding evidence relocation bound")
@@ -1897,6 +1939,8 @@ class ElfBindingMetadata:
             if type(binding.get("nonreturning", False)) is not bool:
                 raise ValueError("invalid nonreturning contract field")
             self.proof[slot] = dict(binding)
+        if self.trusted_provider_contracts:
+            self.mrs_window_record = validated_window
 
     def needed_version(self, index):
         start, count = self.tags.get(0x6FFFFFFE, 0), self.tags.get(0x6FFFFFFF, 0)
@@ -2206,6 +2250,9 @@ class ElfDecoder:
             "return_auth_profile_sha256": hashlib.sha256(
                 Path(guest_return_auth_profile.__file__).read_bytes()
             ).hexdigest(),
+            "mrs_window_reader_sha256": hashlib.sha256(
+                Path(guest_mrs_window.__file__).read_bytes()
+            ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()
             ).hexdigest(),
@@ -2316,6 +2363,24 @@ class ElfDecoder:
             flags & 4 and not flags & 1 and start <= address and address + width <= end
             for start, end, _, _, flags in self.bindings.loads
         )
+
+    def mrs_stack_window(self, address):
+        metadata = self.bindings
+        record = metadata.mrs_window_record if metadata is not None else None
+        if (record is None or record.image_stack_exclusion_profile != 1
+                or type(address) is not int or address not in record.sites):
+            return None
+        return {
+            "profile": record.profile, "before": record.before, "after": record.after,
+            "image_stack_exclusion_profile": record.image_stack_exclusion_profile,
+            "source_site": hex(address), "elf_sha256": metadata.elf_sha256,
+            "bridge_sha256": metadata.provider_bridge["sha256"],
+            "binding_proof_sha256": metadata.proof_hash,
+            "trust": "explicit-first-party-bridge-contract",
+            "scope": "producer installation snapshot; explicitly trusted window and live Image/native-stack exclusion contracts",
+            "lifetime_scope": "normal-or-owned-synchronous-traces",
+            "excludes": ["arbitrary-host-cleanup-epochs", "general-Loader-shutdown-quiescence"],
+        }
 
     def caller_frame(self, caller):
         try:
@@ -2451,7 +2516,7 @@ def main():
     parser.add_argument(
         "--provider-bridge",
         type=Path,
-        help="explicit trusted first-party bridge image matching provider contracts in the binding report",
+        help="explicitly trust this first-party bridge implementation of provider, MRS-window and Image/native-stack exclusion contracts",
     )
     parser.add_argument(
         "--guest-library-dir", type=Path,

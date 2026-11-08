@@ -147,6 +147,17 @@ class NamespaceDecoder:
             return False
         return located[2].owned_image_data(located[1], width)
 
+    def mrs_stack_window(self, address):
+        located = self.locate(address)
+        if located is None:
+            return None
+        index, local, decoder = located
+        lookup = getattr(decoder, "mrs_stack_window", None)
+        record = lookup(local) if lookup else None
+        if record is None:
+            return None
+        return {**record, "analysis_site": hex(address), "module": self.names[index]}
+
     def adjust_image_address(self, origin, delta):
         located = self.locate(origin)
         if located is None or type(delta) is not int:

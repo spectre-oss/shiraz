@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/binding_evidence.hpp"
 #include "shiraz/darwin/guest/instruction.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -95,6 +96,7 @@ size_t write_binding_evidence(const Loader &loader, const std::filesystem::path 
     json.add(",\"mrs_stack_window\":{\"profile\":" + std::to_string(kMrsStackWindowProfile) +
              ",\"before\":" + std::to_string(kMrsStackBytesBefore) +
              ",\"after\":" + std::to_string(kMrsStackBytesAfter) +
+             ",\"image_stack_exclusion_profile\":" + std::to_string(kImageStackExclusionProfile) +
              ",\"verification\":\"mapped-code-default-accessor\",\"execution_claim\":false,\"sites\":[");
     bool site_comma = false;
     for (auto site : loader.verified_mrs_window_sites(module.info.name)) {
