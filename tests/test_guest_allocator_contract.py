@@ -221,7 +221,7 @@ class ManagedMallocAuditTests(unittest.TestCase):
                             for row in report["accesses"]))
         self.assertFalse(report["owned_image_accesses"])
 
-    def test_native_spill_reload_stays_unknown_even_after_a_new_store(self):
+    def test_native_spill_reload_requires_exact_post_call_store(self):
         for overwrite in (False, True):
             body = [instruction(0, "mrs", R("x19")), instruction(4, "bl", I(100))]
             if overwrite:
@@ -229,7 +229,8 @@ class ManagedMallocAuditTests(unittest.TestCase):
             body.extend([instruction(12 if overwrite else 8, "ldr", R("x8"), M("sp", -8)),
                          instruction(16 if overwrite else 12, "ret")])
             report = self.report(body)
-            self.assertIn("native-callee-stack-spill-reload-unproved", self.reasons(report))
+            self.assertEqual("native-callee-stack-spill-reload-unproved" in self.reasons(report), not overwrite)
+            self.assertEqual(report["classification"], "unknown")
         report = self.report([
             instruction(0, "mrs", R("x19")), instruction(4, "bl", I(100)),
             instruction(8, "mov", R("x19"), R("xzr")),
@@ -237,6 +238,102 @@ class ManagedMallocAuditTests(unittest.TestCase):
         ])
         self.assertIn("unmodelled-load-may-alias-thread-pointer-stack-spill", self.reasons(report))
         self.assertFalse(report["owned_image_accesses"])
+
+    def test_exact_post_native_store_coverage_has_no_lifetime_or_root_return_waiver(self):
+        report = self.report([
+            instruction(0, "mrs", R("x19")),
+            instruction(4, "str", R("x30"), M("sp", 16)),
+            instruction(8, "bl", I(100)),
+            instruction(12, "str", R("x19"), M("sp", -8)),
+            instruction(16, "ldr", R("x8"), M("sp", -8)),
+            instruction(20, "ldr", R("x9"), M("x8", 40)),
+            instruction(24, "ldr", R("x30"), M("sp", 16)),
+            instruction(28, "ret"),
+        ])
+        self.assertNotIn("native-callee-stack-spill-reload-unproved", self.reasons(report))
+        self.assertTrue(any(row["pc"] == "0x14" and row["kind"] == "guard" for row in report["accesses"]))
+        self.assertIn("native-callee-spills-return-needs-caller-context", self.reasons(report))
+        self.assertEqual(report["classification"], "unknown")
+
+    def test_post_native_slot_coverage_invalidates_on_overlap_and_checks_pair_elements(self):
+        cases = (
+            [instruction(12, "str", R("xzr"), M("sp", -16)),
+             instruction(16, "ldp", R("x8"), R("x9"), M("sp", -16))],
+            [instruction(12, "str", R("xzr"), M("sp", -16)),
+             audit.Instruction(16, "str", (R("wzr"), M("sp", -12)), width=4),
+             instruction(20, "ldr", R("x8"), M("sp", -16))],
+            [instruction(12, "str", R("xzr"), M("sp", -16)),
+             audit.Instruction(16, "str", (R("q0"), M("sp", -24)), width=16),
+             instruction(20, "ldr", R("x8"), M("sp", -16))],
+            [instruction(12, "str", R("xzr"), M("sp", -16)),
+             instruction(16, "str", R("xzr"), M("x0")),
+             instruction(20, "ldr", R("x8"), M("sp", -16))],
+            [instruction(12, "str", R("xzr"), M("sp", -16)),
+             audit.Instruction(16, "ldr", (R("w8"), M("sp", -16)), width=4)],
+            [instruction(12, "str", R("xzr"), M("sp", -16)),
+             audit.Instruction(16, "mrs", (R("x20"),), tpidr_read=True),
+             instruction(20, "ldr", R("x8"), M("sp", -16))],
+        )
+        for body in cases:
+            with self.subTest(body=body):
+                result = self.report([instruction(0, "mrs", R("x19")),
+                                      instruction(4, "str", R("x30"), M("sp", 16)),
+                                      instruction(8, "bl", I(100)), *body,
+                                      instruction(body[-1].address + 4, "ret")])
+                self.assertIn("native-callee-stack-spill-reload-unproved", self.reasons(result))
+                self.assertEqual(result["classification"], "unknown")
+        result = self.report([
+            instruction(0, "mrs", R("x19")), instruction(4, "bl", I(100)),
+            instruction(8, "stp", R("xzr"), R("xzr"), M("sp", -16)),
+            instruction(12, "ldp", R("x8"), R("x9"), M("sp", -16)), instruction(16, "ret"),
+        ])
+        self.assertNotIn("native-callee-stack-spill-reload-unproved", self.reasons(result))
+
+    def test_post_native_coverage_is_copied_and_part_of_state_identity(self):
+        original = audit.State(native_stack_rewritten={-16})
+        copied = original.copy()
+        self.assertEqual(copied.fingerprint(), original.fingerprint())
+        copied.native_stack_rewritten.add(-8)
+        self.assertNotEqual(copied.fingerprint(), original.fingerprint())
+        self.assertEqual(original.native_stack_rewritten, {-16})
+
+    def test_another_native_call_revokes_post_call_coverage(self):
+        # Discard the selected MRS result so scratch SIMD facts do not prevent
+        # reaching the second native call before testing its coverage reset.
+        result = self.report([
+            instruction(0, "mrs", R("xzr")), instruction(4, "bl", I(100)),
+            instruction(8, "str", R("xzr"), M("sp", -16)),
+            instruction(12, "bl", I(100)),
+            instruction(16, "ldr", R("x8"), M("sp", -16)), instruction(20, "ret"),
+        ])
+        self.assertEqual(len(result["conditional_managed_malloc"]), 2)
+        self.assertIn("native-callee-stack-spill-reload-unproved", self.reasons(result))
+
+    def test_slot_limit_failure_cannot_establish_overwrite_coverage(self):
+        initial = audit.State(stack={8 * index: audit.CLEAN for index in range(audit.MAX_STACK_SLOTS)})
+        result = self.report([
+            instruction(0, "mrs", R("x19")), instruction(4, "bl", I(100)),
+            instruction(8, "str", R("xzr"), M("sp", -16)),
+            instruction(12, "ldr", R("x8"), M("sp", -16)), instruction(16, "ret"),
+        ], initial=initial)
+        self.assertIn("stack-slot-limit", self.reasons(result))
+        self.assertIn("native-callee-stack-spill-reload-unproved", self.reasons(result))
+
+    def test_atomic_call_revokes_post_call_coverage(self):
+        from guest_callee_effects import Atomic32Effects, AtomicPath
+
+        effect = Atomic32Effects(64, 80, "a" * 64, 0x9000,
+                                 (AtomicPath("lse", 84, ("x0", "x16")),))
+        result = self.report([
+            instruction(0, "mrs", R("x19")), instruction(4, "bl", I(100)),
+            instruction(8, "str", R("xzr"), M("sp", -16)),
+            instruction(12, "mov", R("x0"), R("xzr")),
+            instruction(16, "mov", R("x1"), R("xzr")),
+            instruction(20, "bl", I(64)),
+            instruction(24, "ldr", R("x8"), M("sp", -16)), instruction(28, "ret"),
+            instruction(64, "bti"), instruction(84, "ret"),
+        ], atomic=effect)
+        self.assertIn("native-callee-stack-spill-reload-unproved", self.reasons(result))
 
     def test_preserved_lr_copy_must_be_restored_after_malloc(self):
         for restore in (False, True):

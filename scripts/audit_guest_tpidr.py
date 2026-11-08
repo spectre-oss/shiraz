@@ -169,10 +169,11 @@ class State:
     return_signatures: dict = field(default_factory=dict)
     stack_signatures: dict = field(default_factory=dict)
     # A native callee can save input registers in its frames below incoming SP.
-    # Never silently treat later reads there as clean, even after a new store
-    # (precise post-call overwrite coverage is not modeled yet).
+    # Exact modeled 8-byte guest stores can replace individual spill slots;
+    # this does not bound the other native spill bytes or clear latent risk.
     native_stack_clobber_below: int | None = None
     native_memory_may_contain_tp: bool = False
+    native_stack_rewritten: set = field(default_factory=set)
 
     def copy(self):
         return State(
@@ -190,6 +191,7 @@ class State:
             dict(self.stack_signatures),
             self.native_stack_clobber_below,
             self.native_memory_may_contain_tp,
+            set(self.native_stack_rewritten),
         )
 
     def fingerprint(self):
@@ -201,6 +203,7 @@ class State:
             self.fp,
             self.native_stack_clobber_below,
             self.native_memory_may_contain_tp,
+            tuple(sorted(self.native_stack_rewritten)),
             *(
                 tuple(sorted((key, value) for key, value in mapping.items()
                              if not defaults or value != CLEAN))
@@ -576,6 +579,8 @@ class Audit:
                 problem(pc, "undecodable-or-outside-executable-bytes")
                 continue
             if pc == address or instruction.tpidr_read:
+                # The runtime MRS replacement uses native stack scratch.
+                state.native_stack_rewritten.clear()
                 destination = instruction.operands[0].value
                 state.set(destination, frozenset({0}))
                 state.set_alias(destination, CLEAN)
@@ -591,6 +596,8 @@ class Audit:
             if summary is None and instruction.mnemonic == "bti" and hasattr(self.decode, "cas64"):
                 summary = self.decode.cas64(pc)
             if summary is not None:
+                # Atomic helper writes are not exact ordinary stack stores.
+                state.native_stack_rewritten.clear()
                 compare = getattr(summary, "memory_compare", None)
                 operation = "atomic-cas64" if compare else "atomic-add32"
                 callee_effects[pc] = {
@@ -739,6 +746,7 @@ class Audit:
                             continue
                         return_pc = returns[-1][0]
                         post = state.copy()
+                        post.native_stack_rewritten.clear()
                         post.native_stack_clobber_below = max(
                             state.sp, state.native_stack_clobber_below
                             if state.native_stack_clobber_below is not None else state.sp)
@@ -1188,7 +1196,10 @@ class Audit:
                     and (state.native_memory_may_contain_tp or any(tainted(value) for value in state.stack.values()))
                 )
                 if (load and slot is not None and state.native_stack_clobber_below is not None
-                        and slot < state.native_stack_clobber_below):
+                        and slot < state.native_stack_clobber_below
+                        and not (instruction.width == 8 and data and all(
+                            slot + index * 8 in state.native_stack_rewritten
+                            for index in range(len(data))))):
                     problem(pc, "native-callee-stack-spill-reload-unproved")
                 opaque_source = False
                 if possible_spill_load:
@@ -1229,6 +1240,7 @@ class Audit:
                 if not load and not store:
                     problem(pc, "unmodelled-memory-operation")
                 if store and slot is None:
+                    state.native_stack_rewritten.clear()
                     # Even a clean payload can partially overwrite a TP spill.
                     # Its old affine value is no longer an exact reload fact.
                     # Keep the failure sticky rather than silently laundering
@@ -1248,6 +1260,9 @@ class Audit:
                 for index, item in enumerate(data):
                     key = None if slot is None else slot + index * instruction.width
                     if store and key is not None:
+                        state.native_stack_rewritten.difference_update(
+                            saved for saved in tuple(state.native_stack_rewritten)
+                            if key < saved + 8 and saved < key + instruction.width)
                         for saved in state.stack_returns:
                             if key < saved + 8 and saved < key + instruction.width:
                                 state.stack_returns[saved] = CLEAN
@@ -1336,6 +1351,8 @@ class Audit:
                             state.stack[key] = value
                             state.stack_aliases[key] = state.alias(item.value)
                             state.stack_returns[key] = state.control(item.value)
+                            if state.native_stack_clobber_below is not None:
+                                state.native_stack_rewritten.add(key)
                             signature = state.signature(item.value)
                             if signature is not None:
                                 state.stack_signatures[key] = signature
