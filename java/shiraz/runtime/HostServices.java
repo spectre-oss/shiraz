@@ -14,13 +14,15 @@ public final class HostServices implements AutoCloseable {
  /** Bind explicit local or supported separate-process services; external APKs have no service registry. */
  public synchronized boolean bindUnavailable(Intent intent,ServiceConnection connection,int flags){
   live();if(intent==null||connection==null)throw new IllegalArgumentException("Service intent and connection are required");
-  if((flags&~(Context.BIND_AUTO_CREATE|Context.BIND_WAIVE_PRIORITY|Context.BIND_IMPORTANT))!=0)throw new UnsupportedOperationException("Service binding flags");
   ComponentName name=intent.getComponent();String packageName=intent.getPackage();
   if(name==null&&packageName==null)throw new IllegalArgumentException("Service binding requires a component or package");
   if(name==null&&pkg.equals(packageName))throw new UnsupportedOperationException("Local service filter resolution is not implemented");
   if(name!=null&&pkg.equals(name.getPackageName())&&(packageName==null||pkg.equals(packageName))){
    Integer index=declarations.get(name.getClassName());
    if(index!=null&&flag("service."+index+".enabled",true)){
+    // Flags cannot affect scheduling when the requested service is absent.
+    if((flags&~(Context.BIND_AUTO_CREATE|Context.BIND_WAIVE_PRIORITY|Context.BIND_IMPORTANT))!=0)throw new UnsupportedOperationException("Service binding flags");
+
     if(flag("service."+index+".isolated",false))throw new UnsupportedOperationException("Isolated service permissions are not implemented");
     ComponentName target=new ComponentName(pkg,name.getClassName());return bind(target,intent,connection);
    }

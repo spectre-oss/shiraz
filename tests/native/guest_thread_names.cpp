@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <pthread.h>
+#include <signal.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <cassert>
@@ -12,6 +13,7 @@ void* ShirazGuestPthread();
 void* ShirazRetainCreatedGuestThread();
 pthread_t ShirazCompleteGuestThreadCreation(void*,bool);
 int ShirazGuestJoinThread(pthread_t,void**);
+int ShirazGuestKillThread(pthread_t,int);
 void ShirazRefreshGuestThreadIdentity();
 int ShirazGuestSetThreadName(pthread_t,const char*);
 int ShirazGuestGetThreadName(pthread_t,char*,size_t);
@@ -30,8 +32,14 @@ static void* worker(void* p){
  char byte; assert(read(w->proceed,&byte,1)==1);
  return reinterpret_cast<void*>(w->guest);
 }
+static volatile sig_atomic_t self_signal_seen=0;
+static void self_signal(int){self_signal_seen=ShirazGuestKillThread(pthread_self(),0)==0?1:-1;}
 int main(){
  auto self=reinterpret_cast<pthread_t>(ShirazGuestPthread());
+ struct sigaction action{},previous{};action.sa_handler=self_signal;sigemptyset(&action.sa_mask);
+ assert(sigaction(SIGUSR1,&action,&previous)==0);
+ assert(ShirazGuestKillThread(self,SIGUSR1)==0&&self_signal_seen==1);
+ assert(sigaction(SIGUSR1,&previous,nullptr)==0);
  int ready[2],proceed[2]; assert(pipe(ready)==0&&pipe(proceed)==0);
  Work work{ready[1],proceed[0],0,nullptr}; pthread_t thread;
  assert(pthread_create(&thread,nullptr,worker,&work)==0);
@@ -42,6 +50,11 @@ int main(){
  assert(ShirazGuestGetThreadName(thread,name,sizeof name)==0&&!strcmp(name,"parent-name"));
  assert(ShirazGuestSetThreadName(self,"name-too-long-for-linux")==ERANGE);
  assert(ShirazGuestGetThreadName(self,name,1)==ERANGE);
+ assert(ShirazGuestKillThread(work.guest,0)==0);
+ assert(ShirazGuestKillThread(self,0)==0);
+ assert(ShirazGuestKillThread(0,0)==ESRCH);
+ assert(ShirazGuestKillThread(self,32)==EINVAL);
+ assert(ShirazGuestKillThread(self,-1)==EINVAL);
  int policy=-1;int32_t priority=-1,normal=0;
  assert(ShirazGuestGetSchedParam(work.guest,&policy,&priority)==0&&policy==SCHED_OTHER&&priority==0);
  assert(ShirazGuestSetSchedParam(thread,SCHED_OTHER,&normal)==0);
@@ -65,6 +78,7 @@ int main(){
  assert(write(proceed[1],"x",1)==1); void* result=nullptr;
  assert(ShirazGuestJoinThread(work.guest,&result)==0 && result==reinterpret_cast<void*>(work.guest));
  assert(ShirazGuestGetThreadName(work.guest,name,sizeof name)==ESRCH);
+ assert(ShirazGuestKillThread(work.guest,0)==ESRCH);
  assert(ShirazGuestGetThreadName(0,name,sizeof name)==ESRCH);
  assert(ShirazGuestGetSchedParam(work.guest,&policy,&priority)==ESRCH);
  assert(ShirazGuestSetSchedPriority(work.guest,0)==ESRCH);

@@ -51,6 +51,12 @@ int main() {
     setenv("SHIRAZ_INPUT_SCRIPT",replayPath,1);std::vector<shiraz::PointerEvent> replayed;int replayResizes=0;
     shiraz::present(shiraz::Surface(2,2,0xff000000),"replay",7,{},[&](const shiraz::PointerEvent& e){replayed.push_back(e);},{},{},[&](shiraz::Surface& surface,int w,int h){surface=shiraz::Surface(w,h,0xff000000);replayResizes++;});
     assert(replayed.size()==4&&replayed[0].action==shiraz::PointerAction::Down&&replayed[1].action==shiraz::PointerAction::Up&&replayed[2].point.x==3&&replayed[2].point.y==7&&replayResizes==1);
+    setenv("SHIRAZ_MOUSE_AS_TOUCH","1",1);
+    assert(shiraz::presentation_has_touchscreen());
+    replayed.clear();
+    shiraz::present(shiraz::Surface(2,2,0xff000000),"virtual touch",7,{},[&](const shiraz::PointerEvent& e){replayed.push_back(e);},{},{},[&](shiraz::Surface& surface,int w,int h){surface=shiraz::Surface(w,h,0xff000000);});
+    assert(replayed.size()==4&&replayed.front().source==shiraz::touch_source&&replayed.back().source==shiraz::touch_source&&replayed.back().point.x==3&&replayed.back().point.y==7);
+    unsetenv("SHIRAZ_MOUSE_AS_TOUCH");
     for(const char* bad:{"1 down 1 1\n0 up 1 1\n","0 unknown 0 0\n","0 resize 8192 8192\n","0 down 1 1 trailing\n"}){
         {std::ofstream file(replayPath);file<<bad;}bool failed=false;try{shiraz::present(shiraz::Surface(2,2,0),"bad replay",1);}catch(const std::invalid_argument&){failed=true;}assert(failed);
     }

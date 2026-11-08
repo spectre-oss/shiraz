@@ -60,3 +60,36 @@ These are bounded gameplay observations, not complete app certification. Long
 games, reaching 2048, Play services features and the current Play Store build
 remain unverified. The separate starsep Unity variant was removed from the web
 catalog at the user's request; its older experiment report remains historical.
+
+## Subway Surfers 3.71.0 — ARM64 split, partial offline startup
+
+The supplied `com.kiloo.subwaysurf` APKM (version code 97327) contains a base APK
+and ARM64/ARM32 native splits. The unchanged base SHA-256 is
+`b1a6f7a677d5e9687bb271c0efb32ac6e627d181ff854a5ec010fbb482c2c30b`;
+the ARM64 split is
+`f7ad8a95181332f5b116de628a4991e67603f407f587fce405e5a33f6bba15a2`.
+The x86_64 development runtime loaded its 19 ARM64 libraries through the optional
+pinned Digitalis bridge. This is not an AppImage compatibility result.
+
+Startup exposed incomplete/stale proxy deployment, current-thread attribute and
+signal/exit gaps, a missing NDK media bridge, missing debugger/orientation APIs,
+package-query flags, and local Messenger parcel support. The corresponding
+changes were exercised with the real APK and dedicated regression fixtures.
+The media bridge forwards the existing host subset and explicitly rejects
+unsupported calls; it does not provide every Android codec API.
+
+In an isolated Linux network namespace, the game rendered its loading screen,
+age confirmation, optional ad-personalization choice, title screen and 3D run.
+A synthetic local adult test profile was used and ad personalization declined.
+Normal input actions exercised lane movement, a roll animation, and pause/resume.
+Resizing from 390×720 to 720×390 changed the rendered camera viewport. The initial
+profile choices persisted across restart. No APK patch, Google account, purchase,
+or online session was used. Both input APKs remain unchanged.
+
+**Remaining blocker:** forward progress stalls around score 43–44 at the first
+barrier. Full gameplay, jump progression, sound, rewards, and online features are
+not verified. The stall also occurred using Digitalis's lite translation tier.
+A separate read-only timing diagnostic reported time scale 1, approximately
+0.016-second frame deltas and focused state; this does not identify the stall's
+cause. Optional virtual mouse-to-touch input did not resolve it. Do not interpret
+the rendered game screen as full compatibility.

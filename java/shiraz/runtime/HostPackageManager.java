@@ -98,7 +98,7 @@ public final class HostPackageManager extends PackageManager {
     @Override public java.util.List<android.content.pm.ResolveInfo> queryIntentActivities(android.content.Intent intent,int flags){
         if(intent==null)throw new NullPointerException("intent");
         int selectorDepth=0;while(intent.getComponent()==null&&intent.getSelector()!=null){if(++selectorDepth>32)throw new IllegalArgumentException("Intent selector depth");intent=intent.getSelector();}
-        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_DEFAULT_ONLY|GET_RESOLVED_FILTER|MATCH_ALL|MATCH_SYSTEM_ONLY;
+        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_DEFAULT_ONLY|GET_RESOLVED_FILTER|MATCH_ALL|MATCH_SYSTEM_ONLY|MATCH_UNINSTALLED_PACKAGES;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Activity resolution flags: "+flags);
         java.util.ArrayList<android.content.pm.ResolveInfo> result=new java.util.ArrayList<android.content.pm.ResolveInfo>();
         // Packaged APKs and the in-app camera adapter are not Android system packages.
@@ -192,7 +192,7 @@ public final class HostPackageManager extends PackageManager {
     @Override public android.content.pm.ActivityInfo getReceiverInfo(android.content.ComponentName component,int flags) throws NameNotFoundException {
         if(component==null)throw new NullPointerException("component");
         if(!name.equals(component.getPackageName()))throw new NameNotFoundException(component.flattenToString());
-        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE;
+        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_UNINSTALLED_PACKAGES;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Receiver query flags are not implemented: "+flags);
         int count=integer("receiver.count",0);
         if(count<0||count>256)throw new IllegalArgumentException("Receiver declaration count");
@@ -224,7 +224,7 @@ public final class HostPackageManager extends PackageManager {
     @Override public android.content.pm.ActivityInfo getActivityInfo(android.content.ComponentName component,int flags) throws NameNotFoundException {
         if(component==null)throw new NullPointerException("component");
         if(!name.equals(component.getPackageName()))throw new NameNotFoundException(component.flattenToString());
-        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE;
+        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_UNINSTALLED_PACKAGES;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Activity query flags are not implemented: "+flags);
         int count=integer("activity.count",0);
         if(count<0||count>256)throw new IllegalArgumentException("Activity declaration count");
@@ -255,7 +255,7 @@ public final class HostPackageManager extends PackageManager {
     }
     @Override public android.content.pm.ServiceInfo getServiceInfo(android.content.ComponentName component,int flags) throws NameNotFoundException {
         if(component==null)throw new NullPointerException("component");if(!name.equals(component.getPackageName()))throw new NameNotFoundException(component.flattenToString());
-        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE;
+        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_UNINSTALLED_PACKAGES;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Service query flags are not implemented: "+flags);
         int count=integer("service.count",0);if(count<0||count>256)throw new IllegalArgumentException("Service declaration count");
         for(int i=0;i<count;i++) {
@@ -303,7 +303,7 @@ public final class HostPackageManager extends PackageManager {
     }
     @Override public android.content.pm.ProviderInfo resolveContentProvider(String authority,int flags){
         if(authority==null||authority.isEmpty())return null;
-        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE;
+        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_UNINSTALLED_PACKAGES;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Provider query flags are not implemented: "+flags);
         int count=integer("provider.count",0);if(count<0||count>256)throw new IllegalArgumentException("Provider declaration count");
         for(int i=0;i<count;i++){

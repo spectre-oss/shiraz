@@ -100,7 +100,7 @@ def framework(descriptor):
     return descriptor.lstrip('[').startswith(FRAMEWORK)
 
 
-def inspect_apk(path):
+def inspect_apk(path, *, require_dex=True):
     path = Path(path)
     sha = hashlib.sha256()
     with path.open('rb') as stream:
@@ -157,7 +157,7 @@ def inspect_apk(path):
                 except ElfError as exc:
                     raise FormatError(str(exc)) from exc
                 native.append({'name': name, 'abi': abi, 'machine': machine, 'bytes': entry.file_size, **elf})
-    if not dex_files:
+    if require_dex and not dex_files:
         raise FormatError('APK has no supported classes.dex files')
     abis = sorted({item['abi'] for item in native})
     return {

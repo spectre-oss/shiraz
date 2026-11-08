@@ -92,12 +92,14 @@ std::pair<long long,long long> timestamps(const fs::path& data,const std::string
 }
 
 #include "desktop_install.h"
+#include "offline.h"
 
 void help(){std::cout<<"Usage: AppRun [--width N] [--height N] [--frames N]\n"
  "              [--snapshot /absolute/new.ppm] [--data-dir /absolute/directory]\n"
- "              [--version] [--diagnose] [--help]\n"
+ "              [--no-internet] [--version] [--diagnose] [--help]\n"
  "       AppRun install  (extract runtime and register a per-user desktop launcher)\n"
  "Runs this packaged APK using standalone ART and Shiraz.\n"
+ "--no-internet blocks direct network sockets; local Unix IPC remains available.\n"
  "Default display: 720x1280. SHIRAZ_ART_MODE=jit (default) or interpreter.\n"
  "SHIRAZ_ART_HEAP_MB: Java heap cap in MiB, 128..512 (default 512).\n"
  "Data persists under XDG_DATA_HOME/shiraz-apps/<package>; logs are under\n"
@@ -112,9 +114,9 @@ int main(int argc,char** argv) {
     fs::path executable=fs::canonical(argv[0]);if(executable.filename()!="shiraz-app"||executable.parent_path().filename()!="bin"||executable.parent_path().parent_path().filename()!="usr")fail("Unexpected packaged executable layout");
     fs::path root=executable.parent_path().parent_path().parent_path(),usr=root/"usr",share=usr/"share/shiraz",lib=usr/"lib",art=usr/"art";
     if(root.string().find(':')!=std::string::npos)fail("AppDir path cannot contain a colon (Java classpath separator)");
-    auto facts=config(share/"launch.properties");int width=720,height=1280,frames=-1;std::string snapshot="-",dataOption;bool diagnose=false;
+    auto facts=config(share/"launch.properties");int width=720,height=1280,frames=-1;std::string snapshot="-",dataOption;bool diagnose=false,noInternet=false;
     if(argc==2&&std::string(argv[1])=="install"){installDesktop(root,facts);return 0;}
-    for(int i=1;i<argc;i++){std::string option=argv[i];if(option=="--help"){help();return 0;}if(option=="--version"){std::cout<<"Shiraz "<<facts["version"]<<" ("<<facts["package"]<<")\n";return 0;}if(option=="--diagnose"){diagnose=true;continue;}
+    for(int i=1;i<argc;i++){std::string option=argv[i];if(option=="--help"){help();return 0;}if(option=="--version"){std::cout<<"Shiraz "<<facts["version"]<<" ("<<facts["package"]<<")\n";return 0;}if(option=="--no-internet"){noInternet=true;continue;}if(option=="--diagnose"){diagnose=true;continue;}
         if(option!="--width"&&option!="--height"&&option!="--frames"&&option!="--snapshot"&&option!="--data-dir")fail("Unknown option: "+option);
         if(++i==argc)fail("Missing value for "+option);
         std::string value=argv[i];
@@ -147,7 +149,8 @@ int main(int argc,char** argv) {
     fs::path cache=xdg("XDG_CACHE_HOME",".cache")/"shiraz-apps"/facts["package"];
     data=fs::weakly_canonical(data);cache=fs::weakly_canonical(cache);if(within(data,root)||within(cache,root))fail("Writable directories must be outside AppDir");
     if(snapshot!="-"){fs::path requested=absolute(snapshot,"snapshot");if(requested.extension()!=".ppm"||within(requested,root)||fs::exists(requested)||fs::is_symlink(fs::symlink_status(requested)))fail("Snapshot must be a new .ppm file outside AppDir");if(!fs::is_directory(requested.parent_path()))fail("Snapshot parent directory does not exist");snapshot=requested.string();}
-    if(diagnose){std::cout<<"AppDir: "<<root<<"\nPackage: "<<facts["package"]<<"\nRuntime: "<<facts["version"]<<"\nART mode: "<<mode<<"\nPackaged AOT: "<<(packagedAot?"yes":"no")<<"\nJava heap cap MiB: "<<heapMiB<<"\nData: "<<data<<"\nCache: "<<cache<<"\nPayload layout checks passed; this does not test display, audio, TLS or APK compatibility.\n";return 0;}
+    if(diagnose){std::cout<<"AppDir: "<<root<<"\nPackage: "<<facts["package"]<<"\nRuntime: "<<facts["version"]<<"\nART mode: "<<mode<<"\nPackaged AOT: "<<(packagedAot?"yes":"no")<<"\nNetwork policy: "<<(noInternet?"offline (enforced at launch)":"unrestricted")<<"\nJava heap cap MiB: "<<heapMiB<<"\nData: "<<data<<"\nCache: "<<cache<<"\nPayload layout checks passed; this does not test display, audio, TLS or APK compatibility.\n";return 0;}
+    if(noInternet)restrictInternet();
     directory(data);directory(cache);
     int lock=open((data/".session.lock").c_str(),O_RDWR|O_CREAT|O_NOFOLLOW,0600);if(lock<0)fail(error("open session lock"));if(flock(lock,LOCK_EX|LOCK_NB))fail("This data directory already has a running session"); // intentionally inherited by ART
     auto times=timestamps(data,facts["sha256"]);

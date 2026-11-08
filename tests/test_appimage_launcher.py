@@ -4,6 +4,7 @@ import fcntl
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import tempfile
 import unittest
@@ -41,6 +42,57 @@ class AppImageLauncherTests(unittest.TestCase):
         self.launch.write_text('package=org.shiraz.test\napplication=android.app.Application\nactivity=org.shiraz.test.Main\nsha256='+digest+'\nversion=1.2.3\n')
     def run_launcher(self,*args):
         return subprocess.run([str(self.exe),'--data-dir',str(self.data),*args],env=self.env,capture_output=True,text=True,timeout=10)
+    def test_offline_blocks_native_network_and_children_but_keeps_unix_ipc(self):
+        compiler=shutil.which('cc')
+        if not compiler:self.skipTest('C compiler unavailable')
+        source=self.root/'network-probe.c'
+        source.write_text(r"""
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdlib.h>
+int main(void) {
+    int offline=getenv("EXPECT_OFFLINE")!=0;
+    const char* inherited=getenv("INHERITED_SOCKET");
+    if(inherited) {
+        int type;socklen_t size=sizeof(type);
+        if(getsockopt(atoi(inherited),SOL_SOCKET,SO_TYPE,&type,&size)!=-1 ||
+           (errno!=EBADF && errno!=ENOTSOCK))return 19;
+    }
+    int families[]={AF_INET,AF_INET6};
+    for(int i=0;i<2;i++) {
+        int fd=socket(families[i],SOCK_STREAM,0);
+        if(offline ? (fd!=-1||errno!=ENETUNREACH) : fd<0)return 10+i;
+        if(fd>=0)close(fd);
+    }
+    int pair[2];if(socketpair(AF_UNIX,SOCK_STREAM,0,pair))return 12;
+    if(write(pair[0],"x",1)!=1)return 13;
+    char value;if(read(pair[1],&value,1)!=1||value!='x')return 14;
+    if(offline) {
+        if(syscall(__NR_io_uring_setup,0,0)!=-1||errno!=EPERM)return 15;
+        pid_t child=fork();if(child<0)return 16;
+        if(!child){int fd=socket(AF_INET,SOCK_DGRAM,0);_exit(fd==-1&&errno==ENETUNREACH?0:17);}
+        int status;if(waitpid(child,&status,0)<0||!WIFEXITED(status)||WEXITSTATUS(status))return 18;
+    }
+    return 0;
+}
+""")
+        subprocess.run([compiler,str(source),'-o',str(self.app/'usr/art/bin/dalvikvm')],check=True)
+        result=self.run_launcher('--frames','1')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.env['EXPECT_OFFLINE']='1'
+        result=self.run_launcher('--no-internet','--frames','1')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('offline',self.run_launcher('--no-internet','--diagnose').stdout)
+        with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as inherited:
+            self.env['INHERITED_SOCKET']=str(inherited.fileno())
+            result=subprocess.run([str(self.exe),'--data-dir',str(self.data),
+                '--no-internet','--frames','1'],env=self.env,pass_fds=(inherited.fileno(),),
+                capture_output=True,text=True,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)
+
     def test_version_has_no_data_side_effects(self):
         result=self.run_launcher('--version');self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('1.2.3',result.stdout);self.assertFalse(self.data.exists());self.assertFalse(self.cache.exists())

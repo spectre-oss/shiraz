@@ -29,6 +29,7 @@ public abstract class PackageManager {
     public static final int GET_SIGNING_CERTIFICATES = 0x08000000;
     public static final int GET_SIGNATURES = 0x40, GET_META_DATA = 0x80, GET_PERMISSIONS = 0x1000;
     /** Sentinel selecting the existing user-state matching policy (API 29). */
+    public static final int MATCH_UNINSTALLED_PACKAGES=0x2000;
     public static final int MATCH_DIRECT_BOOT_AUTO=0x10000000;
     public static final int GET_DISABLED_COMPONENTS=0x200,MATCH_DISABLED_COMPONENTS=0x200,MATCH_DIRECT_BOOT_UNAWARE=0x40000,MATCH_DIRECT_BOOT_AWARE=0x80000;
     public ActivityInfo getReceiverInfo(android.content.ComponentName component,int flags) throws NameNotFoundException {throw new NameNotFoundException(String.valueOf(component));}

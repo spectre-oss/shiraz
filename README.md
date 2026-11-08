@@ -127,3 +127,35 @@ affiliation or endorsement.
 </p>
 
 <p dir="rtl" lang="fa"><a href="https://ganjoor.net/saadi/mavaez/ghasides/sh28">سعدی — قصیدهٔ شمارهٔ ۲۸</a></p>
+
+To block direct internet access for a packaged app, run:
+
+```sh
+./YourApp.AppImage --no-internet
+```
+
+This Linux seccomp policy blocks non-Unix socket creation in Java/native code and
+child processes, closes inherited sockets, and disables io_uring. It fails rather
+than launching unrestricted if the policy cannot be installed. Local Unix IPC
+remains available for display/audio; this is not a complete sandbox and does not
+prevent network access through an external local service. Apps requiring servers
+may not function offline. `--diagnose` reports the selected policy without launching.
+
+The development CLI accepts a matching native-only ABI split without modifying
+its APKs: `python3 -m shiraz run base.apk --native-split split_config.arm64_v8a.apk`
+(with `PYTHONPATH=src`). Package/version mismatches and code/resource splits are
+rejected. This is not general APKM installation support.
+
+Experimental ARM64 developer runs on x86_64 select the built bridge through
+`SHIRAZ_DIGITALIS_LIBRARY=/absolute/path/libberberis_arm64.so`. Build its core with
+`make runtime-digitalis` and its platform proxies with `make digitalis-platform-proxies`.
+The pinned Digitalis guest-support libraries must be visible under `/system`
+inside the test process's private namespace; do not install them over the host.
+`make digitalis-platform-smoke DIGITALIS_GUEST_SYSTEM=/path/to/guest/system`
+checks translated math, thread attributes/signals/exit, and the existing NDK media
+subset. Unsupported media APIs fail explicitly. Digitalis is not yet wired into
+the AppImage packager.
+
+Set `SHIRAZ_MOUSE_AS_TOUCH=1` to expose a virtual single-touch device and translate
+left-button mouse drags into Android finger gestures. Physical touch input and
+host mouse capture remain available; unset it for normal mouse events.

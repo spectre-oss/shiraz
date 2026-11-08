@@ -38,6 +38,7 @@ public final class ServiceSmoke {
  private static void absent(Context context){
   final int[] callbacks={0};ServiceConnection connection=new ServiceConnection(){public void onServiceConnected(ComponentName name,IBinder binder){callbacks[0]++;}public void onServiceDisconnected(ComponentName name){callbacks[0]++;}};
   Intent external=new Intent().setComponent(new ComponentName("missing.provider","missing.provider.Service"));
+  check(!context.bindService(external,connection,129),"Absent external service with adjustment flags");due();check(callbacks[0]==0,"No callbacks for absent flagged service");context.unbindService(connection);
   check(!context.bindService(external,connection,Context.BIND_AUTO_CREATE),"Absent external service must not report a connection");due();check(callbacks[0]==0,"Absent service must not fabricate callbacks");context.unbindService(connection);
   try{context.unbindService(connection);throw new AssertionError("Unknown connection accepted");}catch(IllegalArgumentException expected){}
   check(!context.bindService(new Intent().setComponent(new ComponentName("org.shiraz.fixture","org.shiraz.fixture.Absent")),connection,0),"Absent local service");context.unbindService(connection);
@@ -54,6 +55,7 @@ public final class ServiceSmoke {
   Intent explicit=new Intent().setComponent(new ComponentName("test.pkg","test.pkg.Main"));
   Intent selectedActivity=new Intent(Intent.ACTION_VIEW);selectedActivity.setSelector(explicit);
   check(manager.queryIntentActivities(selectedActivity,0).size()==1,"Selector resolves declared activity");
+  check(manager.queryIntentActivities(explicit,android.content.pm.PackageManager.MATCH_UNINSTALLED_PACKAGES).size()==1,"Including uninstalled packages retains installed own activity");
   check(manager.queryIntentActivities(explicit,android.content.pm.PackageManager.MATCH_ALL).size()==1,"MATCH_ALL includes declared own activity");
   check(manager.queryIntentActivities(explicit,android.content.pm.PackageManager.MATCH_SYSTEM_ONLY|android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).isEmpty(),"Own APK is not a system package");
   check(manager.resolveActivity(new Intent("android.provider.action.PICK_IMAGES"),android.content.pm.PackageManager.MATCH_SYSTEM_ONLY|android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)==null,"Absent system picker does not fabricate activity");

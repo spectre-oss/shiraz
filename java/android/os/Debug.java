@@ -8,6 +8,8 @@ import java.util.Map;
 public final class Debug {
  static {System.loadLibrary("shiraz-host");}
  private Debug(){}
+ /** The standalone launcher does not offer a wait-for-debugger startup mode. */
+ public static boolean waitingForDebugger(){return false;}
  public static boolean isDebuggerConnected(){return dalvik.system.VMDebug.isDebuggerConnected();}
  public static native long getNativeHeapAllocatedSize();
  public static native long getNativeHeapSize();

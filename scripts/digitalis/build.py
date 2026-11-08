@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Build the experimental optional Digitalis bridge, never execute an APK."""
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -25,6 +26,11 @@ def main():
     scripts = pathlib.Path(__file__).parent
     subprocess.run([sys.executable, str(scripts / 'prepare.py')], check=True)
     overlays = [
+        ('guest_os_primitives/include', 'berberis/guest_os_primitives/guest_thread.h',
+         '  [[nodiscard]] GuestAddr GetStackTop() const { return stack_top_; }',
+         '  [[nodiscard]] GuestAddr GetStackTop() const { return stack_top_; }\n'
+         '  [[nodiscard]] size_t GetStackSize() const { return stack_size_; }\n'
+         '  [[nodiscard]] size_t GetGuardSize() const { return guard_size_; }'),
         ('intrinsics/all_to_x86_32_or_x86_64/include', 'berberis/intrinsics/all_to_x86_32_or_x86_64/verifier_assembler_x86_32_or_x86_64.h',
          '    constexpr Register(std::optional<Register> reg)',
          '    template <class T> requires std::is_same_v<std::remove_cvref_t<T>, std::optional<Register>>\n    constexpr Register(T&& reg)'),
@@ -41,6 +47,14 @@ def main():
         output.write_text(source.replace(before, after))
     subprocess.run([sys.executable, str(scripts / 'compile_generator.py')], check=True)
     subprocess.run([sys.executable, str(scripts / 'compile.py')], check=True)
+    # Keep the exported bridge and both required proxies from the same build.
+    # Older exports omitted libm and could fail only when an app first called it.
+    deployment = WORK / 'deploy'
+    deployment.mkdir(exist_ok=True)
+    for name in ('libberberis_arm64.so', 'libberberis_proxy_libc.so', 'libberberis_proxy_libm.so'):
+        temporary = deployment / (name + '.new')
+        shutil.copy2(WORK / name, temporary)
+        temporary.replace(deployment / name)
     subprocess.run([sys.executable, str(scripts / 'host_library_names.py'),
                     str(ROOT / 'context/art_standalone/out/host/linux-x86/lib64'),
                     str(ROOT / '.local/lib')], check=True)

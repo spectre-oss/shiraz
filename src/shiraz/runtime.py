@@ -15,7 +15,7 @@ import time
 import tempfile
 import zipfile
 from .architecture import native_abi, supports_native_abis
-from .apk import FormatError
+from .apk import FormatError, inspect_apk
 from .native_payload import extract_native
 
 
@@ -430,7 +430,7 @@ def art_execution_options(mode):
     raise FormatError('SHIRAZ_ART_MODE must be interpreter or jit')
 
 
-def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=None, timeout=None, log_level='INFO', device_profile=None):
+def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=None, timeout=None, log_level='INFO', device_profile=None, native_split=None):
     if log_level not in ('VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'ASSERT', 'SILENT'):
         raise FormatError('Invalid Android log level')
     if width < 1 or height < 1 or width > 8192 or height > 8192 or width * height > 16 * 1024 * 1024:
@@ -455,12 +455,31 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
     activity = launcher[0]['target']
     if not all(NAME.fullmatch(name) for name in (package, app, activity)):
         raise FormatError('Invalid package or component class name')
+    native_source = apk
+    split_report = None
+    if native_split is not None:
+        native_split = Path(native_split).resolve()
+        with zipfile.ZipFile(native_split) as archive:
+            if any(not (name == 'AndroidManifest.xml' or name == 'stamp-cert-sha256' or
+                        name.startswith(('lib/', 'META-INF/'))) for name in archive.namelist()):
+                raise FormatError('Only native-library splits are supported; code/resource splits are not implemented')
+        split_report = inspect_apk(native_split, require_dex=False)
+        if any(split_report['manifest'].get(key) != manifest.get(key)
+               for key in ('package', 'version_code', 'version_code_major')):
+            raise FormatError('Native split package/version does not match the base APK')
+        if report['native_abis'] or split_report['dex'] or not split_report['native_abis']:
+            raise FormatError('Expected a native-only split and a base without native libraries')
+        report = dict(report, native_abis=split_report['native_abis'])
+        native_source = native_split
     digitalis = None
     if not supports_native_abis(report['native_abis']) and native_abi() == 'x86_64' and 'arm64-v8a' in report['native_abis']:
         if configured_bridge := os.environ.get('SHIRAZ_DIGITALIS_LIBRARY'):
             digitalis = Path(configured_bridge).resolve()
             if not digitalis.is_file():
                 raise FormatError('Configured Digitalis native bridge is missing')
+            for name in ('libberberis_proxy_libc.so', 'libberberis_proxy_libm.so'):
+                if not (digitalis.parent / name).is_file():
+                    raise FormatError('Incomplete Digitalis runtime: missing ' + name + '; run make runtime-digitalis')
     if not supports_native_abis(report['native_abis']) and digitalis is None:
         raise FormatError('APK has no native ABI candidate for this host (' + str(native_abi()) + ')')
     vm = HOST / 'bin/dalvikvm64'
@@ -513,7 +532,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
             shutil.rmtree(app_lib)
         if report['native_abis']:
             try:
-                libraries = extract_native(apk, app_lib, 'x86_64' if native_abi() == 'x86_64' and digitalis is None else 'aarch64')
+                libraries = extract_native(native_source, app_lib, 'x86_64' if native_abi() == 'x86_64' and digitalis is None else 'aarch64')
             except (ValueError, OSError, zipfile.BadZipFile) as exc:
                 raise FormatError('Cannot prepare APK native libraries: ' + str(exc)) from exc
             print(f'SHIRAZ_NATIVE_LIBRARIES installed={len(libraries)}', flush=True)
@@ -581,6 +600,13 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         with apk.open('rb') as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b''):
                 current.update(block)
+        if split_report:
+            split_digest = hashlib.sha256()
+            with native_split.open('rb') as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    split_digest.update(block)
+            if split_digest.hexdigest() != split_report['apk_sha256']:
+                raise FormatError('Input native split changed during the run')
         if current.hexdigest() != report['apk_sha256']:
             raise FormatError('Input APK changed during the run')
         evidence = {'package': package, 'activity': activity, 'exit_status': result.returncode,

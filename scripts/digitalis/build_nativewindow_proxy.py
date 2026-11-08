@@ -5,16 +5,19 @@ import argparse
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--kind', choices=['nativewindow', 'egl', 'gles1', 'gles2', 'gles3', 'libc', 'opensles', 'android_runtime', 'android'], default='nativewindow')
+    parser.add_argument('--kind', choices=['nativewindow', 'egl', 'gles1', 'gles2', 'gles3', 'libc', 'opensles', 'android_runtime', 'android', 'mediandk'], default='nativewindow')
     parser.add_argument('--library-dir', type=Path, default=ROOT/'build/digitalis-host')
     parser.add_argument('--android-library-dir', type=Path, default=ROOT/'build')
-    parser.add_argument('--java-home', type=Path, default=Path(os.environ.get('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')))
+    javac = shutil.which('javac')
+    java_home = os.environ.get('JAVA_HOME') or (str(Path(javac).resolve().parents[1]) if javac else '/usr/lib/jvm/default')
+    parser.add_argument('--java-home', type=Path, default=Path(java_home))
     args = parser.parse_args()
     work = ROOT/'build/digitalis-host'
     manifest = json.loads((work/'manifest.json').read_text())
@@ -22,11 +25,12 @@ def main():
     includes = [ROOT/Path(p).relative_to(original) for p in manifest['includes']]
     includes += [ROOT/'include', ROOT/'context/art_standalone/libbase/include', ROOT/'context/art_standalone/system/core/include', ROOT/'context/art_standalone/system/core/liblog/include', args.java_home/'include', args.java_home/'include/linux']
     includes += list((ROOT/'context/digitalis-native-bridge-support').rglob('include'))
-    command = [os.environ.get('DIGITALIS_CXX', 'clang++'), '-std=gnu++23', '-shared', '-fPIC', '-O1', '-include', 'string', '-DANDROID', '-DHAVE_SYS_UIO_H', '-DBERBERIS_GUEST_LP64=1', '-DNATIVE_BRIDGE_GUEST_ARCH_ARM64']
+    compiler = os.environ.get('DIGITALIS_CXX') or shutil.which('clang++') or '/usr/lib/llvm21/bin/clang++'
+    command = [compiler, '-std=gnu++23', '-shared', '-fPIC', '-O1', '-include', 'string', '-DANDROID', '-DHAVE_SYS_UIO_H', '-DBERBERIS_GUEST_LP64=1', '-DNATIVE_BRIDGE_GUEST_ARCH_ARM64']
     if args.kind in ('android_runtime', 'android'):
         command += ['-I'+str(ROOT/'context/art_standalone/libnativehelper/include/nativehelper')]
     command += ['-I'+str(p) for p in includes]
-    names = {'nativewindow': 'nativewindow', 'egl': 'EGL', 'gles1': 'GLESv1_CM', 'gles2': 'GLESv2', 'gles3': 'GLESv3', 'libc': 'c', 'opensles': 'OpenSLES', 'android_runtime': 'android_runtime', 'android': 'android'}
+    names = {'nativewindow': 'nativewindow', 'egl': 'EGL', 'gles1': 'GLESv1_CM', 'gles2': 'GLESv2', 'gles3': 'GLESv3', 'libc': 'c', 'opensles': 'OpenSLES', 'android_runtime': 'android_runtime', 'android': 'android', 'mediandk': 'mediandk'}
     source = ROOT/('native/digitalis_'+args.kind+'_proxy.cpp')
     if args.kind in ('gles2', 'gles3'):
         upstream = ROOT/('context/digitalis-native-bridge-support/android_api/lib'+names[args.kind]+'/proxy')
@@ -55,6 +59,15 @@ def main():
         source = overlay/(args.kind+'_trampolines.cc')
         source.write_text(text)
         (overlay/'trampolines_arm64_to_x86_64-inl.h').write_text(table)
+    if args.kind == 'mediandk':
+        upstream = ROOT/'context/digitalis-native-bridge-support/android_api/libmediandk/proxy'
+        table = (upstream/'trampolines_arm64_to_x86_64-inl.h').read_text()
+        table = re.sub(r'DoCustomTrampoline_\w+', 'UnsupportedMedia', table)
+        table = table.replace('reinterpret_cast<void*>(DoBadThunk)', 'nullptr')
+        overlay = work/'mediandk-proxy'
+        overlay.mkdir(exist_ok=True)
+        (overlay/'trampolines_arm64_to_x86_64-inl.h').write_text(table)
+        command += ['-I'+str(overlay)]
     if args.kind == 'android':
         from android_headers import prepare
         command += ['-I'+str(prepare(work/'android-headers'))]
@@ -128,6 +141,7 @@ bool isSLID(SLInterfaceID id, SLInterfaceID id2) {
         if len(functions) < 100:
             raise SystemExit('Incomplete GLES1 declarations')
         (work/'digitalis-gles1.inc').write_text(''.join('ENTRY('+name+')\n' for name in functions))
+    command += ['-L'+str(ROOT/'context/art_standalone/out/host/linux-x86/lib64'), '-L'+str(ROOT/'.local/lib')]
     command += ['-I'+str(work), str(source), '-L'+str(args.library_dir), '-L'+str(args.android_library_dir), '-lberberis_arm64']
     if args.kind == 'libc':
         upstream = ROOT/'context/digitalis-native-bridge-support/android_api/libc/proxy'

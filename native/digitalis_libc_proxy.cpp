@@ -105,6 +105,7 @@ static uint32_t PropertyAreaSerial() { return 0; }
 // guest thread across host fork, then discard inherited thread-map entries.
 void ShirazRefreshGuestThreadIdentity();
 int ShirazGuestJoinThread(pthread_t,void**);
+int ShirazGuestKillThread(pthread_t,int);
 int ShirazGuestDetachThread(pthread_t);
 int ShirazGuestSetThreadName(pthread_t,const char*);
 int ShirazGuestGetThreadName(pthread_t,char*,size_t);
@@ -121,6 +122,33 @@ static pid_t CloneForFork() {
  return pid;
 }
 static void ShirazLongJump(void* buffer,int value){DoThunk_siglongjmp(buffer,value?value:1);}
+void* ShirazGuestPthread();
+// Guest pthread_t and pthread_attr_t are Bionic records, not glibc objects.
+// Current-thread queries describe the translated stack, never the host stack.
+static int CurrentThreadAttributes(pthread_t handle, ShirazGuestPthreadAttributes* output) {
+ if (!output) return EINVAL;
+ if (handle != reinterpret_cast<pthread_t>(ShirazGuestPthread()) && handle != pthread_self()) return ENOTSUP;
+ auto* thread = GetCurrentGuestThread();
+ if (!thread) return ESRCH;
+ pthread_attr_t host;
+ int result = pthread_getattr_np(pthread_self(), &host);
+ if (result) return result;
+ ShirazGuestPthreadAttributes guest{};
+ int detached = 0;
+ result = pthread_attr_getdetachstate(&host, &detached);
+ if (!result) result = pthread_attr_getschedpolicy(&host, &guest.sched_policy);
+ sched_param parameter{};
+ if (!result) result = pthread_attr_getschedparam(&host, &parameter);
+ pthread_attr_destroy(&host);
+ if (result) return result;
+ guest.flags = detached == PTHREAD_CREATE_DETACHED ? 1u : 0u;
+ guest.sched_priority = parameter.sched_priority;
+ guest.stack_size = thread->GetStackSize();
+ guest.stack_base = reinterpret_cast<void*>(thread->GetStackTop() - guest.stack_size);
+ guest.guard_size = thread->GetGuardSize();
+ *output = guest;
+ return 0;
+}
 static uintptr_t StackTop() { return GetCurrentGuestThread()->GetStackTop(); }
 static void ThreadCreate(HostCode, ThreadState* state) {
  using Signature = int(pthread_t*, const ShirazGuestPthreadAttributes*, void*(*)(void*), void*);
@@ -229,8 +257,8 @@ static const KnownTrampoline functions[] = {
 {"pthread_attr_setstacksize", GetTrampolineFunc<decltype(shiraz_guest_attr::setstacksize)>(), reinterpret_cast<void*>(shiraz_guest_attr::setstacksize)},
 {"pthread_create", ThreadCreate, nullptr},
 {"pthread_detach", GetTrampolineFunc<int(pthread_t)>(), reinterpret_cast<void*>(ShirazGuestDetachThread)},
-{"pthread_exit", Unsupported, const_cast<char*>("pthread_exit")},
-{"pthread_getattr_np", Unsupported, const_cast<char*>("pthread_getattr_np")},
+{"pthread_exit", GetTrampolineFunc<auto(void*) -> void>(), nullptr},
+{"pthread_getattr_np", GetTrampolineFunc<decltype(CurrentThreadAttributes)>(), reinterpret_cast<void*>(CurrentThreadAttributes)},
 {"pthread_getcpuclockid", Unsupported, const_cast<char*>("pthread_getcpuclockid")},
 {"pthread_getname_np", GetTrampolineFunc<decltype(ShirazGuestGetThreadName)>(), reinterpret_cast<void*>(ShirazGuestGetThreadName)},
 {"pthread_getschedparam", GetTrampolineFunc<decltype(ShirazGuestGetSchedParam)>(), reinterpret_cast<void*>(ShirazGuestGetSchedParam)},
@@ -239,7 +267,7 @@ static const KnownTrampoline functions[] = {
 {"pthread_join", ThreadJoin, nullptr},
 {"pthread_key_create", KeyCreate, nullptr},
 {"pthread_key_delete", GetTrampolineFunc<auto(int32_t) -> int32_t>(), reinterpret_cast<void*>(NULL)},
-{"pthread_kill", Unsupported, const_cast<char*>("pthread_kill")},
+{"pthread_kill", GetTrampolineFunc<decltype(ShirazGuestKillThread)>(), reinterpret_cast<void*>(ShirazGuestKillThread)},
 {"pthread_setname_np", GetTrampolineFunc<decltype(ShirazGuestSetThreadName)>(), reinterpret_cast<void*>(ShirazGuestSetThreadName)},
 {"pthread_setschedparam", GetTrampolineFunc<decltype(ShirazGuestSetSchedParam)>(), reinterpret_cast<void*>(ShirazGuestSetSchedParam)},
 {"pthread_setschedprio", GetTrampolineFunc<decltype(ShirazGuestSetSchedPriority)>(), reinterpret_cast<void*>(ShirazGuestSetSchedPriority)},

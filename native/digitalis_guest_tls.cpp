@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <pthread.h>
+#include <signal.h>
 #include <cerrno>
 namespace berberis {
 struct GuestThreadRecord {
@@ -140,6 +141,15 @@ template<class F> static int WithGuestThread(pthread_t handle,F operation){
  }
  pthread_mutex_unlock(&thread_registry_lock);
  return result;
+}
+int ShirazGuestKillThread(pthread_t handle,int signal){
+ // Bionic reserves 32/33; reject those and invalid signal numbers explicitly.
+ if(signal<0||signal>=NSIG||signal==32||signal==33)return EINVAL;
+ // A self-signal may run its handler before pthread_kill returns. Never hold
+ // the registry mutex across that reentrant path. This thread owns its lifetime.
+ if(handle==pthread_self() || (current_storage && handle==reinterpret_cast<pthread_t>(current_storage->pthread_record)))
+  return pthread_kill(pthread_self(),signal);
+ return WithGuestThread(handle,[&](pthread_t host){return pthread_kill(host,signal);});
 }
 int ShirazGuestSetThreadName(pthread_t handle,const char* name){return WithGuestThread(handle,[&](pthread_t host){return name?pthread_setname_np(host,name):EINVAL;});}
 int ShirazGuestGetThreadName(pthread_t handle,char* output,size_t size){return WithGuestThread(handle,[&](pthread_t host){return output?pthread_getname_np(host,output,size):EINVAL;});}

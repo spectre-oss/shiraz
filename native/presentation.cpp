@@ -19,6 +19,12 @@
 
 namespace shiraz {
 namespace {
+bool mouse_as_touch() {
+    const char* value=std::getenv("SHIRAZ_MOUSE_AS_TOUCH");
+    if(!value||!std::strcmp(value,"0"))return false;
+    if(!std::strcmp(value,"1"))return true;
+    throw std::invalid_argument("SHIRAZ_MOUSE_AS_TOUCH must be 0 or 1");
+}
 struct ReplayEvent {int frame,x,y;std::string action;};
 std::vector<ReplayEvent> loadReplay() {
     const char* path=std::getenv("SHIRAZ_INPUT_SCRIPT");if(!path||!*path)return {};
@@ -100,6 +106,7 @@ void discard_prepared_presentation(){preparedWindow.reset();}
 bool uses_wayland_text_input(){const char* driver=SDL_GetCurrentVideoDriver();return driver&&std::string(driver)=="wayland";}
 void request_text_input(bool visible){unsigned old=text_input_request.load();while(!text_input_request.compare_exchange_weak(old,((old+2)&~1u)|unsigned(visible))) {}}
 bool presentation_has_touchscreen() {
+    if(mouse_as_touch())return true; // A real virtual single-touch device, not physical hardware.
     std::unique_ptr<Video> video;
     if(!(SDL_WasInit(SDL_INIT_VIDEO)&SDL_INIT_VIDEO))video=std::make_unique<Video>();
     const int count=SDL_GetNumTouchDevices();
@@ -267,13 +274,18 @@ void present(const Surface& initial, const std::string& title, int frames, const
         checked(SDL_UpdateTexture(texture.get(),nullptr,image.pixels.data(),image.width*sizeof(uint32_t)));
         uploadedRevision=revision;++uploads;repaint=true;
     };
+    const bool mouseAsTouch=mouse_as_touch();
     bool mouseCaptured = false;
     PointerStream pointer([&](const PointerEvent& event) {
         if (event.source == mouse_source) {
             if (event.action == PointerAction::Down) mouseCaptured = SDL_CaptureMouse(SDL_TRUE) == 0;
             if (event.action == PointerAction::Up || event.action == PointerAction::Cancel) { SDL_CaptureMouse(SDL_FALSE); mouseCaptured = false; }
         }
-        if (input) input(event);
+        if (input) {
+            PointerEvent forwarded=event;
+            if(mouseAsTouch&&event.source==mouse_source)forwarded.source=touch_source;
+            input(forwarded);
+        }
         else if (event.action == PointerAction::Down || event.action == PointerAction::Up)
             std::cout << "pointer " << (event.action == PointerAction::Down ? "down " : "up ") << event.point.x << ' ' << event.point.y << '\n';
     });

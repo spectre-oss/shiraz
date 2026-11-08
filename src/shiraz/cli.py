@@ -18,6 +18,7 @@ def main(argv=None):
         p = sub.add_parser(command)
         p.add_argument('apk', type=Path)
         if command == 'run':
+            p.add_argument('--native-split', type=Path, help='Matching native-only ABI split APK; code/resource splits are unsupported')
             p.add_argument('--width', type=int, default=360)
             p.add_argument('--height', type=int, default=640)
             p.add_argument('--frames', type=int)
@@ -31,7 +32,7 @@ def main(argv=None):
     try:
         report = inspect_apk(args.apk)
         if args.command == 'run':
-            return run_activity(args.apk, report, width=args.width, height=args.height, frames=args.frames, snapshot=args.snapshot, timeout=args.timeout, log_level=args.log_level, device_profile=args.device_profile)
+            return run_activity(args.apk, report, width=args.width, height=args.height, frames=args.frames, snapshot=args.snapshot, timeout=args.timeout, log_level=args.log_level, device_profile=args.device_profile, native_split=args.native_split)
         if args.command == 'plan':
             output = args.output.resolve()
             local_roots = [(ROOT / name).resolve() for name in ('build', 'dist', 'context')]

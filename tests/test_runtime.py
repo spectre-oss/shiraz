@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from unittest.mock import patch
 from shiraz.apk import FormatError
 from shiraz.runtime import art_execution_options, ROOT, local_path, run_activity, run_with_live_logs, missing_framework_class, missing_framework_method, properties_text, application_metadata, package_timestamps
@@ -138,6 +139,32 @@ class RuntimeTests(unittest.TestCase):
                     with patch.object(Path, 'is_file', return_value=True), patch('shiraz.runtime.selected_device_profile', side_effect=RuntimeError('past ABI gate')):
                         with self.assertRaisesRegex(RuntimeError, 'past ABI gate'):
                             run_activity(Path('missing.apk'), report)
+
+    def test_digitalis_rejects_missing_proxy_before_launch(self):
+        report = deepcopy(self.report)
+        report['native_abis'] = ['arm64-v8a']
+        with tempfile.TemporaryDirectory() as directory:
+            bridge = Path(directory) / 'libberberis_arm64.so'
+            bridge.touch()
+            with patch('shiraz.architecture.platform.machine', return_value='x86_64'), patch.dict(os.environ, {'SHIRAZ_DIGITALIS_LIBRARY': str(bridge)}):
+                for name in ('libberberis_proxy_libc.so', 'libberberis_proxy_libm.so'):
+                    with self.assertRaisesRegex(FormatError, name):
+                        run_activity(Path('missing.apk'), report)
+                    (bridge.parent / name).touch()
+
+    def test_native_split_rejects_wrong_package_and_resource_splits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            split = Path(directory)/'split.apk'
+            with zipfile.ZipFile(split, 'w') as archive:
+                archive.writestr('resources.arsc', b'resource')
+            with self.assertRaisesRegex(FormatError, 'code/resource splits'):
+                run_activity(Path('base.apk'), self.report, native_split=split)
+            with zipfile.ZipFile(split, 'w') as archive:
+                archive.writestr('AndroidManifest.xml', b'manifest')
+            other = dict(manifest=dict(package='another.app'), native_abis=['arm64-v8a'], dex=[])
+            with patch('shiraz.runtime.inspect_apk', return_value=other):
+                with self.assertRaisesRegex(FormatError, 'does not match'):
+                    run_activity(Path('base.apk'), self.report, native_split=split)
 
     def test_invalid_component_never_launches(self):
         self.report['manifest']['launcher_activities'][0]['target'] = '../escape'

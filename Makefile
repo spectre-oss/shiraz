@@ -910,7 +910,7 @@ packaging-tools:
 appimage osmand-appimage: packaging-tools
 HOST_ARCH := $(shell uname -m)
 OSMAND_APK := context/apks/net.osmand.plus_$(if $(filter aarch64,$(HOST_ARCH)),541003,541002).apk
-build/shiraz-app: packaging/app_run.cpp packaging/desktop_install.h
+build/shiraz-app: packaging/app_run.cpp packaging/desktop_install.h packaging/offline.h
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $< -o $@
 appimage: build framework build/shiraz-app build/libEGL_shim.so
@@ -1584,3 +1584,13 @@ landing-build:
 	npm --prefix landing run build
 landing-check:
 	npm --prefix landing run check
+
+# Optional ARM64 platform proxies; build the pinned bridge first.
+.PHONY: digitalis-platform-proxies digitalis-platform-smoke
+digitalis-platform-proxies: build/libandroid.so build/libEGL_shiraz.so.1 build/libOpenSLES.so.1
+	@test -f build/digitalis-host/libberberis_arm64.so || { echo 'Run make runtime-digitalis first'; exit 1; }
+	@set -e; for kind in nativewindow egl gles2 gles3 android_runtime android opensles mediandk; do python3 scripts/digitalis/build_nativewindow_proxy.py --kind $$kind; done
+
+digitalis-platform-smoke:
+	@test -n "$(DIGITALIS_GUEST_SYSTEM)" || { echo 'Set DIGITALIS_GUEST_SYSTEM to the pinned guest-support system directory'; exit 1; }
+	python3 scripts/digitalis/platform_smoke.py --guest-system "$(DIGITALIS_GUEST_SYSTEM)"
