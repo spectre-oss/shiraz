@@ -25,6 +25,7 @@ from pathlib import Path
 
 import guest_callee_effects
 import guest_mrs_window
+import guest_native_target
 
 MAX_BYTES = 256 << 20
 MAX_SITES = 131072
@@ -1938,6 +1939,9 @@ class ElfBindingMetadata:
                 raise ValueError("invalid binding provider ELF hash")
             if type(binding.get("nonreturning", False)) is not bool:
                 raise ValueError("invalid nonreturning contract field")
+            # Identity is a diagnostic snapshot, not a native effect grant.
+            # Keep legacy adapters unknown; reject malformed claimed identity.
+            guest_native_target.validate_native_target(binding)
             self.proof[slot] = dict(binding)
         if self.trusted_provider_contracts:
             self.mrs_window_record = validated_window
@@ -2131,6 +2135,22 @@ class ElfBindingMetadata:
                 "bridge_sha256": self.provider_bridge["sha256"],
                 "reason": "verified-explicit-nonreturning-noargs-provider",
             }
+        if proof.get("native_target") is not None:
+            if not self.trusted_provider_contracts:
+                return {**result, "reason": "native-target-identity-untrusted"}
+            if (
+                addend != 0
+                or proof.get("relocation_type") != kind
+                or info & 15 != 2
+                or (required_library is not None and proof["provider"] != required_library)
+            ):
+                return {**result, "reason": "native-target-identity-binding-mismatch"}
+            return {
+                **result,
+                "native_target": guest_native_target.validate_native_target(proof),
+                "bridge_sha256": self.provider_bridge["sha256"],
+                "reason": "native-target-identity-only-no-effect-contract",
+            }
         if (
             proof["provider"] != self.name
             or proof.get("provider_elf_sha256") != self.elf_sha256
@@ -2252,6 +2272,9 @@ class ElfDecoder:
             ).hexdigest(),
             "mrs_window_reader_sha256": hashlib.sha256(
                 Path(guest_mrs_window.__file__).read_bytes()
+            ).hexdigest(),
+            "native_target_reader_sha256": hashlib.sha256(
+                Path(guest_native_target.__file__).read_bytes()
             ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()

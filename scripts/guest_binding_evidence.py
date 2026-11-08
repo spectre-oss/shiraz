@@ -6,6 +6,8 @@ import json
 import struct
 from pathlib import Path
 
+from guest_native_target import validate_native_target
+
 MAX_REPORT = 64 * 1024 * 1024
 MAX_BINDINGS = 200000
 GUEST_ABIS = {"guest-AAPCS64", "guest-local-AAPCS64"}
@@ -146,6 +148,11 @@ def augment_binding_report(
                 raise ValueError("malformed or duplicate binding report relocation")
             if type(binding.get("nonreturning", False)) is not bool:
                 raise ValueError("invalid nonreturning binding contract")
+            native_target = validate_native_target(binding)
+            if native_target is not None:
+                if bridge_identity is None:
+                    raise ValueError("native target identity requires bridge identity")
+                binding["native_target"] = native_target
             if binding.get("nonreturning", False) and (
                 bridge_identity is None
                 or binding["kind"] != "function"

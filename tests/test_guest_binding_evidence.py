@@ -16,6 +16,7 @@ from guest_binding_evidence import (
     bounded_read,
     verify_relocation_inventory,
 )
+from test_guest_native_target import self_binding
 from test_guest_tpidr_audit import BindingElfFixture
 
 
@@ -143,6 +144,30 @@ class GuestBindingEvidenceTests(unittest.TestCase):
             self.binding[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
                 self.augment(**identity)
+
+    def test_native_identity_requires_bridge_identity_and_preserves_false_claims(self):
+        identity = self.terminal_binding()
+        self.binding.clear()
+        self.binding.update(self_binding(), relocation=32)
+        with self.assertRaisesRegex(ValueError, "requires bridge identity"):
+            self.augment()
+        report = self.augment(**identity)
+        target = report["modules"][0]["bindings"][0]["native_target"]
+        self.assertEqual(target["image"], "/usr/lib/system/libsystem_pthread.dylib")
+        self.assertEqual(target["mapped_prefix_sha256"], hashlib.sha256(
+            bytes.fromhex(self.binding["native_target"]["prefix_hex"])).hexdigest())
+        self.assertIs(target["execution_claim"], False)
+        self.assertIs(target["semantic_effects_verified"], False)
+        self.binding["native_target"] = target
+        self.binding["native_target"]["prefix_hex"] = "00" * 64
+        with self.assertRaisesRegex(ValueError, "digest"):
+            self.augment(**identity)
+
+    def test_native_identity_cannot_be_attached_to_another_adapter(self):
+        identity = self.terminal_binding()
+        self.binding["native_target"] = self_binding()["native_target"]
+        with self.assertRaisesRegex(ValueError, "exact pthread self binding"):
+            self.augment(**identity)
 
     def test_preempting_guest_provider_identity_is_preserved(self):
         report = self.augment()
