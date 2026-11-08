@@ -17,7 +17,7 @@ public final class NetworkRuntimeMain {
     Class.forName("shiraz.runtime.HostTlsProvider").getMethod("install").invoke(null);
     String[] cases = {"dns_localhost", "tcp_half_close", "http_chunked", "http_error_body",
         "http_post", "http_redirect", "http_read_timeout", "tls_socket_factory", "trust_manager",
-        "tls_verified", "tls_untrusted", "tls_hostname",
+        "tls_verified", "tls_untrusted", "tls_hostname", "tls_handshake",
              "tls_engine_verified", "tls_engine_untrusted", "tls_engine_hostname",
              "local_stream", "local_timeout", "local_rebind", "local_close_read", "local_close_accept"};
     int failed = 0;

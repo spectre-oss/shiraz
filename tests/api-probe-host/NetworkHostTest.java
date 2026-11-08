@@ -12,7 +12,7 @@ public final class NetworkHostTest {
              "tls_socket_factory", "trust_manager"}) {
       System.out.println("HOST network." + id + ": " + NetworkChecks.run("network." + id));
     }
-    for (String id : new String[] {"tls_verified", "tls_untrusted", "tls_hostname",
+    for (String id : new String[] {"tls_verified", "tls_untrusted", "tls_hostname", "tls_handshake",
              "tls_engine_verified", "tls_engine_untrusted", "tls_engine_hostname"}) {
       System.out.println("HOST network." + id + ": " + TlsNetworkChecks.run("network." + id,
           name -> new FileInputStream(new File(args[0], name))));

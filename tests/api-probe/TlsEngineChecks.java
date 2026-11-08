@@ -20,18 +20,32 @@ final class TlsEngineChecks {
         if (wire.position() == 0) return;
         wire.flip();
         try {
-            SSLEngineResult r = engine.unwrap(wire, plain);
-            NetworkChecks.require(r.getStatus() != SSLEngineResult.Status.BUFFER_OVERFLOW, "TLS plaintext capacity");
+            while (wire.hasRemaining()) {
+                SSLEngineResult r = engine.unwrap(wire, plain);
+                NetworkChecks.require(r.getStatus() != SSLEngineResult.Status.BUFFER_OVERFLOW, "TLS plaintext capacity");
+                if (r.getStatus() == SSLEngineResult.Status.BUFFER_UNDERFLOW
+                        || r.getStatus() == SSLEngineResult.Status.CLOSED
+                        || (r.bytesConsumed() == 0 && r.bytesProduced() == 0)) break;
+            }
         } finally { wire.compact(); }
     }
     static String run(SSLContext clientContext, SSLContext serverContext, String host,
             boolean reject) throws Exception {
+        String result = runProtocol(clientContext, serverContext, host, reject, "TLSv1.2");
+        if (java.util.Arrays.asList(clientContext.getSupportedSSLParameters().getProtocols()).contains("TLSv1.3")) {
+            runProtocol(clientContext, serverContext, host, reject, "TLSv1.3");
+            return result + "; verified TLSv1.2 and TLSv1.3";
+        }
+        return result + "; verified TLSv1.2 (TLSv1.3 unavailable)";
+    }
+    private static String runProtocol(SSLContext clientContext, SSLContext serverContext, String host,
+            boolean reject, String protocol) throws Exception {
         SSLEngine client = clientContext.createSSLEngine(host, 443);
         SSLEngine server = serverContext.createSSLEngine();
         client.setUseClientMode(true); server.setUseClientMode(false);
         // Keep this deterministic across host JVMs and the pinned TLS backend.
-        client.setEnabledProtocols(new String[] {"TLSv1.2"});
-        server.setEnabledProtocols(new String[] {"TLSv1.2"});
+        client.setEnabledProtocols(new String[] {protocol});
+        server.setEnabledProtocols(new String[] {protocol});
         SSLParameters parameters = client.getSSLParameters();
         parameters.setEndpointIdentificationAlgorithm("HTTPS");
         client.setSSLParameters(parameters);
@@ -59,6 +73,7 @@ final class TlsEngineChecks {
             NetworkChecks.require(clientRejected == reject, "engine certificate rejection result");
             if (reject) {
                 NetworkChecks.require(serverPlain.position() == 0, "rejected engine sent application bytes");
+                NetworkChecks.require(!client.getSession().isValid(), "failed TLS engine retained a valid session");
                 return "TLS client engine rejects invalid peer before application bytes";
             }
             NetworkChecks.require(complete, "engine handshake did not complete within bound: client=" + client.getHandshakeStatus() + " server=" + server.getHandshakeStatus() + " toClient=" + toClient.position() + " toServer=" + toServer.position());

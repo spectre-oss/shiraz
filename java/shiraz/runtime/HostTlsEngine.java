@@ -28,13 +28,16 @@ final class HostTlsEngine extends SSLEngine {
             }
             verified = true;
         } catch (ReflectiveOperationException error) {
-            failure = new SSLException("Pinned hostname verifier unavailable", error);
-        } catch (SSLException error) { failure = error; }
-        if (failure != null) {
-            delegate.getSession().invalidate();
-            delegate.closeOutbound();
-            throw failure;
+            throw new SSLException("Pinned hostname verifier unavailable", error);
         }
+    }
+    private SSLException failed(SSLException error) {
+        failure = error;
+        try { delegate.getSession().invalidate(); }
+        catch (RuntimeException cleanup) { error.addSuppressed(cleanup); }
+        try { delegate.closeOutbound(); }
+        catch (RuntimeException cleanup) { error.addSuppressed(cleanup); }
+        return error;
     }
     public SSLEngineResult wrap(ByteBuffer[] src, int offset, int length, ByteBuffer dst)
             throws SSLException {
@@ -44,7 +47,7 @@ final class HostTlsEngine extends SSLEngine {
             SSLEngineResult result = delegate.wrap(src, offset, length, dst);
             verify(result);
             return result;
-        } catch (SSLException error) { dst.position(position); failure = error; throw error; }
+        } catch (SSLException error) { dst.position(position); throw failed(error); }
     }
     public SSLEngineResult unwrap(ByteBuffer src, ByteBuffer[] dst, int offset, int length)
             throws SSLException {
@@ -62,8 +65,7 @@ final class HostTlsEngine extends SSLEngine {
             return result;
         } catch (SSLException error) {
             for (int i = 0; i < length; i++) dst[offset + i].position(positions[i]);
-            failure = error;
-            throw error;
+            throw failed(error);
         }
     }
     public SSLParameters getSSLParameters() {

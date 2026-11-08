@@ -29,6 +29,12 @@ final class TlsNetworkChecks {
     return context;
   }
   static String run(String id, Assets assets) throws Exception {
+    if (id.equals("network.tls_handshake")) {
+      run("network.tls_verified", assets);
+      run("network.tls_untrusted", assets);
+      run("network.tls_hostname", assets);
+      return "Controlled TLS accepts trusted peer and rejects untrusted or wrong-host certificates";
+    }
     if (!java.util.Arrays.asList("network.tls_verified", "network.tls_untrusted", "network.tls_hostname",
             "network.tls_engine_verified", "network.tls_engine_untrusted", "network.tls_engine_hostname").contains(id))
       throw new IllegalArgumentException("Unknown TLS case: " + id);
