@@ -1594,3 +1594,12 @@ digitalis-platform-proxies: build/libandroid.so build/libEGL_shiraz.so.1 build/l
 digitalis-platform-smoke:
 	@test -n "$(DIGITALIS_GUEST_SYSTEM)" || { echo 'Set DIGITALIS_GUEST_SYSTEM to the pinned guest-support system directory'; exit 1; }
 	python3 scripts/digitalis/platform_smoke.py --guest-system "$(DIGITALIS_GUEST_SYSTEM)"
+
+# Regenerate measured inventories after rebuilding the local framework. No app data is imported.
+.PHONY: landing-compatibility-data
+ifeq ($(shell uname -s),Darwin)
+landing-compatibility-data: macos-framework
+else
+landing-compatibility-data: framework
+endif
+	uv run --no-project python scripts/update_compatibility_tracker.py

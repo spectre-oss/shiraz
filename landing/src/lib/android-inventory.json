@@ -1,0 +1,518 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-11-08",
+  "runtimeVersion": "0.338.0",
+  "sourceCommit": "abbdec12834cd2370b7a9459ae5286e6e84ba49f",
+  "scope": "Development snapshot; includes local framework changes. Android 8.1 / API 27 is the runtime's advertised level, not a certification.",
+  "inventory": {
+    "apiLevel": 35,
+    "androidVersion": "15",
+    "referenceArchive": "platform-35_r02.zip",
+    "referenceJarSha256": "4566663c3876e022b4fa4ced8c8697c4ab1688267f090114fd92d027b32e619b",
+    "definition": "Matching android.* class names in the built Java framework versus the pinned Android API 35 SDK jar. android.R resource classes excluded. No method, signature, behavior or CTS compatibility is implied.",
+    "present": 933,
+    "reference": 4445,
+    "packages": [
+      {
+        "package": "android",
+        "present": 0,
+        "reference": 3
+      },
+      {
+        "package": "android.accessibilityservice",
+        "present": 0,
+        "reference": 25
+      },
+      {
+        "package": "android.accounts",
+        "present": 2,
+        "reference": 13
+      },
+      {
+        "package": "android.adservices",
+        "present": 0,
+        "reference": 145
+      },
+      {
+        "package": "android.animation",
+        "present": 16,
+        "reference": 29
+      },
+      {
+        "package": "android.annotation",
+        "present": 0,
+        "reference": 5
+      },
+      {
+        "package": "android.app",
+        "present": 54,
+        "reference": 343
+      },
+      {
+        "package": "android.appwidget",
+        "present": 1,
+        "reference": 5
+      },
+      {
+        "package": "android.bluetooth",
+        "present": 4,
+        "reference": 64
+      },
+      {
+        "package": "android.companion",
+        "present": 0,
+        "reference": 19
+      },
+      {
+        "package": "android.content",
+        "present": 74,
+        "reference": 178
+      },
+      {
+        "package": "android.credentials",
+        "present": 0,
+        "reference": 19
+      },
+      {
+        "package": "android.crypto",
+        "present": 0,
+        "reference": 2
+      },
+      {
+        "package": "android.database",
+        "present": 37,
+        "reference": 58
+      },
+      {
+        "package": "android.devicelock",
+        "present": 0,
+        "reference": 2
+      },
+      {
+        "package": "android.drm",
+        "present": 0,
+        "reference": 22
+      },
+      {
+        "package": "android.gesture",
+        "present": 0,
+        "reference": 13
+      },
+      {
+        "package": "android.graphics",
+        "present": 101,
+        "reference": 197
+      },
+      {
+        "package": "android.hardware",
+        "present": 19,
+        "reference": 138
+      },
+      {
+        "package": "android.health",
+        "present": 0,
+        "reference": 182
+      },
+      {
+        "package": "android.icu",
+        "present": 0,
+        "reference": 214
+      },
+      {
+        "package": "android.inputmethodservice",
+        "present": 2,
+        "reference": 13
+      },
+      {
+        "package": "android.location",
+        "present": 5,
+        "reference": 41
+      },
+      {
+        "package": "android.media",
+        "present": 83,
+        "reference": 436
+      },
+      {
+        "package": "android.mtp",
+        "present": 0,
+        "reference": 7
+      },
+      {
+        "package": "android.net",
+        "present": 25,
+        "reference": 317
+      },
+      {
+        "package": "android.nfc",
+        "present": 2,
+        "reference": 32
+      },
+      {
+        "package": "android.opengl",
+        "present": 17,
+        "reference": 36
+      },
+      {
+        "package": "android.os",
+        "present": 62,
+        "reference": 143
+      },
+      {
+        "package": "android.preference",
+        "present": 1,
+        "reference": 24
+      },
+      {
+        "package": "android.print",
+        "present": 0,
+        "reference": 22
+      },
+      {
+        "package": "android.printservice",
+        "present": 0,
+        "reference": 5
+      },
+      {
+        "package": "android.provider",
+        "present": 19,
+        "reference": 232
+      },
+      {
+        "package": "android.renderscript",
+        "present": 0,
+        "reference": 73
+      },
+      {
+        "package": "android.sax",
+        "present": 0,
+        "reference": 7
+      },
+      {
+        "package": "android.se",
+        "present": 0,
+        "reference": 5
+      },
+      {
+        "package": "android.security",
+        "present": 3,
+        "reference": 59
+      },
+      {
+        "package": "android.service",
+        "present": 4,
+        "reference": 146
+      },
+      {
+        "package": "android.speech",
+        "present": 6,
+        "reference": 25
+      },
+      {
+        "package": "android.system",
+        "present": 0,
+        "reference": 14
+      },
+      {
+        "package": "android.telecom",
+        "present": 5,
+        "reference": 45
+      },
+      {
+        "package": "android.telephony",
+        "present": 5,
+        "reference": 179
+      },
+      {
+        "package": "android.text",
+        "present": 88,
+        "reference": 159
+      },
+      {
+        "package": "android.transition",
+        "present": 3,
+        "reference": 26
+      },
+      {
+        "package": "android.util",
+        "present": 30,
+        "reference": 67
+      },
+      {
+        "package": "android.view",
+        "present": 161,
+        "reference": 397
+      },
+      {
+        "package": "android.webkit",
+        "present": 21,
+        "reference": 60
+      },
+      {
+        "package": "android.widget",
+        "present": 83,
+        "reference": 189
+      },
+      {
+        "package": "android.window",
+        "present": 0,
+        "reference": 10
+      }
+    ]
+  },
+  "probeCatalog": {
+    "total": 239,
+    "categories": [
+      {
+        "name": "Crypto",
+        "automatic": 6,
+        "manual": 0
+      },
+      {
+        "name": "Database",
+        "automatic": 11,
+        "manual": 0
+      },
+      {
+        "name": "Graphics",
+        "automatic": 29,
+        "manual": 2
+      },
+      {
+        "name": "Hardware",
+        "automatic": 4,
+        "manual": 3
+      },
+      {
+        "name": "IPC",
+        "automatic": 9,
+        "manual": 2
+      },
+      {
+        "name": "Lifecycle",
+        "automatic": 0,
+        "manual": 3
+      },
+      {
+        "name": "Media",
+        "automatic": 3,
+        "manual": 1
+      },
+      {
+        "name": "Native",
+        "automatic": 12,
+        "manual": 0
+      },
+      {
+        "name": "Network",
+        "automatic": 55,
+        "manual": 0
+      },
+      {
+        "name": "Packages",
+        "automatic": 4,
+        "manual": 0
+      },
+      {
+        "name": "Resources",
+        "automatic": 14,
+        "manual": 0
+      },
+      {
+        "name": "Runtime",
+        "automatic": 31,
+        "manual": 0
+      },
+      {
+        "name": "Storage",
+        "automatic": 16,
+        "manual": 0
+      },
+      {
+        "name": "System",
+        "automatic": 6,
+        "manual": 3
+      },
+      {
+        "name": "UI",
+        "automatic": 22,
+        "manual": 3
+      }
+    ]
+  },
+  "probeSnapshot": {
+    "label": "Historical targeted network run",
+    "suiteVersion": "0.333.2",
+    "suiteFingerprint": "4a36319f8e5f27347423db36683a57b74d68b159764abbbdfbb5bbbdc83e15c0",
+    "catalogSize": 233,
+    "host": "Host platform not recorded in the exported report",
+    "note": "This older targeted run is not the current full suite. Unrun cases are not passes or skips.",
+    "categories": [
+      {
+        "name": "Crypto",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 6
+        }
+      },
+      {
+        "name": "Database",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 11
+        }
+      },
+      {
+        "name": "Graphics",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 31
+        }
+      },
+      {
+        "name": "Hardware",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 7
+        }
+      },
+      {
+        "name": "IPC",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 11
+        }
+      },
+      {
+        "name": "Lifecycle",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 3
+        }
+      },
+      {
+        "name": "Media",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 4
+        }
+      },
+      {
+        "name": "Native",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 12
+        }
+      },
+      {
+        "name": "Network",
+        "counts": {
+          "PASS": 49,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 0
+        }
+      },
+      {
+        "name": "Packages",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 4
+        }
+      },
+      {
+        "name": "Resources",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 14
+        }
+      },
+      {
+        "name": "Runtime",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 31
+        }
+      },
+      {
+        "name": "Storage",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 16
+        }
+      },
+      {
+        "name": "System",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 9
+        }
+      },
+      {
+        "name": "UI",
+        "counts": {
+          "PASS": 0,
+          "FAIL": 0,
+          "UNSUPPORTED": 0,
+          "SKIPPED": 0,
+          "TIMEOUT": 0,
+          "NOT_RUN": 25
+        }
+      }
+    ]
+  }
+}

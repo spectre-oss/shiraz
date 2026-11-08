@@ -3,6 +3,7 @@
   import { tick } from 'svelte';
   import { resolve } from '$app/paths';
   import Footer from '#lib/Footer.svelte';
+  import AndroidCoverage from '#lib/AndroidCoverage.svelte';
   import { applications } from '#lib/compatibility.js';
   import '../../styles.css';
   let dialog;
@@ -49,6 +50,7 @@
     {#each statuses.slice(1) as item}<p><strong>{applications.filter(app => app.status === item).length}</strong><span>{item}</span></p>{/each}
   </div>
   <aside class="compat-caveat"><strong>Experimental, app by app.</strong> These are recorded observations, not fresh tests or full compatibility guarantees. Results depend on the APK version, architecture, runtime, and test environment. Read the report before relying on a feature.</aside>
+  <nav class="compat-section-nav" aria-label="Compatibility sections"><a href="#app-results-title">App results</a><a href="#android-tracker">Android coverage tracker</a></nav>
   </div>
   <section aria-labelledby="app-results-title" class="compat-results">
     <h2 id="app-results-title">Find an app</h2>
@@ -71,6 +73,7 @@
     </div>
     {#if results.length === 0}<div class="compat-empty"><h3>No matching apps</h3><p>Try a different search or reset the filters.</p><button type="button" onclick={() => {query = ''; status = 'All'; framework = 'All'; letter = 'All';}}>Reset filters</button></div>{/if}
   </section>
+  <AndroidCoverage />
   <section class="compat-contribute"><h2>Your app isn’t listed?</h2><p>That means we have no result here, not that it works or fails.<br>Help us record a reproducible test. Each app is one entry in our <a href="https://github.com/spectre-oss/shiraz/blob/main/landing/src/lib/compatibility.json">shared JSON catalog</a>.</p><a class="button primary" href="https://github.com/spectre-oss/shiraz/blob/main/docs/AI_CONTRIBUTING.md">Contribute a test report <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a></section>
 </main>
 <dialog class="limitations-dialog" bind:this={dialog} aria-labelledby="limitations-title" aria-describedby="limitations-description">

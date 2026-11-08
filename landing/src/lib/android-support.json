@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-11-09",
+  "note": "Maintained subsystem notes describe bounded development support. Partial never means a whole subsystem is complete. Shared framework rows do not certify every host backend.",
+  "areas": [
+    {
+      "id": "runtime",
+      "name": "Java / DEX runtime",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Component and app flows",
+      "notes": "Standalone ART, threads, exceptions and reflection run real apps. Broad Java/API behavior remains incremental.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "ui",
+      "name": "Views, input and lifecycle",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "App flows",
+      "notes": "Onboarding, pointer input, text entry and resizing exercised. Complex layouts, animations and complete app flows still expose gaps.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "resources",
+      "name": "Resources and themes",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "App flows",
+      "notes": "APK resources, density/configuration changes and selected theme paths work; arbitrary attributes and full theme parity remain incomplete.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "storage",
+      "name": "Files and preferences",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "Synthetic committed preferences and queued apply writes survive separate OpenJDK/ART processes. Telegram saved-login persistence is still unverified.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "database",
+      "name": "SQLite storage",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "App flows",
+      "notes": "SQLite-backed app state is used by tested apps; complete Android database APIs and every failure mode are not established.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "network",
+      "name": "Networking and TLS",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Targeted probes",
+      "notes": "A historical targeted network run records 49 passes. Guest sockets and initial MTProto exchange tested; full current network suite remains unrun.",
+      "evidence": "tests/api-probe/catalog.json"
+    },
+    {
+      "id": "ipc",
+      "name": "Binder and Android services",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "Selected in-process/host IPC services exist. Full Android service behavior and cross-process compatibility are not established.",
+      "evidence": "java/shiraz/runtime/ServiceProcess.java"
+    },
+    {
+      "id": "graphics",
+      "name": "Canvas, EGL and GLES",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "App flows",
+      "notes": "Real apps render through software/host graphics paths. Rendering parity and all graphics APIs are not verified.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "native-macos",
+      "name": "Android native ELF / Bionic",
+      "scope": "macOS ARM64",
+      "status": "Partial",
+      "verification": "App and component tests",
+      "notes": "Telegram library initialization and selected libc, socket, TLS and JNI bridges tested. This is not complete syscall or native-ABI compatibility.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "playback-macos",
+      "name": "Audio playback and AAC",
+      "scope": "macOS ARM64",
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "PCM output, WAV/AAC decode, AAC encode and timestamps tested with synthetic media. Telegram voice messages and calls remain unverified.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "capture-macos",
+      "name": "Microphone and camera",
+      "scope": "macOS ARM64",
+      "status": "Partial",
+      "verification": "Hardware unverified",
+      "notes": "Host bridges and foreground consent checks exist; physical capture in Telegram has not been verified. JPEG tests use synthetic pixels.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "video-macos",
+      "name": "Video recording",
+      "scope": "macOS ARM64",
+      "status": "Unsupported",
+      "verification": "Explicit limitation",
+      "notes": "The macOS video-recording pipeline is not implemented. Audio-only recording APIs do not imply video support.",
+      "evidence": "java/android/media/MediaRecorder.java"
+    },
+    {
+      "id": "sensors-macos",
+      "name": "Android sensors",
+      "scope": "macOS ARM64",
+      "status": "Unsupported",
+      "verification": "Explicit limitation",
+      "notes": "No Android sensor event bridge is advertised on Darwin.",
+      "evidence": "native/sensors.cpp"
+    },
+    {
+      "id": "cast-macos",
+      "name": "Remote media / casting",
+      "scope": "macOS ARM64",
+      "status": "Unsupported",
+      "verification": "Explicit limitation",
+      "notes": "Only a local default audio route is provided. Remote and cast routing are unavailable.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "webview",
+      "name": "WebView JavaScript / DOM",
+      "scope": "Shared framework",
+      "status": "Unsupported",
+      "verification": "App limitation",
+      "notes": "The current WebView subset does not supply a JavaScript/DOM engine; rich editing and arbitrary web content are not supported.",
+      "evidence": "docs/experiments/react-native/JOPLIN.md"
+    },
+    {
+      "id": "gms",
+      "name": "Google Play services runtime",
+      "scope": "Shared framework",
+      "status": "Unsupported",
+      "verification": "Explicit limitation",
+      "notes": "Shiraz does not provide the Google Play Store or Google Play system services. Bundled client libraries do not supply those services.",
+      "evidence": "docs/tested.md"
+    },
+    {
+      "id": "telephony",
+      "name": "Cellular telephony and SMS",
+      "scope": "Shared framework",
+      "status": "Unverified",
+      "verification": "Not accepted",
+      "notes": "No claim of real modem control, phone calls or carrier SMS compatibility. App login over the network is a separate flow.",
+      "evidence": "java/android/telephony/TelephonyManager.java"
+    },
+    {
+      "id": "full-platform",
+      "name": "Android platform certification",
+      "scope": "All hosts",
+      "status": "Unverified",
+      "verification": "Not measured",
+      "notes": "No complete CTS/VTS run, complete API behavior result or whole-platform compatibility percentage is established.",
+      "evidence": "docs/AI_CONTRIBUTING.md"
+    }
+  ]
+}

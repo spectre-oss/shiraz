@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { test, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
+import catalog from '../src/lib/compatibility.json' with {type:'json'};
 const require = createRequire(import.meta.url);
 
 test('responsive site keeps table columns aligned and has no accessibility violations', async ({page}) => {
@@ -85,23 +86,30 @@ test('poem translates only the hovered verse and supports keyboard focus', async
 
 test('compatibility directory filters recorded evidence and handles empty searches', async ({page}) => {
   await page.goto('/compatibility/');
-  await expect(page.locator('.compat-table tbody tr')).toHaveCount(13);
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(catalog.applications.length);
   await page.getByRole('button',{name:'Blocked',exact:true}).click();
   await expect(page.locator('.compat-table tbody tr')).toHaveCount(1);
   await page.getByRole('group',{name:'Filter by recorded status'}).getByRole('button',{name:'All',exact:true}).click();
   await page.getByLabel('Framework',{exact:true}).selectOption('Flutter');
   await expect(page.locator('.compat-table tbody tr')).toHaveCount(2);
-  await page.getByRole('searchbox').fill('no matching application');
+  await page.getByLabel('Search apps',{exact:true}).fill('no matching application');
   await expect(page.getByRole('heading',{name:'No matching apps'})).toBeVisible();
   await page.getByRole('button',{name:'Reset filters'}).click();
-  await expect(page.locator('.compat-table tbody tr')).toHaveCount(13);
-  await page.getByRole('searchbox').fill('Joplin');
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(catalog.applications.length);
+  await page.getByLabel('Search apps',{exact:true}).fill('Joplin');
   await page.getByRole('button',{name:'Known limitations',exact:true}).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByText(/Body editing is unsupported/)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await expect(page.getByRole('button',{name:'Known limitations',exact:true})).toBeFocused();
+  await page.getByLabel('Search apps',{exact:true}).fill('Telegram');
+  await expect(page.getByRole('rowheader',{name:'Telegram',exact:true})).toBeVisible();
+  await expect(page.locator('.compat-table tbody tr')).toContainText('macOS ARM64');
+  await expect(page.getByRole('region',{name:'App compatibility results'}).getByRole('cell',{name:'Partial',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Known limitations',exact:true}).click();
+  await expect(page.getByRole('dialog')).toContainText('saved login across restart');
+  await expect(page.getByRole('dialog')).toContainText('physical microphone/camera capture remain unverified');
 });
 
 test('compatibility mobile view stays within the viewport and is accessible', async ({page}) => {
@@ -136,4 +144,27 @@ test('limitations dialog can reverse an interrupted close and honors reduced mot
   expect(await page.locator('dialog').evaluate(dialog=>getComputedStyle(dialog).transitionDuration)).toBe('0s');
   await page.keyboard.press('Escape');
   await expect(page.locator('dialog')).not.toBeVisible();
+});
+
+test('Android tracker separates class inventory, subsystem support and historical probe results', async ({page}) => {
+  await page.goto('/compatibility/');
+  await page.getByRole('link',{name:'Android coverage tracker',exact:true}).click();
+  const coverage=page.locator('#android-tracker');
+  await expect(coverage.getByRole('heading',{name:'How much of Android works?'})).toBeVisible();
+  await expect(coverage.getByText('No whole-Android compatibility percentage has been established.',{exact:true})).toBeVisible();
+  await expect(coverage.getByRole('img',{name:/class names present; .* absent from the API 35 reference/})).toBeVisible();
+  await coverage.getByLabel('Search Android support').fill('microphone');
+  const table=coverage.getByRole('region',{name:'Android subsystem coverage'});
+  await expect(table.getByRole('rowheader',{name:'Microphone and camera'})).toBeVisible();
+  await expect(table).toContainText('Hardware unverified');
+  await coverage.getByLabel('Support status').selectOption('Unsupported');
+  await expect(table).toContainText('No matching subsystems.');
+  await coverage.getByRole('button',{name:'Reset support filters'}).click();
+  await coverage.getByLabel('Host scope').selectOption('macOS ARM64');
+  await coverage.getByLabel('Support status').selectOption('Unsupported');
+  await expect(table.getByRole('rowheader',{name:'Video recording',exact:true})).toBeVisible();
+  await expect(table.getByRole('rowheader',{name:'Files and preferences',exact:true})).toHaveCount(0);
+  await expect(coverage.getByRole('heading',{name:'Historical targeted network run'})).toBeVisible();
+  await expect(coverage.getByRole('list',{name:'Recorded probe status totals'})).toContainText('NOT RUN');
+  await expect(coverage.getByRole('region',{name:'Historical probe results'})).toContainText('Network');
 });
