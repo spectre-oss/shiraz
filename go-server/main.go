@@ -249,20 +249,25 @@ func (s *server) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid APK: "+err.Error(), 400)
 		return
 	}
+	accepted = true
+	s.acceptRun(w, dir, path, filepath.Base(file.FileName()), fmt.Sprintf("%x", hash.Sum(nil)))
+}
+
+func (s *server) acceptRun(w http.ResponseWriter, dir, path, name, digest string) {
 	s.mu.Lock()
 	if s.stopping {
+		s.running = false
 		s.mu.Unlock()
 		os.RemoveAll(dir)
 		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
 		return
 	}
-	s.appName = filepath.Base(file.FileName())
-	s.latestLogDir = filepath.Join(s.root, "build", "runs", fmt.Sprintf("%x", hash.Sum(nil)))
+	s.appName = name
+	s.latestLogDir = filepath.Join(s.root, "build", "runs", digest)
 	s.latestRunStarted = time.Now()
 	s.runs.Add(1)
 	s.mu.Unlock()
-	accepted = true
-	s.broadcast(event{"app", filepath.Base(file.FileName())})
+	s.broadcast(event{"app", name})
 	go s.run(dir, path)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -421,6 +426,8 @@ func main() {
 	mux.HandleFunc("POST /webrtc", s.webrtcAnswer)
 	mux.HandleFunc("POST /upload", s.upload)
 	mux.HandleFunc("GET /logs", s.savedLogs)
+	mux.HandleFunc("GET /apps", s.library)
+	mux.HandleFunc("POST /apps/{id}/run", s.launchLibrary)
 	httpServer := &http.Server{Addr: *listen, Handler: mux}
 	done := make(chan struct{})
 	go func() {
