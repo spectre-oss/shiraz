@@ -495,6 +495,12 @@ std::vector<LoadedModuleInfo> Loader::module_info() const {
   }
   return result;
 }
+std::vector<uint64_t> Loader::verified_mrs_window_sites(const std::string &module_path) const {
+  for (auto *module : state_->order)
+    if (module->image && module->key == module_path)
+      return module->image->verified_mrs_window_sites();
+  throw ElfError("MRS installation evidence module is not loaded");
+}
 Binding Loader::symbol(Module *handle, const std::string &name,
                        const std::string &version) const {
   if (!valid_handle(handle) || name.empty())

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
+#include "shiraz/darwin/guest/image.hpp"
+#include "shiraz/darwin/guest/jit.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -154,12 +156,55 @@ int main(int argc, char **argv) {
     };
     reject_table_pointer(true);
     reject_table_pointer(false);
+    // Inspect a sealed but deliberately unexecuted fixture. Zero relocation
+    // targets here are not execution stubs and never enter the real Loader.
+    {
+      Image inspected(bytes, Image::Mapping::Deferred);
+      bool unsealed_refused = false;
+      try { (void)inspected.verified_mrs_window_sites(); }
+      catch (const ElfError &error) {
+        unsealed_refused = std::string(error.what()) == "MRS installation evidence requires a sealed image";
+      }
+      require(unsealed_refused, "unsealed mappings cannot attest MRS installation");
+      inspected.relocate([](size_t) { return uintptr_t(0); });
+      inspected.seal();
+      auto expected_sites = std::vector<uint64_t>{};
+      for (const auto &site : analysis.sites)
+        if ((site.instruction & 31) != 31) expected_sites.push_back(site.address);
+      require(!expected_sites.empty() && inspected.verified_mrs_window_sites() == expected_sites,
+              "mapped default-accessor patches attest exact non-XZR site identities");
+      auto site_index = size_t(std::find_if(analysis.sites.begin(), analysis.sites.end(),
+          [](const auto &site) { return (site.instruction & 31) != 31; }) - analysis.sites.begin());
+      auto *code = reinterpret_cast<uint8_t *>(inspected.load_bias() + expected_sites.front());
+      auto *accessor_byte = reinterpret_cast<uint8_t *>(inspected.load_bias() + inspected.elf().first_page +
+                              inspected.elf().span + site_index * 64 + 56);
+      auto changed_refused = [&](uint8_t *byte, const char *message) {
+        const uint8_t original = *byte;
+        { JitWriteScope writable; *byte ^= 1; }
+        bool refused = false;
+        try { (void)inspected.verified_mrs_window_sites(); }
+        catch (const ElfError &error) { refused = std::string(error.what()) == message; }
+        { JitWriteScope writable; *byte = original; }
+        require(refused && inspected.verified_mrs_window_sites() == expected_sites,
+                "changed mapped instruction/accessor cannot attest; restoration remains verifiable");
+      };
+      changed_refused(code, "guest MRS installation changed");
+      changed_refused(accessor_byte, "guest MRS island installation changed");
+      std::cout << "M5_MRS_INSTALLATION_PASS unsealed_refused=1 branch_tamper=1 accessor_tamper=1 restored=1 execution_claim=0\n";
+    }
     Loader *current = nullptr;
     Loader loader({fixtures}, native_personality([&](const void *p) { return current && current->contains_code(p); }));
     current = &loader;
     auto *module = loader.link("libprotected.so");
     require(!loader.constructor_count() && loader.rewritten_thread_pointers() == analysis.sites.size(),
             "all planned instructions patched before constructors");
+    const auto loaded = loader.module_info();
+    require(loaded.size() == 1 && !loader.verified_mrs_window_sites(loaded[0].name).empty(),
+            "Loader exposes verified installed sites only for an actual sealed module");
+    bool missing_module_refused = false;
+    try { (void)loader.verified_mrs_window_sites("not-a-loaded-module"); }
+    catch (const ElfError &) { missing_module_refused = true; }
+    require(missing_module_refused, "MRS installation evidence refuses fake module paths");
     loader.open("libprotected.so");
     require(loader.constructor_count() == 1 && loader.image_count() == 1, "real protected constructor executed");
     auto function_address = loader.symbol(module, "protected_sum").address;

@@ -3,6 +3,12 @@
 #include <array>
 #include <cstdint>
 namespace shiraz::guest {
+// Production MRS admission profile v1. The complete half-open window must
+// lie in the prepared native stack. Later spill addresses still require an
+// independent per-site proof; this does not establish continuous SP residence.
+inline constexpr uint32_t kMrsStackWindowProfile = 1;
+inline constexpr uint64_t kMrsStackBytesBefore = 4096;
+inline constexpr uint64_t kMrsStackBytesAfter = 256;
 struct ThreadPointerPatch {
   uint32_t replacement;
   std::array<uint8_t, 64> island{};

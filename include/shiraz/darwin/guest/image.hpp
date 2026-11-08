@@ -39,6 +39,8 @@ public:
   uintptr_t load_bias() const { return reinterpret_cast<uintptr_t>(base_) - elf_.first_page; }
   uint64_t mapping_size() const { return mapping_size_; }
   size_t rewritten_thread_pointers() const { return analysis_.sites.size(); }
+  // Read-only mapped-code verification, not execution or spill-footprint proof.
+  std::vector<uint64_t> verified_mrs_window_sites() const;
   size_t unwind_frame_count() const { return unwind_ ? unwind_->frame_count() : 0; }
 
 private:

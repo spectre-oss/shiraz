@@ -213,6 +213,29 @@ void Image::seal() {
   metrics_.map_ns += elapsed(map_start);
 }
 
+std::vector<uint64_t> Image::verified_mrs_window_sites() const {
+  if (link_state_ != LinkState::Sealed)
+    throw ElfError("MRS installation evidence requires a sealed image");
+  std::vector<uint64_t> sites;
+  sites.reserve(analysis_.sites.size());
+  for (size_t i = 0; i < analysis_.sites.size(); ++i) {
+    const auto &site = analysis_.sites[i];
+    const auto *code = static_cast<const uint8_t *>(at(site.address, 4));
+    const auto *island = base_ + elf_.span + i * 64;
+    const auto expected = plan_thread_pointer(reinterpret_cast<uintptr_t>(code), site.instruction,
+                                               reinterpret_cast<uintptr_t>(island));
+    uint32_t installed;
+    std::memcpy(&installed, code, sizeof(installed));
+    if (installed != expected.replacement)
+      throw ElfError("guest MRS installation changed");
+    if (!expected.uses_island) continue; // XZR discards TP; no accessor runs.
+    if (std::memcmp(island, expected.island.data(), expected.island.size()))
+      throw ElfError("guest MRS island installation changed");
+    sites.push_back(site.address);
+  }
+  return sites;
+}
+
 uintptr_t Image::address(size_t index) const {
   const auto &symbol = elf_.symbols.at(index);
   if (!symbol.section)

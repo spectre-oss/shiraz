@@ -40,6 +40,10 @@ bool prepared_guest_stack_contains(uintptr_t pointer) noexcept;
 // Snapshot bytes remaining above pointer in this thread's prepared extent;
 // zero means unavailable/outside. The physical extent outlives TLS epochs.
 uintptr_t prepared_guest_stack_remaining(uintptr_t pointer) noexcept;
+// Validates anchor membership and [anchor-before, anchor+after) from one
+// cached bound pair, using subtraction so caller sizes cannot wrap addresses.
+// Async query only; no allocation, registry lock or pthread metadata lookup.
+bool prepared_guest_stack_window(uintptr_t anchor, uint64_t before, uint64_t after) noexcept;
 // Handles have namespace-independent identity and stay alive while any thread
 // retains a value. Deletion suppresses future selections, never invokes a
 // destructor. A callback already selected during concurrent deletion may finish.

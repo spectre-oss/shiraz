@@ -8,6 +8,7 @@
 #include <libkern/OSCacheControl.h>
 #include <sys/mman.h>
 #include <thread>
+#include <pthread.h>
 #include <vector>
 #include <csignal>
 #include <sys/wait.h>
@@ -24,6 +25,8 @@ extern "C" void *shiraz_tpidr_stress_access() noexcept;
 extern "C" char shiraz_tpidr_guard_start[], shiraz_tpidr_guard_first[],
     shiraz_tpidr_guard_second[], shiraz_tpidr_guard_failure[], shiraz_tpidr_guard_end[];
 extern "C" void shiraz_guest_stack_check_fail();
+extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
+                                        uint64_t, uint64_t, uint64_t, uintptr_t) noexcept;
 struct alignas(16) Result {
   uint64_t integers[31], sp, nzcv, fpcr, fpsr, padding;
   uint8_t vectors[32][16];
@@ -70,6 +73,50 @@ static void verify(const Result &result, unsigned target, uintptr_t tls) {
   for (unsigned reg = 0; reg < 32; ++reg)
     for (unsigned byte = 0; byte < 16; ++byte)
       require(result.vectors[reg][byte] == 0x40 + reg, "all 128 vector bits preserved");
+}
+static void check_mrs_window() {
+  const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+  const auto low = high - pthread_get_stacksize_np(pthread_self());
+  require(prepared_guest_stack_window(low + kMrsStackBytesBefore, kMrsStackBytesBefore, kMrsStackBytesAfter) &&
+              prepared_guest_stack_window(high - kMrsStackBytesAfter, kMrsStackBytesBefore, kMrsStackBytesAfter),
+          "complete MRS window admits exact native extent boundaries");
+  require(!prepared_guest_stack_window(low + kMrsStackBytesBefore - 1, kMrsStackBytesBefore, 1) &&
+              !prepared_guest_stack_window(high - kMrsStackBytesAfter + 1, 0, kMrsStackBytesAfter) &&
+              !prepared_guest_stack_window(high, 0, 0) &&
+              !prepared_guest_stack_window(low + kMrsStackBytesBefore, UINT64_MAX, 1) &&
+              !prepared_guest_stack_window(high - kMrsStackBytesAfter, 0, UINT64_MAX) &&
+              !prepared_guest_stack_window(UINTPTR_MAX, UINT64_MAX, UINT64_MAX),
+          "MRS window rejects one-byte boundary crossing and overflow without reading memory");
+  for (const auto anchor : {low + kMrsStackBytesBefore - 16, high - kMrsStackBytesAfter + 16}) {
+    require(!(anchor & 15) && prepared_guest_stack_contains(anchor), "negative window anchor is an aligned native-stack member");
+    int descriptors[2];
+    require(pipe(descriptors) == 0, "MRS window diagnostic pipe");
+    const pid_t child = fork();
+    require(child >= 0, "MRS window child");
+    if (!child) {
+      close(descriptors[0]);
+      if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
+      close(descriptors[1]);
+      std::signal(SIGABRT, [](int) { _exit(97); });
+      (void)shiraz_guest_tls_access(0, 0, 0, 0, 0, 0, 0, anchor);
+      _exit(98);
+    }
+    close(descriptors[1]);
+    std::string diagnostic;
+    char buffer[256]; ssize_t count;
+    while ((count = read(descriptors[0], buffer, sizeof(buffer))) > 0) {
+      diagnostic.append(buffer, size_t(count));
+      if (diagnostic.size() > 8192) { kill(child, SIGKILL); break; }
+    }
+    close(descriptors[0]);
+    int status;
+    require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 97 &&
+                count == 0 && diagnostic == "SHIRAZ_GUEST_FATAL MRS spill window outside prepared native stack extent\n",
+            "production MRS accessor refuses incomplete windows even when anchor itself is valid");
+  }
+  std::cout << "M5_MRS_WINDOW_PASS profile=" << kMrsStackWindowProfile
+            << " before=" << kMrsStackBytesBefore << " after=" << kMrsStackBytesAfter
+            << " exact_boundaries=1 lower_refusal=1 upper_refusal=1 overflow=1\n";
 }
 int main() {
   try {
@@ -138,6 +185,7 @@ int main() {
     sys_icache_invalidate(memory, used);
     prepare_guest_tls();
     uintptr_t tls = reinterpret_cast<uintptr_t>(guest_tls_base());
+    check_mrs_window();
     for (const auto &program : programs) {
       Result result{};
       errno = ELOOP;
@@ -151,6 +199,10 @@ int main() {
     for (int i = 0; i < 4; ++i) threads.emplace_back([&, i] {
       bool arrived = false;
       try {
+        uintptr_t native_sp;
+        __asm__ volatile("mov %0, sp" : "=r"(native_sp));
+        require(!prepared_guest_stack_window(native_sp, 0, 1) && !guest_tls_prepared(),
+                "unprepared window query refuses without initializing TLS");
         prepare_guest_tls();
         uintptr_t own = reinterpret_cast<uintptr_t>(guest_tls_base());
         bases[i] = own;

@@ -17,6 +17,11 @@ extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
       (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
       std::abort();
     }
+    if (!prepared_guest_stack_window(original_sp, kMrsStackBytesBefore, kMrsStackBytesAfter)) {
+      constexpr char message[] = "SHIRAZ_GUEST_FATAL MRS spill window outside prepared native stack extent\n";
+      (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+      std::abort();
+    }
     return guest_tls_base();
   } catch (...) { std::abort(); }
 }

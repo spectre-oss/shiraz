@@ -83,6 +83,7 @@ public:
   Binding global_symbol(const std::string &name, const std::string &version = {}) const;
   LoadedAddressInfo address_info(const void *pointer) const;
   std::vector<LoadedModuleInfo> module_info() const;
+  std::vector<uint64_t> verified_mrs_window_sites(const std::string &module_path) const;
   bool valid_handle(const void *handle) const;
   bool contains_code(const void *pointer) const;
   // Immutable snapshot for callback validation during constructors on other
