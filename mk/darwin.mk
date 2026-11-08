@@ -2038,3 +2038,13 @@ macos-guest-check: macos-guest-descriptor-local-check
 macos-guest-descriptor-local-check:
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -Wall -Wextra -Werror -fsyntax-only tests/darwin/guest/descriptor_compile.cpp
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_JNI_FLAGS) -std=c++17 -Wall -Wextra -Werror -fsyntax-only native/darwin/guest/jni.cpp
+
+.PHONY: macos-guest-jni-descriptor-local-check
+# Requires a current --mode adhoc JNI run; only guest ELF variants are built.
+macos-guest-jni-descriptor-local-check:
+	uv run --no-project python scripts/macos_guest_jni_descriptor_local.py
+
+.PHONY: macos-guest-jni-descriptor-hardened-local-check
+# Reuses an existing strict signed closure; verifies it without signing.
+macos-guest-jni-descriptor-hardened-local-check:
+	uv run --no-project python scripts/macos_guest_jni_descriptor_local.py --mode hardened

@@ -14,6 +14,9 @@ extern void free(void *);
 extern void *memcpy(void *, const void *, size_t);
 extern int memcmp(const void *, const void *, size_t);
 extern int __cxa_thread_atexit_impl(void (*)(void *), void *, void *);
+#ifndef SHIRAZ_REGISTERED_SIGNATURE
+#define SHIRAZ_REGISTERED_SIGNATURE "(IIIIIIIIIIII)J"
+#endif
 
 static JavaVM *guest_vm;
 static volatile int initialized;
@@ -124,7 +127,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
   if (!klass)
     return JNI_ERR;
   JNINativeMethod methods[] = {
-      {"registered", "(IIIIIIIIIIII)J", (void *)registered},
+      {"registered", SHIRAZ_REGISTERED_SIGNATURE, (void *)registered},
       {"registeredObject", "(Ljava/lang/String;[I)Ljava/lang/String;",
        (void *)registered_object},
   };
