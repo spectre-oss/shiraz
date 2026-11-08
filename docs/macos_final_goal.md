@@ -566,6 +566,133 @@ Not done yet:
   checked only with a standalone SDL/ANGLE probe (build/macos/m4/hidpi), not
   with a running app.
 
+### Guest ELF and JNI foundations (M5, incomplete)
+
+After building the Darwin ART runtime, the native-library fixture gates are:
+
+```sh
+make runtime-art
+make macos-guest-check
+make macos-guest-jni-adhoc-check
+```
+
+The first gate checks memory layout, bounded ELF parsing and malformed inputs,
+four AArch64 RELA relocation forms, constructors/BSS, scalar argument marshalling,
+generated closures and guest `va_list` decoding. It also runs dependency-group and
+initial libc-personality fixtures, including version matching, breadth-first lookup,
+`DT_SYMBOLIC`, global precedence, cycles, weak-null imports, failure rollback and
+per-thread errno translation. A link-only API permits binding inspection without
+executing constructors. Executable fixtures run ad-hoc
+and hardened with only `allow-jit`; parser rejection tests use ASan/UBSan.
+File-I/O fixtures cover real files, guarded guest stat/flock layouts, locks,
+nanosecond timestamps, directory iteration, symlinks, pipe errno translation,
+32-bit ioctl requests, checked-open/read failure, microsecond timestamps and
+working-directory changes. Filesystem-space queries serialize the guest statvfs
+layout with full-width host counters. Layouts and constants are derived
+by compiling the pinned bionic headers. The host adapter also runs under ASan/UBSan.
+
+The memory API gate checks anonymous and file-backed mappings, shared writeback,
+private copies, offsets, partial unmaps, real protection faults, concurrent calls
+and bounded reservations. Mapping/protection operations are restricted to memory
+owned by this provider; fixed mappings cannot replace host or loader allocations.
+Guest addresses and offsets use the host's 16 KiB page granularity. Executable
+guest mappings, unknown flags and `MAP_FIXED_NOREPLACE` remain explicitly refused;
+`mremap` is not yet implemented.
+
+The pthread gate checks guest entry callbacks, attributes with guarded bionic
+buffers, join/detach, thread identity, per-thread keys and repeated guest key
+destructors. Returned pthread errors are translated separately from errno.
+Thread/destructor code pointers require validation against resident ELF images.
+An immutable executable-image snapshot lets constructor-created workers validate
+callbacks without waiting on the constructor's loader lock.
+
+The synchronization gate adds static/dynamic mutexes, recursion and error-checking
+types, condition signal/broadcast, realtime/monotonic deadlines and contended
+one-time initialization. It checks buffer guards, busy destruction and mutex
+reacquisition after timeout. Host objects stay outside guest buffers; process-shared
+attributes are explicitly unsupported. Guest monotonic time uses Darwin's awake
+uptime clock. Default private rwlocks additionally check concurrent readers,
+writer exclusion, guarded layouts and busy destruction. Non-default rwlock
+attributes remain unsupported.
+
+Unnamed semaphore adapters keep the full bionic count range in lock-free atomics
+and use an immediately unlinked private POSIX semaphore only for coalesced
+wakeups. Posting takes no registry mutex. Tests cover 40,000 posts, overflow,
+four-byte guest alignment, reuse, posting from an actual host signal handler and
+interrupted waits. Runtime entry points initialize guest errno before guest code
+can use the error path from a signal handler. This does not establish Android
+signal-handler or semaphore timed-wait support; those remain unfinished.
+
+The compiler-emulated TLS gate builds unchanged, hash-pinned LLVM compiler-rt
+under ignored `.deps`, retaining its Apache-2.0 WITH LLVM-exception license.
+Real guest C++ and peer-DSO fixtures verify initialized/zero TLS, over-alignment,
+thread isolation and LIFO thread-exit destructors, including registration during
+destruction. Native per-thread storage supplies a nonzero process stack guard.
+This gate does not rewrite TPIDR instructions or implement ELF `PT_TLS`; both
+remain unfinished. The fixtures use freestanding cross-compilation, with no
+claim that protected OsmAnd code has executed.
+
+The separate TPIDR trampoline gate patches explicitly declared first-party code
+sites into bounded branch islands. It checks full-width GPRs, all 32 vector
+registers, NZCV/FPCR/FPSR, SP/LR, PAC instruction sequences and concurrent real
+per-thread pointer reads. A rewritten two-read stack-guard pattern returns
+normally and aborts after deliberate corruption. Reserved x18, malformed sites
+and unreachable islands are rejected. Host thread-pointer registers are never
+written. Automatic ELF code-site selection and guest unwind integration remain
+unpassed; the gate reports both limits and does not enable native APK launch.
+
+The ART gate loads a real freestanding AArch64 ELF with a virtual libc dependency through NativeBridge with
+CheckJNI enabled. It checks `JNI_OnLoad`, symbol lookup and `RegisterNatives`,
+packed narrow stack arguments and floating-point overflow arguments, Java
+upcalls through ellipsis/V/A forms, objects, fields, arrays, reflected method IDs,
+exceptions, registration replacement and calls from four Java threads. A native
+file roundtrip and page-mapping/protection call check the providers through ART
+and the shadow JNI table. A separate
+Mach-O JNI library loads after the bridge is active, checking host-library routing.
+The adapter inventories all 229 callable JNI table slots from ART's own header;
+this inventory does not mean every slot has dedicated runtime coverage.
+Four guest-created threads additionally exercise regular/daemon attachment,
+Java calls, detach/GetEnv and reattachment through the shadow VM. A constructor
+also creates and joins a guest worker with a guest key destructor. Thread fixtures
+exercise the mutex/condition/once adapters around attachment and Java calls. They
+do not establish instruction-based bionic TLS. Four thread-exit callbacks also
+reattach, call Java and detach during cleanup. Shadow `JNIEnv` ownership uses a
+native pthread key to support these late callbacks.
+
+`make macos-guest-jni-check` additionally runs hardened ART with only `allow-jit`.
+This gate remains unpassed: the ad-hoc ART dylibs fail library validation without
+matching Team IDs. The harness verifies the runtime signing flag and exact
+entitlements and retains per-mode results; it does not disable library validation.
+
+These are synthetic compatibility fixtures. Native APK native-code execution remains unverified:
+the remaining bionic services, guest TLS and instruction handling, FastNative/CriticalNative
+handling and real OsmAnd native-library execution remain unfinished. No OsmAnd
+or F-Droid execution is established by these gates.
+
+Automatic thread-pointer rewriting now uses pinned AArch64 decoding, bounded
+control-flow traversal, validated unwind entries and JNI registration tables.
+All seven unchanged OsmAnd libraries pass this static site analysis. Protected
+ELF fixtures exercise constructors, private callbacks and canary failure in
+ad-hoc, hardened allow-jit-only and sanitizer modes; ART JNI additionally runs
+with compiler-generated stack protection. This establishes instruction handling
+for those tests, not complete CPU compatibility or OsmAnd execution.
+
+Explicit native services now include opaque stdio handles and scalar libm
+adapters. The ten printf-family adapters support scalar variadics and va_list; positional formats, %n and binary128 remain unsupported. Original
+ELF unwind frames are validated and registered with Darwin libunwind; a native
+backtrace traverses two guest frames across repeated image lifetimes. Guest
+C++ exceptions, LSDA/personality interoperability and generated island unwinding
+remain unverified.
+
+Guest-only libdl, explicit zlib stream/callback adapters and bounded liblog
+ellipsis/va_list formatting now pass ad-hoc, hardened allow-jit-only and sanitizer
+tests. Dynamic images remain resident on logical close; RTLD_NEXT and new loads
+during constructors remain unsupported. Abandoned zlib streams retain their
+allocations and budget charges; pre-unmap cleanup is unfinished. Integrated ART
+JNI still passes ad-hoc. The unchanged OsmAnd link-only gate reports unresolved
+libc services and missing libjnigraphics; no real OsmAnd constructors or
+JNI_OnLoad functions have executed.
+
 ## Acceptance on macOS
 
 All of the following, on Apple Silicon, with retained evidence:
@@ -592,3 +719,79 @@ All of the following, on Apple Silicon, with retained evidence:
 | M5 Native libraries | Guest ELF loader runs arm64-v8a JNI libraries, including TLS rewriting and variadic thunks; NDK fixtures pass |
 | M6 OsmAnd+ | Full acceptance above |
 | M7 Distribution | Signed `.app` per APK, Builder support, CI |
+
+
+## Current native-service and startup evidence
+
+DSO callbacks now finalize before image unmapping, with per-DSO LIFO, recursive
+registration and concurrent-callback checks. Scalar libc adapters translate
+Android unsigned UTF-32 buffers explicitly instead of aliasing Darwin signed
+wchar_t. The property namespace follows the existing nominal API-27 framework
+profile. All ten printf-family functions have bounded formatting and translated
+errors. The JNI bitmap provider unwraps the checked shadow environment before
+calling Shiraz's software bitmap implementation; the ART fixture verifies RGBA,
+nested locks and writeback. These fixtures do not establish real OsmAnd JNI.
+
+All seven unchanged OsmAnd native libraries now link and initialize through
+ART's NativeBridge. The real-library gate observes 115 constructors, exercises
+legacy JNI opening and closing the APK's exact basemap, runs OsmAndCore PointI
+intersection/orientation and deletion, and checks 83 AndroidXPath iterator
+create/destroy pairs against the API-27 Path view. The retained AndroidXPath
+entrypoints are tested directly because this APK stripped its public wrappers.
+Native library and basemap hashes are checked against the unchanged APK.
+Per-library parse/map/rewrite/bind/init timings, independently counted constructor
+metadata and three unique JNI_OnLoad provider/version results are recorded by the
+real-library harness. Rewritten TLS accessor backtraces now retain the interrupted
+guest PC and its caller for framed and frameless functions, with normal, hardened
+and sanitizer checks. A purpose-built guest C++ fixture now verifies nested RAII cleanup,
+rethrow and typed catches against the unchanged APK libc++ and a hash-pinned LLVM
+guest libunwind archive, in normal and hardened allow-jit-only modes. This covers
+guest exception/LSDA paths; exception propagation across host ABI frames remains
+unsupported.
+
+Explicit networking, event, signal, account, cleanup, memory-remap and filesystem
+adapters have normal, hardened fixture and sanitizer coverage. Signal-mask changes
+are restricted to guest-owned dispositions and must be restored before shutdown;
+native ART masks remain protected. A portable ELF/DEX corpus now exercises TLS,
+guards, actual NEON arithmetic, signals/masks and formatting on Darwin. The
+identical real-Android reference run remains unperformed, so this is not yet
+differential proof. Unsupported
+operations still fail explicitly; APFS statfs, inotify and advanced signal modes
+remain unavailable. Typed EGL/GLES providers cover the 93 observed direct GL
+imports and pass real ANGLE pbuffer/readback checks. Strict hardened ART remains
+unverified: the existing ad-hoc native libraries fail library validation. The
+harness now prepares isolated native copies with checked dependency resolution;
+`make macos-guest-jni-hardened-prepare` needs no signing identity or execution.
+Running the strict gate requires a public `SHIRAZ_CODESIGN_IDENTITY` whose signed
+copies all expose the same actual TeamIdentifier. Only allow-jit is permitted on
+the main executable. Successful ad-hoc ART execution does not complete M5.
+
+The missing macOS NativeSound library is now built by macos-runtime-libs. It
+uses pinned Ogg Vorbis decoding and AudioToolbox/AudioQueue with real output;
+all five OsmAnd sound assets decode, and output/control/release and unavailable
+device tests pass. Linux audio source is unchanged after Apple preprocessing.
+Darwin SensorManager service creation now reports no supported bridged sensors
+instead of probing Linux /sys; subscriptions remain unavailable.
+
+With `SHIRAZ_GUEST_LOADER=1`, the actual OsmAnd APK now renders its native map
+at 720 by 1280 and completes a bounded eight-frame run with status 0. Read-only
+Android font aliases include the ART ANDROID_ROOT/fonts namespace used by the
+legacy Skia implementation. The app-provided snapshot shows Iran and the Caspian
+Sea with OsmAnd map controls; it is an actual app frame, not a fixture. Run:
+
+```sh
+SHIRAZ_GUEST_LOADER=1 make run APK=context/apks/net.osmand.plus_541003.apk
+```
+
+The loader remains explicitly opt-in while M5 gates are unfinished. HTTPS,
+interactive walkthrough, routing, persistence, responsive resizing and full
+OsmAnd acceptance remain unverified. A bounded rendering success does not
+establish those flows or F-Droid compatibility.
+
+Additional service fixtures cover fortified memory/format operations, scanf,
+locale and multibyte translation, time/system queries, bounded scalar helpers,
+and nonlocal jumps that reject crossing native ABI frames. Binary128 conversions
+and log2l use integer arithmetic with explicit rounding; their normal, hardened
+allow-jit-only and sanitizer fixtures pass. Process services have the same three
+fixture gates, but unsupported syscalls, including futex, still report ENOSYS.
+These service fixtures do not establish unchanged-library or app execution.

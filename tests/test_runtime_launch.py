@@ -287,12 +287,12 @@ class LaunchCommandTests(unittest.TestCase):
         report = {**self.report, 'native_abis': ['arm64-v8a', 'x86_64']}
         out = io.StringIO()
         with patch.object(runtime, 'host_system', return_value='Darwin'), \
-                patch.dict(os.environ, {'SHIRAZ_REFUSE_NATIVE_LIBS': ''}), \
+                patch.dict(os.environ, {'SHIRAZ_REFUSE_NATIVE_LIBS': '', 'SHIRAZ_GUEST_LOADER': '0'}), \
                 patch.object(runtime, 'runtime_inputs', side_effect=AssertionError('reached launch inputs')), \
                 contextlib.redirect_stdout(out):
             with self.assertRaisesRegex(AssertionError, 'reached launch inputs'):
                 runtime.run_activity(Path('missing.apk'), report)
-        self.assertIn('SHIRAZ_UNSUPPORTED native-libraries abis=arm64-v8a,x86_64 reason=m5-guest-loader-missing', out.getvalue())
+        self.assertIn('SHIRAZ_UNSUPPORTED native-libraries abis=arm64-v8a,x86_64 reason=m5-guest-loader-disabled', out.getvalue())
 
     def test_darwin_rejects_linux_only_runtime_switches(self):
         for variable, value, message in (('SHIRAZ_ART_MODE', 'jit', 'jit is not supported on macOS'),

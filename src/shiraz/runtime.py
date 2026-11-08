@@ -565,7 +565,7 @@ def profile_environment(env, profile_values, version):
 
 def launch_command(system, *, root, host, environ, vm, classpath, framework_resources, work, data, app_lib,
                    metadata, package, app, activity, width, height, frames, snapshot, log_level,
-                   execution_options, device_profile, profile_values, digitalis, version, gles=False):
+                   execution_options, device_profile, profile_values, digitalis, version, gles=False, guest_bridge=None):
     """Build the ART command line and environment without touching the filesystem."""
     darwin = system == 'Darwin'
     boot = ':'.join(str(host / 'framework' / name) for name in (DARWIN_JARS if darwin else JARS))
@@ -593,6 +593,11 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
             env.setdefault('SHIRAZ_HOST_' + key, env.pop(key))
     if darwin:
         darwin_gles_environment(env, root, gles)
+        env.pop('SHIRAZ_GUEST_EGL_SHIM', None)
+        if guest_bridge:
+            env['SHIRAZ_ANDROID_FONT_DIR'] = str(root / '.local/share/shiraz/fonts')
+        if guest_bridge and gles:
+            env['SHIRAZ_GUEST_EGL_SHIM'] = str(root / DARWIN_LIBRARIES / 'libEGL_shim.so')
     if digitalis:
         env['LD_LIBRARY_PATH'] = str(digitalis.parent) + ':' + env['LD_LIBRARY_PATH']
         # Digitalis strips host loader variables and unmangles this prefix
@@ -613,8 +618,9 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
         # absolute directories, then @rpath. No preload, no -Xcompiler: the
         # interposers and dex2oat are not ported (M5).
         command = [str(vm), '-Xbootclasspath:' + boot, '-Xnoimage-dex2oat', *execution_options, '-Xcheck:jni',
+                   *(['-XX:NativeBridge=' + str(guest_bridge), '-Xforce-nb-testing', '-Dshiraz.guestAbi=arm64-v8a'] if guest_bridge else []),
                    '-Dlog.tag=' + log_level, *trust_store,
-                   '-Djava.library.path=' + ':'.join((str(root / DARWIN_LIBRARIES), str(host / 'lib64'))),
+                   '-Djava.library.path=' + ':'.join((str(root / DARWIN_LIBRARIES), str(host / 'lib64'), *([str(app_lib)] if guest_bridge else []))),
                    *tail]
         return command, env
     compat = root / 'build/libshiraz-android-process.so'
@@ -642,6 +648,21 @@ def launch_command(system, *, root, host, environ, vm, classpath, framework_reso
         command = [loader, '--library-path', library_path,
                    *(['--preload', preload] if preload else []), *command]
     return command, env
+
+
+def darwin_guest_bridge(root, native_abis, environ):
+    """Select the explicit M5 bridge; do not fall back after opting in."""
+    mode = environ.get('SHIRAZ_GUEST_LOADER', '0')
+    if mode not in ('0', '1'):
+        raise FormatError('SHIRAZ_GUEST_LOADER must be 0 or 1')
+    if not native_abis or mode == '0':
+        return None
+    if 'arm64-v8a' not in native_abis or native_abi() != 'arm64-v8a':
+        raise FormatError('The macOS M5 loader requires arm64-v8a libraries on Apple Silicon')
+    library = root / DARWIN_LIBRARIES / 'libshiraz-guest.so'
+    if not library.is_file():
+        raise FormatError('The M5 guest loader is not built; run make macos-runtime-libs')
+    return library.resolve()
 
 
 def darwin_gles_environment(env, root, gles):
@@ -715,18 +736,19 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         report = dict(report, native_abis=split_report['native_abis'])
         native_source = native_split
     digitalis = None
+    guest_bridge = None
     if darwin:
         if report['native_abis']:
-            # The M5 guest loader is not there yet. Run the Java side and let the
-            # app see its native libraries as absent: System.loadLibrary throws
-            # UnsatisfiedLinkError (app_lib is not on the darwin library path),
-            # which apps with optional native code catch. Set
-            # SHIRAZ_REFUSE_NATIVE_LIBS=1 to keep the old refusal.
             if os.environ.get('SHIRAZ_REFUSE_NATIVE_LIBS') == '1':
                 raise FormatError('APK contains native ABI libraries (lib/' + '/, lib/'.join(report['native_abis'])
                                   + '/); native JNI libraries need the M5 guest loader on macOS')
-            print('SHIRAZ_UNSUPPORTED native-libraries abis=' + ','.join(report['native_abis'])
-                  + ' reason=m5-guest-loader-missing first-use=UnsatisfiedLinkError', flush=True)
+        guest_bridge = darwin_guest_bridge(ROOT, report['native_abis'], os.environ)
+        if report['native_abis']:
+            if guest_bridge:
+                print('SHIRAZ_GUEST_LOADER configured=darwin-arm64 app_execution=experimental', flush=True)
+            else:
+                print('SHIRAZ_UNSUPPORTED native-libraries abis=' + ','.join(report['native_abis'])
+                      + ' reason=m5-guest-loader-disabled enable=SHIRAZ_GUEST_LOADER=1 first-use=UnsatisfiedLinkError', flush=True)
     else:
         if not supports_native_abis(report['native_abis']) and native_abi() == 'x86_64' and 'arm64-v8a' in report['native_abis']:
             if configured_bridge := os.environ.get('SHIRAZ_DIGITALIS_LIBRARY'):
@@ -807,7 +829,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
             snapshot=snapshot, log_level=log_level, execution_options=execution_options,
             device_profile=device_profile, profile_values=profile_values, digitalis=digitalis,
             version=(ROOT / 'VERSION').read_text(encoding='ascii').strip(),
-            gles=darwin and not gles_missing)
+            gles=darwin and not gles_missing, guest_bridge=guest_bridge)
         print(f'Launching experimental activity {activity}; logs: {work.relative_to(ROOT)}', flush=True)
         try:
             result = run_with_live_logs(command, data, env, work, timeout)

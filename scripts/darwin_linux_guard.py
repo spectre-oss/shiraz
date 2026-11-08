@@ -11,7 +11,7 @@ import argparse
 import subprocess
 import sys
 
-SUFFIXES = ('.c', '.cc', '.cpp', '.h', '.hpp', '.inc')
+SUFFIXES = ('.c', '.cc', '.cpp', '.h', '.hpp', '.inc', '.S', '.s', '.m', '.mm')
 
 
 def git(*args, check=True):

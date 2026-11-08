@@ -1,0 +1,1 @@
+LIBLOG { global: __android_log_print; __android_log_vprint; local: *; };

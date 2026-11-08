@@ -1,0 +1,2 @@
+FIXTURE_OLD { global: versioned_api; };
+FIXTURE_1 { global: *; } FIXTURE_OLD;

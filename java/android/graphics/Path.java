@@ -9,6 +9,13 @@ public class Path {
     public enum FillType { WINDING, EVEN_ODD, INVERSE_WINDING, INVERSE_EVEN_ODD }
     private float[] data=new float[32],snapshot;
     private int size;
+    // Software rendering keeps its existing cubic encoding. Native iterators
+    // need the original verbs, including quadratics before cubic conversion.
+    private float[] semanticData=new float[32];
+    private int semanticSize;
+    private long shirazNativePath;
+    private boolean nativePathDirty=true;
+    private int nativePathGeneration=1,nativePathPublishedGeneration;
     private float x,y,startX,startY;
     private FillType fill=FillType.WINDING;
     /** Vector boolean operations preserve fractional geometry without allocating raster masks. */
@@ -51,13 +58,44 @@ public class Path {
     private void reserve(int count) {
         if(size+count>65536)throw new IllegalStateException("Path exceeds 65536 command values");
         if(size+count>data.length)data=Arrays.copyOf(data,Math.min(65536,Math.max(size+count,data.length*2)));
+        if(semanticSize+count>65536)throw new IllegalStateException("Path exceeds 65536 semantic values");
+        if(semanticSize+count>semanticData.length)semanticData=Arrays.copyOf(semanticData,Math.min(65536,Math.max(semanticSize+count,semanticData.length*2)));
         snapshot=null;
     }
-    private void append(int command){reserve(1);data[size++]=command;}
-    private void append(int command,float a,float b){valid(a);valid(b);reserve(3);data[size++]=command;data[size++]=a;data[size++]=b;}
+    private void changed() {
+        nativePathDirty=true;
+        nativePathGeneration=nativePathGeneration==Integer.MAX_VALUE?1:nativePathGeneration+1;
+        if(nativePathGeneration==nativePathPublishedGeneration)nativePathGeneration=nativePathGeneration==Integer.MAX_VALUE?1:nativePathGeneration+1;
+    }
+    private void append(int command){reserve(1);data[size++]=command;semanticData[semanticSize++]=command;changed();}
+    private void append(int command,float a,float b){valid(a);valid(b);reserve(3);data[size++]=command;data[size++]=a;data[size++]=b;semanticData[semanticSize++]=command;semanticData[semanticSize++]=a;semanticData[semanticSize++]=b;changed();}
     private void append(int command,float a,float b,float c,float d,float e,float f){
         valid(a);valid(b);valid(c);valid(d);valid(e);valid(f);reserve(7);
         data[size++]=command;data[size++]=a;data[size++]=b;data[size++]=c;data[size++]=d;data[size++]=e;data[size++]=f;
+        semanticData[semanticSize++]=command;semanticData[semanticSize++]=a;semanticData[semanticSize++]=b;semanticData[semanticSize++]=c;semanticData[semanticSize++]=d;semanticData[semanticSize++]=e;semanticData[semanticSize++]=f;changed();
+    }
+    /**
+     * Called by the audited Darwin shadow JNI field alias before reading its backing field. Native
+     * iterator owners must retain this Path until their iterator is destroyed.
+     */
+    public final synchronized void shirazPrepareNativePath() {
+        if(shirazNativePath==0) {
+            long pointer=shiraz.runtime.NativeGuestPath.createPath();
+            if(pointer==0)throw new IllegalStateException("Native guest path allocation returned zero");
+            shirazNativePath=pointer;nativePathDirty=true;
+        }
+        if(nativePathDirty) {
+            shiraz.runtime.NativeGuestPath.updatePath(shirazNativePath,Arrays.copyOf(semanticData,semanticSize),nativePathGeneration);
+            nativePathPublishedGeneration=nativePathGeneration;
+            nativePathDirty=false;
+        }
+    }
+    @Override protected void finalize() throws Throwable {
+        try {
+            long pointer;
+            synchronized(this) { pointer=shirazNativePath;shirazNativePath=0; }
+            if(pointer!=0)shiraz.runtime.NativeGuestPath.destroyPath(pointer);
+        } finally { super.finalize(); }
     }
     private void ensureStart() { if (size == 0) moveTo(0,0); }
     float[] commands() { if (snapshot == null) snapshot=Arrays.copyOf(data,size); return snapshot; }
@@ -95,22 +133,29 @@ public class Path {
         if(points.isEmpty())throw new IllegalArgumentException("Empty animation path");
         double[] result=new double[points.size()];for(int i=0;i<result.length;i++)result[i]=points.get(i);return result;
     }
-    public void set(Path other) { if (other == this) return; data=other.commands().clone(); size=data.length; x=other.x; y=other.y; startX=other.startX; startY=other.startY; fill=other.fill; snapshot=null; }
-    public void reset() { size=0; x=y=startX=startY=0; snapshot=null; }
+    public void set(Path other) { if (other == this) return; float[] copy=other.commands().clone(),semantic=Arrays.copyOf(other.semanticData,other.semanticSize);data=copy;size=data.length;semanticData=semantic;semanticSize=semantic.length;x=other.x;y=other.y;startX=other.startX;startY=other.startY;fill=other.fill;snapshot=null;changed(); }
+    public void reset() { size=semanticSize=0; x=y=startX=startY=0; snapshot=null;changed(); }
     public void rewind() { FillType old=fill; reset(); fill=old; }
     public int shirazCommandCount() { return size; }
     public boolean isEmpty() { return size == 0; }
-    public void setFillType(FillType value) { if (value == null) throw new NullPointerException("fill type"); fill=value; }
+    public void setFillType(FillType value) { if (value == null) throw new NullPointerException("fill type"); if(fill!=value){fill=value;changed();} }
     public FillType getFillType() { return fill; }
     public boolean isInverseFillType() { return fill.ordinal() >= 2; }
-    public void toggleInverseFillType() { fill=FillType.values()[fill.ordinal()^2]; }
+    public void toggleInverseFillType() { fill=FillType.values()[fill.ordinal()^2];changed(); }
     public void moveTo(float x,float y) { append(1,x,y); this.x=startX=x; this.y=startY=y; }
     public void rMoveTo(float dx,float dy) { moveTo(x+dx,y+dy); }
     public void lineTo(float x,float y) { valid(x); valid(y); ensureStart(); append(2,x,y); this.x=x; this.y=y; }
     public void rLineTo(float dx,float dy) { lineTo(x+dx,y+dy); }
     public void cubicTo(float x1,float y1,float x2,float y2,float x3,float y3) { valid(x1);valid(y1);valid(x2);valid(y2);valid(x3);valid(y3); ensureStart(); append(3,x1,y1,x2,y2,x3,y3); x=x3; y=y3; }
     public void rCubicTo(float dx1,float dy1,float dx2,float dy2,float dx3,float dy3) { cubicTo(x+dx1,y+dy1,x+dx2,y+dy2,x+dx3,y+dy3); }
-    public void quadTo(float x1,float y1,float x2,float y2) { valid(x1);valid(y1);valid(x2);valid(y2); cubicTo(x+(x1-x)*2/3,y+(y1-y)*2/3,x2+(x1-x2)*2/3,y2+(y1-y2)*2/3,x2,y2); }
+    public void quadTo(float x1,float y1,float x2,float y2) {
+        valid(x1);valid(y1);valid(x2);valid(y2);
+        float a=x+(x1-x)*2/3,b=y+(y1-y)*2/3,c=x2+(x1-x2)*2/3,d=y2+(y1-y2)*2/3;
+        valid(a);valid(b);valid(c);valid(d);ensureStart();reserve(7);
+        data[size++]=3;data[size++]=a;data[size++]=b;data[size++]=c;data[size++]=d;data[size++]=x2;data[size++]=y2;
+        semanticData[semanticSize++]=5;semanticData[semanticSize++]=x1;semanticData[semanticSize++]=y1;semanticData[semanticSize++]=x2;semanticData[semanticSize++]=y2;
+        x=x2;y=y2;changed();
+    }
     public void rQuadTo(float dx1,float dy1,float dx2,float dy2) { quadTo(x+dx1,y+dy1,x+dx2,y+dy2); }
     public void close() { if (size != 0) { append(4); x=startX; y=startY; } }
     public void addRect(float left,float top,float right,float bottom,Direction direction) {
@@ -132,10 +177,13 @@ public class Path {
     }
     public void addPath(Path other) {
         if(other==null)throw new NullPointerException("path"); float[] values=other.commands(); if(values.length==0)return;
+        float[] semantic=Arrays.copyOf(other.semanticData,other.semanticSize);
         if(size+values.length>65536)throw new IllegalStateException("Path exceeds 65536 command values");
         float nextX=other.x,nextY=other.y,nextStartX=other.startX,nextStartY=other.startY;
         if(size+values.length>data.length)data=Arrays.copyOf(data,size+values.length);
+        if(semanticSize+semantic.length>semanticData.length)semanticData=Arrays.copyOf(semanticData,semanticSize+semantic.length);
         System.arraycopy(values,0,data,size,values.length);size+=values.length;snapshot=null;
+        System.arraycopy(semantic,0,semanticData,semanticSize,semantic.length);semanticSize+=semantic.length;changed();
         x=nextX;y=nextY;startX=nextStartX;startY=nextStartY;
     }
     private void ellipseArc(float cx,float cy,float rx,float ry,double start,double sweep) {
@@ -237,8 +285,11 @@ public class Path {
         float[] copy=commands().clone();
         for(int i=0;i<copy.length;){int command=(int)copy[i++],count=command==3?6:command==4?0:2;matrix.mapPoints(copy,i,copy,i,count/2);for(int j=0;j<count;j++)valid(copy[i+j]);i+=count;}
         float[] cursor={x,y,startX,startY};if(size!=0){matrix.mapPoints(cursor);for(float value:cursor)valid(value);}
+        float[] semantic=Arrays.copyOf(semanticData,semanticSize);
+        for(int i=0;i<semantic.length;){int command=(int)semantic[i++],count=command==3?6:command==5?4:command==4?0:2;matrix.mapPoints(semantic,i,semantic,i,count/2);i+=count;}
         if(destination==null)destination=this;
         destination.data=copy;destination.size=copy.length;destination.snapshot=null;destination.fill=fill;
+        destination.semanticData=semantic;destination.semanticSize=semantic.length;destination.changed();
         destination.x=cursor[0];destination.y=cursor[1];destination.startX=cursor[2];destination.startY=cursor[3];
     }
     public void offset(float dx,float dy) { offset(dx,dy,this); }
@@ -252,7 +303,10 @@ public class Path {
         float nextX=size == 0 ? x : x+dx,nextY=size == 0 ? y : y+dy;
         float nextStartX=size == 0 ? startX : startX+dx,nextStartY=size == 0 ? startY : startY+dy;
         FillType nextFill=fill;
+        float[] semantic=Arrays.copyOf(semanticData,semanticSize);
+        for(int i=0;i<semantic.length;){int command=(int)semantic[i++],count=command==3?6:command==5?4:command==4?0:2;for(int j=0;j<count;j++)semantic[i+j]+=j%2==0?dx:dy;i+=count;}
         destination.data=copy; destination.size=copy.length; destination.snapshot=null;
+        destination.semanticData=semantic;destination.semanticSize=semantic.length;destination.changed();
         destination.x=nextX; destination.y=nextY; destination.startX=nextStartX; destination.startY=nextStartY; destination.fill=nextFill;
     }
 }

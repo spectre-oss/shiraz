@@ -138,6 +138,158 @@ Session logs are private workspace files, outside the Git checkout. In the
 `codes/shiraz` workspace layout, use `../../docs/jobs/`. They are not part of the
 public development guide or release artifacts.
 
+## Android API probe
+
+`make api-probe-apk` builds `build/android-api-probe/api-probe-unsigned.apk` using
+stock SDK classes and pinned D8 desugaring. The probe calls public Android APIs;
+it does not use Shiraz framework classes. The APK is unsigned. Sign a local copy
+with your Android development signing setup before installing it on Android or
+Waydroid. Use the same signed APK on both platforms for a meaningful comparison.
+
+Run the probe with `make api-probe-run`. This prepares the platform runtime before
+launching the APK. On macOS it builds the private text, path and image bridges; plain
+button backgrounds reduce the controller's initial graphics requirements. Focus highlights and text
+editing still require the path bridge.
+`make run APK=...` launches an already-prepared runtime and does not build missing
+bridges. The graphics dependency bootstrap must finish before starting another
+build that needs its lock.
+
+The source catalog is `tests/api-probe/catalog.json`. Every automatic catalog
+entry has an independent assertion in `ProbeDispatch.java`; missing implementations
+fail. Expected behavior is included in the UI and report. The catalog covers
+runtime/concurrency, IPC, resources, storage, SQLite, Canvas/bitmap/text, EGL/GLES,
+widgets/input, package/system services, networking, crypto, hardware inventory,
+media configuration and JNI/NDK. It is a growing sample of Android behavior, not
+an exhaustive API inventory or an Android compatibility certification.
+
+- Tap **Category** to cycle categories and **Previous/Next case** to select a test.
+- **Run selected** executes one automatic assertion or opens a manual procedure.
+- **Run category** and **Run all** execute automatic cases. Manual cases without
+  observations are recorded as skipped, never passed by a batch.
+- **Stop queue** stops after the active case; it does not interrupt an API call.
+- Manual PASS/FAIL/SKIP records an operator observation. **Input sandbox** provides
+  real text editing, scrolling, corner touch targets and an Activity result screen.
+  Other manual procedures require a suitable fixture/endpoint/hardware; their
+  presence in the catalog does not mean those fixtures are implemented here.
+
+Each automatic case first requests a separate, non-exported service process. Private
+atomic result files avoid depending on remote ResultReceiver support. A watchdog
+in that process records TIMEOUT after eight seconds and terminates its own process.
+If the service is incorrectly run in the controller process, it reports FAIL and
+executes no assertion. If no worker report arrives after twelve seconds, the
+controller pauses the batch: process launch failure, crash and a blocked runtime
+cannot reliably be distinguished by missing output. These cases need runtime logs.
+If the controller itself cannot start or save reports, no API result is implied.
+
+When the platform explicitly rejects separate service processes, the controller
+uses an in-process diagnostic worker instead. Reports label this `in_process`
+with `isolated=false`; the UI also displays the fallback. This preserves API
+assertion results while giving up crash containment. A local timeout blocks
+further tests until the app process restarts, because Java cannot safely stop
+the blocked thread. Native crashes can terminate the controller in this mode.
+
+
+The on-screen report shows the selected case plus up to twelve recent results,
+so long histories do not require rebuilding thousands of text lines on each click.
+Selecting any case reveals its saved result; export retains the full history.
+
+Results are saved in the app-private `files/api-probe-report.json` after each step.
+**Save/export** also writes to the app's external-files directory and opens the
+Android document picker. The report contains expected/observed behavior, duration,
+status, suite version and device metadata. Relaunch retains the latest result for
+each test and pending work. Cases absent from `results` have not run. PASS applies
+only to the stated assertion: sensor/camera/codec enumeration does not prove event
+delivery, capture or decoding; a TLS engine does not prove a TLS handshake.
+
+The optional native payload requires an existing local NDK:
+
+```sh
+uv run --no-project python scripts/build_api_probe.py --ndk /path/to/android-ndk
+```
+
+This builds Android x86_64 and arm64-v8a libraries, including JNI, attached native
+threads, direct buffers, native loopers, native windows, bitmap pixels, shared
+memory, hardware buffers, dynamic symbol lookup and monotonic clocks. Without a
+payload matching the device ABI, native cases are SKIPPED. Source or cross-compilation
+alone is not proof that these calls work in Shiraz.
+
+Compare exported reports with:
+
+```sh
+uv run --no-project python scripts/compare_api_probe.py android.json shiraz.json
+```
+
+The comparator distinguishes regressions, lost coverage, manual observations,
+changed test definitions and tests missing from either report. Exit status is
+nonzero for regressions or lost coverage. It does not infer success from skips.
+Run focused host/helper validation after building the APK:
+
+```sh
+make api-probe-check
+```
+
+`make api-probe-smoke` additionally launches the real APK in headless portrait
+and landscape windows and captures their startup surfaces under `build/`.
+
+Those checks exercise report validation, atomic files, catalog/dispatch consistency
+and selected pure-Java assertions on the host JVM. They do not replace running the
+APK and observing its controls, crash recovery, deadlines, resizing and persistence
+on Android and Shiraz, or testing real OsmAnd workflows.
+
+## Real APK corpus and performance checks
+
+`make compatibility-apks` fetches three pinned, unmodified F-Droid APKs into the
+ignored `context/apks/` directory: OsmAnd~, Editor and Simple Calculator. The source
+catalog is `config/compatibility-apks.json`. Downloads are size-bounded and checked
+against SHA-256, package ID and version code. These content pins do not independently
+establish signer trust or app compatibility; generated receipts say so explicitly.
+No APKs, app assets or runtime reports belong in commits.
+
+After building the framework, inspect static class availability with:
+
+```sh
+uv run --no-project python scripts/audit_apk_api_surface.py context/apks/*.apk
+```
+
+The report goes to `build/api-surface-audit.json`. Class presence is only a
+conservative inventory: methods, fields, conditional paths, reflection, JNI and
+actual app behavior still need testing. A missing annotation is different from a
+missing startup class. The report does not produce a compatibility percentage.
+
+`make bitmap-clear-smoke` checks bitmap erase semantics on the JVM and ART, with
+separate Java-fill/native-clear component timings. `make ui-performance-smoke`
+runs outline pixel references, text layout/input, cluster boundary ordering and
+bidi fixtures on both runtimes. Fixture failures remain failures even when they
+expose pre-existing platform gaps.
+
+For frame diagnostics, launch with `SHIRAZ_TRACE_FRAMES=1`; the runtime logs setup,
+layout, draw and post times. `SHIRAZ_PROFILE_METHODS=1` enables bounded ART sampling
+into the app-private `cache/shiraz-methods.trace` (8 MiB, one-millisecond sampling).
+Profiling and live snapshot capture add overhead: disable them when measuring
+normal interaction. Frame traversal time is not an input-to-photon measurement.
+On macOS the current ART port is interpreter-only; these checks do not imply JIT,
+GPU or guest JNI-loader support.
+
+`make probe-interaction-benchmark` measures six settled case-selection redraws in
+headless software presentation at 360×640/density 160. First prepare the probe with
+only the reflection result recorded, select the Runtime category/first case, and
+close it. The benchmark refuses a different scene rather than deleting results.
+It disables live capture and method profiling; reports and input logs go under
+`build/probe-benchmark/current/`. These fixed inputs are a performance benchmark,
+not a substitute for the guided real-app acceptance walkthrough. Optional baseline
+framework/native paths allow comparing retained build artifacts with the same APK.
+
+### Local APK launcher
+
+Run `make launcher` and open <http://127.0.0.1:8080/>. The app library lists
+Android API Probe and the pinned compatibility APKs. Build/download missing entries
+with `make api-probe-apk compatibility-apks`, then choose Refresh. Launch starts
+one APK at a time using the existing live screen, normal input controls, Stop,
+and Live logs. You can still upload another APK. App data persists between runs.
+The library is local; it does not claim that listed apps are compatible.
+Requires Go, Task (`task`), the built Shiraz runtime, and FFmpeg with libvpx
+for the live screen. `cd go-server && go run . -root ..` also starts it directly.
+
 ## Networking on macOS
 
 Build the pinned HTTP, crypto and TLS boot modules with `make macos-network`,

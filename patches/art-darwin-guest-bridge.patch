@@ -1,0 +1,48 @@
+--- a/system/core/libnativebridge/native_bridge.cc
++++ b/system/core/libnativebridge/native_bridge.cc
+@@ -68,6 +68,7 @@
+ void UNUSED(const T&) {}
+ #endif
+ 
++#if !defined(__APPLE__)
+ static bool elf_not_native(const char *lib_path) {
+   FILE *elf_file = fopen(lib_path, "rb");
+   if (!elf_file) {
+@@ -84,6 +85,7 @@
+ 
+   return header.e_machine != E_MACHINE;
+ }
++#endif
+ 
+ extern "C" {
+ 
+@@ -665,9 +667,13 @@
+ 
+ bool NativeBridgeIsSupported(const char* libpath) {
+   if (NativeBridgeInitialized()) {
++#if defined(__APPLE__)
++    // Same-ISA ELF still needs a guest loader and ABI adaptation on Darwin.
++    return callbacks->isSupported(libpath);
++#else
+     /* try to use native bridge iff the elf arch is not native */
+     return elf_not_native(libpath);
+-//  return callbacks->isSupported(libpath);
++#endif
+   }
+   return false;
+ }
+--- a/art/runtime/native_bridge_art_interface.cc
++++ b/art/runtime/native_bridge_art_interface.cc
+@@ -104,10 +104,9 @@
+   if (unshare(CLONE_NEWNS) == -1) {
+     LOG(WARNING) << "Could not create mount namespace.";
+   }
++#endif
++  // Darwin skips the namespace syscall, but still needs the bridge state transition.
+   android::PreInitializeNativeBridge(dir.c_str(), GetInstructionSetString(kRuntimeISA));
+-#else
+-  UNUSED(dir);
+-#endif
+ }
+ 
+ void InitializeNativeBridge(JNIEnv* env, const char* instruction_set) {

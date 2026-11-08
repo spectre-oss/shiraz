@@ -289,6 +289,10 @@ PATCHES_DARWIN = {
         ('art-darwin-url-handlers.patch', {  # 2635 bytes
             'libcore/ojluni/src/main/java/java/net/URL.java': 'f9481fffcbf68eaee61bf99d1ca740f47816b8215e783367b157e0ba78bd2b32',
         }),
+        ('art-darwin-guest-bridge.patch', {
+            'system/core/libnativebridge/native_bridge.cc': 'f6e87865f6e35b89dbf7ef78870942ffa08465e9c453de13b2b9f60d261342e0',
+            'art/runtime/native_bridge_art_interface.cc': '2ab7bd28a7ab0c3c45ea467fe419f86a229be8e362bbb366de08a6d5c8564cc9',
+        }),
     ],
 }
 BSD_VERSION = '0.12.2'

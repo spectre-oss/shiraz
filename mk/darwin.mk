@@ -448,8 +448,8 @@ $(MACOS_OUT)/test-window-aspect: tests/native/window_aspect.cpp include/shiraz/w
 	$(MACOS_CXX) tests/native/window_aspect.cpp -o $@
 $(MACOS_OUT)/test-archive-path: tests/native/archive_path.cpp include/shiraz/archive_path.hpp $(MACOS_OUT)/.dir
 	$(MACOS_CXX) tests/native/archive_path.cpp -o $@
-$(MACOS_OUT)/test-native-window: tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp include/shiraz/shared_frame.hpp include/shiraz/window_frames.hpp include/shiraz/native_window.h include/shiraz/window_snapshot.hpp include/shiraz/compositor.hpp $(MACOS_OUT)/.dir
-	$(MACOS_CXX) tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp -o $@ -pthread
+$(MACOS_OUT)/test-native-window: tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp include/shiraz/shared_frame.hpp include/shiraz/window_frames.hpp include/shiraz/native_window.h include/shiraz/window_snapshot.hpp include/shiraz/compositor.hpp native/darwin/shared_event.mm native/darwin/window_queue.inc $(MACOS_OUT)/.dir
+	$(MACOS_CXX) tests/native_window.cpp native/native_window.cpp native/shared_frame.cpp native/darwin/shared_event.mm -o $@ -pthread -framework IOSurface -framework Metal -framework Foundation -framework CoreFoundation
 $(MACOS_OUT)/test-shared-frame: tests/shared_frame.cpp native/shared_frame.cpp include/shiraz/shared_frame.hpp $(MACOS_OUT)/.dir
 	$(MACOS_CXX) tests/shared_frame.cpp native/shared_frame.cpp -o $@ -pthread
 $(MACOS_OUT)/test-choreographer: tests/native/choreographer.cpp native/choreographer.cpp native/looper.cpp $(MACOS_OUT)/.dir
@@ -639,3 +639,1378 @@ macos-gles-probe-smoke: $(MACOS_OUT)/test-gles-probe $(addprefix $(MACOS_OUT)/,$
 macos-gpu-canvas-smoke: macos-runtime-libs macos-framework
 	python3 scripts/macos_gpu_canvas_smoke.py
 macos-gles-jvm-smokes: macos-gles20-smoke macos-gles30-smoke macos-gles-window-smoke macos-egl-surface-resize-smoke macos-pixel-copy-smoke macos-gles-probe-smoke
+
+# M5 phase 0: synthetic host memory probe, independent of ART and APKs.
+.PHONY: macos-guest-memory-check
+$(MACOS_OUT)/m5/guest-memory: tests/darwin/guest/memory.c
+	mkdir -p $(dir $@)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
+
+macos-guest-memory-check: $(MACOS_OUT)/m5/guest-memory tests/darwin/guest/jit.entitlements
+	$(MACOS_OUT)/m5/guest-memory
+	cp $(MACOS_OUT)/m5/guest-memory $(MACOS_OUT)/m5/guest-memory-hardened.pending
+	mv $(MACOS_OUT)/m5/guest-memory-hardened.pending $(MACOS_OUT)/m5/guest-memory-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/guest-memory-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/guest-memory-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/guest-memory-hardened
+	$(MACOS_OUT)/m5/guest-memory-hardened
+
+.PHONY: macos-guest-toolchain
+macos-guest-toolchain:
+	uv run --no-project python scripts/bootstrap_guest_toolchain.py
+
+.PHONY: macos-guest-fixture
+$(MACOS_OUT)/m5/fixture.o: tests/darwin/guest/fixture.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+macos-guest-fixture: macos-guest-toolchain $(MACOS_OUT)/m5/fixture.o
+	.deps/guest-toolchain/bin/ld.lld -shared --hash-style=both --no-undefined -z now -z max-page-size=16384 -soname libshiraz_fixture.so $(MACOS_OUT)/m5/fixture.o -o $(MACOS_OUT)/m5/fixture.so
+
+MACOS_GUEST_CPPFLAGS := -Iinclude -I$(MACOS_OUT)/m5 -I.deps/capstone/src/include
+MACOS_GUEST_SOURCES := native/darwin/guest/providers.cpp native/darwin/guest/lifecycle.cpp native/darwin/guest/jump.cpp native/darwin/guest/jump.S native/darwin/guest/dynamic.cpp native/darwin/guest/tls.cpp native/darwin/guest/instruction.cpp native/darwin/guest/decode.cpp native/darwin/guest/unwind.cpp native/darwin/guest/unwind_runtime.cpp native/darwin/guest/tpidr.S native/darwin/guest/loader.cpp native/darwin/guest/jit.cpp native/darwin/guest/elf.cpp native/darwin/guest/image.cpp native/darwin/guest/call.cpp native/darwin/guest/va_list.cpp native/darwin/guest/closure.cpp native/darwin/guest/invoke.S .deps/capstone/build/libcapstone.a
+MACOS_GUEST_HEADERS := include/shiraz/darwin/guest/unwind.hpp include/shiraz/darwin/guest/unwind_runtime.hpp include/shiraz/darwin/guest/decode.hpp include/shiraz/darwin/guest/instruction.hpp include/shiraz/darwin/guest/tls.hpp include/shiraz/darwin/guest/providers.hpp include/shiraz/darwin/guest/lifecycle.hpp include/shiraz/darwin/guest/jump.hpp $(MACOS_OUT)/m5/guest_errno.hpp include/shiraz/darwin/guest/loader.hpp include/shiraz/darwin/guest/dynamic.hpp include/shiraz/darwin/guest/jit.hpp include/shiraz/darwin/guest/elf.hpp include/shiraz/darwin/guest/image.hpp include/shiraz/darwin/guest/call.hpp include/shiraz/darwin/guest/va_list.hpp include/shiraz/darwin/guest/closure.hpp $(MACOS_OUT)/m5/guest_io.hpp
+$(MACOS_OUT)/m5/elf-probe: tests/darwin/guest/elf_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/elf_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-elf-check
+macos-guest-elf-check: macos-guest-fixture $(MACOS_OUT)/m5/elf-probe
+	xcrun clang --version
+	shasum -a 256 $(MACOS_OUT)/m5/fixture.so
+	$(MACOS_OUT)/m5/elf-probe $(MACOS_OUT)/m5/fixture.so
+	cp $(MACOS_OUT)/m5/elf-probe $(MACOS_OUT)/m5/elf-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/elf-probe-hardened.pending $(MACOS_OUT)/m5/elf-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/elf-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/elf-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/elf-probe-hardened
+	$(MACOS_OUT)/m5/elf-probe-hardened $(MACOS_OUT)/m5/fixture.so
+
+$(MACOS_OUT)/m5/elf-negative: tests/darwin/guest/elf_negative.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/elf_negative.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-parser-check
+macos-guest-parser-check: macos-guest-fixture $(MACOS_OUT)/m5/elf-negative
+	$(MACOS_OUT)/m5/elf-negative $(MACOS_OUT)/m5/fixture.so
+
+.PHONY: macos-guest-check
+macos-guest-check: macos-guest-memory-check macos-guest-elf-check macos-guest-parser-check macos-guest-dependency-check macos-guest-dependency-sanitize-check macos-guest-personality-check
+
+# M5 JNI registration metadata is generated from this ART tree, never guessed.
+MACOS_GUEST_ART := context/art_standalone
+MACOS_GUEST_JNI_FLAGS := -I$(MACOS_GUEST_ART)/libnativehelper/include -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -I$(MACOS_GUEST_ART)/system/core/libnativebridge/include
+$(MACOS_OUT)/m5/guest_jni_slots.inc: scripts/generate_guest_jni.py $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h
+	uv run --no-project python scripts/generate_guest_jni.py $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h $@
+$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/binding_evidence.cpp include/shiraz/darwin/guest/binding_evidence.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) native/darwin/guest/jni.cpp native/darwin/guest/bridge.cpp include/shiraz/darwin/guest/jni.hpp $(MACOS_OUT)/m5/guest_jni_slots.inc native/darwin/guest/guestegl.cpp include/shiraz/darwin/guest/guestegl.hpp include/shiraz/darwin/guest/guestegl_symbols.inc native/darwin/guest/path.cpp include/shiraz/darwin/guest/path.hpp
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) $(MACOS_GUEST_JNI_FLAGS) $(MACOS_ANGLE_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fvisibility=hidden -dynamiclib -Wl,-install_name,@rpath/libshiraz-guest.so $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_IO_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) native/darwin/guest/binding_evidence.cpp native/darwin/guest/jni.cpp native/darwin/guest/bridge.cpp native/darwin/guest/bitmap.cpp native/android_bitmap.cpp native/darwin/guest/guestegl.cpp native/darwin/guest/path.cpp -o $@
+
+$(MACOS_OUT)/m5/jni-fixture.o: tests/darwin/guest/jni_fixture.c $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -funwind-tables -fstack-protector-all -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-jni-fixture macos-guest-jni-check
+macos-guest-jni-fixture: macos-guest-toolchain $(MACOS_OUT)/m5/jni-fixture.o $(MACOS_OUT)/m5/deps/libc-link.so $(MACOS_OUT)/m5/deps/libjnigraphics-link.so
+	.deps/guest-toolchain/bin/ld.lld -shared --hash-style=both --eh-frame-hdr --no-undefined -z now -z max-page-size=16384 -soname libshiraz_jni_fixture.so $(MACOS_OUT)/m5/jni-fixture.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -l:libjnigraphics-link.so -o $(MACOS_OUT)/m5/jni-fixture.so
+$(MACOS_OUT)/m5/native-closure-inventory.o: tests/darwin/guest/native_closure_inventory.c $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h
+	mkdir -p $(dir $@)
+	xcrun clang -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -std=c11 -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_OUT)/m5/host-fixture.so: tests/darwin/guest/host_fixture.c $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h $(MACOS_OUT)/m5/native-closure-inventory.o
+	mkdir -p $(dir $@)
+	xcrun clang -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -dynamiclib -O2 -Wall -Wextra -Werror $< $(MACOS_OUT)/m5/native-closure-inventory.o -o $@
+macos-guest-jni-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_jni_smoke.py
+
+.PHONY: macos-guest-jni-adhoc-check
+macos-guest-jni-adhoc-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_jni_smoke.py --mode adhoc
+
+# Separate closure route check; this is not a hardened ART acceptance gate.
+.PHONY: macos-guest-jni-staged-adhoc-check
+macos-guest-jni-staged-adhoc-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_jni_smoke.py --mode staged-adhoc
+
+MACOS_GUEST_DEP_DIR := $(MACOS_OUT)/m5/deps
+MACOS_GUEST_LD := .deps/guest-toolchain/bin/ld.lld
+MACOS_GUEST_LD_FLAGS := -shared --hash-style=both -z now -z max-page-size=16384
+$(MACOS_GUEST_DEP_DIR)/%.o: tests/darwin/guest/deps/%.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-dependency-fixtures
+macos-guest-dependency-fixtures: macos-guest-toolchain $(addprefix $(MACOS_GUEST_DEP_DIR)/,leaf.o left.o right.o root.o global.o missing.o cycle-a.o cycle-b.o cycle-stub.o host-escape.o)
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined --version-script=tests/darwin/guest/deps/leaf.map -soname libleaf.so $(MACOS_GUEST_DEP_DIR)/leaf.o -o $(MACOS_GUEST_DEP_DIR)/libleaf.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libleft.so $(MACOS_GUEST_DEP_DIR)/left.o -L$(MACOS_GUEST_DEP_DIR) -lleaf -o $(MACOS_GUEST_DEP_DIR)/libleft.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libright.so $(MACOS_GUEST_DEP_DIR)/right.o -o $(MACOS_GUEST_DEP_DIR)/libright.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libroot.so $(MACOS_GUEST_DEP_DIR)/root.o -L$(MACOS_GUEST_DEP_DIR) -lleft -lright -o $(MACOS_GUEST_DEP_DIR)/libroot.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -z global -soname libglobal.so $(MACOS_GUEST_DEP_DIR)/global.o -o $(MACOS_GUEST_DEP_DIR)/libglobal.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) -soname libmissing.so $(MACOS_GUEST_DEP_DIR)/missing.o -L$(MACOS_GUEST_DEP_DIR) -lleft -o $(MACOS_GUEST_DEP_DIR)/libmissing.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) -soname libcycle-a.so $(MACOS_GUEST_DEP_DIR)/cycle-stub.o -o $(MACOS_GUEST_DEP_DIR)/libcycle-a.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libcycle-b.so $(MACOS_GUEST_DEP_DIR)/cycle-b.o -L$(MACOS_GUEST_DEP_DIR) -lcycle-a -o $(MACOS_GUEST_DEP_DIR)/libcycle-b.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libcycle-a.so $(MACOS_GUEST_DEP_DIR)/cycle-a.o -L$(MACOS_GUEST_DEP_DIR) -lcycle-b -o $(MACOS_GUEST_DEP_DIR)/libcycle-a.so
+	xcrun clang --target=aarch64-linux-android24 -DNO_OLD_VERSION -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c tests/darwin/guest/deps/leaf.c -o $(MACOS_GUEST_DEP_DIR)/leaf-bad.o
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined --version-script=tests/darwin/guest/deps/leaf-bad.map -soname libleaf.so $(MACOS_GUEST_DEP_DIR)/leaf-bad.o -o $(MACOS_GUEST_DEP_DIR)/leaf-bad.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) -soname libhost-escape.so $(MACOS_GUEST_DEP_DIR)/host-escape.o -o $(MACOS_GUEST_DEP_DIR)/libhost-escape.so
+
+$(MACOS_OUT)/m5/dependency-probe: tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-dependency-check
+macos-guest-dependency-check: macos-guest-dependency-fixtures $(MACOS_OUT)/m5/dependency-probe
+	$(MACOS_OUT)/m5/dependency-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/dependency-probe $(MACOS_OUT)/m5/dependency-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/dependency-probe-hardened.pending $(MACOS_OUT)/m5/dependency-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/dependency-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/dependency-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/dependency-probe-hardened
+	$(MACOS_OUT)/m5/dependency-probe-hardened $(MACOS_GUEST_DEP_DIR)
+
+$(MACOS_OUT)/m5/guest_errno.hpp: scripts/generate_guest_errno.py scripts/bootstrap_bionic_headers.py
+	uv run --no-project python scripts/generate_guest_errno.py
+
+$(MACOS_GUEST_DEP_DIR)/libc-link.so: $(MACOS_GUEST_DEP_DIR)/link-libc.o tests/darwin/guest/deps/libc.map | macos-guest-toolchain
+$(MACOS_GUEST_DEP_DIR)/libfixture_host.so: $(MACOS_GUEST_DEP_DIR)/link-host.o | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libfixture_host.so $< -o $@
+$(MACOS_GUEST_DEP_DIR)/personality.o: tests/darwin/guest/deps/personality.c $(MACOS_OUT)/m5/guest_errno.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-personality-fixture macos-guest-personality-check
+macos-guest-personality-fixture: $(MACOS_GUEST_DEP_DIR)/personality.o $(MACOS_GUEST_DEP_DIR)/libc-link.so $(MACOS_GUEST_DEP_DIR)/libfixture_host.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libpersonality.so $(MACOS_GUEST_DEP_DIR)/personality.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -lfixture_host -o $(MACOS_GUEST_DEP_DIR)/libpersonality.so
+$(MACOS_OUT)/m5/personality-probe: tests/darwin/guest/personality_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/personality_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-personality-check: macos-guest-personality-fixture $(MACOS_OUT)/m5/personality-probe
+	$(MACOS_OUT)/m5/personality-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/personality-probe $(MACOS_OUT)/m5/personality-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/personality-probe-hardened.pending $(MACOS_OUT)/m5/personality-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/personality-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/personality-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/personality-probe-hardened
+	$(MACOS_OUT)/m5/personality-probe-hardened $(MACOS_GUEST_DEP_DIR)
+
+$(MACOS_OUT)/m5/dependency-sanitized: tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/dependency_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-dependency-sanitize-check
+macos-guest-dependency-sanitize-check: macos-guest-dependency-fixtures $(MACOS_OUT)/m5/dependency-sanitized
+	$(MACOS_OUT)/m5/dependency-sanitized $(MACOS_GUEST_DEP_DIR)
+
+.PHONY: macos-guest-errno-check
+macos-guest-errno-check:
+	uv run --no-project python scripts/generate_guest_errno.py
+macos-guest-check macos-guest-jni-check macos-guest-jni-adhoc-check: macos-guest-errno-check
+
+$(MACOS_OUT)/m5/guest_io.hpp: scripts/generate_guest_io.py scripts/generate_guest_errno.py scripts/bootstrap_bionic_headers.py
+	uv run --no-project python scripts/generate_guest_io.py
+
+MACOS_GUEST_ICU_PREFIX := $(CURDIR)/.deps/guest-icu-static/install
+MACOS_GUEST_ICU_ARCHIVES := $(MACOS_GUEST_ICU_PREFIX)/lib/libicuuc.a $(MACOS_GUEST_ICU_PREFIX)/lib/libicudata.a
+MACOS_GUEST_ICU_CFLAGS := -I$(MACOS_GUEST_ICU_PREFIX)/include -DU_STATIC_IMPLEMENTATION
+MACOS_GUEST_ICU_LIBS := $(MACOS_GUEST_ICU_ARCHIVES)
+
+MACOS_GUEST_IO_SOURCES := native/darwin/guest/io.cpp native/darwin/guest/memory.cpp native/darwin/guest/math.cpp native/darwin/guest/stdio.cpp native/darwin/guest/format.cpp native/darwin/guest/log.cpp native/darwin/guest/properties.cpp native/darwin/guest/libc_scalar.cpp native/darwin/guest/quad.cpp native/darwin/guest/transfer.cpp native/darwin/guest/wideformat.cpp native/darwin/guest/core_services.cpp native/darwin/guest/accounts.cpp native/darwin/guest/cleanup.cpp native/darwin/guest/fs.cpp native/darwin/guest/fonts.cpp native/darwin/guest/events.cpp native/darwin/guest/networking.cpp native/darwin/guest/signals.cpp native/darwin/guest/signals.S native/darwin/guest/fortify.cpp native/darwin/guest/cxx.cpp native/darwin/guest/locale.cpp native/darwin/guest/multibyte.cpp native/darwin/guest/time.cpp native/darwin/guest/system.cpp native/darwin/guest/scan.cpp native/darwin/guest/zlib.cpp native/darwin/guest/thread.cpp native/darwin/guest/sync.cpp native/darwin/guest/semaphore.cpp native/darwin/guest/process.cpp
+MACOS_GUEST_IO_HEADERS := $(MACOS_GUEST_ICU_ARCHIVES) include/shiraz/darwin/guest/io.hpp include/shiraz/darwin/guest/memory.hpp include/shiraz/darwin/guest/math.hpp include/shiraz/darwin/guest/stdio.hpp include/shiraz/darwin/guest/format.hpp include/shiraz/darwin/guest/log.hpp include/shiraz/darwin/guest/properties.hpp include/shiraz/darwin/guest/libc_scalar.hpp include/shiraz/darwin/guest/quad.hpp include/shiraz/darwin/guest/transfer.hpp include/shiraz/darwin/guest/wideformat.hpp include/shiraz/darwin/guest/core_services.hpp include/shiraz/darwin/guest/accounts.hpp include/shiraz/darwin/guest/cleanup.hpp include/shiraz/darwin/guest/fs.hpp include/shiraz/darwin/guest/fonts.hpp include/shiraz/darwin/guest/events.hpp include/shiraz/darwin/guest/networking.hpp include/shiraz/darwin/guest/signals.hpp include/shiraz/darwin/guest/fortify.hpp include/shiraz/darwin/guest/cxx.hpp include/shiraz/darwin/guest/locale.hpp include/shiraz/darwin/guest/multibyte.hpp include/shiraz/darwin/guest/time.hpp include/shiraz/darwin/guest/system.hpp include/shiraz/darwin/guest/scan.hpp include/shiraz/darwin/guest/zlib.hpp include/shiraz/darwin/guest/thread.hpp include/shiraz/darwin/guest/sync.hpp include/shiraz/darwin/guest/tls.hpp $(MACOS_OUT)/m5/guest_io.hpp include/shiraz/darwin/guest/process.hpp
+$(MACOS_OUT)/m5/io.o: $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -c native/darwin/guest/io.cpp -o $@
+
+$(MACOS_GUEST_DEP_DIR)/link-io.o: tests/darwin/guest/deps/link-io.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libc-link.so: $(MACOS_GUEST_DEP_DIR)/link-io.o $(MACOS_GUEST_DEP_DIR)/link-stdio.o $(MACOS_GUEST_DEP_DIR)/link-scalar.o $(MACOS_GUEST_DEP_DIR)/link-locale.o $(MACOS_GUEST_DEP_DIR)/link-process.o
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined --version-script=tests/darwin/guest/deps/libc.map -soname libc.so $(MACOS_GUEST_DEP_DIR)/link-libc.o $(MACOS_GUEST_DEP_DIR)/link-io.o $(MACOS_GUEST_DEP_DIR)/link-stdio.o $(MACOS_GUEST_DEP_DIR)/link-scalar.o $(MACOS_GUEST_DEP_DIR)/link-locale.o $(MACOS_GUEST_DEP_DIR)/link-process.o -o $@
+$(MACOS_GUEST_DEP_DIR)/io.o: tests/darwin/guest/deps/io.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-io-fixture macos-guest-io-check
+macos-guest-io-fixture: $(MACOS_GUEST_DEP_DIR)/io.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libio.so $(MACOS_GUEST_DEP_DIR)/io.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libio.so
+$(MACOS_OUT)/m5/io-probe: tests/darwin/guest/io_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/io_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-io-check: macos-guest-io-fixture $(MACOS_OUT)/m5/io-probe
+	$(MACOS_OUT)/m5/io-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/io-probe $(MACOS_OUT)/m5/io-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/io-probe-hardened.pending $(MACOS_OUT)/m5/io-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/io-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/io-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/io-probe-hardened
+	$(MACOS_OUT)/m5/io-probe-hardened $(MACOS_GUEST_DEP_DIR)
+
+$(MACOS_OUT)/libshiraz-guest.so: $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS)
+
+$(MACOS_OUT)/m5/io-sanitized: tests/darwin/guest/io_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/io_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-io-sanitize-check macos-guest-io-abi-check
+macos-guest-io-sanitize-check: macos-guest-io-fixture $(MACOS_OUT)/m5/io-sanitized
+	$(MACOS_OUT)/m5/io-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-io-abi-check:
+	uv run --no-project python scripts/generate_guest_io.py
+macos-guest-check: macos-guest-io-check macos-guest-io-sanitize-check macos-guest-io-abi-check
+macos-guest-jni-check macos-guest-jni-adhoc-check: macos-guest-io-abi-check
+
+$(MACOS_GUEST_DEP_DIR)/memory.o: tests/darwin/guest/deps/memory.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-memory-api-fixture macos-guest-memory-api-check macos-guest-memory-api-sanitize-check
+macos-guest-memory-api-fixture: $(MACOS_GUEST_DEP_DIR)/memory.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libmemory.so $(MACOS_GUEST_DEP_DIR)/memory.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libmemory.so
+$(MACOS_OUT)/m5/memory-api-probe: tests/darwin/guest/memory_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/memory_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-memory-api-check: macos-guest-memory-api-fixture $(MACOS_OUT)/m5/memory-api-probe
+	$(MACOS_OUT)/m5/memory-api-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/memory-api-probe $(MACOS_OUT)/m5/memory-api-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/memory-api-probe-hardened.pending $(MACOS_OUT)/m5/memory-api-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/memory-api-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/memory-api-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/memory-api-probe-hardened
+	$(MACOS_OUT)/m5/memory-api-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/memory-api-sanitized: tests/darwin/guest/memory_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/memory_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-memory-api-sanitize-check: macos-guest-memory-api-fixture $(MACOS_OUT)/m5/memory-api-sanitized
+	$(MACOS_OUT)/m5/memory-api-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-memory-api-check macos-guest-memory-api-sanitize-check
+
+$(MACOS_GUEST_DEP_DIR)/thread.o: tests/darwin/guest/deps/thread.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-thread-fixture macos-guest-thread-check macos-guest-thread-sanitize-check
+macos-guest-thread-fixture: $(MACOS_GUEST_DEP_DIR)/thread.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libthread.so $(MACOS_GUEST_DEP_DIR)/thread.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libthread.so
+$(MACOS_OUT)/m5/thread-probe: tests/darwin/guest/thread_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/thread_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-thread-check: macos-guest-thread-fixture $(MACOS_OUT)/m5/thread-probe
+	$(MACOS_OUT)/m5/thread-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/thread-probe $(MACOS_OUT)/m5/thread-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/thread-probe-hardened.pending $(MACOS_OUT)/m5/thread-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/thread-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/thread-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/thread-probe-hardened
+	$(MACOS_OUT)/m5/thread-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/thread-sanitized: tests/darwin/guest/thread_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/thread_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-thread-sanitize-check: macos-guest-thread-fixture $(MACOS_OUT)/m5/thread-sanitized
+	$(MACOS_OUT)/m5/thread-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-thread-check macos-guest-thread-sanitize-check
+
+$(MACOS_GUEST_DEP_DIR)/sync.o: tests/darwin/guest/deps/sync.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-sync-fixture macos-guest-sync-check macos-guest-sync-sanitize-check
+macos-guest-sync-fixture: $(MACOS_GUEST_DEP_DIR)/sync.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libsync.so $(MACOS_GUEST_DEP_DIR)/sync.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libsync.so
+$(MACOS_OUT)/m5/sync-probe: tests/darwin/guest/sync_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/sync_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-sync-check: macos-guest-sync-fixture $(MACOS_OUT)/m5/sync-probe
+	$(MACOS_OUT)/m5/sync-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/sync-probe $(MACOS_OUT)/m5/sync-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/sync-probe-hardened.pending $(MACOS_OUT)/m5/sync-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/sync-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/sync-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/sync-probe-hardened
+	$(MACOS_OUT)/m5/sync-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/sync-sanitized: tests/darwin/guest/sync_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/sync_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-sync-sanitize-check: macos-guest-sync-fixture $(MACOS_OUT)/m5/sync-sanitized
+	$(MACOS_OUT)/m5/sync-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-sync-check macos-guest-sync-sanitize-check
+
+$(MACOS_GUEST_DEP_DIR)/rwsem.o: tests/darwin/guest/deps/rwsem.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-rwsem-fixture macos-guest-rwsem-check macos-guest-rwsem-sanitize-check
+macos-guest-rwsem-fixture: $(MACOS_GUEST_DEP_DIR)/rwsem.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname librwsem.so $(MACOS_GUEST_DEP_DIR)/rwsem.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/librwsem.so
+$(MACOS_OUT)/m5/rwsem-probe: tests/darwin/guest/rwsem_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/rwsem_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-rwsem-check: macos-guest-rwsem-fixture $(MACOS_OUT)/m5/rwsem-probe
+	$(MACOS_OUT)/m5/rwsem-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/rwsem-probe $(MACOS_OUT)/m5/rwsem-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/rwsem-probe-hardened.pending $(MACOS_OUT)/m5/rwsem-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/rwsem-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/rwsem-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/rwsem-probe-hardened
+	$(MACOS_OUT)/m5/rwsem-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/rwsem-sanitized: tests/darwin/guest/rwsem_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/rwsem_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-rwsem-sanitize-check: macos-guest-rwsem-fixture $(MACOS_OUT)/m5/rwsem-sanitized
+	$(MACOS_OUT)/m5/rwsem-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-rwsem-check macos-guest-rwsem-sanitize-check
+
+.PHONY: macos-guest-emutls-source macos-guest-tls-fixture macos-guest-tls-check macos-guest-tls-sanitize-check
+macos-guest-emutls-source:
+	uv run --no-project python scripts/bootstrap_guest_emutls.py
+.deps/compiler-rt-emutls/emutls.c: scripts/bootstrap_guest_emutls.py
+	uv run --no-project python scripts/bootstrap_guest_emutls.py
+$(MACOS_GUEST_DEP_DIR)/emutls.o: .deps/compiler-rt-emutls/emutls.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/tls.o: tests/darwin/guest/deps/tls.cpp $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang++ --target=aarch64-linux-android24 -mno-outline-atomics -femulated-tls -nostdinc++ -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-exceptions -fno-rtti -std=c++17 -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/tls-peer.o: tests/darwin/guest/deps/tls_peer.cpp $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang++ --target=aarch64-linux-android24 -femulated-tls -ffreestanding -fPIC -fno-stack-protector -fno-exceptions -fno-rtti -std=c++17 -O2 -Wall -Wextra -Werror -c $< -o $@
+macos-guest-tls-fixture: macos-guest-emutls-source $(MACOS_GUEST_DEP_DIR)/emutls.o $(MACOS_GUEST_DEP_DIR)/tls.o $(MACOS_GUEST_DEP_DIR)/tls-peer.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libemutls-fixture.so $(MACOS_GUEST_DEP_DIR)/emutls.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libemutls-fixture.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libtls-peer.so $(MACOS_GUEST_DEP_DIR)/tls-peer.o -L$(MACOS_GUEST_DEP_DIR) -lemutls-fixture -o $(MACOS_GUEST_DEP_DIR)/libtls-peer.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libtls-fixture.so $(MACOS_GUEST_DEP_DIR)/tls.o -L$(MACOS_GUEST_DEP_DIR) -ltls-peer -lemutls-fixture -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libtls-fixture.so
+$(MACOS_OUT)/m5/tls-probe: tests/darwin/guest/tls_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/tls_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-tls-check: macos-guest-tls-fixture $(MACOS_OUT)/m5/tls-probe
+	$(MACOS_OUT)/m5/tls-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/tls-probe $(MACOS_OUT)/m5/tls-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/tls-probe-hardened.pending $(MACOS_OUT)/m5/tls-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/tls-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/tls-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/tls-probe-hardened
+	$(MACOS_OUT)/m5/tls-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/tls-sanitized: tests/darwin/guest/tls_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/tls_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-tls-sanitize-check: macos-guest-tls-fixture $(MACOS_OUT)/m5/tls-sanitized
+	$(MACOS_OUT)/m5/tls-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-tls-check macos-guest-tls-sanitize-check
+
+.PHONY: macos-guest-tpidr-thunk-check macos-guest-tpidr-thunk-sanitize-check
+$(MACOS_OUT)/m5/tpidr-thunk-probe: tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-tpidr-thunk-check: $(MACOS_OUT)/m5/tpidr-thunk-probe
+	$(MACOS_OUT)/m5/tpidr-thunk-probe
+	cp $(MACOS_OUT)/m5/tpidr-thunk-probe $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened.pending $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
+	$(MACOS_OUT)/m5/tpidr-thunk-probe-hardened
+$(MACOS_OUT)/m5/tpidr-thunk-sanitized: tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/tpidr_probe.cpp tests/darwin/guest/tpidr_probe.S $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-tpidr-thunk-sanitize-check: $(MACOS_OUT)/m5/tpidr-thunk-sanitized
+	$(MACOS_OUT)/m5/tpidr-thunk-sanitized
+macos-guest-check: macos-guest-tpidr-thunk-check macos-guest-tpidr-thunk-sanitize-check
+
+.PHONY: macos-guest-decoder-check
+.deps/capstone/build/libcapstone.a: scripts/bootstrap_guest_decoder.py
+	uv run --no-project python scripts/bootstrap_guest_decoder.py
+macos-guest-decoder-check:
+	uv run --no-project python scripts/bootstrap_guest_decoder.py
+macos-guest-check macos-guest-jni-check macos-guest-jni-adhoc-check: macos-guest-decoder-check
+
+.PHONY: macos-guest-protected-fixture
+$(MACOS_GUEST_DEP_DIR)/protected.o: tests/darwin/guest/deps/protected.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -fno-inline -funwind-tables -fstack-protector-all -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/code-data.o: tests/darwin/guest/deps/code_data.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+macos-guest-protected-fixture: $(MACOS_GUEST_DEP_DIR)/protected.o $(MACOS_GUEST_DEP_DIR)/code-data.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined --eh-frame-hdr -soname libprotected.so $(MACOS_GUEST_DEP_DIR)/protected.o $(MACOS_GUEST_DEP_DIR)/code-data.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libprotected.so
+$(MACOS_OUT)/m5/protected-probe: tests/darwin/guest/protected_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/protected_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-protected-check
+macos-guest-protected-check: macos-guest-protected-fixture $(MACOS_OUT)/m5/protected-probe
+	$(MACOS_OUT)/m5/protected-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/protected-probe $(MACOS_OUT)/m5/protected-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/protected-probe-hardened.pending $(MACOS_OUT)/m5/protected-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/protected-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/protected-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/protected-probe-hardened
+	$(MACOS_OUT)/m5/protected-probe-hardened $(MACOS_GUEST_DEP_DIR)
+include mk/darwin-zero-copy.mk
+
+$(MACOS_OUT)/m5/protected-sanitized: tests/darwin/guest/protected_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/protected_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-protected-sanitize-check
+macos-guest-protected-sanitize-check: macos-guest-protected-fixture $(MACOS_OUT)/m5/protected-sanitized
+	$(MACOS_OUT)/m5/protected-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-protected-check macos-guest-protected-sanitize-check
+
+$(MACOS_OUT)/m5/math-probe: tests/darwin/guest/math_probe.cpp native/darwin/guest/math.cpp include/shiraz/darwin/guest/math.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/math_probe.cpp native/darwin/guest/math.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-math-check
+macos-guest-math-check: $(MACOS_OUT)/m5/math-probe
+	$(MACOS_OUT)/m5/math-probe
+	cp $(MACOS_OUT)/m5/math-probe $(MACOS_OUT)/m5/math-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/math-probe-hardened.pending $(MACOS_OUT)/m5/math-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/math-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/math-probe-hardened
+	$(MACOS_OUT)/m5/math-probe-hardened
+macos-guest-check: macos-guest-math-check
+
+$(MACOS_GUEST_DEP_DIR)/link-stdio.o: tests/darwin/guest/deps/link-stdio.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/stdio.o: tests/darwin/guest/deps/stdio.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-stdio-fixture macos-guest-stdio-check
+macos-guest-stdio-fixture: $(MACOS_GUEST_DEP_DIR)/stdio.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libstdio.so $(MACOS_GUEST_DEP_DIR)/stdio.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libstdio.so
+$(MACOS_OUT)/m5/stdio-probe: tests/darwin/guest/stdio_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/stdio_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-stdio-check: macos-guest-stdio-fixture $(MACOS_OUT)/m5/stdio-probe
+	$(MACOS_OUT)/m5/stdio-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/stdio-probe $(MACOS_OUT)/m5/stdio-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/stdio-probe-hardened.pending $(MACOS_OUT)/m5/stdio-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/stdio-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/stdio-probe-hardened
+	$(MACOS_OUT)/m5/stdio-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-stdio-check
+
+$(MACOS_OUT)/m5/osmand-link-probe: native/darwin/guest/binding_evidence.cpp include/shiraz/darwin/guest/binding_evidence.hpp tests/darwin/guest/osmand_link_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) native/darwin/guest/bitmap.cpp include/shiraz/darwin/guest/bitmap.hpp native/android_bitmap.cpp native/darwin/guest/guestegl.cpp include/shiraz/darwin/guest/guestegl.hpp include/shiraz/darwin/guest/guestegl_symbols.inc
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) $(MACOS_GUEST_JNI_FLAGS) $(MACOS_ANGLE_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/osmand_link_probe.cpp native/darwin/guest/binding_evidence.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) native/darwin/guest/bitmap.cpp native/android_bitmap.cpp native/darwin/guest/guestegl.cpp -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-osmand-link-check
+macos-guest-osmand-link-check: $(MACOS_OUT)/m5/osmand-link-probe
+	SHIRAZ_EGL_LIBRARY="$(CURDIR)/$(MACOS_OUT)/libEGL.dylib" SHIRAZ_GUEST_EGL_SHIM="$(CURDIR)/$(MACOS_OUT)/libEGL_shim.so" $(MACOS_OUT)/m5/osmand-link-probe $(MACOS_OUT)/m5/design/abi-table/libs/lib/arm64-v8a
+
+$(MACOS_GUEST_DEP_DIR)/unwind.o: tests/darwin/guest/deps/unwind.cpp
+	mkdir -p $(dir $@)
+	xcrun clang++ --target=aarch64-linux-android24 -ffreestanding -fPIC -funwind-tables -fno-stack-protector -fno-exceptions -fno-rtti -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-unwind-fixture macos-guest-unwind-check
+$(MACOS_GUEST_DEP_DIR)/unwind-islands.o: tests/darwin/guest/deps/unwind_islands.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+macos-guest-unwind-fixture: macos-guest-toolchain $(MACOS_GUEST_DEP_DIR)/unwind.o $(MACOS_GUEST_DEP_DIR)/unwind-islands.o
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --eh-frame-hdr --no-undefined -soname libunwind-fixture.so $(MACOS_GUEST_DEP_DIR)/unwind.o $(MACOS_GUEST_DEP_DIR)/unwind-islands.o -o $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
+$(MACOS_OUT)/m5/unwind-probe: tests/darwin/guest/unwind_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/unwind_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-unwind-check: macos-guest-unwind-fixture $(MACOS_OUT)/m5/unwind-probe
+	$(MACOS_OUT)/m5/unwind-probe $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
+	cp $(MACOS_OUT)/m5/unwind-probe $(MACOS_OUT)/m5/unwind-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/unwind-probe-hardened.pending $(MACOS_OUT)/m5/unwind-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/unwind-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/unwind-probe-hardened
+	$(MACOS_OUT)/m5/unwind-probe-hardened $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
+macos-guest-check: macos-guest-unwind-check
+
+$(MACOS_OUT)/m5/unwind-sanitized: tests/darwin/guest/unwind_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/unwind_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-unwind-sanitize-check
+macos-guest-unwind-sanitize-check: macos-guest-unwind-fixture $(MACOS_OUT)/m5/unwind-sanitized
+	$(MACOS_OUT)/m5/unwind-sanitized $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
+macos-guest-check: macos-guest-unwind-sanitize-check
+
+$(MACOS_GUEST_DEP_DIR)/link-log.o: tests/darwin/guest/deps/link-log.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/liblog-link.so: $(MACOS_GUEST_DEP_DIR)/link-log.o tests/darwin/guest/deps/log.map | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --version-script=tests/darwin/guest/deps/log.map -soname liblog.so $< -o $@
+$(MACOS_GUEST_DEP_DIR)/log.o: tests/darwin/guest/deps/log.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-log-fixture macos-guest-log-check
+macos-guest-log-fixture: $(MACOS_GUEST_DEP_DIR)/log.o $(MACOS_GUEST_DEP_DIR)/liblog-link.so $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname liblog-fixture.so $(MACOS_GUEST_DEP_DIR)/log.o -L$(MACOS_GUEST_DEP_DIR) -l:liblog-link.so -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/liblog-fixture.so
+$(MACOS_OUT)/m5/log-probe: tests/darwin/guest/log_probe.cpp native/darwin/guest/log.cpp native/darwin/guest/format.cpp include/shiraz/darwin/guest/log.hpp include/shiraz/darwin/guest/format.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/log_probe.cpp native/darwin/guest/log.cpp native/darwin/guest/format.cpp $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-log-check: macos-guest-log-fixture $(MACOS_OUT)/m5/log-probe
+	$(MACOS_OUT)/m5/log-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/log-probe $(MACOS_OUT)/m5/log-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/log-probe-hardened.pending $(MACOS_OUT)/m5/log-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/log-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/log-probe-hardened
+	$(MACOS_OUT)/m5/log-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-log-check
+
+$(MACOS_GUEST_DEP_DIR)/zlib-link.o: tests/darwin/guest/deps/zlib.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -DZLIB_LINK_ONLY -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libz-link.so: $(MACOS_GUEST_DEP_DIR)/zlib-link.o | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libz.so $< -o $@
+$(MACOS_GUEST_DEP_DIR)/zlib.o: tests/darwin/guest/deps/zlib.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-zlib-fixture macos-guest-zlib-check
+macos-guest-zlib-fixture: $(MACOS_GUEST_DEP_DIR)/zlib.o $(MACOS_GUEST_DEP_DIR)/libz-link.so $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libzlib-fixture.so $(MACOS_GUEST_DEP_DIR)/zlib.o -L$(MACOS_GUEST_DEP_DIR) -l:libz-link.so -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libzlib-fixture.so
+$(MACOS_OUT)/m5/zlib-probe: tests/darwin/guest/zlib_probe.cpp native/darwin/guest/zlib.cpp include/shiraz/darwin/guest/zlib.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/zlib_probe.cpp native/darwin/guest/zlib.cpp $(MACOS_GUEST_SOURCES) -lz -o $@
+macos-guest-zlib-check: macos-guest-zlib-fixture $(MACOS_OUT)/m5/zlib-probe
+	$(MACOS_OUT)/m5/zlib-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/zlib-probe $(MACOS_OUT)/m5/zlib-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/zlib-probe-hardened.pending $(MACOS_OUT)/m5/zlib-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/zlib-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/zlib-probe-hardened
+	$(MACOS_OUT)/m5/zlib-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-zlib-check
+
+$(MACOS_GUEST_DEP_DIR)/link-dynamic.o: tests/darwin/guest/deps/link-dynamic.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libdl-link.so: $(MACOS_GUEST_DEP_DIR)/link-dynamic.o tests/darwin/guest/deps/dynamic.map | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined --version-script=tests/darwin/guest/deps/dynamic.map -soname libdl.so $< -o $@
+$(MACOS_GUEST_DEP_DIR)/dynamic.o: tests/darwin/guest/deps/dynamic.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-dynamic-fixture macos-guest-dynamic-check
+macos-guest-dynamic-fixture: $(MACOS_GUEST_DEP_DIR)/dynamic.o $(MACOS_GUEST_DEP_DIR)/libdl-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libdynamic.so $(MACOS_GUEST_DEP_DIR)/dynamic.o -L$(MACOS_GUEST_DEP_DIR) -l:libdl-link.so -o $(MACOS_GUEST_DEP_DIR)/libdynamic.so
+$(MACOS_OUT)/m5/dynamic-probe: tests/darwin/guest/dynamic_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/dynamic_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-dynamic-check: macos-guest-dynamic-fixture $(MACOS_OUT)/m5/dynamic-probe
+	$(MACOS_OUT)/m5/dynamic-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/dynamic-probe $(MACOS_OUT)/m5/dynamic-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/dynamic-probe-hardened.pending $(MACOS_OUT)/m5/dynamic-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/dynamic-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/dynamic-probe-hardened
+	$(MACOS_OUT)/m5/dynamic-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-dynamic-check
+
+$(MACOS_OUT)/m5/dynamic-sanitized: tests/darwin/guest/dynamic_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/dynamic_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/zlib-sanitized: tests/darwin/guest/zlib_probe.cpp native/darwin/guest/zlib.cpp include/shiraz/darwin/guest/zlib.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/zlib_probe.cpp native/darwin/guest/zlib.cpp $(MACOS_GUEST_SOURCES) -lz -o $@
+$(MACOS_OUT)/m5/log-sanitized: tests/darwin/guest/log_probe.cpp native/darwin/guest/log.cpp native/darwin/guest/format.cpp include/shiraz/darwin/guest/log.hpp include/shiraz/darwin/guest/format.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/log_probe.cpp native/darwin/guest/log.cpp native/darwin/guest/format.cpp $(MACOS_GUEST_SOURCES) -o $@
+$(MACOS_OUT)/m5/stdio-sanitized: tests/darwin/guest/stdio_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/stdio_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-services-sanitize-check
+macos-guest-services-sanitize-check: macos-guest-dynamic-fixture macos-guest-zlib-fixture macos-guest-log-fixture macos-guest-stdio-fixture $(MACOS_OUT)/m5/dynamic-sanitized $(MACOS_OUT)/m5/zlib-sanitized $(MACOS_OUT)/m5/log-sanitized $(MACOS_OUT)/m5/stdio-sanitized
+	$(MACOS_OUT)/m5/dynamic-sanitized $(MACOS_GUEST_DEP_DIR)
+	$(MACOS_OUT)/m5/zlib-sanitized $(MACOS_GUEST_DEP_DIR)
+	$(MACOS_OUT)/m5/log-sanitized $(MACOS_GUEST_DEP_DIR)
+	$(MACOS_OUT)/m5/stdio-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-services-sanitize-check
+
+# Service variables are declared below the NativeBridge rule; add their
+# prerequisites after expansion so service edits rebuild the ART bridge too.
+$(MACOS_OUT)/libshiraz-guest.so: $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS)
+
+$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/bitmap.cpp include/shiraz/darwin/guest/bitmap.hpp native/android_bitmap.cpp include/shiraz/android_bitmap.h
+$(MACOS_OUT)/m5/properties-probe: tests/darwin/guest/properties_probe.cpp native/darwin/guest/properties.cpp include/shiraz/darwin/guest/properties.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/properties_probe.cpp native/darwin/guest/properties.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-properties-check
+macos-guest-properties-check: $(MACOS_OUT)/m5/properties-probe
+	$(MACOS_OUT)/m5/properties-probe
+	cp $(MACOS_OUT)/m5/properties-probe $(MACOS_OUT)/m5/properties-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/properties-probe-hardened.pending $(MACOS_OUT)/m5/properties-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/properties-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/properties-probe-hardened
+	$(MACOS_OUT)/m5/properties-probe-hardened
+macos-guest-check: macos-guest-properties-check
+
+$(MACOS_GUEST_DEP_DIR)/link-bitmap.o: tests/darwin/guest/deps/link-bitmap.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libjnigraphics-link.so: $(MACOS_GUEST_DEP_DIR)/link-bitmap.o | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libjnigraphics.so $< -o $@
+
+$(MACOS_GUEST_DEP_DIR)/lifecycle.o: tests/darwin/guest/deps/lifecycle.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-lifecycle-fixture macos-guest-lifecycle-check
+macos-guest-lifecycle-fixture: $(MACOS_GUEST_DEP_DIR)/lifecycle.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname liblifecycle.so $(MACOS_GUEST_DEP_DIR)/lifecycle.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/liblifecycle.so
+$(MACOS_OUT)/m5/lifecycle-probe: tests/darwin/guest/lifecycle_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/lifecycle_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-lifecycle-check: macos-guest-lifecycle-fixture $(MACOS_OUT)/m5/lifecycle-probe
+	$(MACOS_OUT)/m5/lifecycle-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/lifecycle-probe $(MACOS_OUT)/m5/lifecycle-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/lifecycle-probe-hardened.pending $(MACOS_OUT)/m5/lifecycle-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/lifecycle-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/lifecycle-probe-hardened
+	$(MACOS_OUT)/m5/lifecycle-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-lifecycle-check
+
+$(MACOS_GUEST_DEP_DIR)/format.o: tests/darwin/guest/deps/format.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-format-fixture macos-guest-format-check
+macos-guest-format-fixture: $(MACOS_GUEST_DEP_DIR)/format.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libformat.so $(MACOS_GUEST_DEP_DIR)/format.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libformat.so
+$(MACOS_OUT)/m5/format-probe: tests/darwin/guest/format_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/format_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-format-check: macos-guest-format-fixture $(MACOS_OUT)/m5/format-probe
+	$(MACOS_OUT)/m5/format-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/format-probe $(MACOS_OUT)/m5/format-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/format-probe-hardened.pending $(MACOS_OUT)/m5/format-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/format-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/format-probe-hardened
+	$(MACOS_OUT)/m5/format-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-format-check
+
+$(MACOS_GUEST_DEP_DIR)/link-scalar.o: tests/darwin/guest/deps/link-scalar.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libc-scalar.o: tests/darwin/guest/deps/libc_scalar.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-libc-scalar-fixture macos-guest-libc-scalar-check
+macos-guest-libc-scalar-fixture: $(MACOS_GUEST_DEP_DIR)/libc-scalar.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname liblibc-scalar.so $(MACOS_GUEST_DEP_DIR)/libc-scalar.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/liblibc-scalar.so
+$(MACOS_OUT)/m5/libc-scalar-probe: tests/darwin/guest/libc_scalar_probe.cpp native/darwin/guest/libc_scalar.cpp include/shiraz/darwin/guest/libc_scalar.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/libc_scalar_probe.cpp native/darwin/guest/libc_scalar.cpp $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-libc-scalar-check: macos-guest-libc-scalar-fixture $(MACOS_OUT)/m5/libc-scalar-probe
+	$(MACOS_OUT)/m5/libc-scalar-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/libc-scalar-probe $(MACOS_OUT)/m5/libc-scalar-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/libc-scalar-probe-hardened.pending $(MACOS_OUT)/m5/libc-scalar-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/libc-scalar-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/libc-scalar-probe-hardened
+	$(MACOS_OUT)/m5/libc-scalar-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-libc-scalar-check
+
+# NativeSound on macOS: real Ogg/CoreAudio decoding and AudioQueue output.
+MACOS_AUDIO_SOURCES := native/audio.cpp native/darwin/audio_decode.cpp native/darwin/audio_output.cpp
+MACOS_AUDIO_HEADERS := include/shiraz/audio.hpp include/shiraz/audio_output.hpp native/darwin/audio_decode.hpp
+MACOS_AUDIO_CODEC := .deps/stb-audio/libstb_vorbis.a
+MACOS_AUDIO_FRAMEWORKS := -framework AudioToolbox -framework CoreFoundation
+.PHONY: macos-audio-deps macos-audio-check
+macos-audio-deps:
+	uv run --no-project python scripts/bootstrap_macos_audio.py
+$(MACOS_AUDIO_CODEC): scripts/bootstrap_macos_audio.py
+	uv run --no-project python scripts/bootstrap_macos_audio.py
+$(MACOS_OUT)/libshiraz-audio.so: $(MACOS_AUDIO_SOURCES) $(MACOS_AUDIO_HEADERS) native/audio_jni.cpp $(MACOS_AUDIO_CODEC) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -I.deps/stb-audio -fPIC $(MACOS_DYLIB) $(MACOS_AUDIO_SOURCES) native/audio_jni.cpp $(MACOS_AUDIO_CODEC) -o $@ $(MACOS_AUDIO_FRAMEWORKS) -pthread
+$(MACOS_OUT)/test-audio: tests/audio.cpp native/audio.cpp native/darwin/audio_decode.cpp $(MACOS_AUDIO_HEADERS) $(MACOS_AUDIO_CODEC) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -I.deps/stb-audio tests/audio.cpp native/audio.cpp native/darwin/audio_decode.cpp $(MACOS_AUDIO_CODEC) -o $@ $(MACOS_AUDIO_FRAMEWORKS) -pthread
+$(MACOS_OUT)/test-audio-decode: tests/darwin/audio_decode.cpp native/audio.cpp native/darwin/audio_decode.cpp $(MACOS_AUDIO_HEADERS) $(MACOS_AUDIO_CODEC) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -I.deps/stb-audio tests/darwin/audio_decode.cpp native/audio.cpp native/darwin/audio_decode.cpp $(MACOS_AUDIO_CODEC) -o $@ $(MACOS_AUDIO_FRAMEWORKS) -pthread
+$(MACOS_OUT)/test-audio-output: tests/darwin/audio_output.cpp $(MACOS_AUDIO_SOURCES) $(MACOS_AUDIO_HEADERS) $(MACOS_AUDIO_CODEC) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -I.deps/stb-audio tests/darwin/audio_output.cpp $(MACOS_AUDIO_SOURCES) $(MACOS_AUDIO_CODEC) -o $@ $(MACOS_AUDIO_FRAMEWORKS) -pthread
+macos-audio-check: macos-audio-deps $(MACOS_OUT)/test-audio $(MACOS_OUT)/test-audio-decode $(MACOS_OUT)/test-audio-output
+	$(MACOS_OUT)/test-audio
+macos-runtime-libs: $(MACOS_OUT)/libshiraz-audio.so
+
+.PHONY: macos-sensor-check
+macos-sensor-check: macos-framework
+	mkdir -p $(MACOS_OUT)/sensor-smoke/classes
+	javac --release 8 -cp build/framework/classes -d $(MACOS_OUT)/sensor-smoke/classes tests/java/SensorDiscoverySmoke.java
+	java -cp $(MACOS_OUT)/sensor-smoke/classes:build/framework/classes SensorDiscoverySmoke $(MACOS_OUT)/sensor-smoke
+
+$(MACOS_OUT)/m5/lifecycle-sanitized: tests/darwin/guest/lifecycle_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/lifecycle_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/format-sanitized: tests/darwin/guest/format_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/format_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/libc-scalar-sanitized: tests/darwin/guest/libc_scalar_probe.cpp native/darwin/guest/libc_scalar.cpp include/shiraz/darwin/guest/libc_scalar.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/libc_scalar_probe.cpp native/darwin/guest/libc_scalar.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-extra-services-sanitize-check
+macos-guest-extra-services-sanitize-check: macos-guest-lifecycle-fixture macos-guest-format-fixture macos-guest-libc-scalar-fixture $(MACOS_OUT)/m5/lifecycle-sanitized $(MACOS_OUT)/m5/format-sanitized $(MACOS_OUT)/m5/libc-scalar-sanitized
+	$(MACOS_OUT)/m5/lifecycle-sanitized $(MACOS_GUEST_DEP_DIR)
+	$(MACOS_OUT)/m5/format-sanitized $(MACOS_GUEST_DEP_DIR)
+	$(MACOS_OUT)/m5/libc-scalar-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-extra-services-sanitize-check
+
+$(MACOS_OUT)/test-audio-decode-sanitized: tests/darwin/audio_decode.cpp native/audio.cpp native/darwin/audio_decode.cpp $(MACOS_AUDIO_HEADERS) $(MACOS_AUDIO_CODEC) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -O1 -fsanitize=address,undefined -I.deps/stb-audio tests/darwin/audio_decode.cpp native/audio.cpp native/darwin/audio_decode.cpp $(MACOS_AUDIO_CODEC) -o $@ $(MACOS_AUDIO_FRAMEWORKS) -pthread
+
+$(MACOS_GUEST_DEP_DIR)/fortify.o: tests/darwin/guest/deps/fortify.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-fortify-fixture macos-guest-fortify-check
+macos-guest-fortify-fixture: $(MACOS_GUEST_DEP_DIR)/fortify.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libfortify.so $(MACOS_GUEST_DEP_DIR)/fortify.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libfortify.so
+$(MACOS_OUT)/m5/fortify-probe: tests/darwin/guest/fortify_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/fortify_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-fortify-check: macos-guest-fortify-fixture $(MACOS_OUT)/m5/fortify-probe
+	$(MACOS_OUT)/m5/fortify-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/fortify-probe $(MACOS_OUT)/m5/fortify-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/fortify-probe-hardened.pending $(MACOS_OUT)/m5/fortify-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/fortify-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/fortify-probe-hardened
+	$(MACOS_OUT)/m5/fortify-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-fortify-check
+
+$(MACOS_GUEST_DEP_DIR)/link-cxx.o: tests/darwin/guest/deps/link-cxx.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libstdc++-link.so: $(MACOS_GUEST_DEP_DIR)/link-cxx.o tests/darwin/guest/deps/cxx.map | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined --version-script=tests/darwin/guest/deps/cxx.map -soname libstdc++.so $< -o $@
+$(MACOS_GUEST_DEP_DIR)/cxx.o: tests/darwin/guest/deps/cxx.cpp mk/darwin.mk
+	mkdir -p $(dir $@)
+	xcrun clang++ --target=aarch64-linux-android24 -ffreestanding -fPIC -fno-stack-protector -fno-exceptions -fno-rtti -mno-outline-atomics -nostdinc++ -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-cxx-fixture macos-guest-cxx-check
+macos-guest-cxx-fixture: $(MACOS_GUEST_DEP_DIR)/cxx.o $(MACOS_GUEST_DEP_DIR)/libstdc++-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libcxx-fixture.so $(MACOS_GUEST_DEP_DIR)/cxx.o -L$(MACOS_GUEST_DEP_DIR) -l:libstdc++-link.so -o $(MACOS_GUEST_DEP_DIR)/libcxx-fixture.so
+$(MACOS_OUT)/m5/cxx-probe: tests/darwin/guest/cxx_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/cxx_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-cxx-check: macos-guest-cxx-fixture $(MACOS_OUT)/m5/cxx-probe
+	$(MACOS_OUT)/m5/cxx-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/cxx-probe $(MACOS_OUT)/m5/cxx-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/cxx-probe-hardened.pending $(MACOS_OUT)/m5/cxx-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/cxx-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/cxx-probe-hardened
+	$(MACOS_OUT)/m5/cxx-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-cxx-check
+
+$(MACOS_GUEST_DEP_DIR)/link-locale.o: tests/darwin/guest/deps/link-locale.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/locale.o: tests/darwin/guest/deps/locale.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/multibyte.o: tests/darwin/guest/deps/multibyte.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/time.o: tests/darwin/guest/deps/time.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-locale-fixture macos-guest-multibyte-fixture macos-guest-time-fixture
+macos-guest-locale-fixture: $(MACOS_GUEST_DEP_DIR)/locale.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname liblocale.so $(MACOS_GUEST_DEP_DIR)/locale.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/liblocale.so
+macos-guest-multibyte-fixture: $(MACOS_GUEST_DEP_DIR)/multibyte.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libmultibyte.so $(MACOS_GUEST_DEP_DIR)/multibyte.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libmultibyte.so
+macos-guest-time-fixture: $(MACOS_GUEST_DEP_DIR)/time.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libtime-fixture.so $(MACOS_GUEST_DEP_DIR)/time.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libtime-fixture.so
+$(MACOS_OUT)/m5/locale-probe: tests/darwin/guest/locale_probe.cpp native/darwin/guest/locale.cpp include/shiraz/darwin/guest/locale.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/locale_probe.cpp native/darwin/guest/locale.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/multibyte-probe: tests/darwin/guest/multibyte_probe.cpp native/darwin/guest/locale.cpp native/darwin/guest/multibyte.cpp include/shiraz/darwin/guest/locale.hpp include/shiraz/darwin/guest/multibyte.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/multibyte_probe.cpp native/darwin/guest/locale.cpp native/darwin/guest/multibyte.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/time-probe: tests/darwin/guest/time_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/time_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-locale-check macos-guest-multibyte-check macos-guest-time-check
+macos-guest-locale-check: macos-guest-locale-fixture $(MACOS_OUT)/m5/locale-probe
+	$(MACOS_OUT)/m5/locale-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/locale-probe $(MACOS_OUT)/m5/locale-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/locale-probe-hardened.pending $(MACOS_OUT)/m5/locale-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/locale-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/locale-probe-hardened
+	$(MACOS_OUT)/m5/locale-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-multibyte-check: macos-guest-multibyte-fixture $(MACOS_OUT)/m5/multibyte-probe
+	$(MACOS_OUT)/m5/multibyte-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/multibyte-probe $(MACOS_OUT)/m5/multibyte-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/multibyte-probe-hardened.pending $(MACOS_OUT)/m5/multibyte-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/multibyte-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/multibyte-probe-hardened
+	$(MACOS_OUT)/m5/multibyte-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-time-check: macos-guest-time-fixture $(MACOS_OUT)/m5/time-probe
+	$(MACOS_OUT)/m5/time-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/time-probe $(MACOS_OUT)/m5/time-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/time-probe-hardened.pending $(MACOS_OUT)/m5/time-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/time-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/time-probe-hardened
+	$(MACOS_OUT)/m5/time-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-locale-check macos-guest-multibyte-check macos-guest-time-check
+
+$(MACOS_GUEST_DEP_DIR)/system.o: tests/darwin/guest/deps/system.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/scan.o: tests/darwin/guest/deps/scan.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-system-fixture macos-guest-scan-fixture
+macos-guest-system-fixture: $(MACOS_GUEST_DEP_DIR)/system.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libsystem-fixture.so $(MACOS_GUEST_DEP_DIR)/system.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libsystem-fixture.so
+macos-guest-scan-fixture: $(MACOS_GUEST_DEP_DIR)/scan.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libscan.so $(MACOS_GUEST_DEP_DIR)/scan.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libscan.so
+$(MACOS_OUT)/m5/system-probe: tests/darwin/guest/system_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/system_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/scan-probe: tests/darwin/guest/scan_probe.cpp native/darwin/guest/scan.cpp include/shiraz/darwin/guest/scan.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/scan_probe.cpp native/darwin/guest/scan.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-system-check macos-guest-scan-check
+macos-guest-system-check: macos-guest-system-fixture $(MACOS_OUT)/m5/system-probe
+	$(MACOS_OUT)/m5/system-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/system-probe $(MACOS_OUT)/m5/system-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/system-probe-hardened.pending $(MACOS_OUT)/m5/system-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/system-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/system-probe-hardened
+	$(MACOS_OUT)/m5/system-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-scan-check: macos-guest-scan-fixture $(MACOS_OUT)/m5/scan-probe
+	$(MACOS_OUT)/m5/scan-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/scan-probe $(MACOS_OUT)/m5/scan-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/scan-probe-hardened.pending $(MACOS_OUT)/m5/scan-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/scan-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/scan-probe-hardened
+	$(MACOS_OUT)/m5/scan-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-system-check macos-guest-scan-check
+
+$(MACOS_GUEST_ICU_ARCHIVES): scripts/bootstrap_guest_icu.py scripts/bootstrap_darwin.py
+	uv run --no-project python scripts/bootstrap_guest_icu.py
+.PHONY: macos-guest-icu-check
+macos-guest-icu-check:
+	uv run --no-project python scripts/bootstrap_guest_icu.py
+$(MACOS_OUT)/m5/locale-probe $(MACOS_OUT)/m5/multibyte-probe: $(MACOS_GUEST_ICU_ARCHIVES)
+macos-guest-check macos-guest-jni-check macos-guest-jni-adhoc-check: macos-guest-icu-check
+
+$(MACOS_GUEST_DEP_DIR)/jump.o: tests/darwin/guest/deps/jump.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/scalar-extra.o: tests/darwin/guest/deps/scalar_extra.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-jump-fixture macos-guest-scalar-extra-fixture
+macos-guest-jump-fixture: $(MACOS_GUEST_DEP_DIR)/jump.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libjump-fixture.so $(MACOS_GUEST_DEP_DIR)/jump.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libjump-fixture.so
+macos-guest-scalar-extra-fixture: $(MACOS_GUEST_DEP_DIR)/scalar-extra.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libscalar-extra.so $(MACOS_GUEST_DEP_DIR)/scalar-extra.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libscalar-extra.so
+$(MACOS_OUT)/m5/jump-probe: tests/darwin/guest/jump_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/jump_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/scalar-extra-probe: tests/darwin/guest/scalar_extra_probe.cpp native/darwin/guest/libc_scalar.cpp include/shiraz/darwin/guest/libc_scalar.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/scalar_extra_probe.cpp native/darwin/guest/libc_scalar.cpp $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-jump-check macos-guest-scalar-extra-check
+macos-guest-jump-check: macos-guest-jump-fixture $(MACOS_OUT)/m5/jump-probe
+	$(MACOS_OUT)/m5/jump-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/jump-probe $(MACOS_OUT)/m5/jump-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/jump-probe-hardened.pending $(MACOS_OUT)/m5/jump-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/jump-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/jump-probe-hardened
+	$(MACOS_OUT)/m5/jump-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-scalar-extra-check: macos-guest-scalar-extra-fixture $(MACOS_OUT)/m5/scalar-extra-probe
+	$(MACOS_OUT)/m5/scalar-extra-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/scalar-extra-probe $(MACOS_OUT)/m5/scalar-extra-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/scalar-extra-probe-hardened.pending $(MACOS_OUT)/m5/scalar-extra-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/scalar-extra-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/scalar-extra-probe-hardened
+	$(MACOS_OUT)/m5/scalar-extra-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-jump-check macos-guest-scalar-extra-check
+
+# Binary128 conversion gates: genuine AAPCS64 q0 returns, never Darwin long double.
+$(MACOS_GUEST_DEP_DIR)/quad.o: tests/darwin/guest/deps/quad.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-quad-fixture macos-guest-quad-check macos-guest-quad-sanitize-check
+macos-guest-quad-fixture: $(MACOS_GUEST_DEP_DIR)/quad.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libquad.so $(MACOS_GUEST_DEP_DIR)/quad.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libquad.so
+$(MACOS_OUT)/m5/quad-probe: tests/darwin/guest/quad_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp include/shiraz/darwin/guest/quad.hpp include/shiraz/darwin/guest/locale.hpp $(MACOS_GUEST_ICU_ARCHIVES) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/quad_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-quad-check: macos-guest-quad-fixture $(MACOS_OUT)/m5/quad-probe
+	$(MACOS_OUT)/m5/quad-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/quad-probe $(MACOS_OUT)/m5/quad-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/quad-probe-hardened.pending $(MACOS_OUT)/m5/quad-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/quad-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/quad-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/quad-probe-hardened
+	$(MACOS_OUT)/m5/quad-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/quad-sanitized: tests/darwin/guest/quad_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp include/shiraz/darwin/guest/quad.hpp include/shiraz/darwin/guest/locale.hpp $(MACOS_GUEST_ICU_ARCHIVES) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/quad_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-quad-sanitize-check: macos-guest-quad-fixture $(MACOS_OUT)/m5/quad-sanitized
+	$(MACOS_OUT)/m5/quad-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-quad-check macos-guest-quad-sanitize-check
+
+# Guest process services: no raw Linux syscalls or host-global syslog state.
+$(MACOS_GUEST_DEP_DIR)/link-process.o: tests/darwin/guest/deps/link-process.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/process.o: tests/darwin/guest/deps/process.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-process-fixture macos-guest-process-check macos-guest-process-sanitize-check
+macos-guest-process-fixture: $(MACOS_GUEST_DEP_DIR)/process.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libprocess-fixture.so $(MACOS_GUEST_DEP_DIR)/process.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libprocess-fixture.so
+$(MACOS_OUT)/m5/process-probe: tests/darwin/guest/process_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/process_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-process-check: macos-guest-process-fixture $(MACOS_OUT)/m5/process-probe
+	$(MACOS_OUT)/m5/process-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/process-probe $(MACOS_OUT)/m5/process-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/process-probe-hardened.pending $(MACOS_OUT)/m5/process-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/process-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/process-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/process-probe-hardened
+	$(MACOS_OUT)/m5/process-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/process-sanitized: tests/darwin/guest/process_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/process_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-process-sanitize-check: macos-guest-process-fixture $(MACOS_OUT)/m5/process-sanitized
+	$(MACOS_OUT)/m5/process-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-process-check
+macos-guest-extra-services-sanitize-check: macos-guest-process-sanitize-check
+# This target is declared before IO variables above; retain explicit new
+# process integration dependencies so an existing JNI library rebuilds too.
+$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/process.cpp include/shiraz/darwin/guest/process.hpp native/darwin/guest/memory.cpp
+
+# IO lists are defined after the JNI target, so add binary128 rebuild inputs explicitly.
+$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/quad.cpp include/shiraz/darwin/guest/quad.hpp native/darwin/guest/memory.cpp
+
+$(MACOS_GUEST_DEP_DIR)/link-quad-math.o: tests/darwin/guest/deps/link-quad-math.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libquad-math-link.so: $(MACOS_GUEST_DEP_DIR)/link-quad-math.o
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined --version-script=tests/darwin/guest/deps/libc.map -soname libm.so $< -o $@
+
+$(MACOS_GUEST_DEP_DIR)/quad-math.o: tests/darwin/guest/deps/quad_math.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-quad-math-fixture macos-guest-quad-math-check macos-guest-quad-math-sanitize-check
+macos-guest-quad-math-fixture: $(MACOS_GUEST_DEP_DIR)/quad-math.o $(MACOS_GUEST_DEP_DIR)/libc-link.so $(MACOS_GUEST_DEP_DIR)/libquad-math-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libquad-math.so $(MACOS_GUEST_DEP_DIR)/quad-math.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -l:libquad-math-link.so -o $(MACOS_GUEST_DEP_DIR)/libquad-math.so
+$(MACOS_OUT)/m5/quad-math-probe: tests/darwin/guest/quad_math_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp include/shiraz/darwin/guest/quad.hpp include/shiraz/darwin/guest/locale.hpp $(MACOS_GUEST_ICU_ARCHIVES) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/quad_math_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-quad-math-check: macos-guest-quad-math-fixture $(MACOS_OUT)/m5/quad-math-probe
+	$(MACOS_OUT)/m5/quad-math-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/quad-math-probe $(MACOS_OUT)/m5/quad-math-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/quad-math-probe-hardened.pending $(MACOS_OUT)/m5/quad-math-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/quad-math-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/quad-math-probe-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/quad-math-probe-hardened
+	$(MACOS_OUT)/m5/quad-math-probe-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/quad-math-sanitized: tests/darwin/guest/quad_math_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp include/shiraz/darwin/guest/quad.hpp include/shiraz/darwin/guest/locale.hpp $(MACOS_GUEST_ICU_ARCHIVES) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/quad_math_probe.cpp native/darwin/guest/quad.cpp native/darwin/guest/locale.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-quad-math-sanitize-check: macos-guest-quad-math-fixture $(MACOS_OUT)/m5/quad-math-sanitized
+	$(MACOS_OUT)/m5/quad-math-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-quad-math-check macos-guest-quad-math-sanitize-check
+
+$(MACOS_GUEST_DEP_DIR)/transfer.o: tests/darwin/guest/deps/transfer.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+
+.PHONY: macos-guest-transfer-fixture macos-guest-transfer-check
+macos-guest-transfer-fixture: $(MACOS_GUEST_DEP_DIR)/transfer.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libtransfer.so $(MACOS_GUEST_DEP_DIR)/transfer.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libtransfer.so
+$(MACOS_OUT)/m5/transfer-probe: tests/darwin/guest/transfer_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/transfer_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-transfer-check: macos-guest-transfer-fixture $(MACOS_OUT)/m5/transfer-probe
+	$(MACOS_OUT)/m5/transfer-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/transfer-probe $(MACOS_OUT)/m5/transfer-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/transfer-probe-hardened.pending $(MACOS_OUT)/m5/transfer-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/transfer-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/transfer-probe-hardened
+	$(MACOS_OUT)/m5/transfer-probe-hardened $(MACOS_GUEST_DEP_DIR)
+
+macos-guest-check: macos-guest-transfer-check
+
+$(MACOS_GUEST_DEP_DIR)/wideformat.o: tests/darwin/guest/deps/wideformat.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+
+.PHONY: macos-guest-wideformat-fixture macos-guest-wideformat-check
+macos-guest-wideformat-fixture: $(MACOS_GUEST_DEP_DIR)/wideformat.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libwideformat.so $(MACOS_GUEST_DEP_DIR)/wideformat.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libwideformat.so
+$(MACOS_OUT)/m5/wideformat-probe: tests/darwin/guest/wideformat_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/wideformat_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-wideformat-check: macos-guest-wideformat-fixture $(MACOS_OUT)/m5/wideformat-probe
+	$(MACOS_OUT)/m5/wideformat-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/wideformat-probe $(MACOS_OUT)/m5/wideformat-probe-hardened.pending
+	mv $(MACOS_OUT)/m5/wideformat-probe-hardened.pending $(MACOS_OUT)/m5/wideformat-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/wideformat-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/wideformat-probe-hardened
+	$(MACOS_OUT)/m5/wideformat-probe-hardened $(MACOS_GUEST_DEP_DIR)
+
+macos-guest-check: macos-guest-wideformat-check
+
+$(MACOS_GUEST_DEP_DIR)/guestegl.o: tests/darwin/guest/deps/guestegl.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 $(MACOS_ANGLE_CFLAGS) -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/guestegl-bool.o: tests/darwin/guest/deps/guestegl_bool.S
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/link-guestegl.o: tests/darwin/guest/deps/link-guestegl.S
+	xcrun clang --target=aarch64-linux-android24 -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libguestegl-link.so: $(MACOS_GUEST_DEP_DIR)/link-guestegl.o
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libEGL.so $< -o $@
+.PHONY: macos-guest-egl-fixture macos-guest-egl-check
+macos-guest-egl-fixture: $(MACOS_GUEST_DEP_DIR)/guestegl.o $(MACOS_GUEST_DEP_DIR)/guestegl-bool.o $(MACOS_GUEST_DEP_DIR)/libguestegl-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libguestegl.so $(MACOS_GUEST_DEP_DIR)/guestegl.o $(MACOS_GUEST_DEP_DIR)/guestegl-bool.o -L$(MACOS_GUEST_DEP_DIR) -l:libguestegl-link.so -o $(MACOS_GUEST_DEP_DIR)/libguestegl.so
+$(MACOS_OUT)/m5/guestegl-probe: tests/darwin/guest/guestegl_probe.cpp native/darwin/guest/guestegl.cpp include/shiraz/darwin/guest/guestegl.hpp include/shiraz/darwin/guest/guestegl_symbols.inc include/shiraz/darwin/guest/guestegl_required.inc $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_ANGLE_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/guestegl_probe.cpp native/darwin/guest/guestegl.cpp $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-egl-check: macos-guest-egl-fixture $(MACOS_OUT)/m5/guestegl-probe $(MACOS_OUT)/libEGL_shim.so
+	SHIRAZ_EGL_LIBRARY="$(CURDIR)/$(MACOS_OUT)/libEGL.dylib" $(MACOS_OUT)/m5/guestegl-probe $(MACOS_GUEST_DEP_DIR) "$(CURDIR)/$(MACOS_OUT)/libEGL_shim.so"
+macos-guest-osmand-link-check: $(MACOS_OUT)/libEGL_shim.so
+
+$(MACOS_OUT)/m5/wideformat-sanitized: tests/darwin/guest/wideformat_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/wideformat_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-wideformat-sanitize-check
+macos-guest-wideformat-sanitize-check: macos-guest-wideformat-fixture $(MACOS_OUT)/m5/wideformat-sanitized
+	$(MACOS_OUT)/m5/wideformat-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-wideformat-sanitize-check
+
+$(MACOS_OUT)/m5/transfer-sanitized: tests/darwin/guest/transfer_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/transfer_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-transfer-sanitize-check
+macos-guest-transfer-sanitize-check: macos-guest-transfer-fixture $(MACOS_OUT)/m5/transfer-sanitized
+	$(MACOS_OUT)/m5/transfer-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-transfer-sanitize-check
+
+macos-guest-check: macos-guest-egl-check
+
+$(MACOS_GUEST_DEP_DIR)/core-services.o: tests/darwin/guest/deps/core_services.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-core-services-fixture macos-guest-core-services-check macos-guest-core-services-sanitize-check
+macos-guest-core-services-fixture: $(MACOS_GUEST_DEP_DIR)/core-services.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libcore-services.so $(MACOS_GUEST_DEP_DIR)/core-services.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libcore-services.so
+$(MACOS_OUT)/m5/core-services-probe: tests/darwin/guest/core_services_probe.cpp native/darwin/guest/core_services.cpp native/darwin/guest/accounts.cpp native/darwin/guest/cleanup.cpp native/darwin/guest/fs.cpp native/darwin/guest/fonts.cpp native/darwin/guest/events.cpp native/darwin/guest/networking.cpp native/darwin/guest/signals.cpp native/darwin/guest/signals.S native/darwin/guest/fortify.cpp include/shiraz/darwin/guest/core_services.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/core_services_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+$(MACOS_OUT)/m5/core-services-sanitized: tests/darwin/guest/core_services_probe.cpp native/darwin/guest/core_services.cpp native/darwin/guest/accounts.cpp native/darwin/guest/cleanup.cpp native/darwin/guest/fs.cpp native/darwin/guest/fonts.cpp native/darwin/guest/events.cpp native/darwin/guest/networking.cpp native/darwin/guest/signals.cpp native/darwin/guest/signals.S native/darwin/guest/fortify.cpp include/shiraz/darwin/guest/core_services.hpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -fsanitize=address,undefined -g -Wall -Wextra -Werror tests/darwin/guest/core_services_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-core-services-check: macos-guest-core-services-fixture $(MACOS_OUT)/m5/core-services-probe
+	$(MACOS_OUT)/m5/core-services-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/core-services-probe $(MACOS_OUT)/m5/core-services-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/core-services-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/core-services-probe-hardened
+	$(MACOS_OUT)/m5/core-services-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-core-services-sanitize-check: macos-guest-core-services-fixture $(MACOS_OUT)/m5/core-services-sanitized
+	$(MACOS_OUT)/m5/core-services-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-core-services-check macos-guest-core-services-sanitize-check
+
+$(MACOS_OUT)/m5/osmand-host-observer.so: tests/darwin/guest/osmand_host_observer.cpp $(MACOS_OUT)/m5/native-closure-inventory.o
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_JNI_FLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fPIC -dynamiclib $< $(MACOS_OUT)/m5/native-closure-inventory.o -o $@
+.PHONY: macos-guest-osmand-jni-check
+macos-guest-osmand-jni-check: $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/osmand-host-observer.so
+	uv run --no-project python scripts/macos_guest_osmand_smoke.py --apk "$(APK)"
+
+$(MACOS_GUEST_DEP_DIR)/events.o: tests/darwin/guest/deps/events.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-events-fixture macos-guest-events-check
+macos-guest-events-fixture: $(MACOS_GUEST_DEP_DIR)/events.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libevents.so $(MACOS_GUEST_DEP_DIR)/events.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libevents.so
+$(MACOS_OUT)/m5/events-probe: tests/darwin/guest/events_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/events_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-events-check: macos-guest-events-fixture $(MACOS_OUT)/m5/events-probe
+	$(MACOS_OUT)/m5/events-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/events-probe $(MACOS_OUT)/m5/events-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/events-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/events-probe-hardened
+	$(MACOS_OUT)/m5/events-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-events-check
+
+$(MACOS_GUEST_DEP_DIR)/signals.o: tests/darwin/guest/deps/signals.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-signals-fixture macos-guest-signals-check
+macos-guest-signals-fixture: $(MACOS_GUEST_DEP_DIR)/signals.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libsignals.so $(MACOS_GUEST_DEP_DIR)/signals.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libsignals.so
+$(MACOS_OUT)/m5/signals-probe: tests/darwin/guest/signals_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/signals_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-signals-check: macos-guest-signals-fixture $(MACOS_OUT)/m5/signals-probe
+	$(MACOS_OUT)/m5/signals-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/signals-probe $(MACOS_OUT)/m5/signals-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/signals-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/signals-probe-hardened
+	$(MACOS_OUT)/m5/signals-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-signals-check
+
+$(MACOS_GUEST_DEP_DIR)/networking.o: tests/darwin/guest/deps/networking.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-networking-fixture macos-guest-networking-check
+macos-guest-networking-fixture: $(MACOS_GUEST_DEP_DIR)/networking.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libnetworking.so $(MACOS_GUEST_DEP_DIR)/networking.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libnetworking.so
+$(MACOS_OUT)/m5/networking-probe: tests/darwin/guest/networking_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/networking_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-networking-check: macos-guest-networking-fixture $(MACOS_OUT)/m5/networking-probe
+	$(MACOS_OUT)/m5/networking-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/networking-probe $(MACOS_OUT)/m5/networking-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/networking-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/networking-probe-hardened
+	$(MACOS_OUT)/m5/networking-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-networking-check
+
+
+$(MACOS_GUEST_DEP_DIR)/accounts.o: tests/darwin/guest/deps/accounts.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-accounts-fixture macos-guest-accounts-check
+macos-guest-accounts-fixture: $(MACOS_GUEST_DEP_DIR)/accounts.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libaccounts.so $(MACOS_GUEST_DEP_DIR)/accounts.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libaccounts.so
+$(MACOS_OUT)/m5/accounts-probe: tests/darwin/guest/accounts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/accounts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-accounts-check: macos-guest-accounts-fixture $(MACOS_OUT)/m5/accounts-probe
+	$(MACOS_OUT)/m5/accounts-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/accounts-probe $(MACOS_OUT)/m5/accounts-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/accounts-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/accounts-probe-hardened
+	$(MACOS_OUT)/m5/accounts-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-accounts-check
+
+
+$(MACOS_GUEST_DEP_DIR)/remap.o: tests/darwin/guest/deps/remap.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-remap-fixture macos-guest-remap-check
+macos-guest-remap-fixture: $(MACOS_GUEST_DEP_DIR)/remap.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libremap.so $(MACOS_GUEST_DEP_DIR)/remap.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libremap.so
+$(MACOS_OUT)/m5/remap-probe: tests/darwin/guest/remap_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/remap_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-remap-check: macos-guest-remap-fixture $(MACOS_OUT)/m5/remap-probe
+	$(MACOS_OUT)/m5/remap-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/remap-probe $(MACOS_OUT)/m5/remap-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/remap-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/remap-probe-hardened
+	$(MACOS_OUT)/m5/remap-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-remap-check
+
+
+$(MACOS_GUEST_DEP_DIR)/fs.o: tests/darwin/guest/deps/fs.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-fs-fixture macos-guest-fs-check
+macos-guest-fs-fixture: $(MACOS_GUEST_DEP_DIR)/fs.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libfs.so $(MACOS_GUEST_DEP_DIR)/fs.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libfs.so
+$(MACOS_OUT)/m5/fs-probe: tests/darwin/guest/fs_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/fs_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-fs-check: macos-guest-fs-fixture $(MACOS_OUT)/m5/fs-probe
+	$(MACOS_OUT)/m5/fs-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/fs-probe $(MACOS_OUT)/m5/fs-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/fs-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/fs-probe-hardened
+	$(MACOS_OUT)/m5/fs-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-fs-check
+
+
+$(MACOS_GUEST_DEP_DIR)/cleanup.o: tests/darwin/guest/deps/cleanup.c $(MACOS_OUT)/m5/guest_io.hpp mk/darwin.mk
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -mno-outline-atomics -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-cleanup-fixture macos-guest-cleanup-check
+macos-guest-cleanup-fixture: $(MACOS_GUEST_DEP_DIR)/cleanup.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libcleanup.so $(MACOS_GUEST_DEP_DIR)/cleanup.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libcleanup.so
+$(MACOS_OUT)/m5/cleanup-probe: tests/darwin/guest/cleanup_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/cleanup_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-cleanup-check: macos-guest-cleanup-fixture $(MACOS_OUT)/m5/cleanup-probe
+	$(MACOS_OUT)/m5/cleanup-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/cleanup-probe $(MACOS_OUT)/m5/cleanup-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/cleanup-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/cleanup-probe-hardened
+	$(MACOS_OUT)/m5/cleanup-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-cleanup-check
+
+
+.PHONY: macos-guest-osmand-core-check
+macos-guest-osmand-core-check: macos-framework $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/osmand-host-observer.so $(MACOS_OUT)/libEGL_shim.so
+	uv run --no-project python scripts/macos_guest_osmand_smoke.py --core --apk "$(APK)"
+
+macos-runtime-libs: $(MACOS_OUT)/libshiraz-guest.so
+
+$(MACOS_OUT)/m5/events-sanitized: tests/darwin/guest/events_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/events_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-events-sanitize-check
+macos-guest-events-sanitize-check: macos-guest-events-fixture $(MACOS_OUT)/m5/events-sanitized
+	$(MACOS_OUT)/m5/events-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-events-sanitize-check
+
+$(MACOS_OUT)/m5/signals-sanitized: tests/darwin/guest/signals_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/signals_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-signals-sanitize-check
+macos-guest-signals-sanitize-check: macos-guest-signals-fixture $(MACOS_OUT)/m5/signals-sanitized
+	$(MACOS_OUT)/m5/signals-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-signals-sanitize-check
+
+$(MACOS_OUT)/m5/networking-sanitized: tests/darwin/guest/networking_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/networking_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-networking-sanitize-check
+macos-guest-networking-sanitize-check: macos-guest-networking-fixture $(MACOS_OUT)/m5/networking-sanitized
+	$(MACOS_OUT)/m5/networking-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-networking-sanitize-check
+
+$(MACOS_OUT)/m5/accounts-sanitized: tests/darwin/guest/accounts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/accounts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-accounts-sanitize-check
+macos-guest-accounts-sanitize-check: macos-guest-accounts-fixture $(MACOS_OUT)/m5/accounts-sanitized
+	$(MACOS_OUT)/m5/accounts-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-accounts-sanitize-check
+
+$(MACOS_OUT)/m5/cleanup-sanitized: tests/darwin/guest/cleanup_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/cleanup_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-cleanup-sanitize-check
+macos-guest-cleanup-sanitize-check: macos-guest-cleanup-fixture $(MACOS_OUT)/m5/cleanup-sanitized
+	$(MACOS_OUT)/m5/cleanup-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-cleanup-sanitize-check
+
+$(MACOS_OUT)/m5/fs-sanitized: tests/darwin/guest/fs_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/fs_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-fs-sanitize-check
+macos-guest-fs-sanitize-check: macos-guest-fs-fixture $(MACOS_OUT)/m5/fs-sanitized
+	$(MACOS_OUT)/m5/fs-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-fs-sanitize-check
+
+$(MACOS_OUT)/m5/remap-sanitized: tests/darwin/guest/remap_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/remap_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-remap-sanitize-check
+macos-guest-remap-sanitize-check: macos-guest-remap-fixture $(MACOS_OUT)/m5/remap-sanitized
+	$(MACOS_OUT)/m5/remap-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-remap-sanitize-check
+
+$(MACOS_GUEST_DEP_DIR)/fonts.o: tests/darwin/guest/deps/fonts.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-fonts-fixture macos-guest-fonts-check
+macos-guest-fonts-fixture: $(MACOS_GUEST_DEP_DIR)/fonts.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libfonts.so $(MACOS_GUEST_DEP_DIR)/fonts.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libfonts.so
+$(MACOS_OUT)/m5/fonts-probe: tests/darwin/guest/fonts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/fonts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-fonts-check: macos-guest-fonts-fixture $(MACOS_OUT)/m5/fonts-probe
+	$(MACOS_OUT)/m5/fonts-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/fonts-probe $(MACOS_OUT)/m5/fonts-probe-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/fonts-probe-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/fonts-probe-hardened
+	$(MACOS_OUT)/m5/fonts-probe-hardened $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-fonts-check
+
+
+$(MACOS_OUT)/m5/fonts-sanitized: tests/darwin/guest/fonts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/fonts_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-fonts-sanitize-check
+macos-guest-fonts-sanitize-check: macos-guest-fonts-fixture $(MACOS_OUT)/m5/fonts-sanitized
+	$(MACOS_OUT)/m5/fonts-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-fonts-sanitize-check
+
+# Exact-PC assertions complement ordinary FDE backtrace coverage.
+.PHONY: macos-guest-island-unwind-check
+macos-guest-island-unwind-check: macos-guest-unwind-check macos-guest-unwind-sanitize-check
+	$(MACOS_OUT)/m5/unwind-probe $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so --islands
+	$(MACOS_OUT)/m5/unwind-probe-hardened $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so --islands
+	$(MACOS_OUT)/m5/unwind-sanitized $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so --islands
+macos-guest-check: macos-guest-island-unwind-check
+
+# Real C++ exception ABI/LSDA gate: first-party fixture, unchanged APK libc++.
+# Intentionally APK-parametric and outside the APK-free aggregate fixture suite.
+$(MACOS_GUEST_DEP_DIR)/cxx-exception.o: tests/darwin/guest/deps/cxx_exception.cpp
+	mkdir -p $(dir $@)
+	xcrun clang++ --target=aarch64-linux-android24 -ffreestanding -fPIC -funwind-tables -fexceptions -frtti -fno-stack-protector -fno-omit-frame-pointer -mno-outline-atomics -O1 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_OUT)/m5/cxx-exception-probe: tests/darwin/guest/cxx_exception_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/cxx_exception_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+.PHONY: macos-guest-cxx-exception-check
+macos-guest-cxx-exception-check: $(MACOS_GUEST_DEP_DIR)/libc-link.so $(MACOS_GUEST_DEP_DIR)/libdl-link.so macos-guest-libunwind-archive macos-guest-toolchain $(MACOS_GUEST_DEP_DIR)/cxx-exception.o $(MACOS_OUT)/m5/cxx-exception-probe
+	uv run --no-project python scripts/macos_guest_cxx_exception_smoke.py --apk "$(APK)" --object $(MACOS_GUEST_DEP_DIR)/cxx-exception.o --probe $(MACOS_OUT)/m5/cxx-exception-probe --linker $(MACOS_GUEST_LD) --unwind-archive .deps/guest-libunwind/lib/libunwind.a --link-provider $(MACOS_GUEST_DEP_DIR)/libc-link.so --link-provider $(MACOS_GUEST_DEP_DIR)/libdl-link.so
+
+# Deliberately partial exception search/catch gate. Full RAII/rethrow target above
+# uses the real pinned guest unwinder for compiler-generated cleanup resumes.
+$(MACOS_GUEST_DEP_DIR)/cxx-exception-basic.o: tests/darwin/guest/deps/cxx_exception_basic.cpp
+	mkdir -p $(dir $@)
+	xcrun clang++ --target=aarch64-linux-android24 -ffreestanding -fPIC -funwind-tables -fexceptions -frtti -fno-stack-protector -fno-omit-frame-pointer -fno-optimize-sibling-calls -mno-outline-atomics -O1 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-cxx-exception-basic-check
+macos-guest-cxx-exception-basic-check: macos-guest-toolchain $(MACOS_GUEST_DEP_DIR)/cxx-exception-basic.o $(MACOS_OUT)/m5/cxx-exception-probe
+	uv run --no-project python scripts/macos_guest_cxx_exception_smoke.py --coverage basic --apk "$(APK)" --object $(MACOS_GUEST_DEP_DIR)/cxx-exception-basic.o --probe $(MACOS_OUT)/m5/cxx-exception-probe --linker $(MACOS_GUEST_LD)
+
+.PHONY: macos-guest-cxx-exception-libunwind-check
+macos-guest-cxx-exception-libunwind-check: macos-guest-cxx-exception-check
+
+# Actual open-source guest libunwind, used only by explicit exception fixtures.
+# No NDK or native _Unwind fallback; archive existence is not execution proof.
+.PHONY: macos-guest-libunwind-source macos-guest-libunwind-archive
+macos-guest-libunwind-source:
+	uv run --no-project python scripts/bootstrap_guest_libunwind.py --source-only
+macos-guest-libunwind-archive: macos-guest-toolchain $(MACOS_OUT)/m5/guest_io.hpp
+	uv run --no-project python scripts/bootstrap_guest_libunwind.py
+
+.PHONY: macos-guest-jni-hardened-prepare
+macos-guest-jni-hardened-prepare: $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_jni_smoke.py --mode hardened --prepare-only
+
+# Identical ELF/DEX corpus for actual bionic and Darwin; no reference is invented.
+GUEST_DIFFERENTIAL_MODE ?= adhoc
+$(MACOS_GUEST_DEP_DIR)/differential.o: tests/darwin/guest/differential_fixture.c $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -femulated-tls -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -funwind-tables -fstack-protector-all -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/differential-guard.o: tests/darwin/guest/differential_guard.S
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -c $< -o $@
+.PHONY: macos-guest-differential-fixture macos-guest-differential-corpus macos-guest-differential-darwin-check macos-guest-differential-check
+macos-guest-differential-fixture: macos-guest-toolchain macos-guest-emutls-source $(MACOS_GUEST_DEP_DIR)/differential.o $(MACOS_GUEST_DEP_DIR)/differential-guard.o $(MACOS_GUEST_DEP_DIR)/emutls.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --eh-frame-hdr --no-undefined -soname libm5-differential.so $(MACOS_GUEST_DEP_DIR)/differential.o $(MACOS_GUEST_DEP_DIR)/differential-guard.o $(MACOS_GUEST_DEP_DIR)/emutls.o -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libm5-differential.so
+macos-guest-differential-corpus: macos-guest-differential-fixture
+	uv run --no-project python scripts/macos_guest_differential_smoke.py --emit-reference-only
+macos-guest-differential-darwin-check: macos-guest-differential-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_differential_smoke.py --mode $(GUEST_DIFFERENTIAL_MODE)
+macos-guest-differential-check: macos-guest-differential-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	@test -n "$(BIONIC_REFERENCE_JSON)" || { echo 'Actual bionic reference JSON is required; use macos-guest-differential-corpus to prepare identical ELF/DEX inputs.'; exit 1; }
+	uv run --no-project python scripts/macos_guest_differential_smoke.py --mode $(GUEST_DIFFERENTIAL_MODE) --reference-result "$(BIONIC_REFERENCE_JSON)"
+
+# Component regression with the guest bridge disabled in OpenJDK and ART.
+.PHONY: macos-guest-path-software-check
+macos-guest-path-software-check: macos-framework
+	uv run --no-project python scripts/pathmeasure_smoke.py
+
+# Real seven-library Core gate through private native copies; route checks do
+# not claim hardened runtime. Strict mode requires a supplied public identity.
+MACOS_GUEST_OSMAND_STAGED_DEPS := macos-framework $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so $(MACOS_OUT)/m5/osmand-host-observer.so $(MACOS_OUT)/libEGL_shim.so $(MACOS_OUT)/libEGL.dylib $(MACOS_OUT)/libGLESv2.dylib
+.PHONY: macos-guest-osmand-core-staged-adhoc-check macos-guest-osmand-core-hardened-prepare macos-guest-osmand-core-hardened-check
+macos-guest-osmand-core-staged-adhoc-check: $(MACOS_GUEST_OSMAND_STAGED_DEPS)
+	uv run --no-project python scripts/macos_guest_osmand_smoke.py --core --mode staged-adhoc --apk "$(APK)"
+macos-guest-osmand-core-hardened-prepare: $(MACOS_GUEST_OSMAND_STAGED_DEPS)
+	uv run --no-project python scripts/macos_guest_osmand_smoke.py --core --mode hardened --prepare-only --apk "$(APK)"
+macos-guest-osmand-core-hardened-check: $(MACOS_GUEST_OSMAND_STAGED_DEPS)
+	uv run --no-project python scripts/macos_guest_osmand_smoke.py --core --mode hardened --apk "$(APK)"
+
+
+# Real Android reference supervision. This helper is loaded only on Android;
+# native host probes verify wait-status collection without claiming bionic proof.
+$(MACOS_GUEST_DEP_DIR)/reference-child.o: tests/darwin/guest/bionic_reference_child.c tests/darwin/guest/bionic_reference_child.h $(MACOS_GUEST_ART)/libnativehelper/include/nativehelper/jni.h $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -isystem .deps/bionic-headers/sysroot/include -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libm5-reference-child.so: $(MACOS_GUEST_DEP_DIR)/reference-child.o $(MACOS_GUEST_DEP_DIR)/libc-link.so | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --eh-frame-hdr --no-undefined -soname libm5-reference-child.so $< -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $@
+macos-guest-differential-fixture: $(MACOS_GUEST_DEP_DIR)/libm5-reference-child.so
+$(MACOS_OUT)/m5/reference-child-probe: tests/darwin/guest/reference_child_probe.c tests/darwin/guest/bionic_reference_child.c tests/darwin/guest/bionic_reference_child.h $(MACOS_OUT)/.dir
+	mkdir -p $(dir $@)
+	xcrun clang -std=c11 -O2 -Wall -Wextra -Werror -DSHIRAZ_REFERENCE_CHILD_CORE_ONLY tests/darwin/guest/reference_child_probe.c tests/darwin/guest/bionic_reference_child.c -o $@
+$(MACOS_OUT)/m5/reference-child-sanitized: tests/darwin/guest/reference_child_probe.c tests/darwin/guest/bionic_reference_child.c tests/darwin/guest/bionic_reference_child.h $(MACOS_OUT)/.dir
+	mkdir -p $(dir $@)
+	xcrun clang -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -DSHIRAZ_REFERENCE_CHILD_CORE_ONLY tests/darwin/guest/reference_child_probe.c tests/darwin/guest/bionic_reference_child.c -o $@
+.PHONY: macos-guest-reference-child-check
+macos-guest-reference-child-check: $(MACOS_OUT)/m5/reference-child-probe $(MACOS_OUT)/m5/reference-child-sanitized
+	$(MACOS_OUT)/m5/reference-child-probe
+	cp $(MACOS_OUT)/m5/reference-child-probe $(MACOS_OUT)/m5/reference-child-hardened.pending
+	mv $(MACOS_OUT)/m5/reference-child-hardened.pending $(MACOS_OUT)/m5/reference-child-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/reference-child-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/reference-child-hardened
+	uv run --no-project python scripts/macos_guest_differential_smoke.py --verify-native-collector $(MACOS_OUT)/m5/reference-child-hardened
+	$(MACOS_OUT)/m5/reference-child-hardened
+	ASAN_OPTIONS=detect_leaks=0 $(MACOS_OUT)/m5/reference-child-sanitized
+
+.PHONY: macos-guest-reference-java-check
+macos-guest-reference-java-check:
+	mkdir -p $(MACOS_OUT)/m5/reference-java
+	javac --release 8 -d $(MACOS_OUT)/m5/reference-java tests/darwin/guest/BionicReferenceRunner.java tests/darwin/guest/BionicReferenceSyntaxSmoke.java
+	java -cp $(MACOS_OUT)/m5/reference-java BionicReferenceSyntaxSmoke
+
+macos-guest-check: macos-guest-reference-child-check macos-guest-reference-java-check
+
+
+# Genuine guest execution validates the exact atomic summary's two paths.
+$(MACOS_GUEST_DEP_DIR)/atomic-effects.o: tests/darwin/guest/atomic_effects.S | macos-guest-toolchain
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libatomic-effects.so: $(MACOS_GUEST_DEP_DIR)/atomic-effects.o | macos-guest-toolchain
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --eh-frame-hdr --no-undefined -soname libatomic-effects.so $< -o $@
+$(MACOS_OUT)/m5/atomic-effects-probe: tests/darwin/guest/atomic_effects_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror $< $(MACOS_GUEST_SOURCES) -o $@
+$(MACOS_OUT)/m5/atomic-effects-sanitized: tests/darwin/guest/atomic_effects_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined $< $(MACOS_GUEST_SOURCES) -o $@
+.PHONY: macos-guest-atomic-effects-check
+macos-guest-atomic-effects-check: $(MACOS_GUEST_DEP_DIR)/libatomic-effects.so $(MACOS_OUT)/m5/atomic-effects-probe $(MACOS_OUT)/m5/atomic-effects-sanitized
+	$(MACOS_OUT)/m5/atomic-effects-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/atomic-effects-probe $(MACOS_OUT)/m5/atomic-effects-hardened.pending
+	mv $(MACOS_OUT)/m5/atomic-effects-hardened.pending $(MACOS_OUT)/m5/atomic-effects-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/atomic-effects-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/atomic-effects-hardened
+	codesign --display --verbose=2 --entitlements - $(MACOS_OUT)/m5/atomic-effects-hardened
+	$(MACOS_OUT)/m5/atomic-effects-hardened $(MACOS_GUEST_DEP_DIR)
+	ASAN_OPTIONS=detect_leaks=0 $(MACOS_OUT)/m5/atomic-effects-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-atomic-effects-check

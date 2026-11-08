@@ -1,0 +1,2 @@
+LIBC { global: dlopen; dlclose; dlsym; dlerror; dladdr; dl_iterate_phdr; local: *; };
+LIBC_N { global: dlvsym; } LIBC;
