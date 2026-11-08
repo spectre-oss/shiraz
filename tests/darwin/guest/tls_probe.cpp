@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
+#include "shiraz/darwin/guest/closure.hpp"
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -123,6 +124,19 @@ static void late_host_cleanup(void *) {
   if (round < late_rounds && pthread_setspecific(late_key, reinterpret_cast<void *>(1)))
     ++late_errors;
 }
+static pthread_key_t unowned_key;
+static void *unowned_entry;
+static std::atomic<int> unowned_rounds{0}, unowned_refusals{0}, unowned_executed{0};
+static void unowned_host_cleanup(void *) {
+  const int round = ++unowned_rounds;
+  try { (void)invoke(unowned_entry, {}); }
+  catch (const std::runtime_error &error) {
+    if (!std::strcmp(error.what(), "unsupported guest entry during unowned native thread teardown") &&
+        !guest_tls_prepared()) ++unowned_refusals;
+  }
+  if (round < late_rounds && pthread_setspecific(unowned_key, reinterpret_cast<void *>(1)))
+    std::abort();
+}
 static void require(bool value, const char *message) {
   if (!value) throw std::runtime_error(message);
 }
@@ -208,6 +222,16 @@ int main(int argc, char **argv) {
                                  {Argument::integer(2 * (late_rounds + 1))}).result_integers[0]);
     std::cerr << "M5_TLS_LATE_SUMMARY result=" << late_summary << " expected=" << 2 * (late_rounds + 1) << '\n';
     require(late_summary == 0, "late cleanup drains nested guest destructors before thread join");
+    unowned_entry = closure([](Capture &) { ++unowned_executed; });
+    require(pthread_key_create(&unowned_key, unowned_host_cleanup) == 0, "unowned native key");
+    std::thread unowned_worker([] {
+      if (pthread_setspecific(unowned_key, reinterpret_cast<void *>(1))) std::abort();
+    });
+    unowned_worker.join();
+    require(pthread_key_delete(unowned_key) == 0 && unowned_rounds == late_rounds &&
+                unowned_refusals == late_rounds && unowned_executed == 0,
+            "unowned native teardown refuses before guest code or TLS allocation in every round");
+    std::cout << "M5_TLS_UNOWNED_EXIT_REFUSAL_PASS rounds=" << late_rounds << " guest_entered=0 tls_prepared=0\n";
     auto failure_binding = loader.symbol(module, "__stack_chk_fail");
     require(failure_binding.nonreturning && failure_binding.kind == SymbolKind::Function &&
                 failure_binding.abi == "fixed/nonreturning-noargs",

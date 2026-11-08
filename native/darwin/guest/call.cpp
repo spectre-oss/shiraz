@@ -36,6 +36,7 @@ double CallFrame::double_result() const {
 CallFrame invoke(void *entry, const std::vector<Argument> &arguments) {
   if (!entry || arguments.size() > 258)
     throw std::invalid_argument("invalid guest call size/entry");
+  require_guest_tls_lifetime();
   CallFrame frame;
   std::vector<uint64_t> stack;
   unsigned integer = 0, vector = 0;

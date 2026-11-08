@@ -724,6 +724,10 @@ macos-guest-jni-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $
 macos-guest-jni-late-tls-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
 	uv run --no-project python scripts/macos_guest_jni_smoke.py --late-tls
 
+.PHONY: macos-guest-jni-late-tls-refusal-check
+macos-guest-jni-late-tls-refusal-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
+	uv run --no-project python scripts/macos_guest_jni_smoke.py --expect-late-tls-refusal
+
 .PHONY: macos-guest-jni-adhoc-check
 macos-guest-jni-adhoc-check: macos-guest-jni-fixture $(MACOS_OUT)/libshiraz-guest.so $(MACOS_OUT)/m5/host-fixture.so
 	uv run --no-project python scripts/macos_guest_jni_smoke.py --mode adhoc

@@ -9,7 +9,9 @@ import json
 import os
 import plistlib
 import re
+import resource
 import shutil
+import signal
 import struct
 import subprocess
 import tempfile
@@ -34,6 +36,10 @@ def run(command, env, cwd=WORK):
     subprocess.run(list(map(str, command)), env=env, cwd=cwd, check=True, timeout=120)
 
 
+def no_child_core():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -54,7 +60,13 @@ def main():
         action="store_true",
         help="also require cleanup after first real JNI entry in final native TSD round",
     )
+    parser.add_argument(
+        "--expect-late-tls-refusal",
+        action="store_true",
+        help="verify explicit fatal refusal of unowned native-teardown entry; not cleanup support",
+    )
     args = parser.parse_args()
+    args.late_tls = args.late_tls or args.expect_late_tls_refusal
     WORK.mkdir(parents=True, exist_ok=True)
     env = environment(WORK)
     env = {
@@ -114,7 +126,13 @@ def main():
         archive.writestr(entry, dex.read_bytes())
     modes = ("adhoc", "hardened") if args.mode == "both" else (args.mode,)
     for mode in modes:
-        run_name = mode + (".late-tls" if args.late_tls else "")
+        run_name = mode + (
+            ".late-tls-refusal"
+            if args.expect_late_tls_refusal
+            else ".late-tls"
+            if args.late_tls
+            else ""
+        )
         io_directory = Path(tempfile.mkdtemp(prefix=f"native-io-{mode}-", dir=WORK))
         io_file = io_directory / "roundtrip.bin"
         vm = HOST / "bin/dalvikvm"
@@ -215,6 +233,7 @@ def main():
             text=True,
             timeout=60,
             check=False,
+            preexec_fn=no_child_core if args.late_tls else None,
         )
         (WORK / (run_name + ".log")).write_text(result.stdout + result.stderr)
         (WORK / (run_name + ".command.json")).write_text(
@@ -270,6 +289,43 @@ def main():
         )
         print(result.stdout, end="")
         print(result.stderr, end="")
+        if args.expect_late_tls_refusal:
+            reason = "SHIRAZ_GUEST_FATAL unsupported guest entry during unowned native thread teardown"
+            # Darwin teardown can turn abort into SIGTRAP, and ART's fatal
+            # handler can exit1. Record the actual terminal result rather than
+            # claiming a raw SIGABRT wait status in that case.
+            fatal_signal = re.search(
+                r"^Fatal signal (5|6) ", result.stderr, re.MULTILINE
+            )
+            terminal = result.returncode in (-signal.SIGABRT, -signal.SIGTRAP) or (
+                result.returncode == 1 and fatal_signal is not None
+            )
+            if (
+                not terminal
+                or reason not in result.stderr.splitlines()
+                or "M5_ART_TLS_PERSISTENCE_PASS " not in result.stdout
+                or "M5_ART_TLS_LATE_ENTRY_OBSERVED" in result.stdout
+                or "M5_ART_TLS_LATE_ENTRY_PASS" in result.stdout
+            ):
+                raise SystemExit(
+                    "unowned native-teardown entry did not fail with the expected refusal"
+                )
+            if any(io_directory.iterdir()):
+                raise SystemExit("native I/O fixture left unexpected files")
+            io_directory.rmdir()
+            evidence.update(
+                rejection_verified=True,
+                refusal_terminal_returncode=result.returncode,
+                art_fatal_signal=int(fatal_signal[1]) if fatal_signal else None,
+            )
+            (WORK / (run_name + ".result.json")).write_text(
+                json.dumps(evidence, indent=2) + "\n"
+            )
+            print(
+                f"M5_ART_TLS_LATE_REFUSAL_PASS mode={mode} returncode={result.returncode} "
+                "cleanup_supported=0 full_execution_verified=0 hardened_execution_verified=0"
+            )
+            continue
         if (
             result.returncode
             or inventory_error

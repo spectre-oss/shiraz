@@ -14,6 +14,10 @@ public:
   GuestTlsCleanupScope(const GuestTlsCleanupScope &) = delete;
   GuestTlsCleanupScope &operator=(const GuestTlsCleanupScope &) = delete;
 };
+// Synchronous invoke during teardown requires an owned scope or active drain.
+// Ordinary native entries preserve state for the entire pthread lifetime.
+// Uses an explicitly admitted Darwin exit-state SPI; missing capability fails.
+void require_guest_tls_lifetime();
 void prepare_guest_tls();
 void *guest_tls_base();
 // Async-signal-safe readiness query only; never initializes native TLS.

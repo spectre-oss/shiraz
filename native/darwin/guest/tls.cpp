@@ -9,6 +9,12 @@
 #include <map>
 #include <vector>
 #include <pthread.h>
+#include <stdexcept>
+
+// Apple libpthread private/pthread/private.h: int result, 0 or 1; macOS 11+.
+// Weak linkage gives unsupported hosts an explicit failure, never an assumed
+// normal lifetime. No private pthread/TSD layout or global hook is used.
+extern "C" int pthread_self_is_exiting_np(void) __attribute__((weak_import));
 
 namespace shiraz::guest {
 struct GuestThreadKey {
@@ -170,6 +176,21 @@ GuestTlsCleanupScope::~GuestTlsCleanupScope() {
   // itself be torn down before late callbacks, and there may be no later TSD
   // round. Keep depth/draining in this live owned object, never another TLV.
   if (!current->cleanup_depth && !current->draining) destroy_state(current);
+}
+void require_guest_tls_lifetime() {
+  if (!pthread_self_is_exiting_np)
+    throw std::runtime_error("Darwin native thread exit-state query unavailable");
+  const int exiting = pthread_self_is_exiting_np();
+  if (!exiting) return;
+  if (exiting != 1)
+    throw std::runtime_error("invalid Darwin native thread exit state");
+  if (pthread_once(&state_key_once, &initialize_state_key)) std::abort();
+  auto *current = static_cast<ThreadState *>(pthread_getspecific(state_key));
+  // An arbitrary external TSD callback has no owned end boundary. Draining on
+  // each JNI return would prematurely destroy state used by its next JNI call;
+  // another native destructor registration may already have missed round four.
+  if (!current || (!current->draining && !current->cleanup_depth))
+    throw std::runtime_error("unsupported guest entry during unowned native thread teardown");
 }
 void prepare_guest_tls() {
   HostErrno preserve;
