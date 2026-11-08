@@ -169,7 +169,7 @@ Upcall upcall(Capture &capture, Family family, Variant variant) {
     list.integer_offset = -int32_t((8 - named) * 8);
     list.vector_offset = -128;
   }
-  VaListCursor cursor(list);
+  VaListCursor cursor(list, variant == Variant::Ellipsis ? capture.native_stack_remaining : 0);
   Upcall call{host,
               reinterpret_cast<jobject>(registers[1]),
               reinterpret_cast<jclass>(

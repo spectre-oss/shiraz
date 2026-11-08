@@ -11,11 +11,15 @@ struct GuestVaList {
 static_assert(sizeof(GuestVaList) == 32);
 class VaListCursor {
 public:
-  explicit VaListCursor(const GuestVaList &list);
+  // Nonzero bytes supply a validated, same-thread stack extent. Other lists
+  // remain caller-owned; this does not validate arbitrary guest pointers.
+  explicit VaListCursor(const GuestVaList &list, uint64_t stack_bytes = 0);
   // Types are the promoted argument types, obtained from the call contract.
   uint64_t next(ArgumentType type);
 
 private:
   GuestVaList list_;
+  uint64_t stack_base_ = 0, stack_bytes_ = 0;
+  uintptr_t stack_thread_ = 0;
 };
 } // namespace shiraz::guest

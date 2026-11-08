@@ -15,6 +15,7 @@
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <thread>
 #include <stdexcept>
 #include <sys/mman.h>
 #include <vector>
@@ -99,6 +100,34 @@ int main(int argc, char **argv) {
     require(munmap(other_stack, other_stack_bytes) == 0, "temporary alternate stack cleanup");
     require(rejected == 1 && !capture_boundary_token(),
             "real alternate-stack invocation refuses before guest entry and restores boundary");
+    alignas(16) uint64_t va_words[2] = {0x1122334455667788ULL, 0x8877665544332211ULL};
+    GuestVaList va_list{reinterpret_cast<uintptr_t>(va_words), 0, 0, 0, 0};
+    VaListCursor bounded_va(va_list, 8);
+    require(bounded_va.next(ArgumentType::Int64) == va_words[0], "bounded variadic first word");
+    bool va_end_rejected = false, va_partial_rejected = false, va_owner_rejected = false;
+    try { (void)bounded_va.next(ArgumentType::Int64); }
+    catch (const std::invalid_argument &error) {
+      va_end_rejected = std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
+    }
+    try { (void)VaListCursor(va_list, 4).next(ArgumentType::Double); }
+    catch (const std::invalid_argument &error) {
+      va_partial_rejected = std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
+    }
+    VaListCursor owner_va(va_list, 8);
+    std::thread other_va([&] {
+      try { (void)owner_va.next(ArgumentType::Int64); }
+      catch (const std::invalid_argument &error) {
+        va_owner_rejected = std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
+      }
+    });
+    other_va.join();
+    require(va_end_rejected && va_partial_rejected && va_owner_rejected &&
+                owner_va.next(ArgumentType::Int64) == va_words[0],
+            "variadic span/partial/owner refusals precede reads and preserve cursor position");
+    VaListCursor caller_owned_va(va_list);
+    require(caller_owned_va.next(ArgumentType::Int64) == va_words[0] &&
+                caller_owned_va.next(ArgumentType::Int64) == va_words[1],
+            "caller-owned V-list memory retains existing semantics");
     const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
     Capture partial{};
     partial.stack = reinterpret_cast<const uint8_t *>(high - 4);
@@ -238,6 +267,7 @@ int main(int argc, char **argv) {
             "guest-to-host AAPCS64 va_list conversion");
     std::cout << "M5_STACK_ENTRY_PASS alternate_stack_rejected=1 boundary_restored=1\n";
     std::cout << "M5_PROVIDER_STACK_PASS foreign_stack_rejected=1 handler_not_entered=1 span_rejected=1 synthetic_buffer=1\n";
+    std::cout << "M5_VA_SPAN_PASS end=1 partial=1 owner=1 caller_owned=1\n";
     std::cout << "M5_ELF_ABI_PASS images=2 constructors=2 integer12=1 "
                  "mixed24=1 variadic25=1 callback_va_list=1 closure=1 dyld=0\n";
   } catch (const std::exception &error) {
