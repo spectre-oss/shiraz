@@ -291,7 +291,7 @@ PATCHES_DARWIN = {
         }),
         ('art-darwin-guest-bridge.patch', {
             'system/core/libnativebridge/native_bridge.cc': 'f6e87865f6e35b89dbf7ef78870942ffa08465e9c453de13b2b9f60d261342e0',
-            'art/runtime/native_bridge_art_interface.cc': '2ab7bd28a7ab0c3c45ea467fe419f86a229be8e362bbb366de08a6d5c8564cc9',
+            'art/runtime/native_bridge_art_interface.cc': '976f3fe572f3a85e2d7aad9d3194da3aa14d3c9e62a61686ae7f3f7577c88583',
         }),
     ],
 }

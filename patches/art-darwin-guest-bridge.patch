@@ -33,7 +33,7 @@
  }
 --- a/art/runtime/native_bridge_art_interface.cc
 +++ b/art/runtime/native_bridge_art_interface.cc
-@@ -104,10 +104,9 @@
+@@ -104,18 +104,23 @@
    if (unshare(CLONE_NEWNS) == -1) {
      LOG(WARNING) << "Could not create mount namespace.";
    }
@@ -46,3 +46,20 @@
  }
  
  void InitializeNativeBridge(JNIEnv* env, const char* instruction_set) {
+   if (android::InitializeNativeBridge(env, instruction_set)) {
+     if (android::NativeBridgeGetVersion() >= 2U) {
+-#ifdef _NSIG  // Undefined on Apple, but we don't support running on Mac, anyways.
+-      // Managed signal handling support added in version 2.
+-      for (int signal = 0; signal < _NSIG; ++signal) {
++#if defined(__APPLE__) || defined(_NSIG)
++      // Managed signal handling support added in version 2. Darwin exposes
++      // NSIG rather than _NSIG. Signal zero is not a deliverable signal.
++#if defined(__APPLE__)
++      constexpr int signal_count = NSIG;
++#else
++      constexpr int signal_count = _NSIG;
++#endif
++      for (int signal = 1; signal < signal_count; ++signal) {
+         android::NativeBridgeSignalHandlerFn fn = android::NativeBridgeGetSignalHandler(signal);
+         if (fn != nullptr) {
+           sigset_t mask;

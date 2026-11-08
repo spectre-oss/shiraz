@@ -12,6 +12,8 @@
 #include "shiraz/darwin/guest/loader.hpp"
 #include "shiraz/darwin/guest/binding_evidence.hpp"
 #include <cstdio>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
@@ -19,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <signal.h>
 
 namespace {
 thread_local std::string last_error;
@@ -191,7 +194,40 @@ bool compatible(uint32_t version) { return version >= 1 && version <= 3; }
 const android::NativeBridgeRuntimeValues *environment(const char *) {
   return nullptr;
 }
-android::NativeBridgeSignalHandlerFn signal_handler(int) { return nullptr; }
+// Opt-in ART integration probe only. Normal bridge execution advertises no
+// managed signal handlers. Keep the probe process-resident, like the bridge;
+// never remove a special handler while ART threads might dispatch through it.
+std::atomic<unsigned> signal_probe_deliveries{0}, signal_probe_queries{0};
+static_assert(std::atomic<unsigned>::is_always_lock_free);
+bool signal_probe(int number, siginfo_t *, void *) {
+  if (number != SIGWINCH) return false;
+  signal_probe_deliveries.fetch_add(1, std::memory_order_relaxed);
+  return true;
+}
+android::NativeBridgeSignalHandlerFn signal_handler(int number) {
+  static const bool probe = [] {
+    const char *value = std::getenv("SHIRAZ_GUEST_SIGNAL_CHAIN_CHECK");
+    return value && !std::strcmp(value, "1");
+  }();
+  if (!probe) return nullptr;
+  signal_probe_queries.fetch_add(1, std::memory_order_relaxed);
+  // SIGWINCH precedes NSIG-1 on Darwin. At this query ART must already have
+  // installed our prior callback. raise() delivers synchronously on this
+  // thread; the callback itself uses only a lock-free counter.
+  static_assert(SIGWINCH < NSIG - 1);
+  if (number == NSIG - 1) {
+    const int status = ::raise(SIGWINCH);
+    const auto queries = signal_probe_queries.load(std::memory_order_relaxed);
+    const auto deliveries = signal_probe_deliveries.load(std::memory_order_relaxed);
+    if (!status && queries == NSIG - 1 && deliveries == 1)
+      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_PASS queries=%u signal=%d deliveries=1\n",
+                   queries, SIGWINCH);
+    else
+      std::fprintf(stderr, "M5_ART_NATIVEBRIDGE_SIGNAL_FAIL queries=%u signal=%d deliveries=%u status=%d\n",
+                   queries, SIGWINCH, deliveries, status);
+  }
+  return number == SIGWINCH ? signal_probe : nullptr;
+}
 int unload(void *handle) {
   std::lock_guard<std::recursive_mutex> lock(*mutex);
   if (loader && loader->valid_handle(handle))

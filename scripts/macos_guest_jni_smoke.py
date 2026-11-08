@@ -65,10 +65,16 @@ def main():
         action="store_true",
         help="verify explicit fatal refusal of unowned native-teardown entry; not cleanup support",
     )
+    parser.add_argument(
+        "--signal-chain-check",
+        action="store_true",
+        help="require ART to register and deliver an opt-in NativeBridge special signal",
+    )
     args = parser.parse_args()
     args.late_tls = args.late_tls or args.expect_late_tls_refusal
     WORK.mkdir(parents=True, exist_ok=True)
     env = environment(WORK)
+    env["SHIRAZ_GUEST_SIGNAL_CHAIN_CHECK"] = "1" if args.signal_chain_check else "0"
     env = {
         k: v
         for k, v in env.items()
@@ -256,8 +262,19 @@ def main():
                 native_image_inventory_error=inventory_error,
             )
             write_manifest(closure)
+        signal_marker = (
+            f"M5_ART_NATIVEBRIDGE_SIGNAL_PASS queries={signal.NSIG - 1} "
+            f"signal={signal.SIGWINCH} deliveries=1"
+        )
+        # ART's logger can leave NUL separators before the bridge's stderr
+        # line. Accept those separators, but still require an exact marker.
+        signal_verified = args.signal_chain_check and any(
+            line.lstrip("\0") == signal_marker for line in result.stderr.splitlines()
+        )
         evidence = {
             "mode": mode,
+            "signal_chain_requested": args.signal_chain_check,
+            "signal_chain_verified": signal_verified,
             "late_tls_requested": args.late_tls,
             "late_tls_verified": "M5_ART_TLS_LATE_ENTRY_PASS " in result.stdout,
             "hardened_verified": False,
@@ -289,6 +306,8 @@ def main():
         )
         print(result.stdout, end="")
         print(result.stderr, end="")
+        if args.signal_chain_check and not signal_verified:
+            raise SystemExit("ART NativeBridge special signal registration/delivery gate failed")
         if args.expect_late_tls_refusal:
             reason = "SHIRAZ_GUEST_FATAL unsupported guest entry during unowned native thread teardown"
             # Darwin teardown can turn abort into SIGTRAP, and ART's fatal
@@ -367,7 +386,11 @@ def main():
                 returncode=result.returncode,
             )
             write_manifest(closure)
-        evidence.update(execution_verified=True, hardened_verified=mode == "hardened")
+        evidence.update(
+            execution_verified=True,
+            hardened_verified=mode == "hardened",
+            signal_chain_verified=signal_verified,
+        )
         (WORK / (run_name + ".result.json")).write_text(
             json.dumps(evidence, indent=2) + "\n"
         )
