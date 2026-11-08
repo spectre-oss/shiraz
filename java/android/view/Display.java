@@ -39,6 +39,8 @@ public final class Display {
     public int getRotation() { resources.getDisplayMetrics(); return 0; }
     public int getOrientation() { return getRotation(); }
     public float getRefreshRate() { resources.getDisplayMetrics();return shiraz.runtime.NativeSurface.refreshRate(); }
+    /** The app display currently exposes only its active presentation mode. */
+    @Deprecated public float[] getSupportedRefreshRates() { return new float[]{getRefreshRate()}; }
     public Mode getMode(){return new Mode(getWidth(),getHeight(),getRefreshRate());}
     public Mode[] getSupportedModes(){return new Mode[]{getMode()};}
     public boolean isHdr(){return false;}

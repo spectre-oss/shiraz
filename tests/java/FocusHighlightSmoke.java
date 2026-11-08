@@ -13,6 +13,11 @@ public final class FocusHighlightSmoke {
   StringBuilder typed=new StringBuilder();for(KeyEvent e:generated)if(e.getAction()==KeyEvent.ACTION_DOWN&&e.getUnicodeChar()!=0)typed.append((char)e.getUnicodeChar());
   check(typed.toString().equals("gG!"),"key synthesis round trip");check(map.getEvents("😀".toCharArray())==null,"unmappable text uses IME fallback");
 
+  Display display=Display.shirazForResources(android.content.res.Resources.getSystem());
+  float[] rates=display.getSupportedRefreshRates();
+  check(rates.length==1&&rates[0]>0&&rates[0]==display.getRefreshRate()&&rates[0]==display.getSupportedModes()[0].getRefreshRate(),"supported display refresh rates");
+  rates[0]=-1;
+  check(display.getSupportedRefreshRates()[0]==display.getRefreshRate(),"refresh rate array is independent");
   int[] directions={View.FOCUS_LEFT,View.FOCUS_UP,View.FOCUS_RIGHT,View.FOCUS_DOWN,View.FOCUS_BACKWARD,View.FOCUS_FORWARD};
   int[] sounds={1,2,3,4,2,4};
   for(int i=0;i<directions.length;i++){check(SoundEffectConstants.getContantForFocusDirection(directions[i])==sounds[i],"focus sound");check(SoundEffectConstants.getConstantForFocusDirection(directions[i],true)==sounds[i]+4,"repeat sound");}
