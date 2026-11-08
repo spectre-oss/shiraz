@@ -27,8 +27,10 @@ int main(int argc, char **argv) {
       return invoke(reinterpret_cast<void *>(loader.symbol(module, name).address), arguments)
           .result_integers[0];
     };
-    require(loader.symbol(module, "pthread_self").abi == "pthread/self-noargs",
-            "pthread_self uses the dedicated opaque-handle adapter");
+    auto self = loader.symbol(module, "pthread_self");
+    require(self.abi == "native/pthread-self-noargs" &&
+                self.address == reinterpret_cast<uintptr_t>(&::pthread_self),
+            "pthread_self binds the identical native no-argument ABI directly");
     errno = ELOOP;
     require(call("self_identity", {}) == reinterpret_cast<uintptr_t>(pthread_self()) &&
                 errno == ELOOP && *guest_errno_location() == 731,

@@ -31,16 +31,14 @@ Argument pointer(const void *value) {
   return Argument::integer(reinterpret_cast<uintptr_t>(value), ArgumentType::Int64);
 }
 ProviderExport self_export() {
-  // Unlike fixed_export, this adapter never clears/restores host errno and
-  // never obtains guest errno storage. The result is an opaque native handle,
-  // not a guest TCB pointer. Common closure dispatch still owns its normal
-  // stack, capture-boundary and first-entry TLS effects; this ABI tag alone
-  // must not be interpreted as a whole-call memory-purity contract.
-  auto address = closure([](Capture &capture) {
-    return_value(capture, ::pthread_self());
-  });
-  return {"pthread_self", "LIBC", reinterpret_cast<uintptr_t>(address),
-          SymbolKind::Function, "pthread/self-noargs", false};
+  // No arguments and a pointer result have identical Darwin/AAPCS64 calling
+  // conventions. Bind the native entry directly: no closure capture, boundary
+  // TLS or errno wrapper is needed. This is an opaque native pthread handle,
+  // never a guest TCB pointer. The ABI tag does not certify the native body or
+  // authorize the instruction analyzer to ignore its memory effects.
+  static_assert(std::is_pointer_v<pthread_t> && sizeof(pthread_t) == 8);
+  return {"pthread_self", "LIBC", reinterpret_cast<uintptr_t>(&::pthread_self),
+          SymbolKind::Function, "native/pthread-self-noargs", false};
 }
 void *call_guest(void *function, void *argument) {
   try {
