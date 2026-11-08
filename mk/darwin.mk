@@ -2030,3 +2030,11 @@ $(MACOS_OUT)/m5/return-auth/b/libatomic-effects.so: $(MACOS_OUT)/m5/return-auth/
 .PHONY: macos-guest-return-auth-local-check
 macos-guest-return-auth-local-check: $(MACOS_OUT)/m5/return-auth/a/libatomic-effects.so $(MACOS_OUT)/m5/return-auth/b/libatomic-effects.so
 	uv run --no-project python scripts/macos_guest_return_auth_local.py --directory $(MACOS_OUT)/m5/return-auth --output $(MACOS_OUT)/m5/return-auth/result.json
+
+$(MACOS_OUT)/libshiraz-guest.so: include/shiraz/darwin/guest/descriptor.hpp
+.PHONY: macos-guest-descriptor-local-check
+macos-guest-check: macos-guest-descriptor-local-check
+# Syntax/constexpr checks only: no Mach-O output, linker or codesign invocation.
+macos-guest-descriptor-local-check:
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -Wall -Wextra -Werror -fsyntax-only tests/darwin/guest/descriptor_compile.cpp
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_JNI_FLAGS) -std=c++17 -Wall -Wextra -Werror -fsyntax-only native/darwin/guest/jni.cpp

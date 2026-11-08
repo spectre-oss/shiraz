@@ -5,6 +5,7 @@
 #include "shiraz/darwin/guest/va_list.hpp"
 #include "shiraz/darwin/guest/providers.hpp"
 #include "shiraz/darwin/guest/path.hpp"
+#include "shiraz/darwin/guest/descriptor.hpp"
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -77,15 +78,13 @@ std::string bounded(const char *text) {
   return std::string(text, length);
 }
 void validate_shorty(const std::string &shorty) {
-  if (shorty.empty() || shorty.size() > 257 ||
-      !std::strchr("VZBCSIJFDL", shorty[0]))
+  if (!valid_method_shorty(shorty))
     throw std::runtime_error("invalid guest JNI shorty");
-  for (size_t i = 1; i < shorty.size(); ++i)
-    if (!std::strchr("ZBCSIJFDL", shorty[i]))
-      throw std::runtime_error("invalid guest JNI parameter");
 }
 std::string signature_shorty(const char *signature) {
   std::string text = bounded(signature), result(1, 'V');
+  if (!valid_method_descriptor(text))
+    throw std::runtime_error("invalid guest JNI method descriptor");
   size_t cursor = 0;
   auto type = [&](bool allow_void) {
     bool array = false;
