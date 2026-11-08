@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 FORBIDDEN_DIRS = {'context', '.deps', '.local', 'build', 'dist', 'data', 'runs', 'docs', 'doc', 'secrets', 'credentials', '__pycache__'}
 PUBLIC_DOCS = {'docs/README.md', 'docs/DEVELOPMENT.md', 'docs/BUILDER.md',
                'docs/WEB.md', 'docs/AI_CONTRIBUTING.md',
-               'docs/tested.md',
+               'docs/tested.md', 'docs/others/droidloom.md',
                'docs/experiments/README.md',
                'docs/experiments/flutter/README.md',
                'docs/experiments/flutter/OBTAINIUM.md',

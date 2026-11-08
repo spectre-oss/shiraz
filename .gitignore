@@ -83,3 +83,7 @@ __pycache__/
 /landing/test-results/
 /landing/playwright-report/
 /landing/static/social-card.png
+
+!/docs/others/
+/docs/others/*
+!/docs/others/droidloom.md
