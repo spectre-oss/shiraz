@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Exact byte-derived recognition of one bounded AArch64 switch sequence.
+"""Exact byte-derived recognition of two bounded AArch64 switch sequences.
 
 Recognition is not permission to skip memory or control-flow checks. The caller
 must provide executable file words and immutable, file-backed, non-relocated
@@ -35,6 +35,11 @@ class ByteJumpTableEffects:
     table_sha256: str
     # Per table entry, retaining the byte/target relationship and duplicates.
     targets: tuple[int, ...]
+    # This copy executes before the conditional branch in the second form.
+    prebranch_move: tuple[str, str] | None = None
+    # CMP Wn constrains only low bits; UXTX addressing needs an independent
+    # path fact that Xn's upper 32 bits were zeroed by an executed W write.
+    requires_zero_extended_index: bool = False
 
 
 def _signed(value, bits):
@@ -51,7 +56,12 @@ def _adr(word, pc, page):
 
 
 def recognize_byte_jump_table(read_word, entry, readonly_bytes):
-    """Recognize CMP/B.HI/MOV/ADRP/ADD/ADR/LDRB/ADD/BR, or return None.
+    """Recognize either exact nine-word byte-table sequence, or return None.
+
+    The first form is CMP/B.HI/MOV-W/ADRP/ADD/ADR/LDRB/ADD/BR. The second
+    is CMP/MOV-X/B.HI followed by the same six instructions, using the CMP
+    register directly as its X index. The caller must separately prove that
+    index zero-extended and apply the MOV-X to both branch outcomes.
 
     read_word(pc) returns an exact executable uint32 word or None. The trusted
     readonly_bytes(address, count) returns exactly count immutable bytes after
@@ -64,7 +74,7 @@ def recognize_byte_jump_table(read_word, entry, readonly_bytes):
     words = tuple(read_word(entry + index * 4) for index in range(BODY_WORDS))
     if any(type(word) is not int or not 0 <= word <= 0xFFFFFFFF for word in words):
         return None
-    compare, conditional, move, page, add_table, adr, load, add_branch, branch = words
+    compare, second, third, page, add_table, adr, load, add_branch, branch = words
     # SUBS WZR, Wn, #imm12 (CMP), with no shifted immediate.
     if compare & 0xFFC0001F != 0x7100001F:
         return None
@@ -72,16 +82,31 @@ def recognize_byte_jump_table(read_word, entry, readonly_bytes):
     limit = (compare >> 10) & 0xFFF
     if source > 28 or limit >= MAX_TABLE_BYTES:
         return None
-    # Unsigned HI, not HS/GT or a flag-independent branch.
-    if conditional & 0xFF00001F != 0x54000008:
+    prebranch_move = None
+    requires_zero_extended_index = False
+    if second & 0xFF00001F == 0x54000008:
+        conditional, conditional_offset, move = second, 4, third
+        # ORR Windex, WZR, Wn (MOV). Its W write zero-extends the X index.
+        if move & 0xFFE0FFE0 != 0x2A0003E0 or (move >> 16) & 31 != source:
+            return None
+        index = move & 31
+    elif third & 0xFF00001F == 0x54000008:
+        conditional, conditional_offset, move = third, 8, second
+        # Exact unshifted ORR Xdst, XZR, Xsrc (MOV), without FP/LR/ZR.
+        if move & 0xFFE0FFE0 != 0xAA0003E0:
+            return None
+        move_destination, move_source = move & 31, (move >> 16) & 31
+        if move_destination > 28 or move_source > 28 or move_destination == source:
+            return None
+        prebranch_move = (f"x{move_destination}", f"x{move_source}")
+        requires_zero_extended_index = True
+        index = source
+    else:
         return None
-    default = entry + 4 + (_signed((conditional >> 5) & 0x7FFFF, 19) << 2)
+    # Unsigned HI, not HS/GT or a flag-independent branch.
+    default = entry + conditional_offset + (_signed((conditional >> 5) & 0x7FFFF, 19) << 2)
     if not _address(default) or entry <= default < entry + BODY_WORDS * 4:
         return None
-    # ORR Windex, WZR, Wn (MOV). Its W write zero-extends the X index.
-    if move & 0xFFE0FFE0 != 0x2A0003E0 or (move >> 16) & 31 != source:
-        return None
-    index = move & 31
     if page & 0x9F000000 != 0x90000000:
         return None
     table = page & 31
@@ -102,8 +127,9 @@ def recognize_byte_jump_table(read_word, entry, readonly_bytes):
             or (load >> 16) & 31 != index or (load >> 5) & 31 != table):
         return None
     offset = load & 31
-    roles = {source, index, table, offset, destination}
-    if len(roles) != 5 or any(register > 28 for register in roles):
+    roles = {index, table, offset, destination}
+    if (len(roles) != 4 or any(register > 28 for register in roles)
+            or not requires_zero_extended_index and source in roles):
         return None
     # ADD Xbranch, Xbranch, Xoffset, LSL #2; BR Xbranch.
     if (add_branch & 0xFFE0FC00 != 0x8B000800
@@ -125,4 +151,5 @@ def recognize_byte_jump_table(read_word, entry, readonly_bytes):
         default, table_address, branch_base, limit, f"w{source}", f"x{index}",
         f"x{table}", f"w{offset}", f"x{destination}", tuple(data),
         hashlib.sha256(data).hexdigest(), targets,
+        prebranch_move, requires_zero_extended_index,
     )

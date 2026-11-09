@@ -180,6 +180,9 @@ class State:
     native_stack_rewritten: set = field(default_factory=set)
     # Exact integer bits only; CLEAN alone never supplies a scalar value.
     constants: dict = field(default_factory=dict)
+    # Architectural W-register writes zero the upper half of their X alias.
+    # CLEAN alone says nothing about these bits. X writes invalidate the fact.
+    zero_upper: set = field(default_factory=set)
 
     def copy(self):
         return State(
@@ -199,6 +202,7 @@ class State:
             self.native_memory_may_contain_tp,
             set(self.native_stack_rewritten),
             dict(self.constants),
+            set(self.zero_upper),
         )
 
     def fingerprint(self):
@@ -212,6 +216,7 @@ class State:
             self.native_memory_may_contain_tp,
             tuple(sorted(self.native_stack_rewritten)),
             tuple(sorted(self.constants.items())),
+            tuple(sorted(self.zero_upper)),
             *(
                 tuple(sorted((key, value) for key, value in mapping.items()
                              if not defaults or value != CLEAN))
@@ -234,6 +239,8 @@ class State:
         return self.return_values.get(reg(name), CLEAN)
 
     def set_control(self, name, value):
+        if full_width_gpr(name):
+            self.zero_upper.discard(reg(name))
         name = reg(name)
         if name not in {"xzr", "wzr", "sp"}:
             self.constants.pop(name, None)
@@ -245,6 +252,8 @@ class State:
 
     def set_signature(self, name, signature):
         normalized = reg(name)
+        if full_width_gpr(name):
+            self.zero_upper.discard(normalized)
         self.constants.pop(normalized, None)
         self.return_signatures.pop(normalized, None)
         if full_width_gpr(name) and isinstance(signature, ReturnSignature):
@@ -268,6 +277,12 @@ class State:
             self.aliases[name] = value
 
     def set(self, name, value):
+        normalized = reg(name)
+        if normalized in {f"x{i}" for i in range(31)}:
+            if name.startswith("w"):
+                self.zero_upper.add(normalized)
+            else:
+                self.zero_upper.discard(normalized)
         name = reg(name)
         if name not in {"xzr", "wzr", "sp"}:
             self.constants.pop(name, None)
@@ -285,7 +300,12 @@ class State:
     def set_scalar(self, name, value):
         if value is not None and (full_width_gpr(name) or name.startswith("w") and
                                   reg(name) in {f"x{i}" for i in range(31)}):
-            self.constants[reg(name)] = value & ((1 << (32 if name.startswith("w") else 64)) - 1)
+            bits = value & ((1 << (32 if name.startswith("w") else 64)) - 1)
+            self.constants[reg(name)] = bits
+            if bits <= 0xFFFFFFFF:
+                self.zero_upper.add(reg(name))
+            else:
+                self.zero_upper.discard(reg(name))
 
     def image(self, name):
         return self.image_addresses.get(reg(name)) if full_width_gpr(name) else None
@@ -649,14 +669,36 @@ class Audit:
                     if instruction.mnemonic == "cmp" and hasattr(self.decode, "byte_jump_table") else None)
             if jump is not None:
                 # Only entry at the exact CMP acquires the unsigned bound.
-                # Default executes no table access or body register writes.
+                # A proved interleaved MOV executes before both outcomes.
+                # Default executes no table access or dispatch scratch writes.
                 state.set("nzcv", CLEAN)
+                if jump.prebranch_move is not None:
+                    destination, source = jump.prebranch_move
+                    value, alias, control, signature, image, scalar = (
+                        state.value(source), state.alias(source), state.control(source),
+                        state.signature(source), state.image(source), state.scalar(source),
+                    )
+                    zero_upper = reg(source) in state.zero_upper
+                    state.set(destination, value)
+                    state.set_alias(destination, alias)
+                    state.set_control(destination, control)
+                    state.set_signature(destination, signature)
+                    state.set_image(destination, image)
+                    state.set_scalar(destination, scalar)
+                    if zero_upper:
+                        state.zero_upper.add(reg(destination))
                 enqueue(jump.default_target, returns, state.copy())
                 source = jump.index_source
                 if (tainted(state.value(source)) or tainted(state.alias(source))
                         or state.signature(source) is not None
                         or reg(source) in state.return_signatures):
                     problem(pc, "jump-table-index-has-pointer-or-signature-fact")
+                    continue
+                if (jump.requires_zero_extended_index
+                        and reg(source) not in state.zero_upper
+                        and not (state.scalar(jump.index_register) is not None
+                                 and state.scalar(jump.index_register) <= 0xFFFFFFFF)):
+                    problem(pc, "jump-table-index-upper-bits-unproved")
                     continue
                 observe_owned_image_access(pc, jump.table_address, len(jump.table_bytes), True, False)
                 if ((state.native_memory_may_contain_tp or any(tainted(v) for v in state.stack.values()))
@@ -668,12 +710,16 @@ class Audit:
                     "body_sha256": jump.body_sha256, "table_sha256": jump.table_sha256,
                     "table": hex(jump.table_address), "bytes": len(jump.table_bytes),
                     "default": hex(jump.default_target),
+                    "prebranch_move": jump.prebranch_move,
+                    "zero_extended_index_required": jump.requires_zero_extended_index,
                     "targets": [hex(target) for target in sorted(set(jump.targets))],
                     "scope": "explicit trusted sealed-Image bytes; normal/owned synchronous lifetime only",
                 }
                 for target in sorted(set(jump.targets)):
                     post = state.copy()
                     for name in (jump.index_register, jump.table_register, jump.offset_register, jump.branch_register):
+                        if jump.requires_zero_extended_index and name == jump.index_register:
+                            continue  # This variant reads an already-extended index.
                         post.set(name, CLEAN)
                         post.set_alias(name, CLEAN)
                     post.set_image(jump.table_register, jump.table_address)

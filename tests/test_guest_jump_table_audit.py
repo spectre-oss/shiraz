@@ -61,6 +61,162 @@ class ReadonlyJumpTableTests(unittest.TestCase):
 
 
 class JumpTableAuditTests(unittest.TestCase):
+    def variant_report(self, setup=(), *, move=("x20", "x19"), branch=None, window=True):
+        """Synthetic state transfer only; the byte recognizer is tested separately."""
+        body = [instruction(0, "mrs", R("x19"))]
+        for mnemonic, operands in setup:
+            body.append(instruction(len(body) * 4, mnemonic, *operands))
+        entry = len(body) * 4
+        body.append(instruction(entry, "cmp", R("w10"), I(1)))
+        summary = replace(jump_tests.ByteJumpTableTests.recognize(), entry=entry,
+                          default_target=80, table_address=0x3000, branch_base=128,
+                          index_source="w10", index_register="x10", table_register="x11",
+                          offset_register="w13", branch_register="x12", limit=1,
+                          table_bytes=(0, 0), targets=(128, 128), prebranch_move=move,
+                          requires_zero_extended_index=True)
+        branch = branch or (("ldr", (R("x8"), M("x20", 40))),)
+        for start in (80, 128):
+            tail = [*branch, ("mov", (R("x19"), R("xzr"))),
+                    ("mov", (R("x20"), R("xzr"))),
+                    ("mov", (R("x21"), R("xzr"))),
+                    ("mov", (R("x22"), R("xzr"))),
+                    ("str", (R("xzr"), M("sp", 8))), ("ret", ())]
+            for index, (mnemonic, operands) in enumerate(tail):
+                body.append(instruction(start + index * 4, mnemonic, *operands))
+        graph = {item.address: item for item in body}
+
+        class Decoder:
+            def __call__(self, pc):
+                return graph.get(pc)
+
+            def byte_jump_table(self, pc):
+                return summary if pc == entry else None
+
+            def owned_image_data(self, address, width):
+                return address == 0x3000 and width in (2, 8)
+
+            def mrs_stack_window(self, pc):
+                return ({"profile": 1, "before": 4096, "after": 256,
+                         "image_stack_exclusion_profile": 1} if window else None)
+
+        return audit.Audit(Decoder()).site(0)
+
+    def test_interleaved_variant_requires_executed_w_write_or_exact_small_scalar(self):
+        for setup in (
+            (("mov", (R("w10"), R("w3"))),),
+            (("sub", (R("w10"), R("w3"), I(1))),),
+            (("mov", (R("x10"), I(1))),),
+        ):
+            with self.subTest(setup=setup):
+                result = self.variant_report(setup)
+                self.assertEqual(result["classification"], "guard-only", result["reasons"])
+                self.assertEqual({r["pc"] for r in result["accesses"]}, {"0x50", "0x80"})
+        for setup in (
+            (),
+            (("mov", (R("x10"), R("x3"))),),
+            (("mov", (R("w10"), R("w3"))), ("mov", (R("x10"), R("x4")))),
+            (("mov", (R("x10"), I(1 << 32))),),
+        ):
+            with self.subTest(setup=setup):
+                result = self.variant_report(setup)
+                self.assertIn("jump-table-index-upper-bits-unproved",
+                              {r["reason"] for r in result["reasons"]})
+                self.assertFalse(result["bounded_jump_tables"])
+
+    def test_interleaved_variant_narrowed_pointer_and_spill_alias_remain_refused(self):
+        result = self.variant_report((("mov", (R("w10"), R("w19"))),))
+        self.assertIn("narrowed-thread-pointer", {r["reason"] for r in result["reasons"]})
+        result = self.variant_report((("mov", (R("w10"), R("w3"))),
+                                      ("str", (R("x19"), M("sp", 8)))), window=False)
+        self.assertIn("jump-table-load-may-alias-thread-pointer-stack-spill",
+                      {r["reason"] for r in result["reasons"]})
+        self.assertFalse(result["bounded_jump_tables"])
+
+    def test_prebranch_move_preserves_stack_alias_on_default_and_case(self):
+        result = self.variant_report(
+            (("mov", (R("w10"), R("w3"))), ("mov", (R("x21"), R("sp"))),
+             ("str", (R("x19"), M("sp", 8)))), move=("x20", "x21"),
+            branch=(("ldr", (R("x22"), M("x20", 8))),
+                    ("ldr", (R("x8"), M("x22", 40)))))
+        self.assertEqual(result["classification"], "guard-only", result["reasons"])
+        self.assertEqual({r["pc"] for r in result["accesses"]}, {"0x54", "0x84"})
+
+    def test_prebranch_move_preserves_image_and_scalar_facts_on_both_paths(self):
+        scalar = self.variant_report(
+            (("mov", (R("w10"), R("w3"))), ("mov", (R("x21"), I(40)))),
+            move=("x20", "x21"),
+            branch=(("add", (R("x22"), R("x19"), R("x20"))),
+                    ("ldr", (R("x8"), M("x22")))))
+        self.assertEqual(scalar["classification"], "guard-only", scalar["reasons"])
+        self.assertEqual({r["pc"] for r in scalar["accesses"]}, {"0x54", "0x84"})
+        image = self.variant_report(
+            (("mov", (R("w10"), R("w3"))), ("adr", (R("x21"), I(0x3000))),
+             ("str", (R("x19"), M("sp", 8)))), move=("x20", "x21"),
+            branch=(("ldr", (R("x8"), M("x20"))),
+                    ("ldr", (R("x8"), M("x19", 40)))))
+        self.assertEqual(image["classification"], "guard-only", image["reasons"])
+        self.assertEqual({r["pc"] for r in image["accesses"]}, {"0x54", "0x84"})
+
+    def test_prebranch_move_preserves_return_tokens_and_signatures(self):
+        for signed in (False, True):
+            with self.subTest(signed=signed):
+                body = [instruction(0, "mrs", R("x19")), instruction(4, "bl", I(32)),
+                        instruction(8, "ldr", R("x8"), M("x19", 40)),
+                        instruction(12, "mov", R("x19"), R("xzr")), instruction(16, "ret")]
+                pc = 32
+                if signed:
+                    body.append(instruction(pc, "paciasp"))
+                    pc += 4
+                body.extend((instruction(pc, "mov", R("x21"), R("x30")),
+                             instruction(pc + 4, "mov", R("w10"), R("w3"))))
+                entry = pc + 8
+                body.append(instruction(entry, "cmp", R("w10"), I(1)))
+                summary = replace(jump_tests.ByteJumpTableTests.recognize(), entry=entry,
+                                  default_target=96, table_address=0x3000, branch_base=128,
+                                  index_source="w10", index_register="x10", table_register="x11",
+                                  offset_register="w13", branch_register="x12", limit=1,
+                                  table_bytes=(0, 0), targets=(128, 128),
+                                  prebranch_move=("x20", "x21"), requires_zero_extended_index=True)
+                for start in (96, 128):
+                    tail = (("mov", (R("x30"), R("x20"))),)
+                    if signed:
+                        tail += (("autiasp", ()),)
+                    tail += (("ret", ()),)
+                    body.extend(instruction(start + index * 4, mnemonic, *operands)
+                                for index, (mnemonic, operands) in enumerate(tail))
+                graph = {item.address: item for item in body}
+
+                class Decoder:
+                    def __init__(self, graph, summary, entry):
+                        self.graph, self.summary, self.entry = graph, summary, entry
+                        self.return_auth_profile = {"feature_pauth": 1, "feature_pauth_lr": 0}
+
+                    def __call__(self, address):
+                        return self.graph.get(address)
+
+                    def byte_jump_table(self, address):
+                        return self.summary if address == self.entry else None
+
+                result = audit.Audit(Decoder(graph, summary, entry)).site(0)
+                self.assertEqual(result["classification"], "guard-only", result["reasons"])
+                self.assertEqual({r["pc"] for r in result["accesses"]}, {"0x8"})
+
+    def test_zero_upper_facts_are_copied_partitioned_and_invalidated_by_x_writes(self):
+        state = audit.State()
+        state.set("w10", audit.CLEAN)
+        self.assertIn("x10", state.zero_upper)
+        clone = state.copy()
+        self.assertEqual(state.fingerprint(), clone.fingerprint())
+        clone.set("x10", audit.CLEAN)
+        self.assertNotIn("x10", clone.zero_upper)
+        self.assertIn("x10", state.zero_upper)
+        self.assertNotEqual(state.fingerprint(), clone.fingerprint())
+        for mutate in (lambda s: s.set_control("x10", audit.CLEAN),
+                       lambda s: s.set_signature("x10", None)):
+            clone = state.copy()
+            mutate(clone)
+            self.assertNotIn("x10", clone.zero_upper)
+
     def test_decoder_requires_every_target_to_have_executable_file_bytes(self):
         entry = jump_tests.FIRST_ENTRY
         words = {entry + 4 * i: word.to_bytes(4, "little") for i, word in enumerate(jump_tests.FIRST_WORDS)}
