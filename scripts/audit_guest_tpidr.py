@@ -32,6 +32,7 @@ import guest_jump_table
 import guest_memory_contract
 import guest_mrs_window
 import guest_native_target
+import guest_scalar_widening
 import guest_swap_effects
 
 MAX_BYTES = 256 << 20
@@ -41,6 +42,7 @@ MAX_CONTEXTS = 4096
 MAX_CALL_DEPTH = 4
 MAX_STACK_SLOTS = 256
 MAX_VALUES = 8
+MAX_SCALAR_VARIANTS = 4
 MAX_TOTAL_STEPS = 2_000_000
 MAX_CALLER_PRELUDE = 64
 MAX_BYTE_COPY = 4096
@@ -213,7 +215,7 @@ class State:
             set(self.zero_upper),
         )
 
-    def fingerprint(self):
+    def fingerprint(self, *, include_scalars=True):
         # Missing register facts and explicit CLEAN facts have identical reads,
         # liveness and limits. Canonicalize those defaults, without dropping
         # stack entries: even CLEAN spill slots affect bounded slot accounting.
@@ -223,8 +225,8 @@ class State:
             self.native_stack_clobber_below,
             self.native_memory_may_contain_tp,
             tuple(sorted(self.native_stack_rewritten)),
-            tuple(sorted(self.constants.items())),
-            tuple(sorted(self.zero_upper)),
+            tuple(sorted(self.constants.items())) if include_scalars else (),
+            tuple(sorted(self.zero_upper)) if include_scalars else (),
             *(
                 tuple(sorted((key, value) for key, value in mapping.items()
                              if not defaults or value != CLEAN))
@@ -762,11 +764,12 @@ def caller_prologue(decode, root, caller, *, helper_evidence=None):
 
 class Audit:
     def __init__(self, decode, *, max_steps=MAX_STEPS, max_contexts=MAX_CONTEXTS,
-                 track_opaque_loads=False):
+                 track_opaque_loads=False, scalar_widening=True):
         self.decode = decode
         self.max_steps = max_steps
         self.max_contexts = max_contexts
         self.track_opaque_loads = track_opaque_loads
+        self.scalar_widening = scalar_widening
 
     def site(self, address, caller=None, *, entry_context=False):
         if entry_context and caller is not None:
@@ -788,6 +791,10 @@ class Audit:
         vector_stack_copies = set()
         relocated_pointer_loads = {}
         indirect_edges = {}
+        scalar_domains = (guest_scalar_widening.ScalarWidening(
+            max_groups=max(0, self.max_contexts), max_variants=MAX_SCALAR_VARIANTS)
+            if self.scalar_widening else None)
+        scalar_widenings = {}
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -850,9 +857,9 @@ class Audit:
 
         def enqueue(pc, returns, state):
             observe_stack_facts(state)
-            # A union at a join loses correlations between register values,
-            # spill contents and stack addresses. Keep each exact abstract state
-            # separately; an unsafe path remains a sticky problem for the site.
+            # Preserve every distinct pointer/stack/control/lifetime partition.
+            # Scalar envelopes may only forget numeric precision inside one
+            # identical non-scalar partition; earlier problems stay sticky.
             for mapping in (
                 state.registers,
                 state.stack,
@@ -867,6 +874,27 @@ class Audit:
             key = (pc, returns, state.fingerprint())
             if key in states:
                 return
+            if scalar_domains is not None:
+                merged = scalar_domains.observe(
+                    (pc, returns, state.fingerprint(include_scalars=False)),
+                    state.constants, state.zero_upper)
+                if merged is None:
+                    problem(pc, "context-limit")
+                    return
+                if merged.widened:
+                    if merged.dropped_constants or merged.dropped_zero_upper:
+                        record = scalar_widenings.setdefault(pc, [0, set(), set()])
+                        record[0] += 1
+                        record[1].update(merged.dropped_constants)
+                        record[2].update(merged.dropped_zero_upper)
+                    state = state.copy()
+                    # set_scalar(None) does not invalidate an existing fact.
+                    # Replace the domains so forgotten values cannot survive.
+                    state.constants = dict(merged.constants)
+                    state.zero_upper = set(merged.zero_upper)
+                    key = (pc, returns, state.fingerprint())
+                    if key in states:
+                        return
             if len(states) >= self.max_contexts:
                 problem(pc, "context-limit")
                 return
@@ -2202,6 +2230,13 @@ class Audit:
             "steps": steps,
             "analysis_strategy": "bounded-exact-state-partitions",
             "state_partitions": len(states),
+            "scalar_widening": self.scalar_widening,
+            "scalar_widenings": [
+                {"pc": hex(pc), "applications": row[0], "constants_dropped": sorted(row[1]),
+                 "zero_upper_dropped": sorted(row[2]),
+                 "scope": "identical non-scalar facts; numeric information only forgotten"}
+                for pc, row in sorted(scalar_widenings.items())
+            ],
             "mrs_window_record": mrs_window,
             "conditional_image_stack_separation": [
                 {"pc": hex(pc), "analysis_image_address": hex(start), "read_width": width,
@@ -3349,6 +3384,9 @@ class ElfDecoder:
             "frame_effects_sha256": hashlib.sha256(
                 Path(guest_frame_effects.__file__).read_bytes()
             ).hexdigest(),
+            "scalar_widening_sha256": hashlib.sha256(
+                Path(guest_scalar_widening.__file__).read_bytes()
+            ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()
             ).hexdigest(),
@@ -3683,6 +3721,8 @@ def main():
         "--guest-library-dir", type=Path,
         help="explicit directory of all hash-matched recorded guest ELFs; enables bounded cross-ELF body traversal",
     )
+    parser.add_argument("--no-scalar-widening", dest="scalar_widening", action="store_false",
+                        help="retain every exact integer partition for diagnostic comparison")
     args = parser.parse_args()
     if args.entry_context and args.caller is not None:
         parser.error("--entry-context and --caller are mutually exclusive")
@@ -3718,13 +3758,14 @@ def main():
         else:
             result = Audit(
                 decoder, max_steps=min(MAX_STEPS, MAX_TOTAL_STEPS - total_steps),
-                track_opaque_loads=args.track_opaque_loads,
+                track_opaque_loads=args.track_opaque_loads, scalar_widening=args.scalar_widening,
             ).site(site, caller=args.caller, entry_context=args.entry_context)
         total_steps += result.get("steps", 0)
         results.append(result)
     report = {
         "schema": 1,
         "experimental_opaque_load_tracking": args.track_opaque_loads,
+        "scalar_widening": args.scalar_widening,
         "analyzer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "decoder": "capstone-5.0.3",
         "decoder_identity": decoder.identity,
@@ -3744,6 +3785,7 @@ def main():
             "call_depth": MAX_CALL_DEPTH,
             "stack_slots": MAX_STACK_SLOTS,
             "values_per_join": MAX_VALUES,
+            "scalar_variants_before_widening": MAX_SCALAR_VARIANTS,
             "total_steps": MAX_TOTAL_STEPS,
             "caller_prelude_instructions": MAX_CALLER_PRELUDE,
             "byte_copy_bytes": MAX_BYTE_COPY,
