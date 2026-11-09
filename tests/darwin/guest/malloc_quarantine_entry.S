@@ -230,6 +230,19 @@ Lshiraz_test_malloc_return_from_entry:
     stp d14, d15, [x9, #160]
     ldr x10, [sp, #176]
     str x10, [x9, #176]
+    // All returned register state has been captured. Inspect the production
+    // entry's retired [-160,0) frame before any subsequent call can reuse it.
+    // This loop reads that region only; its result is outside it in Probe.
+    sub x10, sp, #160
+    mov x11, #20
+    mov x12, xzr
+Lshiraz_test_malloc_retired_scan:
+    ldr x13, [x10], #8
+    cmp x13, #0
+    cinc x12, x12, ne
+    subs x11, x11, #1
+    b.ne Lshiraz_test_malloc_retired_scan
+    str x12, [x9, #840]
     ldp d8, d9, [sp, #96]
 .cfi_restore 72
 .cfi_restore 73
