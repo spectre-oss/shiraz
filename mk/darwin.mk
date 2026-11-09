@@ -2204,3 +2204,33 @@ $(MACOS_OUT)/m5/mrs-quarantine-sanitized: tests/darwin/guest/mrs_quarantine_prob
 macos-guest-mrs-quarantine-sanitize-check: macos-guest-unwind-fixture $(MACOS_OUT)/m5/mrs-quarantine-sanitized
 	$(MACOS_OUT)/m5/mrs-quarantine-sanitized $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
 macos-guest-check: macos-guest-mrs-quarantine-check macos-guest-mrs-quarantine-sanitize-check
+
+# ELF destructor ordering and admission: first-party DSOs, no application code.
+$(MACOS_GUEST_DEP_DIR)/finalize-host.o: tests/darwin/guest/deps/finalize.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -DFINALIZE_LINK_HOST -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/finalize-dep.o: tests/darwin/guest/deps/finalize.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/finalize-root.o: tests/darwin/guest/deps/finalize.c
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -DFINALIZE_ROOT -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+.PHONY: macos-guest-finalize-fixture macos-guest-finalize-check macos-guest-finalize-sanitize-check
+macos-guest-finalize-fixture: macos-guest-toolchain $(MACOS_GUEST_DEP_DIR)/finalize-host.o $(MACOS_GUEST_DEP_DIR)/finalize-dep.o $(MACOS_GUEST_DEP_DIR)/finalize-root.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libfinalize-host.so $(MACOS_GUEST_DEP_DIR)/finalize-host.o -o $(MACOS_GUEST_DEP_DIR)/libfinalize-host.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -fini guest_fini -soname libfinalize-dep.so $(MACOS_GUEST_DEP_DIR)/finalize-dep.o -L$(MACOS_GUEST_DEP_DIR) -lfinalize-host -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libfinalize-dep.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -fini guest_fini -soname libfinalize-root.so $(MACOS_GUEST_DEP_DIR)/finalize-root.o -L$(MACOS_GUEST_DEP_DIR) -lfinalize-dep -lfinalize-host -l:libc-link.so -o $(MACOS_GUEST_DEP_DIR)/libfinalize-root.so
+$(MACOS_OUT)/m5/finalize-probe: tests/darwin/guest/finalize_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/finalize_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-finalize-check: macos-guest-finalize-fixture $(MACOS_OUT)/m5/finalize-probe
+	$(MACOS_OUT)/m5/finalize-probe $(MACOS_GUEST_DEP_DIR)
+	cp $(MACOS_OUT)/m5/finalize-probe $(MACOS_OUT)/m5/finalize-hardened.pending
+	mv $(MACOS_OUT)/m5/finalize-hardened.pending $(MACOS_OUT)/m5/finalize-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/finalize-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/finalize-hardened
+	$(MACOS_OUT)/m5/finalize-hardened $(MACOS_GUEST_DEP_DIR)
+$(MACOS_OUT)/m5/finalize-sanitized: tests/darwin/guest/finalize_probe.cpp $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/finalize_probe.cpp $(MACOS_GUEST_SOURCES) -o $@
+macos-guest-finalize-sanitize-check: macos-guest-finalize-fixture $(MACOS_OUT)/m5/finalize-sanitized
+	$(MACOS_OUT)/m5/finalize-sanitized $(MACOS_GUEST_DEP_DIR)
+macos-guest-check: macos-guest-finalize-check macos-guest-finalize-sanitize-check

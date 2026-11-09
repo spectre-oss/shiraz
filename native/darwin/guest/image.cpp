@@ -301,6 +301,7 @@ size_t Image::initialize() {
   auto init_start = Clock::now();
   try {
     auto execute = [&](uint64_t address) {
+      if (address & 3) throw ElfError("unaligned guest constructor pointer");
       bool valid = false;
       for (const auto &segment : elf_.segments)
         if ((segment.flags & 1) && contains(segment, address, 4))
@@ -337,6 +338,43 @@ size_t Image::initialize() {
     return count;
   } catch (...) {
     metrics_.init_ns = elapsed(init_start);
+    state_ = State::Failed;
+    throw;
+  }
+}
+size_t Image::finalize() {
+  if (state_ == State::Uninitialized || state_ == State::Failed ||
+      state_ == State::Finalizing || state_ == State::Finalized)
+    return 0;
+  if (state_ != State::Ready || link_state_ != LinkState::Sealed)
+    throw ElfError("guest finalization requires initialized sealed image");
+  // Validate all targets before the first callback. Values are relocated
+  // native pointers; DT_FINI itself remains an ELF virtual address.
+  std::vector<void *> functions;
+  auto add = [&](uint64_t address) {
+    if (address & 3) throw ElfError("unaligned guest finalizer pointer");
+    bool valid = false;
+    for (const auto &segment : elf_.segments)
+      if ((segment.flags & 1) && contains(segment, address, 4)) valid = true;
+    if (!valid) throw ElfError("guest finalizer outside executable LOAD");
+    functions.push_back(at(address, 4));
+  };
+  for (uint64_t offset = elf_.fini_array_size; offset; offset -= 8) {
+    uintptr_t pointer;
+    std::memcpy(&pointer, at(elf_.fini_array + offset - 8, 8), 8);
+    if (!pointer || pointer == UINTPTR_MAX) continue;
+    const auto base = reinterpret_cast<uintptr_t>(base_);
+    if (pointer < base || pointer - base >= elf_.span)
+      throw ElfError("invalid guest finalizer pointer");
+    add(elf_.first_page + (pointer - base));
+  }
+  if (elf_.fini) add(elf_.fini);
+  state_ = State::Finalizing;
+  try {
+    for (auto *function : functions) invoke(function, {});
+    state_ = State::Finalized;
+    return functions.size();
+  } catch (...) {
     state_ = State::Failed;
     throw;
   }

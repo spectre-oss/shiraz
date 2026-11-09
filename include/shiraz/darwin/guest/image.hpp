@@ -34,6 +34,9 @@ public:
   void *symbol(std::string_view name) const;
   bool contains_code(const void *pointer) const;
   size_t initialize();
+  // Loader calls this while every dependency and lifecycle provider is resident.
+  // Reverse FINI_ARRAY order, then FINI; never run for a link-only image.
+  size_t finalize();
   const ImageMetrics &metrics() const { return metrics_; }
   const Elf &elf() const { return elf_; }
   uintptr_t load_bias() const { return reinterpret_cast<uintptr_t>(base_) - elf_.first_page; }
@@ -56,7 +59,7 @@ private:
   std::vector<unsigned> page_flags_;
   enum class LinkState { Mapped, Relocated, Sealed };
   LinkState link_state_ = LinkState::Mapped;
-  enum class State { Uninitialized, Initializing, Ready, Failed };
+  enum class State { Uninitialized, Initializing, Ready, Finalizing, Finalized, Failed };
   State state_ = State::Uninitialized;
 };
 } // namespace shiraz::guest

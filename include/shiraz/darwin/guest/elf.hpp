@@ -49,6 +49,7 @@ struct Elf {
   std::vector<Relocation> relocations;
   std::vector<std::string> needed;
   uint64_t init = 0, init_array = 0, init_array_size = 0;
+  uint64_t fini = 0, fini_array = 0, fini_array_size = 0;
   uint64_t relro = 0, relro_size = 0;
   uint64_t eh_frame_header = 0, eh_frame_header_size = 0;
   bool versioned = false, symbolic = false, global = false;

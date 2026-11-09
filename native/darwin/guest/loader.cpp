@@ -56,10 +56,15 @@ struct Loader::State {
   std::map<std::string, std::unique_ptr<Module>> modules;
   std::map<std::string, Module *> aliases;
   std::vector<Module *> order;
+  std::vector<Module *> initialized;
   std::vector<BindingRecord> records;
   size_t constructors = 0, record_bytes = 0;
   bool initializing = false;
+  enum class Finalization { Open, Running, Done, Failed };
+  Finalization stopping = Finalization::Open;
+  Finalization finalization = Finalization::Open;
   std::function<void()> finalizer;
+  bool finalizer_drives_images = false;
   std::vector<std::function<void()>> preunmap, postfinalizer;
 
   std::filesystem::path file(const std::filesystem::path &path) const {
@@ -93,6 +98,8 @@ struct Loader::State {
     auto found = modules.find(key);
     if (found != modules.end())
       return found->second.get();
+    if (stopping != Finalization::Open || finalization != Finalization::Open)
+      throw ElfError("new guest loads during finalization are not implemented");
     if (initializing)
       throw ElfError("new guest loads during constructors are not implemented");
     if (modules.size() >= 128)
@@ -268,8 +275,11 @@ Loader::Loader(std::vector<std::filesystem::path> roots, Providers providers)
 }
 Loader::~Loader() {
   try {
-    for (auto it = state_->preunmap.rbegin(); it != state_->preunmap.rend(); ++it) (*it)();
-    if (state_->finalizer) state_->finalizer();
+    // Keep all mappings and providers resident. Reentrant lookup of an already
+    // loaded module remains possible; discovery of new modules is refused.
+    if (state_->finalizer && state_->finalizer_drives_images) state_->finalizer();
+    finalize_images();
+    if (state_->finalizer && !state_->finalizer_drives_images) state_->finalizer();
     for(auto it=state_->postfinalizer.rbegin();it!=state_->postfinalizer.rend();++it)(*it)();
   }
   catch (const std::exception &error) {
@@ -280,15 +290,55 @@ Loader::~Loader() {
     std::abort();
   }
 }
-void Loader::set_finalizer(std::function<void()> finalizer) {
+void Loader::stop_native_callbacks() {
+  using Finalization = State::Finalization;
+  if (state_->stopping == Finalization::Running || state_->stopping == Finalization::Done) return;
+  if (state_->stopping == Finalization::Failed)
+    throw ElfError("guest native callback stop previously failed");
+  state_->stopping = Finalization::Running;
+  try {
+    for (auto it = state_->preunmap.rbegin(); it != state_->preunmap.rend(); ++it) (*it)();
+    state_->stopping = Finalization::Done;
+  } catch (...) {
+    state_->stopping = Finalization::Failed;
+    throw;
+  }
+}
+void Loader::finalize_images() {
+  using Finalization = State::Finalization;
+  if (state_->finalization == Finalization::Running || state_->finalization == Finalization::Done)
+    return;
+  if (state_->finalization == Finalization::Failed)
+    throw ElfError("guest image finalization previously failed");
+  if (state_->stopping == Finalization::Running)
+    throw ElfError("guest image finalization during native callback stop");
+  stop_native_callbacks();
+  state_->finalization = Finalization::Running;
+  try {
+    for (auto it = state_->initialized.rbegin(); it != state_->initialized.rend(); ++it)
+      (*it)->image->finalize();
+    state_->finalization = Finalization::Done;
+  } catch (...) {
+    state_->finalization = Finalization::Failed;
+    throw;
+  }
+}
+void Loader::set_finalizer(std::function<void()> finalizer, bool drives_images) {
+  if (state_->stopping != State::Finalization::Open || state_->finalization != State::Finalization::Open)
+    throw ElfError("guest finalizer registration after shutdown admission closed");
   if (!finalizer || state_->finalizer) throw ElfError("invalid or duplicate guest Loader finalizer");
   state_->finalizer = std::move(finalizer);
+  state_->finalizer_drives_images = drives_images;
 }
 void Loader::add_preunmap_hook(std::function<void()> hook) {
+  if (state_->stopping != State::Finalization::Open || state_->finalization != State::Finalization::Open)
+    throw ElfError("guest pre-unmap hook registration after shutdown admission closed");
   if (!hook || state_->preunmap.size() >= 16) throw ElfError("invalid or excessive guest pre-unmap hooks");
   state_->preunmap.push_back(std::move(hook));
 }
 void Loader::add_postfinalizer_hook(std::function<void()> hook) {
+  if (state_->stopping != State::Finalization::Open || state_->finalization != State::Finalization::Open)
+    throw ElfError("guest post-finalizer hook registration after shutdown admission closed");
   if(!hook || state_->postfinalizer.size()>=16)throw ElfError("invalid or excessive guest post-finalizer hooks");
   state_->postfinalizer.push_back(std::move(hook));
 }
@@ -399,6 +449,9 @@ Loader::Module *Loader::link(const std::filesystem::path &path, bool global) {
 Loader::Module *Loader::open(const std::filesystem::path &path, bool global) {
   prepare_guest_tls();
   Module *root = link(path, global);
+  if ((state_->stopping != State::Finalization::Open ||
+       state_->finalization != State::Finalization::Open) && root->status != Module::Status::Ready)
+    throw ElfError("guest initialization during finalization is not implemented");
   std::function<void(Module *)> initialize = [&](Module *module) {
     if (module->status == Module::Status::Ready ||
         module->status == Module::Status::Initializing)
@@ -406,8 +459,10 @@ Loader::Module *Loader::open(const std::filesystem::path &path, bool global) {
     module->status = Module::Status::Initializing;
     for (auto *dependency : module->dependencies)
       initialize(dependency);
-    if (module->image)
+    if (module->image) {
       state_->constructors += module->image->initialize();
+      state_->initialized.push_back(module);
+    }
     module->status = Module::Status::Ready;
   };
   bool previous = state_->initializing;

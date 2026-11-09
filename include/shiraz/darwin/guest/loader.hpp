@@ -67,7 +67,16 @@ public:
   Loader &operator=(const Loader &) = delete;
   // Single mandatory callback drain, run before any Image/namespace teardown.
   // Failure aborts rather than unmapping code with pending callbacks.
-  void set_finalizer(std::function<void()> finalizer);
+  // A lifecycle driver quiesces its callbacks, calls finalize_images(), then
+  // drains remaining registrations. Other drains run after ELF finalizers.
+  void set_finalizer(std::function<void()> finalizer, bool drives_images = false);
+  // Stop resources before closing lifecycle callback admission: a stop hook
+  // may join a native worker that is finishing a guest lifecycle drain.
+  void stop_native_callbacks();
+  // Stop native callbacks once, then run ELF destructors for completed
+  // initializations while dependencies remain resident. Also used by the
+  // lifecycle drain on normal guest exit. Closes new initialization admission.
+  void finalize_images();
   // Native resources with guest callback pointers must stop delivery before
   // guest finalizers and Image destruction. Hooks run in reverse order.
   void add_preunmap_hook(std::function<void()> hook);

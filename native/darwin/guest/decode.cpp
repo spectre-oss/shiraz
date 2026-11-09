@@ -221,9 +221,13 @@ ThreadPointerAnalysis analyze_thread_pointers(const Elf &elf,
       enqueue(symbol.address);
   for (uint64_t function : unwind_function_entries(elf, bytes)) enqueue(function);
   if (elf.init) enqueue(elf.init);
+  if (elf.fini) enqueue(elf.fini);
   for (const auto &relocation : elf.relocations) {
-    if (relocation.address < elf.init_array ||
-        relocation.address - elf.init_array >= elf.init_array_size) continue;
+    const bool init = relocation.address >= elf.init_array &&
+        relocation.address - elf.init_array < elf.init_array_size;
+    const bool fini = relocation.address >= elf.fini_array &&
+        relocation.address - elf.fini_array < elf.fini_array_size;
+    if (!init && !fini) continue;
     uint64_t target = 0;
     if (relocation.type == 1027) target = uint64_t(relocation.addend);
     else if (relocation.symbol < elf.symbols.size() && elf.symbols[relocation.symbol].section)

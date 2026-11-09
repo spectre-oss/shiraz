@@ -67,6 +67,35 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < sysv_elf.symbols.size(); ++i)
       if (sysv_elf.symbols[i].name != gnu_elf.symbols[i].name)
         throw std::runtime_error("GNU-only symbol names differ");
+    uint64_t executable = 0;
+    for (const auto &segment : sysv_elf.segments)
+      if ((segment.flags & 1) && segment.file_size >= 4) {
+        executable = segment.address;
+        break;
+      }
+    if (!executable || (executable & 3))
+      throw std::runtime_error("fixture aligned executable segment missing");
+    auto finalizer_tags = [&](Bytes &b) {
+      // SYSV hash remains present. Reuse the optional GNU hash slot and the
+      // existing populated init-array slots; these checks never execute ELF.
+      size_t function = tag(b, 0x6ffffef5), array = tag(b, 25), size = tag(b, 27);
+      put(b, function - 8, 13);
+      put(b, function, executable);
+      put(b, array - 8, 26);
+      put(b, size - 8, 28);
+    };
+    Bytes finalizer_control = original;
+    finalizer_tags(finalizer_control);
+    const auto finalizer_elf = parse_elf(finalizer_control, 16384);
+    if (finalizer_elf.fini != executable || finalizer_elf.fini_array != sysv_elf.init_array ||
+        finalizer_elf.fini_array_size != sysv_elf.init_array_size || !finalizer_elf.fini_array_size)
+      throw std::runtime_error("ELF finalizer metadata was not retained");
+    // As with INIT_ARRAY, size zero means no entries. No paired-tag presence
+    // or pointer range is inferred when there is nothing to execute.
+    put(finalizer_control, tag(finalizer_control, 13), 0);
+    put(finalizer_control, tag(finalizer_control, 26), UINT64_MAX);
+    put(finalizer_control, tag(finalizer_control, 28), 0);
+    parse_elf(finalizer_control, 16384);
     // Android linkers can page-pad RELRO beyond the final LOAD byte.
     Bytes padded = original;
     size_t relro = ph(padded, 0x6474e552);
@@ -119,6 +148,54 @@ int main(int argc, char **argv) {
     });
     reject("dynamic terminator", [](Bytes &b) { put(b, tag(b, 0) - 8, 21); });
     reject("duplicate dynamic", [](Bytes &b) { put(b, tag(b, 11) - 8, 6); });
+    reject("unaligned DT_INIT", [&](Bytes &b) {
+      size_t p = tag(b, 0x6ffffef5);
+      put(b, p - 8, 12);
+      put(b, p, executable + 1);
+    });
+    reject("unaligned init array", [](Bytes &b) {
+      size_t p = tag(b, 25);
+      put(b, p, read(b, p, 8) + 1);
+    });
+    auto executable_bss = [](Bytes &b) {
+      for (size_t i = 0; i < read(b, 56, 2); ++i) {
+        size_t p = read(b, 32, 8) + i * 56;
+        if (read(b, p, 4) != 1 || !(read(b, p + 4, 4) & 1)) continue;
+        const uint64_t base = read(b, p + 16, 8), file_size = read(b, p + 32, 8);
+        const uint64_t target = (base + file_size + 3) & ~uint64_t(3);
+        put(b, p + 40, target - base + 4);
+        return target;
+      }
+      throw std::runtime_error("fixture executable LOAD missing");
+    };
+    reject("non-file-backed DT_INIT", [&](Bytes &b) {
+      size_t p = tag(b, 0x6ffffef5);
+      put(b, p - 8, 12);
+      put(b, p, executable_bss(b));
+    });
+    auto reject_fini = [&](const char *label, const std::function<void(Bytes &)> &mutate) {
+      reject(label, [&](Bytes &b) { finalizer_tags(b); mutate(b); });
+    };
+    reject_fini("unaligned DT_FINI", [&](Bytes &b) { put(b, tag(b, 13), executable + 1); });
+    reject_fini("nonexecutable DT_FINI", [](Bytes &b) { put(b, tag(b, 13), 4); });
+    reject_fini("out-of-image DT_FINI", [](Bytes &b) { put(b, tag(b, 13), UINT64_MAX - 3); });
+    reject_fini("non-file-backed DT_FINI", [&](Bytes &b) {
+      put(b, tag(b, 13), executable_bss(b));
+    });
+    reject_fini("unaligned fini array", [](Bytes &b) {
+      size_t p = tag(b, 26);
+      put(b, p, read(b, p, 8) + 1);
+    });
+    reject_fini("fini array entry size", [](Bytes &b) { put(b, tag(b, 28), 7); });
+    reject_fini("fini array size cap", [](Bytes &b) { put(b, tag(b, 28), 65544); });
+    reject_fini("fini array range overflow", [](Bytes &b) {
+      put(b, tag(b, 26), UINT64_MAX - 7);
+      put(b, tag(b, 28), 16);
+    });
+    reject_fini("nonwritable fini array", [&](Bytes &b) { put(b, tag(b, 26), executable); });
+    reject_fini("fini array missing pointer", [](Bytes &b) {
+      put(b, tag(b, 26) - 8, 0x70000078);
+    });
     // SYSV hash remains present, so replacing the optional GNU hash metadata
     // with an unrelated tag is otherwise a valid parser input. The same
     // replacement with a legacy Android RELR tag must refuse before attempting

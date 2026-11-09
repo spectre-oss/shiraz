@@ -360,12 +360,25 @@ Elf parse_elf(const std::vector<uint8_t> &bytes, uint64_t page_size) {
   elf.init = tag(12);
   elf.init_array = tag(25);
   elf.init_array_size = tag(27);
-  if (elf.init && !memory_address(elf, elf.init, 4, 1))
-    bad("ELF init outside executable LOAD");
+  elf.fini = tag(13);
+  elf.fini_array = tag(26);
+  elf.fini_array_size = tag(28);
+  if (elf.init && ((elf.init & 3) || !memory_address(elf, elf.init, 4, 1)))
+    bad("ELF init outside aligned executable LOAD");
+  if (elf.init)
+    (void)file_address(elf, elf.init, 4);
   if (elf.init_array_size &&
-      (elf.init_array_size % 8 || elf.init_array_size > 65536 ||
+      ((elf.init_array & 7) || elf.init_array_size % 8 || elf.init_array_size > 65536 ||
        !memory_address(elf, elf.init_array, elf.init_array_size, 2)))
     bad("invalid ELF init array");
+  if (elf.fini && ((elf.fini & 3) || !memory_address(elf, elf.fini, 4, 1)))
+    bad("ELF fini outside aligned executable LOAD");
+  if (elf.fini)
+    (void)file_address(elf, elf.fini, 4);
+  if (elf.fini_array_size &&
+      ((elf.fini_array & 7) || elf.fini_array_size % 8 || elf.fini_array_size > 65536 ||
+       !memory_address(elf, elf.fini_array, elf.fini_array_size, 2)))
+    bad("invalid ELF fini array");
   elf.versioned = tags.count(0x6ffffff0) || tags.count(0x6ffffffe) ||
                   tags.count(0x6ffffffc);
   if (tags.count(0x6ffffff0) && !tag(0x6ffffff0))
