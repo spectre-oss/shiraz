@@ -48,7 +48,8 @@ The Apple Silicon macOS port is experimental. Its guest ELF loader, bionic ABI
 adapters and ART bridge have loaded the unchanged OsmAnd+ APK's seven native
 libraries and completed a meaningful OsmAndCore JNI round trip. Developer fixtures
 run in ordinary and hardened allow-jit-only modes. Cached native thread identity
-effects are checked against the compiled bridge body and private table ranges;
+effects are checked against the compiled bridge body and private table ranges.
+Guest errno cells have explicit ownership through ordinary and scoped cleanup;
 the remaining TLS caller contexts still fail closed. M5 remains in progress: complete
 TLS consumer and callback lifetime coverage, plus comparison against Android's
 bionic runtime, are still open. NativeBridge namespaces remain resident for the

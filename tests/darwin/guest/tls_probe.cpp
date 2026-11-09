@@ -45,12 +45,24 @@ static uintptr_t current_native_sp() noexcept {
   __asm__ volatile("mov %0, sp" : "=r"(value));
   return value;
 }
+static bool prepared_errno_matches() {
+  if (!guest_tls_prepared()) return false;
+  int *const generic = guest_errno_location();
+  const int saved_guest_errno = *generic, saved_errno = errno;
+  *generic = 0x51e4;
+  errno = ELOOP;
+  int *const observed = prepared_guest_errno_location(current_native_sp());
+  const bool matches = observed == generic && observed && *observed == 0x51e4 && errno == ELOOP;
+  *generic = saved_guest_errno;
+  errno = saved_errno;
+  return matches;
+}
 static bool prepared_cleanup_matches() {
   const auto sp = current_native_sp();
   if (!prepared_guest_cleanup_admitted(sp)) return false;
   try { require_prepared_guest_tls_lifetime(sp); }
   catch (...) { return false; }
-  return true;
+  return prepared_errno_matches();
 }
 static std::atomic<unsigned> ready_unowned_late_checks{0};
 static Loader *resident;
@@ -569,6 +581,116 @@ static void prepared_cleanup_admission_tests() {
                "owned_before_publication=1 foreign_stacks=2 table_bytes=32768 "
                "async_proof=0 consumer_proof=0\n";
 }
+// Ordinary and owned synchronous observations only. Refusal without readiness
+// proves no state publication here; the compiled query check must separately
+// establish its no-call/no-Mach-O-TLV footprint.
+static void prepared_errno_tests() {
+  const auto table = prepared_guest_errno_table();
+  require(table.role && !std::strcmp(table.role, "errno-cells") && table.address > 1 &&
+              !(table.address % alignof(std::atomic<uintptr_t>)) &&
+              table.bytes == 4096 * sizeof(std::atomic<uintptr_t>) &&
+              table.bytes < UINTPTR_MAX - table.address,
+          "complete prepared native errno-cell table extent");
+  const auto end = table.address + uintptr_t(table.bytes);
+  require(!prepared_guest_errno_disjoint_stack(table.address, end) &&
+              !prepared_guest_errno_disjoint_stack(table.address+1, end-1) &&
+              !prepared_guest_errno_disjoint_stack(table.address-1, table.address+1) &&
+              !prepared_guest_errno_disjoint_stack(end-1, end+1) &&
+              !prepared_guest_errno_disjoint_stack(0, 1) &&
+              !prepared_guest_errno_disjoint_stack(3, 2) &&
+              !prepared_guest_errno_disjoint_stack(2, 2) &&
+              prepared_guest_errno_disjoint_stack(table.address-1, table.address) &&
+              prepared_guest_errno_disjoint_stack(end, end+1),
+          "errno-cell table rejects overlapping and invalid stack extents");
+  const auto *cells = reinterpret_cast<const std::atomic<uintptr_t> *>(table.address);
+  auto rows_with = [&](uintptr_t pointer) {
+    size_t count = 0;
+    for (size_t i = 0; i < 4096; ++i)
+      count += cells[i].load(std::memory_order_acquire) == pointer;
+    return count;
+  };
+  std::atomic<unsigned> epochs_checked{0};
+  std::thread epochs([&] {
+    const auto initial_sp = current_native_sp();
+    errno = ERANGE;
+    require(!guest_tls_prepared() && !prepared_guest_errno_location(initial_sp) &&
+                errno == ERANGE && !guest_tls_prepared(),
+            "first errno cache query does not publish unprepared native state");
+    // Retain the generic pointer before the first publication. Normal owned
+    // cleanup epochs retire ThreadState/readiness, not pthread errno identity.
+    int *const persistent = guest_errno_location();
+    *persistent = 0x5100;
+    for (unsigned epoch = 0; epoch < 8; ++epoch) {
+      const auto sp = current_native_sp();
+      errno = ERANGE;
+      require(!guest_tls_prepared() && !prepared_guest_errno_location(sp) &&
+                  !prepared_guest_errno_location(0) && errno == ERANGE && !guest_tls_prepared(),
+              "unprepared or retired errno query refuses without publishing TLS or changing errno");
+      int *const existing = guest_errno_location();
+      require(existing == persistent && *existing == 0x5100 + int(epoch ? epoch - 1 : 0) &&
+                  errno == ERANGE && !guest_tls_prepared() &&
+                  !prepared_guest_errno_location(sp) &&
+                  rows_with(reinterpret_cast<uintptr_t>(persistent)) == 0,
+              "generic errno identity and value survive normal epochs without republishing a cache row");
+      const int value = 0x5100 + int(epoch);
+      *existing = value;
+      {
+        GuestTlsCleanupScope cleanup;
+        prepare_guest_tls();
+        require(prepared_guest_errno_location(sp) == existing && *existing == value &&
+                    prepared_errno_matches(),
+                "first publication and row reuse retain the existing native errno cell and value");
+        require(rows_with(reinterpret_cast<uintptr_t>(existing)) == 1,
+                "one owned prepared row publishes this thread's errno cell");
+        errno = E2BIG;
+        require(!prepared_guest_errno_location(0) && !prepared_guest_errno_location(1) &&
+                    !prepared_guest_errno_location(sp + 1) &&
+                    !prepared_guest_errno_location(UINTPTR_MAX) && errno == E2BIG &&
+                    *existing == value,
+                "invalid and unaligned SP cannot consume a prepared errno row or modify its cell");
+      }
+      require(!guest_tls_prepared() && !prepared_guest_errno_location(sp) &&
+                  rows_with(reinterpret_cast<uintptr_t>(existing)) == 0,
+              "owned cleanup retires errno pointer before prepared-row reuse");
+      errno = ENOSPC;
+      int *const recreated = guest_errno_location();
+      require(recreated == persistent && *recreated == value && errno == ENOSPC &&
+                  !guest_tls_prepared() && !prepared_guest_errno_location(sp) &&
+                  rows_with(reinterpret_cast<uintptr_t>(persistent)) == 0,
+              "generic state recreation retains normal pthread errno storage and leaves the cache empty");
+      ++epochs_checked;
+    }
+  });
+  epochs.join();
+  std::atomic<uintptr_t> stacks[2]{}, pointers[2]{};
+  std::atomic<unsigned> isolated{0};
+  std::thread workers[2];
+  for (unsigned i = 0; i < 2; ++i) workers[i] = std::thread([&, i] {
+    GuestTlsCleanupScope cleanup;
+    prepare_guest_tls();
+    int *const cell = guest_errno_location();
+    *cell = 0x5200 + int(i);
+    const auto sp = current_native_sp();
+    pointers[i].store(reinterpret_cast<uintptr_t>(cell), std::memory_order_release);
+    stacks[i].store(sp, std::memory_order_release);
+    domain_wait([&] { return stacks[1-i].load(std::memory_order_acquire) != 0; });
+    errno = ENETDOWN;
+    require(prepared_guest_errno_location(sp) == cell && *cell == 0x5200 + int(i) &&
+                pointers[1-i].load(std::memory_order_acquire) != reinterpret_cast<uintptr_t>(cell) &&
+                !prepared_guest_errno_location(stacks[1-i].load(std::memory_order_acquire)) &&
+                errno == ENETDOWN,
+            "prepared errno cells are thread-isolated and foreign prepared SP is refused");
+    ++isolated;
+    domain_wait([&] { return isolated.load() == 2; });
+  });
+  for (auto &worker : workers) worker.join();
+  require(epochs_checked == 8 && isolated == 2 &&
+              rows_with(pointers[0].load()) == 0 && rows_with(pointers[1].load()) == 0,
+          "all errno epochs and live-thread isolation checks finish with retired pointer rows");
+  std::cout << "M5_PREPARED_ERRNO_PASS epochs=8 foreign_stacks=2 thread_cells=2 "
+               "retirement=1 normal_identity=1 preserved_value=1 table_bytes=32768 "
+               "async_proof=0 consumer_proof=0\n";
+}
 int main(int argc, char **argv) {
   try {
     if (argc == 2 && !std::strcmp(argv[1], "--prepared-unowned-late")) {
@@ -578,6 +700,7 @@ int main(int argc, char **argv) {
     }
     require(argc == 2, "usage: tls-probe fixture-directory");
     run_ready_unowned_helper(argv[0]);
+    prepared_errno_tests();
     prepared_cleanup_admission_tests();
     resident = new Loader({std::filesystem::canonical(argv[1])}, allocation_tracking_personality());
     auto &loader = *resident;

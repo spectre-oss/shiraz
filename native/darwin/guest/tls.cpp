@@ -11,6 +11,7 @@
 #include <map>
 #include <iterator>
 #include <mutex>
+#include <memory>
 #include <vector>
 #include <utility>
 #include <pthread.h>
@@ -78,6 +79,9 @@ std::array<std::atomic<uintptr_t>, 4096> prepared_native_tls_keys{};
 // Only the boolean cleanup_depth || draining is published here. Readers must
 // never recover ThreadState or guest TP storage to decide prepared admission.
 std::array<std::atomic<uintptr_t>, 4096> prepared_cleanup_admission{};
+// Separate native errno allocations are owned by ThreadState through cleanup.
+// No residence in a destructible Mach-O TLV block is cached here.
+std::array<std::atomic<uintptr_t>, 4096> prepared_errno_cells{};
 inline uintptr_t native_tls_key() noexcept {
   uintptr_t key;
   asm volatile("mrs %0, tpidrro_el0" : "=r"(key));
@@ -122,6 +126,35 @@ uintptr_t guard() {
   }();
   return value;
 }
+pthread_once_t errno_key_once = PTHREAD_ONCE_INIT;
+pthread_key_t errno_key;
+void destroy_errno_owner(void *opaque) {
+  delete static_cast<std::shared_ptr<int> *>(opaque);
+}
+void initialize_errno_key() {
+  if (pthread_key_create(&errno_key, destroy_errno_owner)) std::abort();
+}
+std::shared_ptr<int> native_errno_cell() {
+  if (pthread_once(&errno_key_once, initialize_errno_key)) std::abort();
+  if (auto *owner = static_cast<std::shared_ptr<int> *>(pthread_getspecific(errno_key)))
+    return *owner;
+  if (!pthread_self_is_exiting_np)
+    throw ElfError("Darwin native thread exit-state query unavailable for errno");
+  const int exiting = pthread_self_is_exiting_np();
+  if (exiting != 0 && exiting != 1) throw ElfError("invalid native errno thread exit state");
+  auto cell = std::make_shared<int>(0);
+  if (!exiting) {
+    // Preserve errno identity/value across ordinary guest-state epochs. The
+    // native key and each live ThreadState independently retain the cell, so
+    // either native destructor order is safe.
+    auto owner = std::make_unique<std::shared_ptr<int>>(cell);
+    if (pthread_setspecific(errno_key, owner.get())) std::abort();
+    owner.release();
+  }
+  // A late owned guest epoch retains its own cell. Do not install another TSD
+  // value after this key's final destructor pass may already have completed.
+  return cell;
+}
 struct TlsSlotStorage {
   static_assert(bionic::kTlsMinSlot >= -16 && bionic::kTlsMinSlot <= 0 &&
                 bionic::kTlsMaxSlot >= 0 && bionic::kTlsMaxSlot <= 63);
@@ -142,6 +175,10 @@ struct ThreadState {
   // Backing covers the pinned slot range; private slot contents remain
   // unimplemented. This is still a canary-only personality, not a bionic TCB.
   TlsSlotStorage slots;
+  // Keep errno physically separate from guest TP/slot storage. Its ownership
+  // follows this state through every guest destructor, independent of dyld's
+  // native TLV teardown order. No prepared reader dereferences ThreadState.
+  std::shared_ptr<int> error_cell = native_errno_cell();
   std::vector<Destructor> destructors;
   std::map<GuestThreadKeyHandle, const void *, std::owner_less<GuestThreadKeyHandle>> key_values;
   size_t registrations = 0;
@@ -170,10 +207,15 @@ struct ThreadState {
       std::fprintf(stderr, "SHIRAZ_GUEST_FATAL native stack extent unavailable\n");
       std::abort();
     }
+    const auto error_address = reinterpret_cast<uintptr_t>(error_cell.get());
+    if (!error_address || error_address % alignof(int) || error_address > UINTPTR_MAX - sizeof(int) ||
+        (error_address < high && high - size < error_address + sizeof(int)))
+      throw ElfError("prepared guest errno cell overlaps native stack or is invalid");
     auto &domains = memory_domains();
     std::lock_guard<std::mutex> lock(domains.mutex);
     if (!mrs_access_tables_disjoint_stack(high - size, high) ||
-        !prepared_cleanup_admission_disjoint_stack(high - size, high))
+        !prepared_cleanup_admission_disjoint_stack(high - size, high) ||
+        !prepared_guest_errno_disjoint_stack(high - size, high))
       throw ElfError("native stack overlaps prepared TLS admission/cache table");
     for (size_t i = 0; i < prepared_threads.size(); ++i)
       if (reinterpret_cast<uintptr_t>(prepared_threads[i].load(std::memory_order_acquire)) > 1 &&
@@ -203,6 +245,7 @@ struct ThreadState {
         prepared_guest_bases[i].store(reinterpret_cast<uintptr_t>(slots.base()), std::memory_order_relaxed);
         // An owned cleanup scope can precede this first publication.
         prepared_cleanup_admission[i].store(cleanup_depth || draining, std::memory_order_relaxed);
+        prepared_errno_cells[i].store(error_address, std::memory_order_relaxed);
         prepared_threads[i].store(thread, std::memory_order_release);
         return;
       }
@@ -278,6 +321,7 @@ struct ThreadState {
       // Keep this cache live through all guest cleanup above, then invalidate
       // it while we still own the row and domains lock, before any row reuse.
       prepared_cleanup_admission[prepared_index].store(0, std::memory_order_release);
+      prepared_errno_cells[prepared_index].store(0, std::memory_order_release);
       prepared_guest_bases[prepared_index].store(0, std::memory_order_relaxed);
       prepared_native_ids[prepared_index].store(0, std::memory_order_relaxed);
       prepared_native_tls_keys[prepared_index].store(0, std::memory_order_relaxed);
@@ -318,6 +362,12 @@ template <size_t N> [[noreturn]] void mrs_failure(const char (&message)[N]) noex
   std::abort();
 }
 } // namespace
+int *guest_errno_location() {
+  // Generic access may initialize native guest state, but never publishes a
+  // prepared row. The allocator uses the no-initialization snapshot below.
+  HostErrno preserve;
+  return live_state().error_cell.get();
+}
 CachedSelfTables cached_pthread_self_tables() noexcept {
   static_assert(sizeof(prepared_threads) == 32768 &&
                 sizeof(prepared_native_tls_keys) == 32768 &&
@@ -379,6 +429,37 @@ bool prepared_guest_cleanup_admitted(uintptr_t incoming_sp) noexcept {
            prepared_cleanup_admission[i].load(std::memory_order_acquire) == 1;
   }
   return false;
+}
+CachedSelfTable prepared_guest_errno_table() noexcept {
+  static_assert(sizeof(prepared_errno_cells) == 32768);
+  return {"errno-cells", reinterpret_cast<uintptr_t>(prepared_errno_cells.data()),
+          sizeof(prepared_errno_cells)};
+}
+bool prepared_guest_errno_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  if (!low || high <= low) return false;
+  const auto table = prepared_guest_errno_table();
+  if (!table.address || !table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
+  return high <= table.address || table.address + table.bytes <= low;
+}
+int *prepared_guest_errno_location(uintptr_t incoming_sp) noexcept {
+  const auto key = native_tls_key();
+  if (!key || !incoming_sp || (incoming_sp & 15)) return nullptr;
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1 ||
+        prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (low >= high || incoming_sp < low || incoming_sp >= high) return nullptr;
+    const auto cell = prepared_errno_cells[i].load(std::memory_order_acquire);
+    if (!cell || cell % alignof(int) || cell > UINTPTR_MAX - sizeof(int) ||
+        (cell < high && low < cell + sizeof(int))) return nullptr;
+    if (prepared_threads[i].load(std::memory_order_acquire) != owner ||
+        prepared_native_tls_keys[i].load(std::memory_order_acquire) != key ||
+        prepared_errno_cells[i].load(std::memory_order_acquire) != cell) return nullptr;
+    return reinterpret_cast<int *>(cell);
+  }
+  return nullptr;
 }
 GuestImageReservation::GuestImageReservation(uintptr_t base, uint64_t bytes) : base_(base) {
   if (!base || !bytes || bytes > UINTPTR_MAX - base)

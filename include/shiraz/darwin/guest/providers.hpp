@@ -9,6 +9,9 @@
 #include <tuple>
 
 namespace shiraz::guest {
+// Separate native allocation retained by native-thread/guest-state owners.
+// Ordinary state retirement preserves identity/value; late owned epochs retain
+// their cell through cleanup. Generic access may initialize unpublished state.
 int *guest_errno_location();
 int errno_to_guest(int host);
 // Shared managed-allocation retirement. Unknown native malloc pointers retain

@@ -19,10 +19,6 @@ namespace shiraz::guest {
 extern "C" void *shiraz_guest_managed_malloc_entry(size_t);
 extern "C" void *shiraz_guest_memcpy_entry(void *, const void *, size_t);
 extern "C" void *shiraz_guest_memmove_entry(void *, const void *, size_t);
-int *guest_errno_location() {
-  static thread_local int value = 0;
-  return &value;
-}
 int errno_to_guest(int host) {
   if (!host)
     return 0;
@@ -221,7 +217,8 @@ extern "C" void *shiraz_guest_managed_malloc_body(size_t bytes, uintptr_t incomi
     if ((incoming_sp & 15) || !prepared_guest_stack_window(incoming_sp, 160, 0))
       throw ElfError("managed malloc SP outside prepared native stack extent");
     CaptureBoundary transition;
-    auto *guest_error = guest_errno_location();
+    auto *guest_error = prepared_guest_errno_location(incoming_sp);
+    if (!guest_error) throw ElfError("managed malloc prepared guest errno unavailable");
     const auto storage = capture_boundary_storage();
     // Returning-path admission only: assembly and boundary storage have
     // already been written. No pre-write safety claim follows from this check.

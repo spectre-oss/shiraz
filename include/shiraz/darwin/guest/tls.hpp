@@ -92,6 +92,12 @@ bool prepared_cleanup_admission_disjoint_stack(uintptr_t low, uintptr_t high) no
 // Ordinary prepared-thread snapshot: no ThreadState, TSD or guest-base lookup.
 // Not a post-fork or asynchronous lifetime lease; exact stack membership only.
 bool prepared_guest_cleanup_admitted(uintptr_t incoming_sp) noexcept;
+// Prepared state-owned native errno residence, physically separate from TP.
+// No Mach-O TLV resolution/initialization occurs in this query. Null means
+// unprepared, invalid SP or unavailable metadata; no lifetime lease follows.
+int *prepared_guest_errno_location(uintptr_t incoming_sp) noexcept;
+CachedSelfTable prepared_guest_errno_table() noexcept;
+bool prepared_guest_errno_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
 // Async-signal-safe readiness query only; never initializes native TLS.
 bool guest_tls_prepared() noexcept;
 // Cached pthread-reported extent, published with TLS readiness. This query
