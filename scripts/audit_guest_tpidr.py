@@ -32,6 +32,7 @@ import guest_jump_table
 import guest_memory_contract
 import guest_mrs_window
 import guest_native_target
+import guest_swap_effects
 
 MAX_BYTES = 256 << 20
 MAX_SITES = 131072
@@ -1069,11 +1070,14 @@ class Audit:
             )
             if summary is None and instruction.mnemonic == "bti" and hasattr(self.decode, "cas64"):
                 summary = self.decode.cas64(pc)
+            if summary is None and instruction.mnemonic == "bti" and hasattr(self.decode, "swap64"):
+                summary = self.decode.swap64(pc)
             if summary is not None:
                 # Atomic helper writes are not exact ordinary stack stores.
                 state.native_stack_rewritten.clear()
                 compare = getattr(summary, "memory_compare", None)
-                operation = "atomic-cas64" if compare else "atomic-add32"
+                swap = isinstance(summary, guest_swap_effects.Atomic64SwapEffects)
+                operation = "atomic-cas64" if compare else "atomic-swap64" if swap else "atomic-add32"
                 callee_effects[pc] = {
                     "entry": hex(pc),
                     "kind": "exact-" + operation,
@@ -1091,8 +1095,9 @@ class Audit:
                         for path in summary.paths
                     ],
                 }
-                if compare:
+                if compare or swap:
                     callee_effects[pc]["memory_order"] = summary.memory_order
+                if compare:
                     if tainted(state.value(compare)):
                         problem(pc, "thread-pointer-atomic-compare")
                     if tainted(state.alias(compare)):
@@ -1115,6 +1120,14 @@ class Audit:
                 )
                 if tainted(aliases) and slot is None:
                     problem(pc, "mixed-stack-address-atomic-access")
+                # Arithmetic/prelude readers already bound normal aliases.
+                # Revalidate at this effect boundary as well: an injected or
+                # future metadata path must not turn modular A64 aliasing into
+                # distinct unbounded Python stack slots and erase the result.
+                if slot is not None and (type(slot) is not int or abs(slot) > 1 << 20
+                                         or abs(slot + summary.rmw_width) > 1 << 20):
+                    problem(pc, "atomic-stack-range-unproved")
+                    continue
                 image = state.image(summary.memory_base)
                 # The helper's capability flag is also a memory read. An ELF
                 # ownership check does not prove separation from initial SP.
@@ -3339,6 +3352,9 @@ class ElfDecoder:
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()
             ).hexdigest(),
+            "swap_effects_sha256": hashlib.sha256(
+                Path(guest_swap_effects.__file__).read_bytes()
+            ).hexdigest(),
             "bindings_sha256": hashlib.sha256(
                 Path(capstone.__file__).read_bytes()
             ).hexdigest(),
@@ -3435,6 +3451,9 @@ class ElfDecoder:
 
     def cas64(self, address):
         return self.atomic_effect(address, guest_callee_effects.recognize_cas64)
+
+    def swap64(self, address):
+        return self.atomic_effect(address, guest_swap_effects.recognize_swap64)
 
     def atomic_effect(self, address, recognize):
         if self.bindings is None:

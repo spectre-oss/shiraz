@@ -171,7 +171,8 @@ class NamespaceDecoder:
         if located is None:
             return None
         index, local, decoder = located
-        summary = getattr(decoder, method)(local)
+        lookup = getattr(decoder, method, None)
+        summary = lookup(local) if lookup else None
         if summary is None:
             return None
         bias = index * STRIDE
@@ -185,6 +186,9 @@ class NamespaceDecoder:
 
     def cas64(self, address):
         return self.atomic(address, "cas64")
+
+    def swap64(self, address):
+        return self.atomic(address, "swap64")
 
     def byte_jump_table(self, address):
         located = self.locate(address)

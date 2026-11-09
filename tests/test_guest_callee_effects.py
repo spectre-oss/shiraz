@@ -188,10 +188,11 @@ class CompareSwapEffectsTests(unittest.TestCase):
         self.assertFalse(retry.preserves_nzcv)
         self.assertTrue(retry.may_write_memory)
 
-    def test_three_exact_memory_order_triplets_and_no_mixed_order_inference(self):
+    def test_four_exact_memory_order_triplets_and_no_mixed_order_inference(self):
         forms = (
             ("relaxed", (0xC8A07C41, 0xC85F7C40, 0xC8117C41)),
             ("acquire", (0xC8E07C41, 0xC85FFC40, 0xC8117C41)),
+            ("release", (0xC8A0FC41, 0xC85F7C40, 0xC811FC41)),
             ("acquire-release", (0xC8E0FC41, 0xC85FFC40, 0xC811FC41)),
         )
         for order, values in forms:
@@ -201,7 +202,7 @@ class CompareSwapEffectsTests(unittest.TestCase):
                     words[index] = value
                 self.assertEqual(self.recognize(words).memory_order, order)
         mixed = list(CAS_WORDS)
-        mixed[10] = 0xC811FC41  # A release-only form is not among the exact bodies.
+        mixed[10] = 0xC811FC41  # Relaxed CAS cannot pair with a release-only store.
         self.assertIsNone(self.recognize(mixed))
         mixed = list(CAS_WORDS)
         mixed[4] = 0xC8E0FC41  # CASAL cannot pair with relaxed LDXR/STXR.
