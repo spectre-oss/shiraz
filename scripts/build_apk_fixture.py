@@ -3,20 +3,23 @@
 """Build an unsigned stock-SDK fixture APK. Downloads/tools stay local-only."""
 import hashlib
 import http.client
-from pathlib import Path
+import os
 import platform
 import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
-import zipfile
 import wave
+import zipfile
+from pathlib import Path
+
 from fixture_images import prepare
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from shiraz.host_layout import host_out_dir  # noqa: E402
+
 TOOLS = ROOT / '.deps/android-sdk'
 DOWNLOADS = {
     'platform-35_r02.zip': (
@@ -113,10 +116,57 @@ def aapt2_jar(system=None):
     return 'aapt2-osx.jar' if (system or platform.system()) == 'Darwin' else 'aapt2-linux.jar'
 
 
+def install_aapt2(cache):
+    """Install a host compiler; Linux ARM requires an explicit native tool.
+
+    Google's Linux Maven artifact is x86_64 only. CI uses Ubuntu's native aapt
+    package on ARM64 rather than executing it through an emulator.
+    """
+    override = os.environ.get('SHIRAZ_AAPT2')
+    system, machine = platform.system(), platform.machine().lower()
+    target = cache / 'aapt2'
+    if override:
+        source = Path(override)
+        if not source.is_absolute() or not source.is_file():
+            raise ValueError('SHIRAZ_AAPT2 must name an existing absolute executable path')
+        if source.stat().st_size > 32 * 1024 * 1024:
+            raise ValueError('compiler exceeds size limit')
+        if system != 'Linux':
+            raise ValueError('SHIRAZ_AAPT2 overrides are supported only on Linux')
+        with source.open('rb') as stream:
+            header = stream.read(20)
+        expected = {'aarch64': 183, 'arm64': 183, 'x86_64': 62, 'amd64': 62}.get(machine)
+        if (expected is None or len(header) != 20 or header[:6] != b'\x7fELF\x02\x01'
+                or int.from_bytes(header[18:20], 'little') != expected):
+            raise ValueError('SHIRAZ_AAPT2 must be a native little-endian 64-bit ELF executable')
+        version = subprocess.run([str(source), 'version'], check=True, capture_output=True,
+                                 text=True, timeout=10).stdout.strip()
+        if not version.startswith('Android Asset Packaging Tool (aapt)'):
+            raise ValueError('SHIRAZ_AAPT2 did not identify itself as aapt2')
+        if source.resolve() != target.resolve():
+            shutil.copyfile(source, target)
+        target.chmod(0o755)
+        return target, {'source': str(source), 'version': version,
+                        'binary_sha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+    if system == 'Linux' and machine not in ('x86_64', 'amd64'):
+        raise ValueError('Google aapt2 is x86_64-only on Linux; set SHIRAZ_AAPT2 to a native compiler')
+    name = aapt2_jar()
+    url, checksum = DOWNLOADS[name]
+    archive_path = cache / name
+    fetch(archive_path, url, checksum, DEFAULT_DOWNLOAD_LIMIT)
+    with zipfile.ZipFile(archive_path) as archive:
+        if archive.getinfo('aapt2').file_size > 32 * 1024 * 1024:
+            raise ValueError('compiler exceeds size limit')
+        target.write_bytes(archive.read('aapt2'))
+    target.chmod(0o755)
+    return target, {'source': url, 'archive_sha256': checksum,
+                    'binary_sha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+
+
 def tools():
     TOOLS.mkdir(parents=True, exist_ok=True)
     for name, (url, checksum) in DOWNLOADS.items():
-        if name.startswith('aapt2-') and name != aapt2_jar():
+        if name.startswith('aapt2-'):
             continue
         fetch(TOOLS / name, url, checksum, DOWNLOAD_LIMITS.get(name, DEFAULT_DOWNLOAD_LIMIT))
     with zipfile.ZipFile(TOOLS / 'platform-35_r02.zip') as archive:
@@ -124,9 +174,7 @@ def tools():
         if len(entries) != 1:
             raise SystemExit('Unexpected SDK archive layout')
         (TOOLS / 'android.jar').write_bytes(archive.read(entries[0]))
-    with zipfile.ZipFile(TOOLS / aapt2_jar()) as archive:
-        (TOOLS / 'aapt2').write_bytes(archive.read('aapt2'))
-    (TOOLS / 'aapt2').chmod(0o755)
+    install_aapt2(TOOLS)
 
 
 def main():
