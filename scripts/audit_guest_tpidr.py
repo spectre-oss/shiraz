@@ -475,6 +475,36 @@ def scalar_logical_result(operation, operands, state):
             "eor": a ^ b, "eon": a ^ b}[operation]
 
 
+def clean_vector_and(instruction, raw, state):
+    """Exact 128-bit AND with provenance-free sources; no numeric SIMD facts."""
+    if type(raw) is not bytes or len(raw) != 4:
+        return None
+    word = int.from_bytes(raw, "little")
+    if word & 0xFFE0FC00 != 0x4E201C00:
+        return None
+    names = tuple(f"v{index}" for index in (word & 31, (word >> 5) & 31, (word >> 16) & 31))
+    if (instruction.mnemonic != "and" or instruction.width != 8
+            or instruction.operands != tuple(Operand("reg", name) for name in names)
+            or instruction.writeback or instruction.post_index or instruction.control_transfer
+            or set(instruction.reads) != set(names[1:]) or set(instruction.writes) != {names[0]}):
+        return None
+    mappings = (state.registers, state.aliases, state.return_values)
+    for name in names[1:]:
+        for prefix in ("b", "h", "s", "d", "q", "v"):
+            view = prefix + name[1:]
+            if (any(tainted(mapping.get(view, CLEAN)) for mapping in mappings)
+                    or view in state.image_addresses or view in state.return_signatures):
+                return None
+    post = state.copy()
+    for prefix in ("b", "h", "s", "d", "q", "v"):
+        view = prefix + names[0][1:]
+        for mapping_name in ("registers", "aliases", "return_values", "image_addresses",
+                             "return_signatures", "constants"):
+            getattr(post, mapping_name).pop(view, None)
+        post.zero_upper.discard(view)
+    return post
+
+
 def stack_fact_slots(state):
     traced = {slot for slot, value in state.stack.items() if tainted(value)}
     protected = traced | {
@@ -1484,6 +1514,15 @@ class Audit:
                 state.set("nzcv", CLEAN)
                 state.set_alias("nzcv", CLEAN)
                 enqueue(pc + 4, returns, state)
+                continue
+            if (op == "and" and operands and operands[0].kind == "reg"
+                    and operands[0].value.startswith("v")):
+                raw = self.decode.word(pc) if hasattr(self.decode, "word") else None
+                post = clean_vector_and(instruction, raw, state)
+                if post is None:
+                    problem(pc, "vector-and-bytes-effects-or-provenance-unproved")
+                    continue
+                enqueue(pc + 4, returns, post)
                 continue
             if (op in SCALAR_LOGICAL_OPS and len(operands) == 3
                     and all(item.kind == "reg" for item in operands)):
