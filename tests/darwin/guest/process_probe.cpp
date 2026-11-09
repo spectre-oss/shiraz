@@ -8,7 +8,10 @@
 #include <cstdio>
 #include <csignal>
 #include <cstring>
+#include <cstdlib>
+#include <climits>
 #include <iostream>
+#include <poll.h>
 #include <pthread.h>
 #include <sys/wait.h>
 #include <thread>
@@ -31,9 +34,92 @@ static std::string read_pipe(int fd) {
     result.append(bytes, size_t(size));
   }
 }
+class WaitableProcessChild {
+  struct sigaction previous{};
+public:
+  WaitableProcessChild() {
+    require(!sigaction(SIGCHLD, nullptr, &previous), "snapshot process child disposition");
+    struct sigaction action{};
+    sigemptyset(&action.sa_mask);
+    action.sa_handler = SIG_DFL;
+    require(!sigaction(SIGCHLD, &action, nullptr), "keep process evidence child waitable");
+  }
+  ~WaitableProcessChild() { if (sigaction(SIGCHLD, &previous, nullptr)) _exit(95); }
+};
+struct ChildEvidence {
+  std::string output;
+  int status = -1, wait_error = 0;
+  bool complete = false;
+};
+static ChildEvidence process_child(const char *executable, const char *directory,
+                                   const char *mode, bool notification = false) {
+  WaitableProcessChild disposition;
+  int descriptors[2];
+  require(!pipe(descriptors), "process child evidence pipe");
+  // Allocate/format everything before fork. The native child only sets up its
+  // descriptors and execs; guest and C++ work happens in the fresh process.
+  auto descriptor = std::to_string(descriptors[1]);
+  std::array<char *, 5> arguments{const_cast<char *>(executable), const_cast<char *>(directory),
+      const_cast<char *>(mode), notification ? descriptor.data() : nullptr, nullptr};
+  const auto child = fork();
+  require(child >= 0, "process evidence child fork");
+  if (!child) {
+    close(descriptors[0]);
+    if (!notification && descriptors[1] != STDERR_FILENO) {
+      if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
+      close(descriptors[1]);
+    }
+    execv(executable, arguments.data());
+    _exit(96);
+  }
+  close(descriptors[1]);
+  ChildEvidence evidence;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  bool failed = false, eof = false;
+  char bytes[1024];
+  while (std::chrono::steady_clock::now() < deadline) {
+    pollfd input{descriptors[0], POLLIN | POLLHUP, 0};
+    const auto ready = poll(&input, 1, 100);
+    if (ready < 0 && errno == EINTR) continue;
+    if (ready < 0) { failed = true; break; }
+    if (!ready) continue;
+    const auto size = read(descriptors[0], bytes, sizeof(bytes));
+    if (size < 0 && errno == EINTR) continue;
+    if (size < 0) { failed = true; break; }
+    if (!size) { eof = true; break; }
+    if (evidence.output.size() + size_t(size) > 16384) { failed = true; break; }
+    evidence.output.append(bytes, size_t(size));
+  }
+  close(descriptors[0]);
+  pid_t waited = 0;
+  while (std::chrono::steady_clock::now() < deadline) {
+    waited = waitpid(child, &evidence.status, WNOHANG);
+    evidence.wait_error = waited < 0 ? errno : 0;
+    if (waited == child || (waited < 0 && evidence.wait_error != EINTR)) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (waited != child) {
+    failed = true;
+    // Never signal a PID after ECHILD: it may no longer name our child.
+    if (waited == 0 || (waited < 0 && evidence.wait_error == EINTR)) {
+      kill(child, SIGKILL);
+      do { waited = waitpid(child, &evidence.status, 0); } while (waited < 0 && errno == EINTR);
+    }
+  }
+  evidence.complete = !failed && eof && waited == child;
+  return evidence;
+}
+static void require_child(const ChildEvidence &evidence, const char *mode, bool accepted,
+                          const char *description) {
+  if (!accepted) std::cerr << "M5_PROCESS_CHILD_OBSERVED mode=" << mode
+      << " complete=" << evidence.complete << " status=" << evidence.status
+      << " wait_errno=" << evidence.wait_error << " diagnostic_bytes=" << evidence.output.size()
+      << " diagnostic=" << evidence.output << std::endl;
+  require(accepted, description);
+}
 int main(int argc, char **argv) {
   try {
-    require(argc == 2, "usage: process-probe fixture-directory");
+    require(argc >= 2 && argc <= 4, "usage: process-probe fixture-directory [child-mode [fd]]");
     Loader *current = nullptr;
     auto lifecycle = std::make_shared<Lifecycle>([&](const void *p) { return current && current->contains_code(p); });
     auto base = native_personality();
@@ -66,6 +152,31 @@ int main(int argc, char **argv) {
     auto call = [&](const char *name, const std::vector<Argument> &arguments) {
       return invoke(reinterpret_cast<void *>(loader.symbol(module, name).address), arguments).result_integers[0];
     };
+    if (argc > 2) {
+      const std::string mode = argv[2];
+      if (mode == "--child-svc" || mode == "--child-abort") {
+        require(argc == 3 && std::signal(SIGABRT, [](int) { _exit(97); }) != SIG_ERR,
+                "fresh process child abort observer");
+        if (mode == "--child-abort") call("process_abort", {});
+        else {
+          std::vector<Argument> values(6, Argument::integer(0, ArgumentType::Int64));
+          values.push_back(Argument::integer(172, ArgumentType::Int64));
+          const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+          values.push_back(Argument::integer(high + 16, ArgumentType::Int64));
+          (void)call("__shiraz_linux_syscall", values);
+        }
+      } else {
+        require(argc == 4 && (mode == "--child-exit" || mode == "--child-fast-exit"),
+                "known process evidence mode");
+        char *end = nullptr;
+        const long descriptor = std::strtol(argv[3], &end, 10);
+        require(end != argv[3] && !*end && descriptor >= 0 && descriptor <= INT_MAX,
+                "valid process notification descriptor");
+        if (call("process_prepare_exit", {Argument::integer(descriptor)})) _exit(99);
+        call("process_exit", {Argument::integer(7), Argument::integer(mode == "--child-fast-exit")});
+      }
+      return 98;
+    }
     auto syscall = [&](long number, int &error) {
       errno = 61;
       auto value = call("process_call", {Argument::integer(number, ArgumentType::Int64), pointer(&error)});
@@ -88,26 +199,10 @@ int main(int argc, char **argv) {
     };
     auto raw_syscall = [&](long number) { return raw_with(number,{}); };
     require(raw_syscall(172) == ::getpid(), "raw syscall returns actual pid");
-    int raw_rejected[2]; require(!pipe(raw_rejected), "raw SVC stack refusal pipe");
-    pid_t raw_child = fork(); require(raw_child >= 0, "raw SVC stack refusal child");
-    if (!raw_child) {
-      close(raw_rejected[0]);
-      if (dup2(raw_rejected[1], STDERR_FILENO) < 0) _exit(96);
-      close(raw_rejected[1]);
-      std::signal(SIGABRT, [](int) { _exit(97); });
-      std::vector<Argument> values(6, Argument::integer(0, ArgumentType::Int64));
-      values.push_back(Argument::integer(172, ArgumentType::Int64));
-      const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
-      values.push_back(Argument::integer(high + 16, ArgumentType::Int64));
-      (void)call("__shiraz_linux_syscall", values);
-      _exit(98);
-    }
-    close(raw_rejected[1]);
-    auto raw_message = read_pipe(raw_rejected[0]); close(raw_rejected[0]);
-    int raw_status;
-    require(waitpid(raw_child, &raw_status, 0) == raw_child && WIFEXITED(raw_status) &&
-                WEXITSTATUS(raw_status) == 97 &&
-                raw_message == "SHIRAZ_GUEST_FATAL SVC SP outside prepared native stack extent\n",
+    const auto raw = process_child(argv[0], argv[1], "--child-svc");
+    require_child(raw, "--child-svc", raw.complete && WIFEXITED(raw.status) &&
+                WEXITSTATUS(raw.status) == 97 && raw.output ==
+                "SHIRAZ_GUEST_FATAL SVC SP outside prepared native stack extent\n",
             "private SVC adapter refuses an aligned original SP beyond the native extent");
     require(raw_syscall(0x7fffffff) == -38, "raw syscall returns negative Linux ENOSYS");
     uint32_t futex_word = 7;
@@ -192,30 +287,20 @@ int main(int argc, char **argv) {
             "copied syslog ident, PID/PERROR and real AAPCS formatted delivery");
     require(call("process_log_bad",{}) == 22, "unknown log option is explicit EINVAL");
     for (int fast = 0; fast < 2; ++fast) {
-      int notification[2]; require(!pipe(notification), "exit callback evidence pipe");
-      pid_t child = fork(); require(child >= 0, "exit child");
-      if (!child) {
-        close(notification[0]);
-        if (call("process_prepare_exit",{Argument::integer(notification[1])})) ::_exit(99);
-        call("process_exit",{Argument::integer(7),Argument::integer(fast)});
-        ::_exit(98);
-      }
-      close(notification[1]);
-      auto finalizers = read_pipe(notification[0]); close(notification[0]);
-      int status; require(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==7 &&
-          finalizers == (fast ? "" : "F"), "exit runs guest finalizers and _exit skips them");
+      const char *mode = fast ? "--child-fast-exit" : "--child-exit";
+      const auto evidence = process_child(argv[0], argv[1], mode, true);
+      require_child(evidence, mode, evidence.complete && WIFEXITED(evidence.status) &&
+          WEXITSTATUS(evidence.status) == 7 && evidence.output == (fast ? "" : "F"),
+          "exit runs guest finalizers and _exit skips them");
     }
-    int aborted[2]; require(!pipe(aborted), "abort evidence pipe");
-    pid_t child = fork(); require(child >= 0, "abort child");
-    if (!child) {
-      close(aborted[0]); dup2(aborted[1],STDERR_FILENO); close(aborted[1]);
-      std::signal(SIGABRT,[](int){::_exit(97);}); call("process_abort",{}); ::_exit(98);
-    }
-    close(aborted[1]); auto message = read_pipe(aborted[0]); close(aborted[0]);
-    int status; require(waitpid(child,&status,0)==child && WIFEXITED(status) && WEXITSTATUS(status)==97 &&
-        message.find("owned guest abort")!=std::string::npos && message.find("later message")==std::string::npos,
+    const auto aborted = process_child(argv[0], argv[1], "--child-abort");
+    require_child(aborted, "--child-abort", aborted.complete && WIFEXITED(aborted.status) &&
+        WEXITSTATUS(aborted.status) == 97 && aborted.output.find("owned guest abort") != std::string::npos &&
+        aborted.output.find("later message") == std::string::npos,
         "abort emits an owned copy of the first guest message then really aborts");
     std::cout << "M5_PROCESS_PASS syscall_ids=7 raw_svc=negative_errno raw_io=real getrandom=real futex=wait_wake_timeout_bitset_validation syslog=native_asl perror=1 abort=owned_first nonreturning_contract=1 exit_finalizers=1 fast_exit_finalizers=0 threads=4\n";
-    std::cout << "M5_SVC_STACK_PASS original_sp_rejected=1\n";
+    std::cout << "M5_SVC_STACK_PASS original_sp_rejected=1 fresh_exec=1 exact_diagnostic=1\n";
+    std::cout << "M5_PROCESS_CHILDREN_PASS fresh_exec=4 bounded_collection=1 waitable_parent=1 "
+                 "postfork_guest_execution=0 inherited_cpp_tls=0\n";
   } catch (const std::exception &failure) { std::cerr << "FAIL " << failure.what() << '\n'; return 1; }
 }
