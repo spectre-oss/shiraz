@@ -57,6 +57,22 @@ void *guest_tls_base();
 // calls or TLV access. Unsupported/unprepared stacks trap. This is not a fork
 // validity or arbitrary asynchronous-lifetime guarantee.
 extern "C" uintptr_t shiraz_guest_cached_pthread_self() noexcept;
+struct CachedSelfTable {
+  const char *role;
+  uintptr_t address;
+  uint64_t bytes;
+};
+struct CachedSelfTables {
+  CachedSelfTable tables[4];
+  uint64_t rows;
+};
+inline constexpr uint32_t kCachedSelfStackExclusionProfile = 1;
+// Addresses/extents only, never live row contents. This snapshot is not an
+// asynchronous lifetime lease or a compiled-body effects certificate.
+CachedSelfTables cached_pthread_self_tables() noexcept;
+// Pure extent predicate over the four real cache tables. It neither registers
+// a stack nor proves that caller-supplied addresses are mapped stack memory.
+bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
 // Async-signal-safe readiness query only; never initializes native TLS.
 bool guest_tls_prepared() noexcept;
 // Cached pthread-reported extent, published with TLS readiness. This query

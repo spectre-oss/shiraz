@@ -164,6 +164,8 @@ struct ThreadState {
     }
     auto &domains = memory_domains();
     std::lock_guard<std::mutex> lock(domains.mutex);
+    if (!cached_self_tables_disjoint_stack(high - size, high))
+      throw ElfError("native stack overlaps cached pthread identity table");
     for (size_t i = 0; i < prepared_threads.size(); ++i)
       if (reinterpret_cast<uintptr_t>(prepared_threads[i].load(std::memory_order_acquire)) > 1 &&
           prepared_native_tls_keys[i].load(std::memory_order_relaxed) == native_key)
@@ -303,6 +305,26 @@ template <size_t N> [[noreturn]] void mrs_failure(const char (&message)[N]) noex
   std::abort();
 }
 } // namespace
+CachedSelfTables cached_pthread_self_tables() noexcept {
+  static_assert(sizeof(prepared_threads) == 32768 &&
+                sizeof(prepared_native_tls_keys) == 32768 &&
+                sizeof(prepared_stack_low) == 32768 && sizeof(prepared_stack_high) == 32768);
+  return {{{"owners", reinterpret_cast<uintptr_t>(prepared_threads.data()), sizeof(prepared_threads)},
+           {"keys", reinterpret_cast<uintptr_t>(prepared_native_tls_keys.data()), sizeof(prepared_native_tls_keys)},
+           {"low", reinterpret_cast<uintptr_t>(prepared_stack_low.data()), sizeof(prepared_stack_low)},
+           {"high", reinterpret_cast<uintptr_t>(prepared_stack_high.data()), sizeof(prepared_stack_high)}},
+          prepared_threads.size()};
+}
+bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  if (!low || high <= low) return false;
+  const auto cache = cached_pthread_self_tables();
+  if (cache.rows != 4096) return false;
+  for (const auto &table : cache.tables) {
+    if (!table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
+    if (low < table.address + table.bytes && table.address < high) return false;
+  }
+  return true;
+}
 GuestImageReservation::GuestImageReservation(uintptr_t base, uint64_t bytes) : base_(base) {
   if (!base || !bytes || bytes > UINTPTR_MAX - base)
     throw ElfError("invalid guest image reservation extent");

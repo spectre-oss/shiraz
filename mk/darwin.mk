@@ -2310,3 +2310,17 @@ macos-guest-thread-retention-check: $(MACOS_GUEST_DEP_DIR)/libthread-retention.s
 	codesign --verify --strict $(MACOS_OUT)/m5/thread-retention-hardened
 	@for mode in joined active validation; do $(MACOS_OUT)/m5/thread-retention-hardened $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
 macos-guest-check: macos-guest-thread-retention-check
+.PHONY: macos-guest-native-mapping-check
+$(MACOS_OUT)/m5/native-mapping-probe: tests/darwin/guest/native_mapping_probe.cpp native/darwin/guest/native_mapping.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -iquote . -std=c++17 -O2 -g -Wall -Wextra -Werror $< -o $@
+macos-guest-native-mapping-check: $(MACOS_OUT)/m5/native-mapping-probe
+	$(MACOS_OUT)/m5/native-mapping-probe
+	cp $(MACOS_OUT)/m5/native-mapping-probe $(MACOS_OUT)/m5/native-mapping-hardened.pending
+	mv $(MACOS_OUT)/m5/native-mapping-hardened.pending $(MACOS_OUT)/m5/native-mapping-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/native-mapping-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/native-mapping-hardened
+	$(MACOS_OUT)/m5/native-mapping-hardened
+macos-guest-check: macos-guest-native-mapping-check
+
+$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/native_mapping.hpp

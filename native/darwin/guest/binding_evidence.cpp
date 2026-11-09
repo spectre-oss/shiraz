@@ -2,6 +2,7 @@
 #include "shiraz/darwin/guest/binding_evidence.hpp"
 #include "shiraz/darwin/guest/instruction.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
+#include "native_mapping.hpp"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -68,28 +69,115 @@ bool native_code_segment(const std::vector<NativeCodeSegment> &segments,
         bytes <= segment.size - (address - segment.start)) return true;
   return false;
 }
+using detail::native_mapping;
 bool native_code_mapping(uintptr_t address, size_t bytes) {
-  if (!bytes || bytes > UINTPTR_MAX - address) return false;
-  natural_t depth = 0;
-  for (unsigned attempt = 0; attempt < 32; ++attempt) {
-    mach_vm_address_t region_start = address;
-    mach_vm_size_t region_size = 0;
-    vm_region_submap_info_data_64_t region{};
-    mach_msg_type_number_t region_count = VM_REGION_SUBMAP_INFO_V0_COUNT_64;
-    const auto status = mach_vm_region_recurse(mach_task_self(), &region_start, &region_size,
-                                               &depth,
-                                               reinterpret_cast<vm_region_recurse_info_t>(&region),
-                                               &region_count);
-    if (status != KERN_SUCCESS || region_count != VM_REGION_SUBMAP_INFO_V0_COUNT_64 ||
-        depth > 32 || address < region_start || address - region_start > region_size ||
-        bytes > region_size - (address - region_start)) return false;
-    // Shared-cache enclosing submaps may report READ alone. Inspect only the
-    // leaf covering the entire requested span; never advance to another map.
-    if (region.is_submap) { ++depth; continue; }
-    return (region.protection & (VM_PROT_READ | VM_PROT_EXECUTE)) ==
-               (VM_PROT_READ | VM_PROT_EXECUTE) && !(region.protection & VM_PROT_WRITE);
+  return native_mapping(address, bytes, VM_PROT_READ | VM_PROT_EXECUTE, VM_PROT_WRITE);
+}
+void cached_self_snapshot(Json &json, const Binding &binding, uintptr_t slot) {
+  const uintptr_t entry = reinterpret_cast<uintptr_t>(&shiraz_guest_cached_pthread_self);
+  Dl_info info{}, producer{};
+  if (!binding.found || binding.address != entry || slot != entry ||
+      binding.kind != SymbolKind::Function || binding.nonreturning || binding.provider != "libc.so" ||
+      !dladdr(reinterpret_cast<const void *>(entry), &info) || !info.dli_fbase || !info.dli_fname ||
+      !dladdr(reinterpret_cast<const void *>(&write_binding_evidence), &producer) ||
+      producer.dli_fbase != info.dli_fbase)
+    throw ElfError("cached pthread identity requires exact first-party entry");
+  const mach_header_64 *header = nullptr;
+  intptr_t slide = 0;
+  const auto count = _dyld_image_count();
+  if (count > 8192) throw ElfError("cached identity image count bound");
+  for (uint32_t index = 0; index < count; ++index) {
+    auto candidate = _dyld_get_image_header(index);
+    if (candidate == info.dli_fbase) {
+      if (header) throw ElfError("ambiguous cached identity image");
+      header = reinterpret_cast<const mach_header_64 *>(candidate);
+      slide = _dyld_get_image_vmaddr_slide(index);
+    }
   }
-  return false;
+  if (!header || header->magic != MH_MAGIC_64 || header->cputype != CPU_TYPE_ARM64 ||
+      header->filetype != MH_DYLIB || !header->ncmds || header->ncmds > 4096 ||
+      header->sizeofcmds > (1u << 20))
+    throw ElfError("cached identity Mach-O header bound");
+  const auto *commands = reinterpret_cast<const uint8_t *>(header + 1);
+  std::vector<NativeCodeSegment> code_segments, data_segments;
+  size_t offset = 0;
+  for (uint32_t index = 0; index < header->ncmds; ++index) {
+    if (offset > header->sizeofcmds || sizeof(load_command) > header->sizeofcmds - offset)
+      throw ElfError("cached identity truncated load command");
+    load_command command;
+    std::memcpy(&command, commands + offset, sizeof(command));
+    if (command.cmdsize < sizeof(command) || command.cmdsize > header->sizeofcmds - offset)
+      throw ElfError("cached identity load command bound");
+    if (command.cmd == LC_SEGMENT_64) {
+      if (command.cmdsize < sizeof(segment_command_64))
+        throw ElfError("cached identity segment command");
+      segment_command_64 segment;
+      std::memcpy(&segment, commands + offset, sizeof(segment));
+      uint64_t start;
+      if (slide >= 0) {
+        if (segment.vmaddr > UINT64_MAX - uint64_t(slide))
+          throw ElfError("cached identity segment slide overflow");
+        start = segment.vmaddr + uint64_t(slide);
+      } else {
+        const uint64_t magnitude = uint64_t(-(slide + 1)) + 1;
+        if (segment.vmaddr < magnitude) throw ElfError("cached identity segment slide underflow");
+        start = segment.vmaddr - magnitude;
+      }
+      if (segment.filesize > segment.vmsize || segment.vmsize > UINT64_MAX - start)
+        throw ElfError("cached identity segment size bound");
+      if ((segment.initprot & (VM_PROT_READ | VM_PROT_EXECUTE)) ==
+              (VM_PROT_READ | VM_PROT_EXECUTE) && !(segment.initprot & VM_PROT_WRITE))
+        code_segments.push_back({start, segment.filesize});
+      if ((segment.initprot & VM_PROT_READ) && !(segment.initprot & VM_PROT_EXECUTE))
+        data_segments.push_back({start, segment.vmsize});
+    }
+    offset += command.cmdsize;
+  }
+  if (offset != header->sizeofcmds) throw ElfError("cached identity load commands size mismatch");
+  const uintptr_t base = reinterpret_cast<uintptr_t>(header);
+  constexpr size_t body_size = 152;
+  // This is one bounded compiler profile, not a claim about arbitrary bodies.
+  // Leave the ABI unresolved if its full window/tail is unavailable; the
+  // independent reader still has to validate every instruction and range.
+  if (entry < base || (entry & 3) || !native_code_segment(code_segments, entry, body_size) ||
+      !native_code_mapping(entry, body_size)) return;
+  uint8_t body[body_size];
+  std::memcpy(body, reinterpret_cast<const void *>(entry), sizeof(body));
+  uint32_t ret, trap;
+  std::memcpy(&ret, body + 144, sizeof(ret));
+  std::memcpy(&trap, body + 148, sizeof(trap));
+  if (ret != 0xd65f03c0u || trap != 0xd4200020u) return;
+  const auto cache = cached_pthread_self_tables();
+  if (cache.rows != 4096) throw ElfError("cached identity row count mismatch");
+  for (size_t index = 0; index < 4; ++index) {
+    const auto &table = cache.tables[index];
+    if (table.address < base || table.bytes != 32768 || table.bytes > UINTPTR_MAX - table.address ||
+        !native_code_segment(data_segments, table.address, size_t(table.bytes)))
+      throw ElfError(std::string("cached identity table declared extent: ") + table.role);
+    if (!native_mapping(table.address, size_t(table.bytes), VM_PROT_READ, VM_PROT_EXECUTE))
+      throw ElfError(std::string("cached identity table current mapping: ") + table.role);
+    if (table.address < entry + body_size && entry < table.address + table.bytes)
+      throw ElfError("cached identity code/table overlap");
+    for (size_t previous = 0; previous < index; ++previous) {
+      const auto &other = cache.tables[previous];
+      if (table.address < other.address + other.bytes && other.address < table.address + table.bytes)
+        throw ElfError("cached identity table overlap");
+    }
+  }
+  json.add(",\"cached_self\":{\"profile\":1,\"verification\":\"mapped-first-party-code-and-cache-ranges\",\"execution_claim\":false,\"entry_offset\":" +
+           std::to_string(entry - base) + ",\"body_hex\":\"");
+  for (uint8_t value : body) {
+    char byte[3]; std::snprintf(byte, sizeof(byte), "%02x", unsigned(value)); json.add(byte);
+  }
+  json.add("\",\"tables\":[");
+  for (size_t index = 0; index < 4; ++index) {
+    if (index) json.add(",");
+    const auto &table = cache.tables[index];
+    json.add("{\"role\":"); json.string(table.role);
+    json.add(",\"offset\":" + std::to_string(table.address - base) + ",\"bytes\":" +
+             std::to_string(table.bytes) + "}");
+  }
+  json.add("],\"stack_exclusion_profile\":" + std::to_string(kCachedSelfStackExclusionProfile) + "}");
 }
 void native_self_identity(Json &json, const Binding &binding, uintptr_t slot) {
   // This identifies a mapped prefix, not the function's complete control flow
@@ -391,6 +479,12 @@ size_t write_binding_evidence(const Loader &loader, const std::filesystem::path 
               (!symbol.version.name.empty() && symbol.version.name != "LIBC") || relocation.addend)
             throw ElfError("native identity binding symbol/version/addend mismatch");
           native_self_identity(json, *binding, slot);
+        }
+        if (!absolute && binding && binding->abi == "prepared/pthread-self-noargs") {
+          if (symbol.name != "pthread_self" ||
+              (!symbol.version.name.empty() && symbol.version.name != "LIBC") || relocation.addend)
+            throw ElfError("cached identity binding symbol/version/addend mismatch");
+          cached_self_snapshot(json, *binding, slot);
         }
         json.add("}");
       }

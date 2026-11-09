@@ -7,6 +7,7 @@ import struct
 from pathlib import Path
 
 from guest_allocator_contract import managed_malloc_binding
+from guest_cached_self_record import validate_cached_self_binding
 from guest_memory_contract import byte_memory_binding
 from guest_native_target import validate_native_target
 
@@ -127,12 +128,15 @@ def _validate_binding_rows(bindings, hashes, names, bridge_identity, *, absolute
                     type(binding.get("symbol_index")) is not int or
                     not 0 <= binding["symbol_index"] < 1 << 32 or
                     type(binding.get("current_slot_matches_link")) is not bool or
-                    "native_target" in binding):
+                    "native_target" in binding or "cached_self" in binding):
                 raise ValueError("absolute binding address snapshot required")
         else:
             if byte_memory_binding(binding) and bridge_identity is None:
                 raise ValueError("byte memory contract requires bridge identity")
             native_target = validate_native_target(binding)
+            validate_cached_self_binding(binding)
+            if "cached_self" in binding and bridge_identity is None:
+                raise ValueError("cached pthread self record requires bridge identity")
             if managed_malloc_binding(binding) and bridge_identity is None:
                 raise ValueError("managed malloc contract requires bridge identity")
             if native_target is not None:

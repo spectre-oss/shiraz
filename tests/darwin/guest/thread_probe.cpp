@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
+#include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <filesystem>
@@ -27,6 +28,28 @@ static Argument pointer(const void *value) {
 int main(int argc, char **argv) {
   try {
     require(argc == 2, "usage: thread-probe fixture-directory");
+    const auto tables = cached_pthread_self_tables();
+    require(tables.rows == 4096, "cached self table row bound");
+    uintptr_t first = UINTPTR_MAX, last = 0;
+    for (const auto &table : tables.tables) {
+      require(table.address && table.bytes == 32768 && table.bytes <= UINTPTR_MAX - table.address,
+              "cached self complete table extent");
+      const uintptr_t end = table.address + uintptr_t(table.bytes);
+      require(!cached_self_tables_disjoint_stack(table.address, end) &&
+                  !cached_self_tables_disjoint_stack(table.address - 1, table.address + 1) &&
+                  !cached_self_tables_disjoint_stack(end - 1, end + 1),
+              "cache overlap refused without using cache memory as an actual stack");
+      first = std::min(first, table.address);last = std::max(last, end);
+    }
+    require(!cached_self_tables_disjoint_stack(0, 1) &&
+                !cached_self_tables_disjoint_stack(2, 2) &&
+                !cached_self_tables_disjoint_stack(3, 2) &&
+                cached_self_tables_disjoint_stack(first - 1, first) &&
+                cached_self_tables_disjoint_stack(last, last + 1),
+            "cached table exclusion checks empty ranges and exact boundaries");
+    const auto native_high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+    require(cached_self_tables_disjoint_stack(native_high - pthread_get_stacksize_np(pthread_self()), native_high),
+            "actual prepared stack is disjoint from all complete cache tables");
     const pid_t child = fork();
     require(child >= 0, "fork unprepared identity check");
     if (!child) {

@@ -25,6 +25,7 @@ from enum import Enum
 from pathlib import Path
 
 import guest_allocator_contract
+import guest_cached_self_record
 import guest_callee_effects
 import guest_frame_effects
 import guest_jump_table
@@ -1099,6 +1100,54 @@ class Audit:
                             "binding": dict(binding),
                         }
                         continue
+                    if binding.get("effect") == "cached-self":
+                        if (not returns or state.signature("x30") is not None or
+                                state.control("x30") != frozenset({returns[-1][0]}) or
+                                state.sp != returns[-1][1]):
+                            problem(pc, "cached-self-return-continuation-unproved")
+                            continue
+                        continuation = returns[-1][0]
+                        call = self.decode(continuation - 4)
+                        # An outlined guest helper may tail-B into this PLT.
+                        # Its intervening instructions were already traversed;
+                        # the readonly no-argument leaf needs the originating
+                        # BL's unchanged SP/LR, not an invented direct call.
+                        if (call is None or call.mnemonic != "bl" or len(call.operands) != 1 or
+                                call.operands[0].kind != "imm" or self.decode(call.operands[0].value) is None):
+                            problem(pc, "cached-self-originating-bl-unproved")
+                            continue
+                        read_slot = binding.get("read_slot")
+                        _, protected = stack_fact_slots(state)
+                        low = min(protected) - anchor_sp if protected else 0
+                        high = max(protected) + 8 - anchor_sp if protected else 0
+                        if state.native_memory_may_contain_tp:
+                            problem(pc, "cached-self-latent-native-copies-unproved")
+                            continue
+                        if (mrs_window is None or binding.get("stack_exclusion_profile") != 1 or
+                                type(read_slot) is not int or not 0 <= read_slot <= (1 << 64) - 8 or
+                                not hasattr(self.decode, "owned_image_data") or
+                                self.decode.owned_image_data(read_slot, 8) is not True or
+                                low < -mrs_window["before"] or high > mrs_window["after"]):
+                            problem(pc, "cached-self-table-stack-separation-unproved")
+                            continue
+                        image_stack_separation.add((pc, read_slot, 8, low, high))
+                        observe_owned_image_access(pc, read_slot, 8, True, False)
+                        post = state.copy()
+                        # The exact leaf writes x0/x8..x16; PLT also writes x17.
+                        # Its x9 is the incoming SP, not an opaque clean value.
+                        for name in (*binding["clobbers"], "x17", "nzcv"):
+                            post.set(name, CLEAN)
+                            post.set_alias(name, CLEAN)
+                        post.set_alias(binding["sp_copy_register"], frozenset({state.sp}))
+                        callee_effects[pc] = {
+                            "entry": hex(pc), "kind": "conditional-cached-pthread-self",
+                            "binding": dict(binding),
+                            "call_origin": hex(continuation - 4),
+                            "decoded_tail_forwarding": call.operands[0].value != pc,
+                            "scope": "exact readonly leaf and private table/stack exclusion; prepared normal/owned synchronous entries only",
+                        }
+                        enqueue(continuation, returns[:-1], post)
+                        continue
                     if binding.get("effect") == "byte-memory":
                         if (not returns or state.signature("x30") is not None or
                                 tainted(state.value("x30")) or tainted(state.alias("x30")) or
@@ -2159,6 +2208,7 @@ class ElfBindingMetadata:
         self.relocation_writes = set()
         self.static_rodata_safe = True
         self.proof = {}
+        self.cached_self_proofs = {}
         self.proof_hash = None
         self.provider_bridge = None
         self.trusted_provider_contracts = False
@@ -2761,6 +2811,16 @@ class ElfBindingMetadata:
         bindings = own.get("bindings")
         if not isinstance(bindings, list) or len(bindings) > 200000:
             raise ValueError("binding evidence relocation bound")
+        bridge_bytes = None
+        cached_records = {}
+        if self.trusted_provider_contracts and any(
+            isinstance(binding, dict) and "cached_self" in binding for binding in bindings
+        ):
+            with Path(self.provider_bridge["path"]).open("rb") as stream:
+                bridge_bytes = stream.read((256 << 20) + 1)
+            if (not 0 < len(bridge_bytes) <= 256 << 20 or
+                    hashlib.sha256(bridge_bytes).hexdigest() != self.provider_bridge["sha256"]):
+                raise ValueError("cached self bridge changed during proof validation")
         for binding in bindings:
             if not isinstance(binding, dict):
                 raise TypeError("invalid binding evidence record")
@@ -2786,6 +2846,14 @@ class ElfBindingMetadata:
             # Identity is a diagnostic snapshot, not a native effect grant.
             # Keep legacy adapters unknown; reject malformed claimed identity.
             guest_native_target.validate_native_target(binding)
+            guest_cached_self_record.validate_cached_self_binding(binding)
+            if bridge_bytes is not None and "cached_self" in binding:
+                key = json.dumps(binding["cached_self"], sort_keys=True, separators=(",", ":"))
+                if key not in cached_records:
+                    cached_records[key] = guest_cached_self_record.validate_cached_self_binding(binding, bridge_bytes)
+                validated = cached_records[key]
+                if validated is not None:
+                    self.cached_self_proofs[slot] = validated.effects
             guest_allocator_contract.managed_malloc_binding(binding)
             guest_memory_contract.byte_memory_binding(binding)
             self.proof[slot] = dict(binding)
@@ -2955,6 +3023,27 @@ class ElfBindingMetadata:
             return {**result, "reason": "namespace-binding-proof-missing"}
         if proof["symbol"] != symbol or proof["version"] != requested_version:
             raise ValueError("binding evidence symbol/version mismatch")
+        if proof["abi"] == "prepared/pthread-self-noargs":
+            if not self.trusted_provider_contracts:
+                return {**result, "reason": "cached-self-contract-untrusted"}
+            if (addend != 0 or proof.get("addend") != 0 or
+                    proof.get("relocation_type") != kind or info & 15 != 2 or
+                    (required_library is not None and proof["provider"] != required_library)):
+                return {**result, "reason": "cached-self-binding-mismatch"}
+            effect = self.cached_self_proofs.get(slot)
+            if effect is None:
+                return {**result, "reason": "cached-self-body-profile-unavailable"}
+            return {
+                **result, "effect": "cached-self", "provider": proof["provider"],
+                "bridge_sha256": self.provider_bridge["sha256"], "read_slot": slot,
+                "body_sha256": effect.body_sha256, "body_size": effect.body_size,
+                "rows": effect.rows, "clobbers": list(effect.clobbers),
+                "sp_copy_register": effect.sp_copy_register,
+                "stack_exclusion_profile": 1,
+                "tables": [{"role": table.role, "native_vmaddr": table.address,
+                            "bytes": table.byte_count} for table in effect.tables],
+                "reason": "verified-first-party-cached-self-body",
+            }
         if proof.get("nonreturning", False):
             if not self.trusted_provider_contracts:
                 return {**result, "reason": "native-provider-contract-untrusted"}
