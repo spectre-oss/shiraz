@@ -2293,3 +2293,20 @@ $(MACOS_OUT)/m5/namespace-lifetime-probe: tests/darwin/guest/namespace_lifetime_
 macos-guest-namespace-lifetime-check: $(MACOS_OUT)/m5/namespace-lifetime-probe $(MACOS_OUT)/libshiraz-guest.so $(MACOS_GUEST_DEP_DIR)/libkey-retention.so
 	$(MACOS_OUT)/m5/namespace-lifetime-probe $(abspath $(MACOS_OUT)/libshiraz-guest.so) $(abspath $(MACOS_GUEST_DEP_DIR)/libkey-retention.so)
 macos-guest-check: macos-guest-namespace-lifetime-check
+.PHONY: macos-guest-thread-retention-check
+$(MACOS_GUEST_DEP_DIR)/thread-retention.o: tests/darwin/guest/deps/thread_retention.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libthread-retention.so: $(MACOS_GUEST_DEP_DIR)/thread-retention.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libthread-retention.so $< -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $@
+$(MACOS_OUT)/m5/thread-retention-probe: tests/darwin/guest/thread_retention_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror $< $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-thread-retention-check: $(MACOS_GUEST_DEP_DIR)/libthread-retention.so $(MACOS_OUT)/m5/thread-retention-probe
+	@for mode in joined active validation; do $(MACOS_OUT)/m5/thread-retention-probe $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+	cp $(MACOS_OUT)/m5/thread-retention-probe $(MACOS_OUT)/m5/thread-retention-hardened.pending
+	mv $(MACOS_OUT)/m5/thread-retention-hardened.pending $(MACOS_OUT)/m5/thread-retention-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/thread-retention-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/thread-retention-hardened
+	@for mode in joined active validation; do $(MACOS_OUT)/m5/thread-retention-hardened $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+macos-guest-check: macos-guest-thread-retention-check

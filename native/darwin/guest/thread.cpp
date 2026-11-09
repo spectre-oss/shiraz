@@ -55,6 +55,7 @@ class Threads : public std::enable_shared_from_this<Threads> {
   struct Start {
     std::shared_ptr<Threads> state;
     std::shared_ptr<Record> record;
+    std::shared_ptr<void> retention;
     void *function, *argument;
   };
   std::mutex mutex_;
@@ -187,7 +188,13 @@ public:
     return 0;
   }
   int create(uint64_t *output, void *address, void *function, void *argument) {
-    if (!output || !function || !validate_(function)) return EINVAL;
+    if (!output || !function) return EINVAL;
+    // Admission precedes captured-code validation and child publication. The
+    // child owns this token through invoke, cleanup and its wrapper return.
+    // Native TSD callbacks have their own queued/selected retention tokens.
+    auto retention = lifecycle_ ? lifecycle_->retain_thread_callback() : nullptr;
+    if (lifecycle_ && !retention) return EINVAL;
+    if (!validate_(function)) return EINVAL;
     std::lock_guard<std::mutex> lock(mutex_);
     Attributes config;
     if (address) {
@@ -210,7 +217,7 @@ public:
       return error;
     auto record = std::make_shared<Record>();
     record->detached = config.detached;
-    auto start = std::make_unique<Start>(Start{shared_from_this(), record, function, argument});
+    auto start = std::make_unique<Start>(Start{shared_from_this(), record, std::move(retention), function, argument});
     // Reserve the registry node before creating a live thread.
     records_.emplace(0, record);
     error = ::pthread_create(&record->host, &host, entry, start.get());
