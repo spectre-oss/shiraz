@@ -364,6 +364,65 @@ def exact_register_delta(operands, state):
 SCALAR_LOGICAL_OPS = frozenset({"and", "bic", "orr", "orn", "eor", "eon"})
 
 
+def comparison_sources(operands, width, operation="cmp"):
+    """Validate scalar flag-only aliases and recover architectural inputs.
+
+    CMP/CMN/TST discard their result. Capstone 5.0.3 reports their
+    first source as a write instead of a read; that metadata must not erase
+    pointer provenance or an exact scalar used by a later instruction.
+    """
+    if operation not in {"cmp", "cmn", "tst"} or len(operands) != 2 or width not in {4, 8}:
+        raise ValueError("comparison form")
+    left, right = operands
+    prefix = "w" if width == 4 else "x"
+    registers = {f"{prefix}{i}" for i in range(31)} | {prefix + "zr"}
+    if (left.kind != "reg" or left.value not in registers
+            or left.shift or left.shift_amount or left.extend):
+        raise ValueError("comparison first source")
+    if right.kind == "imm":
+        if operation == "tst":
+            bits = width * 8
+            if (type(right.value) is not int or not -(1 << (bits - 1)) <= right.value < 1 << bits
+                    or right.shift or right.shift_amount or right.extend):
+                raise ValueError("comparison logical immediate")
+            value = right.value & ((1 << bits) - 1)
+            # A64 logical immediates are replicated rotations of a nonempty,
+            # nonfull run of ones in a power-of-two element.
+            valid = False
+            for size in (2, 4, 8, 16, 32, 64):
+                if size > bits:
+                    break
+                mask = (1 << size) - 1
+                pattern = value & mask
+                replicated = sum(pattern << offset for offset in range(0, bits, size))
+                transitions = pattern ^ (((pattern << 1) | (pattern >> (size - 1))) & mask)
+                valid |= replicated == value and transitions.bit_count() == 2
+            if not valid:
+                raise ValueError("comparison logical immediate")
+            return (left.value,)
+        if (type(right.value) is not int or not 0 <= right.value <= 4095
+                or right.extend or (right.shift, right.shift_amount) not in {("", 0), ("lsl", 12)}):
+            raise ValueError("comparison immediate")
+        return (left.value,)
+    if right.kind != "reg" or type(right.shift_amount) is not int:
+        raise ValueError("comparison second source")
+    if right.extend:
+        if (operation == "tst"
+                or right.extend not in {"uxtb", "uxth", "uxtw", "uxtx", "sxtb", "sxth", "sxtw", "sxtx"}
+                or right.shift not in {"", "lsl"} or not 0 <= right.shift_amount <= 4
+                or not right.shift and right.shift_amount):
+            raise ValueError("comparison extension")
+        source_prefix = "x" if width == 8 and right.extend in {"uxtx", "sxtx"} else "w"
+        if right.value not in {f"{source_prefix}{i}" for i in range(31)} | {source_prefix + "zr"}:
+            raise ValueError("comparison extended source width")
+    elif (right.value not in registers
+            or right.shift not in ({"", "lsl", "lsr", "asr", "ror"} if operation == "tst"
+                                   else {"", "lsl", "lsr", "asr"})
+            or not 0 <= right.shift_amount < width * 8 or not right.shift and right.shift_amount):
+        raise ValueError("comparison shifted source")
+    return (left.value, right.value)
+
+
 def scalar_logical_result(operation, operands, state):
     """Non-flag-setting A64 logical register form; unknown bits stay unknown.
 
@@ -1226,6 +1285,28 @@ class Audit:
                         enqueue(binding["target"], returns, state)
                     continue
             op, operands = instruction.mnemonic, instruction.operands
+            if op in {"cmp", "cmn", "tst"}:
+                try:
+                    sources = comparison_sources(operands, instruction.width, op)
+                    if (instruction.control_transfer or instruction.writeback or instruction.post_index
+                            or any(name != "nzcv" for name in instruction.writes)
+                            or any(name not in sources for name in instruction.reads)):
+                        raise ValueError("comparison effects")
+                    for source in sources:
+                        name = reg(source)
+                        if (tainted(state.value(name)) or tainted(state.alias(name))
+                                or tainted(state.control(name)) or name in state.return_signatures
+                                or name in state.image_addresses):
+                            raise ValueError("comparison address input")
+                except ValueError as error:
+                    problem(pc, str(error))
+                    continue
+                # No register result, no condition folding. Conditional edges
+                # remain separately explored; unknown flags never prune one.
+                state.set("nzcv", CLEAN)
+                state.set_alias("nzcv", CLEAN)
+                enqueue(pc + 4, returns, state)
+                continue
             if (op in SCALAR_LOGICAL_OPS and len(operands) == 3
                     and all(item.kind == "reg" for item in operands)):
                 try:
@@ -3305,13 +3386,19 @@ class ElfDecoder:
                 shifts = {self.arm64.ARM64_SFT_INVALID: "", self.arm64.ARM64_SFT_LSL: "lsl",
                           self.arm64.ARM64_SFT_LSR: "lsr", self.arm64.ARM64_SFT_ASR: "asr",
                           self.arm64.ARM64_SFT_ROR: "ror"}
-                extensions = {self.arm64.ARM64_EXT_INVALID: "", self.arm64.ARM64_EXT_UXTW: "uxtw",
-                              self.arm64.ARM64_EXT_SXTW: "sxtw"}
+                extensions = {self.arm64.ARM64_EXT_INVALID: "", self.arm64.ARM64_EXT_UXTB: "uxtb",
+                              self.arm64.ARM64_EXT_UXTH: "uxth", self.arm64.ARM64_EXT_UXTW: "uxtw",
+                              self.arm64.ARM64_EXT_UXTX: "uxtx", self.arm64.ARM64_EXT_SXTB: "sxtb",
+                              self.arm64.ARM64_EXT_SXTH: "sxth", self.arm64.ARM64_EXT_SXTW: "sxtw",
+                              self.arm64.ARM64_EXT_SXTX: "sxtx"}
                 operands.append(Operand(
                     "reg", decoded.reg_name(item.reg), shift=shifts.get(item.shift.type, "unsupported"),
                     shift_amount=item.shift.value, extend=extensions.get(item.ext, "unsupported")))
             elif item.type == self.arm64.ARM64_OP_IMM:
-                if item.shift.value:
+                if (decoded.mnemonic in {"cmp", "cmn"} and item.shift.type == self.arm64.ARM64_SFT_LSL
+                        and item.shift.value == 12):
+                    operands.append(Operand("imm", item.imm, shift="lsl", shift_amount=12))
+                elif item.shift.value:
                     operands.append(Operand("other"))
                 else:
                     operands.append(Operand("imm", item.imm))
@@ -3333,6 +3420,16 @@ class ElfDecoder:
             decoded.mnemonic,
             operands[0].value if operands and operands[0].kind == "reg" else "",
         )
+        comparison_reads = None
+        if decoded.mnemonic in {"cmp", "cmn", "tst"}:
+            try:
+                sources = comparison_sources(tuple(operands), width, decoded.mnemonic)
+            except ValueError:
+                pass  # The audit rejects malformed/unsupported CMP forms.
+            else:
+                # Do not trust the alias access bug in Capstone 5.0.3.
+                comparison_reads = sources
+                writes = (self.arm64.ARM64_REG_NZCV,)
         post_index = (
             operands[-1].value
             if decoded.writeback and operands and operands[-1].kind == "imm"
@@ -3342,7 +3439,7 @@ class ElfDecoder:
             address,
             decoded.mnemonic,
             tuple(operands),
-            tuple(decoded.reg_name(value) for value in reads),
+            comparison_reads if comparison_reads is not None else tuple(decoded.reg_name(value) for value in reads),
             tuple(decoded.reg_name(value) for value in writes),
             decoded.writeback,
             post_index,
