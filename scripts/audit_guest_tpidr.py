@@ -40,6 +40,7 @@ MAX_STACK_SLOTS = 256
 MAX_VALUES = 8
 MAX_TOTAL_STEPS = 2_000_000
 MAX_CALLER_PRELUDE = 64
+MAX_BYTE_COPY = 4096
 CLEAN = frozenset({None})
 
 
@@ -375,6 +376,51 @@ def opaque_load_register(name):
                                     and reg(name) in {f"x{i}" for i in range(31)}) or name in {"xzr", "wzr"}
 
 
+def copied_stack_facts(state, source, destination, size):
+    """Transactional eight-byte fact transfer, not native object validity proof.
+
+    source=None means an independently proved disjoint image read. Any partial
+    meaningful fact is refused; CLEAN is not a byte-value or pointer-origin fact.
+    """
+    if (type(size) is not int or not 0 < size <= MAX_BYTE_COPY or
+            type(destination) is not int or not state.sp <= destination < destination + size <= 0 or
+            abs(destination) > 1 << 20 or
+            source is not None and (type(source) is not int or
+                                    not state.sp <= source < source + size <= 0 or abs(source) > 1 << 20)):
+        raise MetadataUnavailable("byte-memory-read-write-ranges-unproved")
+    domains = ("stack", "stack_aliases", "stack_returns", "stack_images", "stack_signatures")
+    snapshots = {name: dict(getattr(state, name)) for name in domains}
+    keys = set().union(*(mapping.keys() for mapping in snapshots.values()))
+    if len(keys) > MAX_STACK_SLOTS:
+        raise MetadataUnavailable("byte-memory-stack-slot-limit")
+    meaningful = {key for key in keys if any(
+        key in mapping and (name in {"stack_images", "stack_signatures"} or mapping[key] != CLEAN)
+        for name, mapping in snapshots.items())}
+    for begin in (source, destination):
+        if begin is None:
+            continue
+        for key in meaningful:
+            if begin < key + 8 and key < begin + size and not begin <= key <= begin + size - 8:
+                raise MetadataUnavailable("byte-memory-partial-protected-fact")
+    post = state.copy()
+    for name, snapshot in snapshots.items():
+        mapping = getattr(post, name)
+        for key in list(mapping):
+            if destination < key + 8 and key < destination + size:
+                del mapping[key]
+        if source is not None:
+            for key, value in snapshot.items():
+                if source <= key <= source + size - 8:
+                    mapping[destination + key - source] = value
+    # Overwritten native-spill coverage is no longer an exact eight-byte store.
+    post.native_stack_rewritten.difference_update(
+        key for key in tuple(post.native_stack_rewritten)
+        if destination < key + 8 and key < destination + size)
+    if len(set().union(*(getattr(post, name).keys() for name in domains))) > MAX_STACK_SLOTS:
+        raise MetadataUnavailable("byte-memory-stack-slot-limit")
+    return post
+
+
 def caller_prologue(decode, root, caller, *, helper_evidence=None):
     """Model only a straight-line prologue from an independently proved entry.
 
@@ -543,6 +589,7 @@ class Audit:
         image_stack_separation = set()
         managed_malloc_observations = set()
         jump_tables = {}
+        byte_copy_observations = set()
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -888,6 +935,108 @@ class Audit:
                             "kind": "native-provider-nonreturning",
                             "binding": dict(binding),
                         }
+                        continue
+                    if binding.get("effect") == "byte-memory":
+                        if (not returns or state.signature("x30") is not None or
+                                tainted(state.value("x30")) or tainted(state.alias("x30")) or
+                                state.control("x30") != frozenset({returns[-1][0]}) or
+                                state.sp != returns[-1][1]):
+                            problem(pc, "byte-memory-return-continuation-unproved")
+                            continue
+                        continuation = returns[-1][0]
+                        call = self.decode(continuation - 4)
+                        if (call is None or call.mnemonic != "bl" or
+                                call.operands != (Operand("imm", pc),)):
+                            problem(pc, "byte-memory-direct-bl-unproved")
+                            continue
+                        # The summary starts before the PLT's GOT load. Its
+                        # native target slot needs independent image/stack separation.
+                        read_slot = binding.get("read_slot")
+                        _, protected = stack_fact_slots(state)
+                        low = min(protected) - anchor_sp if protected else 0
+                        high = max(protected) + 8 - anchor_sp if protected else 0
+                        if state.native_memory_may_contain_tp:
+                            problem(pc, "byte-memory-latent-native-copies-unproved")
+                            continue
+                        if (mrs_window is None or type(read_slot) is not int or
+                                not 0 <= read_slot <= (1 << 64) - 8 or
+                                not hasattr(self.decode, "owned_image_data") or
+                                self.decode.owned_image_data(read_slot, 8) is not True or
+                                low < -mrs_window["before"] or high > mrs_window["after"]):
+                            problem(pc, "byte-memory-plt-read-separation-unproved")
+                            continue
+                        image_stack_separation.add((pc, read_slot, 8, low, high))
+                        observe_owned_image_access(pc, read_slot, 8, True, False)
+                        size = state.scalar("x2")
+                        if (type(size) is not int or not 0 <= size <= MAX_BYTE_COPY or tainted(state.value("x2")) or
+                                tainted(state.alias("x2")) or tainted(state.control("x2")) or
+                                state.signature("x2") is not None or state.image("x2") is not None):
+                            problem(pc, "byte-memory-size-unproved-or-bound")
+                            continue
+                        post = state.copy()
+                        source_kind, source, destination = "unused", 0, 0
+                        if size:
+                            def pointer(name, state, size):
+                                aliases = state.alias(name)
+                                image = state.image(name)
+                                if (tainted(state.value(name)) or tainted(state.control(name)) or
+                                        state.signature(name) is not None):
+                                    return None
+                                if aliases != CLEAN:
+                                    if len(aliases) != 1 or image is not None:
+                                        return None
+                                    start = next(iter(aliases))
+                                    if type(start) is not int or not state.sp <= start < start + size <= 0:
+                                        return None
+                                    if abs(start) > 1 << 20:
+                                        return None
+                                    return "stack", start
+                                if (image is not None and 0 <= image < image + size <= 1 << 64 and
+                                        hasattr(self.decode, "owned_image_data") and
+                                        self.decode.owned_image_data(image, size) is True):
+                                    return "image", image
+                                return None
+                            dst, src = pointer("x0", state, size), pointer("x1", state, size)
+                            if dst is None or src is None or dst[0] != "stack":
+                                problem(pc, "byte-memory-read-write-ranges-unproved")
+                                continue
+                            source_kind, source = src
+                            destination = dst[1]
+                            if (src[0] == "stack" and state.native_stack_clobber_below is not None and
+                                    source < state.native_stack_clobber_below):
+                                problem(pc, "byte-memory-native-stack-read-unproved")
+                                continue
+                            if src[0] == "image":
+                                if not image_read_disjoint(pc, state, source, size):
+                                    problem(pc, "byte-memory-image-read-separation-unproved")
+                                    continue
+                                observe_owned_image_access(pc, source, size, True, False)
+                            elif (binding["abi"] == "memory/byte-copy-v1" and
+                                  source < destination + size and destination < source + size):
+                                problem(pc, "byte-memory-memcpy-overlap")
+                                continue
+                            try:
+                                post = copied_stack_facts(state, source if src[0] == "stack" else None,
+                                                          destination, size)
+                            except MetadataUnavailable as error:
+                                problem(pc, str(error))
+                                continue
+                        # PLT uses x16/x17 before the leaf; neither is scalar zero.
+                        for name in ("x3", "x4", "x5", "x6", "x16", "x17"):
+                            post.set(name, CLEAN)
+                            post.set_alias(name, CLEAN)
+                        for name in ("x3", "x4", "x5", "x6"):
+                            post.set_scalar(name, 0)
+                        if size:
+                            post.set("nzcv", CLEAN)
+                            post.set_alias("nzcv", CLEAN)
+                        callee_effects[pc] = {
+                            "entry": hex(pc), "kind": "conditional-byte-memory",
+                            "binding": dict(binding), "maximum_bytes": MAX_BYTE_COPY,
+                            "scope": "proved relative ranges/facts on normal returns; valid objects and synchronous lifetime assumed",
+                        }
+                        byte_copy_observations.add((pc, source_kind, source, destination, size, continuation))
+                        enqueue(continuation, returns[:-1], post)
                         continue
                     if binding.get("effect") == "managed-malloc":
                         if mrs_window is None:
@@ -1667,6 +1816,12 @@ class Audit:
                 {"pc": hex(pc), "analysis_image_address": hex(start), "read_width": width,
                  "protected_min_offset": low, "protected_end_offset": high}
                 for pc, start, width, low, high in sorted(image_stack_separation)
+            ],
+            "conditional_byte_copies": [
+                {"entry": hex(pc), "source_kind": kind, "source": source,
+                 "destination_stack_offset": destination, "bytes": size,
+                 "continuation": hex(continuation)}
+                for pc, kind, source, destination, size, continuation in sorted(byte_copy_observations)
             ],
             "conditional_managed_malloc": [
                 {"pc": hex(pc), "abstract_call_sp": sp, "continuation": hex(continuation),
@@ -2512,10 +2667,10 @@ class ElfBindingMetadata:
             if (addend != 0 or proof.get("relocation_type") != kind or info & 15 != 2 or
                     (required_library is not None and proof["provider"] != required_library)):
                 return {**result, "reason": "byte-memory-binding-mismatch"}
-            # A leaf's exact argument-only accesses do not prove caller ranges.
-            return {**result, "abi": proof["abi"],
+            # This identity permits checking ranges, never bypassing that check.
+            return {**result, "effect": "byte-memory", "abi": proof["abi"], "read_slot": slot,
                     "bridge_sha256": self.provider_bridge["sha256"],
-                    "reason": "byte-memory-requires-proved-read-write-ranges"}
+                    "reason": "explicit-first-party-byte-memory-contract"}
         if guest_allocator_contract.managed_malloc_binding(proof):
             if not self.trusted_provider_contracts:
                 return {**result, "reason": "managed-malloc-contract-untrusted"}
@@ -3044,6 +3199,7 @@ def main():
             "values_per_join": MAX_VALUES,
             "total_steps": MAX_TOTAL_STEPS,
             "caller_prelude_instructions": MAX_CALLER_PRELUDE,
+            "byte_copy_bytes": MAX_BYTE_COPY,
         },
         "sites": results,
         "counts": {

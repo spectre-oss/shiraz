@@ -52,8 +52,9 @@ class MemoryContractTests(unittest.TestCase):
                                  "byte-memory-contract-untrusted")
                 selected = fixture.metadata(proof, bridge).resolve(0x1500)
                 self.assertEqual(selected["abi"], abi)
-                self.assertEqual(selected["reason"], "byte-memory-requires-proved-read-write-ranges")
-                self.assertNotIn("effect", selected)
+                self.assertEqual(selected["reason"], "explicit-first-party-byte-memory-contract")
+                self.assertEqual(selected["effect"], "byte-memory")
+                self.assertEqual(selected["read_slot"], 0x1500)
                 self.assertIsNone(selected["target"])
                 proof["modules"][0]["bindings"][0]["relocation_type"] = 1025
                 self.assertEqual(fixture.metadata(proof, bridge).resolve(0x1500)["reason"],

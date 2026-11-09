@@ -258,6 +258,11 @@ class NamespaceDecoder:
                     verified = guest_cross_binding.verify_guest_target(decoder.bindings, slot, provider)
                     result = {**result, **verified}
                     target_index = provider_index
+        if result.get("effect") == "byte-memory":
+            slot = result.get("read_slot")
+            if type(slot) is not int or not 0 <= slot <= STRIDE - 8:
+                raise ValueError("byte-memory read slot outside analysis module")
+            result["read_slot"] = index * STRIDE + slot
         target = result.get("target")
         if target is not None:
             if type(target) is not int or not 0 <= target < STRIDE:
