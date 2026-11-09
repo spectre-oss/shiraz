@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Relocatable first-party test template: no external calls or data references.
-// Output is 31 GPRs, SP/NZCV/FPCR/FPSR/padding, 32 full Q registers, and two
+// Output is 31 GPRs, SP/NZCV/FPCR/FPSR/scratch count, 32 Q registers, and two
 // pre-instruction references (SP and x18). x18 is read but never seeded.
 .text
 .p2align 4
@@ -233,6 +233,19 @@ _shiraz_tpidr_test_site:
     stp q26, q27, [sp, #704]
     stp q28, q29, [sp, #736]
     stp q30, q31, [sp, #768]
+    // Observe retired trampoline bytes after all guest state was snapshotted.
+    // Count residual words in the shared 832-byte frame plus outer 16-byte
+    // island slot. The accessor's deeper frame is intentionally not inspected.
+    sub x9, sp, #848
+    mov x10, #106
+    mov x11, #0
+Lshiraz_scrub_scan:
+    ldr x12, [x9], #8
+    cmp x12, #0
+    cinc x11, x11, ne
+    subs x10, x10, #1
+    b.ne Lshiraz_scrub_scan
+    str x11, [sp, #280] // Result.retired_scratch_nonzero, before any call
     ldr x0, [sp, #1040]
     mov x1, sp
     mov x2, #816

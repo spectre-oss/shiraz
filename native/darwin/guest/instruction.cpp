@@ -49,10 +49,11 @@ ThreadPointerPatch plan_thread_pointer(uintptr_t site, uint32_t original,
   put(result, 8, uint32_t(0x580000d1u)); // ldr x17, [pc,#24] (entry at +32)
   put(result, 12, uint32_t(0xd61f0220u)); // br x17
   put(result, 16, uint32_t(0xa8c147f0u)); // ldp x16,x17,[sp],#16
-  put(result, 20, branch(island + 20, site + 4));
-  // Exact interrupted guest continuation for the shared entry's DWARF PC
-  // return column. Execution branches at +20; bytes +24..31 are literal data.
-  put(result, 24, site + 4);
+  // Restore both guest registers before erasing their retired island slot.
+  put(result, 20, uint32_t(0xa93f7fffu)); // stp xzr,xzr,[sp,#-16]
+  // The shared entry derives its exact DWARF guest PC from this branch.
+  put(result, 24, branch(island + 24, site + 4));
+  put(result, 28, uint32_t(0xd503201fu)); // nop; no continuation literal
   put(result, 32, reinterpret_cast<uintptr_t>(&shiraz_guest_tpidr_entry));
   put(result, 40, island + 16);
   put(result, 48, target);

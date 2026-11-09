@@ -3,7 +3,7 @@
 // No system thread-pointer register is modified. The DWARF return column is
 // PC (32), independent of original x30: an MRS is not a call, so the interrupted
 // guest PC must be restored without overwriting a frameless function's LR.
-// Exact synchronous accessor backtrace coverage is verified by --islands; this
+// Synchronous accessor backtraces are checked by the fixture gates. This entry
 // does not claim asynchronous-signal or guest exception/LSDA coverage.
 .text
 .p2align 2
@@ -73,9 +73,14 @@ _shiraz_guest_tpidr_entry:
     stp q26, q27, [sp, #688]
     stp q28, q29, [sp, #720]
     stp q30, q31, [sp, #752]
-    // The island's unused literal at context-16 holds exact guest site+4.
-    // Keep that PC distinct from the saved original x30 in the frame record.
-    ldr x9, [x16, #-16]
+    // Recover guest site+4 from the island B at context-16.
+    // Sign-extend its imm26 before scaling; the planner bounded this branch.
+    // Keep this PC distinct from the saved original x30 in the frame record.
+    ldr w9, [x16, #-16]
+    sbfx x9, x9, #0, #26
+    lsl x9, x9, #2
+    sub x10, x16, #16
+    add x9, x10, x9
     str x9, [sp, #816]
 .cfi_offset 32, -32
     add x9, sp, #800
@@ -227,9 +232,20 @@ Lshiraz_tpidr_accessor_return:
 .cfi_restore x27
     ldp x28, x29, [sp, #224]
 .cfi_restore x28
+.cfi_restore x29
     ldr x30, [sp, #240]
-    add sp, sp, #832
-.cfi_def_cfa_offset 16
+.cfi_restore x30
+    // x17 is restored by the island after this entry returns. Preserve the
+    // exact guest continuation there while clearing its old frame slot.
+    ldr x17, [sp, #816]
+.cfi_register 32, 17
+    // Erase exactly the 832-byte shared frame after restoring
+    // guest state. Each post-index store maintains 16-byte SP alignment.
+    // No pre-write, asynchronous or accessor-frame purity claim follows.
+.rept 52
+    stp xzr, xzr, [sp], #16
+.cfi_adjust_cfa_offset -16
+.endr
     br x16
 .cfi_endproc
 
