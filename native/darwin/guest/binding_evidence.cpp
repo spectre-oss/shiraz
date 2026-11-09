@@ -179,6 +179,119 @@ void cached_self_snapshot(Json &json, const Binding &binding, uintptr_t slot) {
   }
   json.add("],\"stack_exclusion_profile\":" + std::to_string(kCachedSelfStackExclusionProfile) + "}");
 }
+void prepared_cleanup_snapshot(Json &json) {
+  const uintptr_t entry = reinterpret_cast<uintptr_t>(&prepared_guest_cleanup_admitted);
+  Dl_info info{}, producer{};
+  if (!dladdr(reinterpret_cast<const void *>(entry), &info) || !info.dli_fbase || !info.dli_fname ||
+      !dladdr(reinterpret_cast<const void *>(&write_binding_evidence), &producer) ||
+      producer.dli_fbase != info.dli_fbase)
+    throw ElfError("prepared cleanup requires exact first-party entry");
+  const mach_header_64 *header = nullptr;
+  intptr_t slide = 0;
+  const auto count = _dyld_image_count();
+  if (count > 8192) throw ElfError("prepared cleanup image count bound");
+  for (uint32_t index = 0; index < count; ++index) {
+    const auto *candidate = _dyld_get_image_header(index);
+    if (candidate == info.dli_fbase) {
+      if (header) throw ElfError("ambiguous prepared cleanup image");
+      header = reinterpret_cast<const mach_header_64 *>(candidate);
+      slide = _dyld_get_image_vmaddr_slide(index);
+    }
+  }
+  // Executable fixture producers have no NativeBridge image contract. Keep
+  // their report format usable without inventing a DLL snapshot for them.
+  if (header && header->filetype != MH_DYLIB) return;
+  if (!header || header->magic != MH_MAGIC_64 || header->cputype != CPU_TYPE_ARM64 ||
+      !header->ncmds || header->ncmds > 4096 || header->sizeofcmds > (1u << 20))
+    throw ElfError("prepared cleanup Mach-O header bound");
+  const auto *commands = reinterpret_cast<const uint8_t *>(header + 1);
+  std::vector<NativeCodeSegment> code_segments, data_segments;
+  size_t offset = 0;
+  for (uint32_t index = 0; index < header->ncmds; ++index) {
+    if (offset > header->sizeofcmds || sizeof(load_command) > header->sizeofcmds - offset)
+      throw ElfError("prepared cleanup truncated load command");
+    load_command command;
+    std::memcpy(&command, commands + offset, sizeof(command));
+    if (command.cmdsize < sizeof(command) || command.cmdsize > header->sizeofcmds - offset)
+      throw ElfError("prepared cleanup load command bound");
+    if (command.cmd == LC_SEGMENT_64) {
+      if (command.cmdsize < sizeof(segment_command_64))
+        throw ElfError("prepared cleanup segment command");
+      segment_command_64 segment;
+      std::memcpy(&segment, commands + offset, sizeof(segment));
+      uint64_t start;
+      if (slide >= 0) {
+        if (segment.vmaddr > UINT64_MAX - uint64_t(slide))
+          throw ElfError("prepared cleanup segment slide overflow");
+        start = segment.vmaddr + uint64_t(slide);
+      } else {
+        const uint64_t magnitude = uint64_t(-(slide + 1)) + 1;
+        if (segment.vmaddr < magnitude) throw ElfError("prepared cleanup segment slide underflow");
+        start = segment.vmaddr - magnitude;
+      }
+      if (segment.filesize > segment.vmsize || segment.vmsize > UINT64_MAX - start)
+        throw ElfError("prepared cleanup segment size bound");
+      if ((segment.initprot & (VM_PROT_READ | VM_PROT_EXECUTE)) ==
+              (VM_PROT_READ | VM_PROT_EXECUTE) && !(segment.initprot & VM_PROT_WRITE))
+        code_segments.push_back({start, segment.filesize});
+      if ((segment.initprot & VM_PROT_READ) && !(segment.initprot & VM_PROT_EXECUTE))
+        data_segments.push_back({start, segment.vmsize});
+    }
+    offset += command.cmdsize;
+  }
+  if (offset != header->sizeofcmds) throw ElfError("prepared cleanup load commands size mismatch");
+  const uintptr_t base = reinterpret_cast<uintptr_t>(header);
+  constexpr size_t body_size = 216;
+  // Capture a bounded installation observation only. The independent reader
+  // must validate all words; unavailable or different complete profiles stay
+  // absent rather than becoming a claim about an arbitrary function tail.
+  if (entry < base || (entry & 3) || !native_code_segment(code_segments, entry, body_size) ||
+      !native_code_mapping(entry, body_size)) return;
+  uint8_t body[body_size];
+  std::memcpy(body, reinterpret_cast<const void *>(entry), sizeof(body));
+  uint32_t first_ret, last_ret;
+  std::memcpy(&first_ret, body + 200, sizeof(first_ret));
+  std::memcpy(&last_ret, body + 212, sizeof(last_ret));
+  if (first_ret != 0xd65f03c0u || last_ret != 0xd65f03c0u) return;
+  const auto cache = cached_pthread_self_tables();
+  if (cache.rows != 4096) throw ElfError("prepared cleanup row count mismatch");
+  const CachedSelfTable tables[] = {cache.tables[0], cache.tables[1], cache.tables[2], cache.tables[3],
+                                    prepared_cleanup_admission_table()};
+  const char *roles[] = {"owners", "keys", "low", "high", "admission"};
+  for (size_t index = 0; index < 5; ++index) {
+    const auto &table = tables[index];
+    if (!table.role || std::strcmp(table.role, roles[index]))
+      throw ElfError("prepared cleanup table role mismatch");
+    if (table.address < base || table.bytes != 32768 || table.bytes > UINTPTR_MAX - table.address ||
+        !native_code_segment(data_segments, table.address, size_t(table.bytes)))
+      throw ElfError(std::string("prepared cleanup table declared extent: ") + table.role);
+    if (!native_mapping(table.address, size_t(table.bytes), VM_PROT_READ, VM_PROT_EXECUTE))
+      throw ElfError(std::string("prepared cleanup table current mapping: ") + table.role);
+    if (table.address < entry + body_size && entry < table.address + table.bytes)
+      throw ElfError("prepared cleanup code/table overlap");
+    for (size_t previous = 0; previous < index; ++previous) {
+      const auto &other = tables[previous];
+      if (table.address < other.address + other.bytes && other.address < table.address + table.bytes)
+        throw ElfError("prepared cleanup table overlap");
+    }
+  }
+  json.add(",\"prepared_cleanup\":{\"profile\":1,\"verification\":\"mapped-first-party-code-and-cache-ranges\",\"execution_claim\":false,\"entry_offset\":" +
+           std::to_string(entry - base) + ",\"body_hex\":\"");
+  for (uint8_t value : body) {
+    char byte[3]; std::snprintf(byte, sizeof(byte), "%02x", unsigned(value)); json.add(byte);
+  }
+  json.add("\",\"tables\":[");
+  for (size_t index = 0; index < 5; ++index) {
+    if (index) json.add(",");
+    const auto &table = tables[index];
+    json.add("{\"role\":"); json.string(table.role);
+    json.add(",\"offset\":" + std::to_string(table.address - base) + ",\"bytes\":" +
+             std::to_string(table.bytes) + "}");
+  }
+  // This version names the trusted first-party publication contract, not an
+  // independently authenticated current row or asynchronous lifetime lease.
+  json.add("],\"stack_exclusion_profile\":1}");
+}
 void native_self_identity(Json &json, const Binding &binding, uintptr_t slot) {
   // This identifies a mapped prefix, not the function's complete control flow
   // or effects. In particular, pthread_self has native PAC failure paths.
@@ -349,7 +462,9 @@ size_t write_binding_evidence(const Loader &loader, const std::filesystem::path 
   Json json;
   json.add("{\"schema\":1,\"namespace\":"); json.string(scope);
   json.add(",\"snapshot\":\"post-link-before-open\",\"constructors_executed\":" + std::to_string(loader.constructor_count()));
-  json.add(",\"report_executes_guest_code\":false,\"load_order\":[");
+  json.add(",\"report_executes_guest_code\":false");
+  prepared_cleanup_snapshot(json);
+  json.add(",\"load_order\":[");
   bool comma = false;
   for (const auto &name : load_order) {
     if (comma) json.add(",");

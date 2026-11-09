@@ -33,6 +33,7 @@ import guest_jump_table
 import guest_memory_contract
 import guest_mrs_window
 import guest_native_target
+import guest_prepared_cleanup_record
 import guest_scalar_widening
 import guest_swap_effects
 
@@ -2438,6 +2439,7 @@ class ElfBindingMetadata:
         self.static_rodata_safe = True
         self.proof = {}
         self.cached_self_proofs = {}
+        self.prepared_cleanup_proof = None
         self.proof_hash = None
         self.provider_bridge = None
         self.trusted_provider_contracts = False
@@ -2981,6 +2983,7 @@ class ElfBindingMetadata:
 
     def load_proof(self, report, report_hash):
         self.mrs_window_record = None
+        self.prepared_cleanup_proof = None
         if (
             not isinstance(report, dict)
             or type(report.get("schema")) is not int
@@ -3030,6 +3033,20 @@ class ElfBindingMetadata:
                     "provider bridge identity disagrees with binding report"
                 )
             self.trusted_provider_contracts = True
+        prepared_bridge_bytes = None
+        if "prepared_cleanup" in report:
+            if not isinstance(report["prepared_cleanup"], dict):
+                raise ValueError("prepared cleanup snapshot object required")
+            # An untrusted record receives schema validation only. Exact file
+            # matching is available solely under the explicit bridge contract.
+            if self.trusted_provider_contracts:
+                with Path(self.provider_bridge["path"]).open("rb") as stream:
+                    prepared_bridge_bytes = stream.read((256 << 20) + 1)
+                if (not 0 < len(prepared_bridge_bytes) <= 256 << 20 or
+                        hashlib.sha256(prepared_bridge_bytes).hexdigest() != self.provider_bridge["sha256"]):
+                    raise ValueError("prepared cleanup bridge changed during proof validation")
+            self.prepared_cleanup_proof = guest_prepared_cleanup_record.validate_prepared_cleanup_record(
+                report["prepared_cleanup"], prepared_bridge_bytes)
         if own is None:
             return
         if own["elf_sha256"] != self.elf_sha256:
@@ -3040,9 +3057,9 @@ class ElfBindingMetadata:
         bindings = own.get("bindings")
         if not isinstance(bindings, list) or len(bindings) > 200000:
             raise ValueError("binding evidence relocation bound")
-        bridge_bytes = None
+        bridge_bytes = prepared_bridge_bytes
         cached_records = {}
-        if self.trusted_provider_contracts and any(
+        if bridge_bytes is None and self.trusted_provider_contracts and any(
             isinstance(binding, dict) and "cached_self" in binding for binding in bindings
         ):
             with Path(self.provider_bridge["path"]).open("rb") as stream:
@@ -3455,6 +3472,9 @@ class ElfDecoder:
             ).hexdigest(),
             "indexed_halfword_reader_sha256": hashlib.sha256(
                 Path(guest_indexed_halfword.__file__).read_bytes()
+            ).hexdigest(),
+            "prepared_cleanup_record_reader_sha256": hashlib.sha256(
+                Path(guest_prepared_cleanup_record.__file__).read_bytes()
             ).hexdigest(),
             "mrs_window_reader_sha256": hashlib.sha256(
                 Path(guest_mrs_window.__file__).read_bytes()
