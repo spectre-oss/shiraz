@@ -57,7 +57,10 @@ int main(int argc, char **argv) {
                 int(other_call("key_namespace_delete", {})) == 0,
             "deleting a key in one guest registry cannot clear another registry value");
     errno = ELOOP;
-    int result = int(call("run_threads", {}));
+    int result = int(call("run_native_attributes", {}));
+    if (result) throw std::runtime_error("guest native attributes failed at line " + std::to_string(result));
+    require(errno == ELOOP, "native attribute snapshot preserves host errno");
+    result = int(call("run_threads", {}));
     if (result) throw std::runtime_error("guest thread failed at line " + std::to_string(result));
     require(errno == ELOOP, "pthread providers preserve host errno");
     struct { uint32_t before = 0xabcdef01, key = 0, after = 0x12345678; } guarded;
@@ -79,7 +82,9 @@ int main(int argc, char **argv) {
                  "key_guards=1 key_width=1 destructors=12 detached=2 callback_validation=1 "
                  "key_iteration_threads=4 key_iterations=4 key_clear_before_callback=1 "
                  "key_reset_final_pass=1 key_create_in_destructor=1 key_delete_suppresses=1 "
-                 "key_delete_in_destructor=1 key_namespaces=2 self_noargs=1 self_errnos=1\n";
+                 "key_delete_in_destructor=1 key_namespaces=2 self_noargs=1 self_errnos=1 "
+                 "attr_snapshot_workers=6 attr_detached_snapshot=2 native_detach_unknown=1 "
+                 "attr_guard_set_known=7 attr_snapshot_create_refused=1 custom_stack=unsupported\n";
   } catch (const std::exception &error) {
     std::cerr << "FAIL " << error.what() << '\n';
     return 1;

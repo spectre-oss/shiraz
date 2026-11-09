@@ -2,6 +2,11 @@
 // Link-time API declarations only. Every body traps if accidentally executed.
 // Runtime tests require the explicit libc personality, never this ELF artifact.
 #include <stddef.h>
+int pthread_getattr_np(void *thread, void *attributes) {
+  (void)thread;
+  (void)attributes;
+  __builtin_trap();
+}
 int *__errno(void) { __builtin_trap(); }
 void *malloc(size_t n) {
   (void)n;

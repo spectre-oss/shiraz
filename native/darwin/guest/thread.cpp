@@ -20,6 +20,7 @@ struct Attributes {
   size_t stack = 1024 * 1024;
   size_t guard = size_t(getpagesize());
   bool detached = false;
+  bool detach_known = true;
   void *base = nullptr;
   bool guard_known = true;
 };
@@ -97,12 +98,14 @@ public:
     if (!value || (state != b::kPTHREAD_CREATE_JOINABLE && state != b::kPTHREAD_CREATE_DETACHED))
       return EINVAL;
     value->detached = state == b::kPTHREAD_CREATE_DETACHED;
+    value->detach_known = true;
     return 0;
   }
   int attr_getdetach(void *address, int *result) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto *value = attr(address);
     if (!value || !result) return EINVAL;
+    if (!value->detach_known) return ENOTSUP;
     *result = value->detached ? b::kPTHREAD_CREATE_DETACHED : b::kPTHREAD_CREATE_JOINABLE;
     return 0;
   }
@@ -125,12 +128,17 @@ public:
   int get_attributes(pthread_t thread,void *address) {
     if(!address)return EINVAL;
     std::lock_guard<std::mutex> lock(mutex_);
-    if(thread!=pthread_self() && !records_.count(uintptr_t(thread)))return ESRCH;
+    const auto record = records_.find(uintptr_t(thread));
+    if(thread!=pthread_self() && record==records_.end())return ESRCH;
     if(attributes_.count(address))return EBUSY;
     if(attributes_.size()>=4096)return EAGAIN;
     void *top=pthread_get_stackaddr_np(thread);size_t size=pthread_get_stacksize_np(thread);
     if(!top||!size)return ESRCH;
     Attributes value;value.stack=size;value.base=static_cast<char *>(top)-size;value.guard_known=false;
+    // A foreign native self handle has no guest-owned detach-state record.
+    // Preserve that uncertainty rather than fabricating JOINABLE.
+    value.detach_known = record != records_.end();
+    if (value.detach_known) value.detached = record->second->detached;
     attributes_.emplace(address,value);std::memset(address,0,b::kPthreadAttrSize);return 0;
   }
   int attr_getstack_address(void *address,void **base,size_t *size) {
@@ -164,6 +172,7 @@ public:
     if (!value) return EINVAL;
     if (size > (size_t(64) << 20)) return EAGAIN;
     value->guard = size;
+    value->guard_known = true;
     return 0;
   }
   int attr_getguard(void *address, size_t *size) {
@@ -183,6 +192,10 @@ public:
       if (!found) return EINVAL;
       config = *found;
     }
+    // A getattr snapshot describes an existing native stack. Custom-stack
+    // creation is unsupported: never silently discard that address, nor
+    // fabricate values for snapshot fields whose native state is unknown.
+    if (config.base || !config.detach_known || !config.guard_known) return ENOTSUP;
     if (records_.size() >= 128) return EAGAIN;
     pthread_attr_t host;
     int error = ::pthread_attr_init(&host);

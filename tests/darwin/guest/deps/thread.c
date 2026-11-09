@@ -11,7 +11,11 @@ static int destroyed;
 // bionic marks pthread_self const; prevent CSE/hoisting across the errno
 // sentinels so these checks actually cross the provider on every invocation.
 static pthread_t (*volatile call_self)(void) = pthread_self;
-struct Work { int index, error, destructors; pthread_t self; };
+struct Work {
+  int index, error, destructors;
+  pthread_t self;
+  int expected_detach, ready;
+};
 static void destructor(void *opaque) {
   struct Work *work = opaque;
   if (pthread_getspecific(key)) work->error = 1;
@@ -22,7 +26,20 @@ static void destructor(void *opaque) {
 static void *worker(void *opaque) {
   struct Work *work = opaque;
   work->self = call_self();
+  unsigned remaining = 100000000;
+  while (!__atomic_load_n(&work->ready, __ATOMIC_ACQUIRE) && --remaining)
+    __asm__ volatile("yield");
+  if (!remaining) { work->error = 6; return work; }
   errno = 700 + work->index;
+  pthread_attr_t snapshot;
+  int detached = -1;
+  size_t guard = 123;
+  if (pthread_getattr_np(work->self, &snapshot) ||
+      pthread_attr_getdetachstate(&snapshot, &detached) || detached != work->expected_detach ||
+      pthread_attr_getguardsize(&snapshot, &guard) != ENOTSUP || guard != 123 ||
+      pthread_attr_setguardsize(&snapshot, 32768) ||
+      pthread_attr_getguardsize(&snapshot, &guard) || guard != 32768 ||
+      pthread_attr_destroy(&snapshot)) work->error = 7;
   if (!pthread_equal(call_self(), work->self) || errno != 700 + work->index)
     work->error = 5;
   if (pthread_join(work->self, 0) != EDEADLK) work->error = 3;
@@ -36,6 +53,38 @@ uintptr_t self_identity(void) {
   pthread_t first = call_self();
   if (!pthread_equal(first, call_self()) || errno != 731) return 0;
   return (uintptr_t)first;
+}
+static int snapshot_workers;
+static void *snapshot_worker(void *opaque) {
+  (void)opaque;
+  __atomic_add_fetch(&snapshot_workers, 1, __ATOMIC_RELEASE);
+  return 0;
+}
+// Called on the host's preexisting thread, which has no guest-created Record.
+int run_native_attributes(void) {
+  pthread_attr_t snapshot;
+  int detached = 123;
+  size_t guard = 123;
+  errno = EDOM;
+  CHECK(pthread_getattr_np(call_self(), &snapshot) == 0);
+  CHECK(pthread_attr_getdetachstate(&snapshot, &detached) == ENOTSUP && detached == 123);
+  CHECK(pthread_attr_setdetachstate(&snapshot, PTHREAD_CREATE_DETACHED) == 0 &&
+        pthread_attr_getdetachstate(&snapshot, &detached) == 0 && detached == PTHREAD_CREATE_DETACHED);
+  CHECK(pthread_attr_getguardsize(&snapshot, &guard) == ENOTSUP && guard == 123);
+  CHECK(pthread_attr_setguardsize(&snapshot, 32768) == 0 &&
+        pthread_attr_getguardsize(&snapshot, &guard) == 0 && guard == 32768);
+  // Resolving unknown scalar fields does not permit cloning the snapshot's
+  // existing native stack. Keep an unexpected worker joinable for safe cleanup.
+  CHECK(pthread_attr_setdetachstate(&snapshot, PTHREAD_CREATE_JOINABLE) == 0);
+  __atomic_store_n(&snapshot_workers, 0, __ATOMIC_RELEASE);
+  const pthread_t sentinel = (pthread_t)(uintptr_t)0x12345;
+  pthread_t unexpected = sentinel;
+  int created = pthread_create(&unexpected, &snapshot, snapshot_worker, 0);
+  if (!created) CHECK(pthread_join(unexpected, 0) == 0);
+  CHECK(created == ENOTSUP && unexpected == sentinel &&
+        __atomic_load_n(&snapshot_workers, __ATOMIC_ACQUIRE) == 0);
+  CHECK(pthread_attr_destroy(&snapshot) == 0 && errno == EDOM);
+  return 0;
 }
 int run_threads(void) {
   struct { uint64_t before; pthread_attr_t value; uint64_t after; } attribute;
@@ -63,6 +112,8 @@ int run_threads(void) {
   pthread_t threads[4];
   for (int i = 0; i < 4; ++i) {
     work[i].index = i;
+    work[i].expected_detach = PTHREAD_CREATE_JOINABLE;
+    work[i].ready = 1;
     CHECK(pthread_create(&threads[i], &attribute.value, worker, &work[i]) == 0);
   }
   CHECK(pthread_getspecific(key) == 0 && errno == EDOM);
@@ -76,7 +127,7 @@ int run_threads(void) {
   CHECK(pthread_attr_setdetachstate(&attribute.value, PTHREAD_CREATE_DETACHED) == 0 &&
         pthread_attr_getdetachstate(&attribute.value, &state) == 0 &&
         state == PTHREAD_CREATE_DETACHED);
-  struct Work detached = {5, 0, 0, 0};
+  struct Work detached = {5, 0, 0, 0, PTHREAD_CREATE_DETACHED, 1};
   pthread_t detached_id;
   CHECK(pthread_create(&detached_id, &attribute.value, worker, &detached) == 0);
   unsigned remaining = 100000000;
@@ -84,9 +135,10 @@ int run_threads(void) {
     __asm__ volatile("yield");
   CHECK(remaining && detached.error == 0 && detached.destructors == 2);
   // Convert a joinable thread to detached and wait for its key destructor.
-  struct Work converted = {6, 0, 0, 0};
+  struct Work converted = {6, 0, 0, 0, PTHREAD_CREATE_DETACHED, 0};
   CHECK(pthread_create(&detached_id, 0, worker, &converted) == 0 &&
         pthread_detach(detached_id) == 0);
+  __atomic_store_n(&converted.ready, 1, __ATOMIC_RELEASE);
   remaining = 100000000;
   while (__atomic_load_n(&destroyed, __ATOMIC_ACQUIRE) < 6 && --remaining)
     __asm__ volatile("yield");
