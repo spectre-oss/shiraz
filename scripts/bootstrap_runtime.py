@@ -64,6 +64,9 @@ PATCHES = {
         ('art-dx-host-bash.patch', {
             'dalvik/dx/etc/dx': '3cf9906026221053b3ed99018f75939462a175d126dcc87924e6a24fc3278147',
         }),
+        ('art-dx-method-handle-lock.patch', {
+            'dalvik/dx/src/com/android/dx/dex/file/MethodHandlesSection.java': '687fa0946824bee5fcf1c29aee0c2f3f2c149d12fe6224ca64285797c9c7e9b8',
+        }),
         ('art-boot-resource-paths.patch', {
             'art/runtime/native/java_lang_VMClassLoader.cc': '8a15f9aea6260e662ed9cf09259a19411e0a923a728cd765c98f3fa037d1e088',
         }),

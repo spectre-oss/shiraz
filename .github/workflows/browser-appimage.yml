@@ -87,6 +87,7 @@ jobs:
             export PATH="/usr/lib/jvm/java-17-openjdk-${JAVA_DEB_ARCH}/bin:$PATH"
             make deps
             make runtime-art
+            make dx-method-handles-check
             make build
             make apk-fixture
             make appimage APK=build/apk-fixture/fixture.apk NAME=Shiraz-CI-Fixture AOT=0
@@ -130,7 +131,8 @@ jobs:
             python3 scripts/make_browser_base.py \
               build/runtime-template.tar.gz build/shiraz-payload-launcher \
               "dist/Shiraz-Browser-Base-${version}-${SHIRAZ_ARCH}.AppImage"
-            (cd go-wasm && GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./... && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
+            export SHIRAZ_WASM_GOROOT="$(go env GOROOT)"
+            (cd go-wasm && GOOS=js GOARCH=wasm go test -exec="python3 ../scripts/run_wasm_test.py" ./... && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
             python3 go-wasm/bootstrap_font.py
             cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" go-wasm/wasm_exec.js
           '
