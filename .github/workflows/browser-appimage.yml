@@ -86,6 +86,7 @@ jobs:
             # ART links against Ubuntu libraries; use Ubuntu Java for JNI.
             export PATH="/usr/lib/jvm/java-17-openjdk-${JAVA_DEB_ARCH}/bin:$PATH"
             make deps
+            make runtime-sources
             make bootstrap-patch-check
             make runtime-art
             make dx-method-handles-check
