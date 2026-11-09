@@ -755,8 +755,56 @@ class Audit:
                 enqueue(pc + 4, returns, state)
                 continue
             jump = (self.decode.byte_jump_table(pc)
-                    if instruction.mnemonic == "cmp" and hasattr(self.decode, "byte_jump_table") else None)
+                    if instruction.mnemonic in {"cmp", "ubfx", "lsr"} and hasattr(self.decode, "byte_jump_table") else None)
             if jump is not None:
+                if jump.index_extract is not None:
+                    # The W bitfield extract itself bounds the index. No CMP,
+                    # default branch, or condition-flag clobber is implied.
+                    sources = (jump.index_source, jump.interleaved_and[1])
+                    if any(tainted(state.value(name)) or tainted(state.alias(name)) or
+                           tainted(state.control(name)) or reg(name) in state.return_signatures or
+                           state.image(reg(name)) is not None for name in sources):
+                        problem(pc, "jump-table-extract-or-mask-has-pointer-or-control-fact")
+                        continue
+                    observe_owned_image_access(pc, jump.table_address, len(jump.table_bytes), True, False)
+                    if ((state.native_memory_may_contain_tp or any(tainted(v) for v in state.stack.values())) and
+                            not image_read_disjoint(pc, state, jump.table_address, len(jump.table_bytes))):
+                        problem(pc, "jump-table-load-may-alias-thread-pointer-stack-spill")
+                        continue
+                    extracted = state.scalar(jump.index_source)
+                    lsb, width = jump.index_extract
+                    selected = (range(len(jump.targets)) if extracted is None else
+                                (((extracted >> lsb) & ((1 << width) - 1)),))
+                    masked_destination, masked_source, mask = jump.interleaved_and
+                    masked = state.scalar(masked_source)
+                    state.set(masked_destination, CLEAN)
+                    state.set_alias(masked_destination, CLEAN)
+                    state.set_control(masked_destination, CLEAN)
+                    state.set_signature(masked_destination, None)
+                    state.set_image(masked_destination, None)
+                    state.set_scalar(masked_destination, None if masked is None else masked & mask)
+                    jump_tables[pc] = {
+                        "entry": hex(pc), "kind": "bounded-extract-readonly-byte-jump-table",
+                        "body_sha256": jump.body_sha256, "table_sha256": jump.table_sha256,
+                        "table": hex(jump.table_address), "bytes": len(jump.table_bytes),
+                        "index_extract": jump.index_extract, "interleaved_and": jump.interleaved_and,
+                        "preserves_nzcv": True, "default": None,
+                        "targets": [hex(target) for target in sorted(set(jump.targets))],
+                        "scope": "explicit trusted sealed-Image bytes; normal/owned synchronous lifetime only",
+                    }
+                    # Preserve entry/index correlation, including duplicate targets.
+                    for index in selected:
+                        target = jump.targets[index]
+                        post = state.copy()
+                        for name in (jump.index_register, jump.table_register, jump.offset_register, jump.branch_register):
+                            post.set(name, CLEAN)
+                            post.set_alias(name, CLEAN)
+                        post.set_scalar("w" + jump.index_register[1:], index)
+                        post.set_scalar(jump.offset_register, jump.table_bytes[index])
+                        post.set_image(jump.table_register, jump.table_address)
+                        post.set_image(jump.branch_register, target)
+                        enqueue(target, returns, post)
+                    continue
                 # Only entry at the exact CMP acquires the unsigned bound.
                 # A proved interleaved MOV executes before both outcomes.
                 # Default executes no table access or dispatch scratch writes.
@@ -3040,7 +3088,8 @@ class ElfDecoder:
 
         result = guest_jump_table.recognize_byte_jump_table(
             word, address, self.bindings.readonly_jump_table_bytes)
-        if result is not None and any(self.word(target) is None for target in (*result.targets, result.default_target)):
+        if result is not None and any(self.word(target) is None for target in (*result.targets,
+                *((result.default_target,) if result.default_target is not None else ()))):
             result = None
         if len(self.jump_table_cache) < 1 << 20:
             self.jump_table_cache[address] = result

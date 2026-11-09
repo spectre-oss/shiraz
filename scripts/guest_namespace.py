@@ -195,13 +195,14 @@ class NamespaceDecoder:
         summary = lookup(local) if lookup else None
         if summary is None:
             return None
-        addresses = (summary.entry, summary.default_target, summary.table_address, summary.branch_base, *summary.targets)
+        addresses = (summary.entry, summary.table_address, summary.branch_base, *summary.targets,
+                     *((summary.default_target,) if summary.default_target is not None else ()))
         if (any(type(value) is not int or not 0 <= value < STRIDE for value in addresses)
                 or summary.entry + summary.body_size > STRIDE
                 or summary.table_address + len(summary.table_bytes) > STRIDE):
             return None
         bias = index * STRIDE
-        return replace(summary, entry=address, default_target=bias + summary.default_target,
+        return replace(summary, entry=address, default_target=None if summary.default_target is None else bias + summary.default_target,
                        table_address=bias + summary.table_address, branch_base=bias + summary.branch_base,
                        targets=tuple(bias + target for target in summary.targets))
 
