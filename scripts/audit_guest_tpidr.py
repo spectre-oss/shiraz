@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import struct
+from bisect import bisect_left
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -41,6 +42,8 @@ MAX_VALUES = 8
 MAX_TOTAL_STEPS = 2_000_000
 MAX_CALLER_PRELUDE = 64
 MAX_BYTE_COPY = 4096
+MAX_INDIRECT_SYMBOL_WORK = 2_000_000
+MAX_INDIRECT_ENTRIES = 4096
 CLEAN = frozenset({None})
 
 
@@ -590,6 +593,8 @@ class Audit:
         managed_malloc_observations = set()
         jump_tables = {}
         byte_copy_observations = set()
+        relocated_pointer_loads = {}
+        indirect_edges = {}
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -1289,7 +1294,31 @@ class Audit:
                     enqueue(target, returns, state)
                 continue
             if op in {"blr", "br", "braa", "brab", "blraa", "blrab"}:
-                problem(pc, "indirect-call-or-branch-with-unproved-summary")
+                target = None
+                entry = None
+                if op in {"blr", "br"} and len(operands) == 1 and operands[0].kind == "reg":
+                    name = operands[0].value
+                    if (full_width_gpr(name) and not tainted(state.value(name)) and
+                            not tainted(state.alias(name)) and not tainted(state.control(name)) and
+                            state.signature(name) is None):
+                        target = state.image(name)
+                        if target is not None and hasattr(self.decode, "indirect_function_entry"):
+                            entry = self.decode.indirect_function_entry(target)
+                if entry is None:
+                    problem(pc, "indirect-call-or-branch-with-unproved-summary")
+                    continue
+                indirect_edges[(pc, target, op)] = entry
+                if op == "blr":
+                    if len(returns) == MAX_CALL_DEPTH:
+                        problem(pc, "callee-depth-limit")
+                        continue
+                    state.set("x30", CLEAN)
+                    state.set_alias("x30", CLEAN)
+                    state.set_control("x30", frozenset({next_pc}))
+                    callees.add((pc, target))
+                    enqueue(target, returns + ((next_pc, state.sp),), state)
+                else:
+                    enqueue(target, returns, state)
                 continue
             if op.startswith("b.") or op in {"cbz", "cbnz", "tbz", "tbnz"}:
                 if any(tainted(value) for value in values):
@@ -1709,6 +1738,15 @@ class Audit:
                         )
                         state.set_signature(item.value, signature if full_width_gpr(item.value) else None)
                         state.set_image(item.value, image)
+                        if (slot is None and load and op == "ldr" and instruction.width == 8 and
+                                len(data) == 1 and not instruction.writeback and not memory.index and
+                                full_width_gpr(item.value) and image_base is not None and image_disjoint and
+                                not state.native_memory_may_contain_tp and
+                                hasattr(self.decode, "relocated_code_pointer")):
+                            pointer = self.decode.relocated_code_pointer(image_base + memory.displacement)
+                            if pointer is not None:
+                                state.set_image(item.value, pointer["target"])
+                                relocated_pointer_loads[(pc, pointer["slot"], pointer["target"])] = {"load": hex(pc), **pointer}
                         if reg(item.value) == "x29":
                             state.fp = (
                                 next(iter(alias))
@@ -1817,6 +1855,10 @@ class Audit:
                  "protected_min_offset": low, "protected_end_offset": high}
                 for pc, start, width, low, high in sorted(image_stack_separation)
             ],
+            "relocated_pointer_loads": [record for _, record in sorted(relocated_pointer_loads.items())],
+            "indirect_edges": [{"pc": hex(pc), "target": hex(target), "operation": op,
+                                "function": entry}
+                               for (pc, target, op), entry in sorted(indirect_edges.items())],
             "conditional_byte_copies": [
                 {"entry": hex(pc), "source_kind": kind, "source": source,
                  "destination_stack_offset": destination, "bytes": size,
@@ -1907,6 +1949,10 @@ class ElfBindingMetadata:
         self._elf_sha256 = hashlib.sha256(data).hexdigest()
         self.loads = []
         self.relocations = {}
+        self.all_relocations = {}
+        self.relro = None
+        self.function_entry_cache = {}
+        self.function_entry_work = 0
         self.relocation_writes = set()
         self.static_rodata_safe = True
         self.proof = {}
@@ -1949,7 +1995,7 @@ class ElfBindingMetadata:
             kind, flags, offset, address, _, size, memory, _ = struct.unpack_from(
                 "<IIQQQQQQ", data, phoff + index * phsize
             )
-            if kind not in {1, 2, 0x6474E550}:
+            if kind not in {1, 2, 0x6474E550, 0x6474E552}:
                 continue
             if (
                 size > memory
@@ -1964,6 +2010,10 @@ class ElfBindingMetadata:
                 ):
                     raise ValueError("overlapping binding LOAD segments")
                 self.loads.append((address, address + memory, offset, size, flags))
+            elif kind == 0x6474E552:
+                if self.relro is not None:
+                    raise ValueError("duplicate PT_GNU_RELRO")
+                self.relro = (address, memory)
             elif kind == 0x6474E550:
                 if self.eh_header is not None:
                     raise ValueError("duplicate PT_GNU_EH_FRAME")
@@ -2103,6 +2153,7 @@ class ElfBindingMetadata:
                     raise ValueError("duplicate relocation address")
                 seen.add(slot)
                 kind, index = info & 0xFFFFFFFF, info >> 32
+                self.all_relocations[slot] = (index, addend, kind)
                 if kind not in {257, 1025, 1026, 1027} or slot > (1 << 64) - 8 or not any(
                         flags & 2 and begin <= slot and slot + 8 <= end
                         for begin, end, _, _, flags in self.loads):
@@ -2115,6 +2166,72 @@ class ElfBindingMetadata:
                     raise ValueError("PLT/GOT relocation symbol/alignment")
                 self.offset(slot, 8)
                 self.relocations[slot] = (index, addend, kind)
+
+    def function_entry(self, address):
+        """Independent sized-symbol/FDE root; no authenticated-branch claim."""
+        if type(address) is not int or address < 0 or address & 3:
+            return None
+        if address in self.function_entry_cache:
+            return self.function_entry_cache[address]
+        if self.function_entry_work + self.symbol_count > MAX_INDIRECT_SYMBOL_WORK or len(self.function_entry_cache) >= MAX_INDIRECT_ENTRIES:
+            return None
+        self.function_entry_work += self.symbol_count
+        try:
+            root, size, source = self.caller_function(address, with_source=True)
+            result = ({"entry": hex(root), "size": size, "source": source, "elf_sha256": self.elf_sha256}
+                      if root == address else None)
+        except MetadataUnavailable:
+            result = None
+        self.function_entry_cache[address] = result
+        return result
+
+    def relocated_code_pointer(self, address):
+        """Exact RELATIVE value in conditionally sealed Darwin 16KiB RELRO.
+
+        The selected bridge's normal/owned synchronous Image seal and lifetime
+        are trusted explicitly. File bytes alone never grant runtime immutability.
+        """
+        if (not self.trusted_provider_contracts or not self.static_rodata_safe or
+                type(address) is not int or address < 0 or address & 7 or
+                address > (1 << 64) - 8 or self.relro is None):
+            return None
+        begin, size = self.relro
+        end = begin + size
+        if not size or not begin <= address <= end - 8:
+            return None
+        # Match Image::seal's host-page constraints, including reservation gaps.
+        page_begin, page_end = begin & ~16383, (end + 16383) & ~16383
+        if end > ((max(stop for _, stop, _, _, _ in self.loads) + 16383) & ~16383):
+            return None
+        if not any(flags & 2 and start <= begin < stop for start, stop, _, _, flags in self.loads):
+            return None
+        for start, stop, _, _, flags in self.loads:
+            low, high = max(start, page_begin), min(stop, page_end)
+            if low < high and (flags & 1 or flags & 2 and (low < begin or high > end)):
+                return None
+        if not any(flags & 6 == 6 and not flags & 1 and start <= address <= stop - 8
+                   for start, stop, _, _, flags in self.loads):
+            return None
+        relocation = self.all_relocations.get(address)
+        if relocation is None or relocation[0] != 0 or relocation[2] != 1027:
+            return None
+        if not hasattr(self, "sorted_relocation_slots"):
+            self.sorted_relocation_slots = sorted(self.all_relocations)
+        slots = self.sorted_relocation_slots
+        index = bisect_left(slots, address)
+        if ((index and slots[index - 1] + 8 > address) or
+                (index + 1 < len(slots) and slots[index + 1] < address + 8)):
+            return None
+        target = relocation[1]
+        entry = self.function_entry(target)
+        if entry is None:
+            return None
+        return {"slot": hex(address), "target": target, "relocation_type": 1027,
+                "relro_begin": hex(begin), "relro_size": size, "page_size": 16384,
+                "function": entry, "elf_sha256": self.elf_sha256,
+                "bridge_sha256": self.provider_bridge["sha256"] if self.provider_bridge else None,
+                "binding_proof_sha256": self.proof_hash,
+                "scope": "trusted sealed Image in normal/owned synchronous lifetime; no caller/object/PAC proof"}
 
     def readonly_jump_table_bytes(self, address, size):
         # Conditional normal/owned synchronous sealed-Image contract. The
@@ -2981,6 +3098,14 @@ class ElfDecoder:
             "excludes": ["arbitrary-host-cleanup-epochs", "general-Loader-shutdown-quiescence"],
         }
 
+    def relocated_code_pointer(self, address):
+        return self.bindings.relocated_code_pointer(address) if self.bindings is not None else None
+
+    def indirect_function_entry(self, address):
+        if not hasattr(self, "entry_metadata"):
+            self.entry_metadata = self.bindings or ElfBindingMetadata(self.data, "<indirect-entry>")
+        return self.entry_metadata.function_entry(address)
+
     def frame_prologue(self, address):
         def word(pc):
             raw = self.word(pc)
@@ -3200,6 +3325,8 @@ def main():
             "total_steps": MAX_TOTAL_STEPS,
             "caller_prelude_instructions": MAX_CALLER_PRELUDE,
             "byte_copy_bytes": MAX_BYTE_COPY,
+            "indirect_symbol_work_per_module": MAX_INDIRECT_SYMBOL_WORK,
+            "indirect_entry_cache_per_module": MAX_INDIRECT_ENTRIES,
         },
         "sites": results,
         "counts": {

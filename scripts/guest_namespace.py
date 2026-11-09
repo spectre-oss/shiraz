@@ -205,6 +205,30 @@ class NamespaceDecoder:
                        table_address=bias + summary.table_address, branch_base=bias + summary.branch_base,
                        targets=tuple(bias + target for target in summary.targets))
 
+    def indirect_function_entry(self, address):
+        located = self.locate(address)
+        if located is None:
+            return None
+        index, local, decoder = located
+        entry = decoder.indirect_function_entry(local)
+        if entry is None:
+            return None
+        return {**entry, "entry": hex(index * STRIDE + local), "module": self.names[index]}
+
+    def relocated_code_pointer(self, address):
+        located = self.locate(address)
+        if located is None:
+            return None
+        index, local, decoder = located
+        pointer = decoder.relocated_code_pointer(local)
+        if pointer is None:
+            return None
+        bias = index * STRIDE
+        return {**pointer, "slot": hex(bias + local), "target": bias + pointer["target"],
+                "relro_begin": hex(bias + int(pointer["relro_begin"], 16)),
+                "function": {**pointer["function"], "entry": hex(bias + pointer["target"])},
+                "module": self.names[index]}
+
     def caller_frame(self, address):
         located = self.locate(address)
         if located is None:
