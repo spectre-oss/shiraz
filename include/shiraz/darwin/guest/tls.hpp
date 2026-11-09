@@ -18,6 +18,9 @@ public:
 // Ordinary native entries preserve state for the entire pthread lifetime.
 // Uses an explicitly admitted Darwin exit-state SPI; missing capability fails.
 void require_guest_tls_lifetime();
+// Prepared-only allocator admission. Call only after readiness is established;
+// generic pre-prepare entry must retain require_guest_tls_lifetime().
+void require_prepared_guest_tls_lifetime(uintptr_t incoming_sp);
 // Versioned admission contract: live Image reservations and prepared native
 // stack extents cannot overlap. This does not describe arbitrary host memory.
 inline constexpr uint32_t kImageStackExclusionProfile = 1;
@@ -82,6 +85,13 @@ struct MrsAccessTables {
 // Extents only; no row-content, asynchronous lifetime or code-effects claim.
 MrsAccessTables mrs_access_tables() noexcept;
 bool mrs_access_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
+// Scalar owned-cleanup admission metadata, separate from the MRS read set.
+// Extent snapshots and predicates do not establish row lifetime or code effects.
+CachedSelfTable prepared_cleanup_admission_table() noexcept;
+bool prepared_cleanup_admission_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
+// Ordinary prepared-thread snapshot: no ThreadState, TSD or guest-base lookup.
+// Not a post-fork or asynchronous lifetime lease; exact stack membership only.
+bool prepared_guest_cleanup_admitted(uintptr_t incoming_sp) noexcept;
 // Async-signal-safe readiness query only; never initializes native TLS.
 bool guest_tls_prepared() noexcept;
 // Cached pthread-reported extent, published with TLS readiness. This query

@@ -217,7 +217,7 @@ extern "C" void *shiraz_guest_managed_malloc_body(size_t bytes, uintptr_t incomi
   try {
     if (!guest_tls_prepared())
       throw ElfError("managed malloc requires prepared guest TLS");
-    require_guest_tls_lifetime();
+    require_prepared_guest_tls_lifetime(incoming_sp);
     if ((incoming_sp & 15) || !prepared_guest_stack_window(incoming_sp, 160, 0))
       throw ElfError("managed malloc SP outside prepared native stack extent");
     CaptureBoundary transition;

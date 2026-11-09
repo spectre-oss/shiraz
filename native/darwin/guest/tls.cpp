@@ -75,6 +75,9 @@ std::array<std::atomic<uintptr_t>, 4096> prepared_stack_low{}, prepared_stack_hi
 std::array<std::atomic<uintptr_t>, 4096> prepared_guest_bases{};
 std::array<std::atomic<uint64_t>, 4096> prepared_native_ids{};
 std::array<std::atomic<uintptr_t>, 4096> prepared_native_tls_keys{};
+// Only the boolean cleanup_depth || draining is published here. Readers must
+// never recover ThreadState or guest TP storage to decide prepared admission.
+std::array<std::atomic<uintptr_t>, 4096> prepared_cleanup_admission{};
 inline uintptr_t native_tls_key() noexcept {
   uintptr_t key;
   asm volatile("mrs %0, tpidrro_el0" : "=r"(key));
@@ -148,6 +151,11 @@ struct ThreadState {
   ThreadState() {
     slots.base()[bionic::kTlsStackGuardSlot] = guard();
   }
+  void refresh_cleanup_admission() noexcept {
+    if (prepared_index != prepared_threads.size())
+      prepared_cleanup_admission[prepared_index].store(cleanup_depth || draining,
+                                                       std::memory_order_release);
+  }
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
     const auto thread = pthread_self();
@@ -164,8 +172,9 @@ struct ThreadState {
     }
     auto &domains = memory_domains();
     std::lock_guard<std::mutex> lock(domains.mutex);
-    if (!mrs_access_tables_disjoint_stack(high - size, high))
-      throw ElfError("native stack overlaps prepared MRS cache table");
+    if (!mrs_access_tables_disjoint_stack(high - size, high) ||
+        !prepared_cleanup_admission_disjoint_stack(high - size, high))
+      throw ElfError("native stack overlaps prepared TLS admission/cache table");
     for (size_t i = 0; i < prepared_threads.size(); ++i)
       if (reinterpret_cast<uintptr_t>(prepared_threads[i].load(std::memory_order_acquire)) > 1 &&
           prepared_native_tls_keys[i].load(std::memory_order_relaxed) == native_key)
@@ -192,6 +201,8 @@ struct ThreadState {
         prepared_native_ids[i].store(native_id, std::memory_order_relaxed);
         prepared_native_tls_keys[i].store(native_key, std::memory_order_relaxed);
         prepared_guest_bases[i].store(reinterpret_cast<uintptr_t>(slots.base()), std::memory_order_relaxed);
+        // An owned cleanup scope can precede this first publication.
+        prepared_cleanup_admission[i].store(cleanup_depth || draining, std::memory_order_relaxed);
         prepared_threads[i].store(thread, std::memory_order_release);
         return;
       }
@@ -266,6 +277,7 @@ struct ThreadState {
       if (stack == domains.stacks.end() || stack->second != high) std::abort();
       // Keep this cache live through all guest cleanup above, then invalidate
       // it while we still own the row and domains lock, before any row reuse.
+      prepared_cleanup_admission[prepared_index].store(0, std::memory_order_release);
       prepared_guest_bases[prepared_index].store(0, std::memory_order_relaxed);
       prepared_native_ids[prepared_index].store(0, std::memory_order_relaxed);
       prepared_native_tls_keys[prepared_index].store(0, std::memory_order_relaxed);
@@ -282,6 +294,7 @@ void destroy_state(void *opaque) {
   // execute so nested TLS access and atexit registration see this live state.
   if (pthread_setspecific(state_key, current)) std::abort();
   current->draining = true;
+  current->refresh_cleanup_admission();
   delete current;
   if (pthread_setspecific(state_key, nullptr)) std::abort();
 }
@@ -338,6 +351,34 @@ bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
 }
 bool mrs_access_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
   return cache_tables_disjoint_stack(mrs_access_tables(), low, high);
+}
+CachedSelfTable prepared_cleanup_admission_table() noexcept {
+  static_assert(sizeof(prepared_cleanup_admission) == 32768);
+  return {"admission", reinterpret_cast<uintptr_t>(prepared_cleanup_admission.data()),
+          sizeof(prepared_cleanup_admission)};
+}
+bool prepared_cleanup_admission_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  if (!low || high <= low) return false;
+  const auto table = prepared_cleanup_admission_table();
+  if (!table.address || !table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
+  return high <= table.address || table.address + table.bytes <= low;
+}
+bool prepared_guest_cleanup_admitted(uintptr_t incoming_sp) noexcept {
+  const auto key = native_tls_key();
+  if (!key || !incoming_sp || (incoming_sp & 15)) return false;
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1 ||
+        prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (low >= high || incoming_sp < low || incoming_sp >= high ||
+        prepared_cleanup_admission[i].load(std::memory_order_acquire) != 1) return false;
+    return prepared_threads[i].load(std::memory_order_acquire) == owner &&
+           prepared_native_tls_keys[i].load(std::memory_order_acquire) == key &&
+           prepared_cleanup_admission[i].load(std::memory_order_acquire) == 1;
+  }
+  return false;
 }
 GuestImageReservation::GuestImageReservation(uintptr_t base, uint64_t bytes) : base_(base) {
   if (!base || !bytes || bytes > UINTPTR_MAX - base)
@@ -420,6 +461,7 @@ GuestTlsCleanupScope::GuestTlsCleanupScope() noexcept {
     auto &current = live_state();
     if (current.cleanup_depth == 4096) std::abort();
     ++current.cleanup_depth;
+    current.refresh_cleanup_admission();
     state_ = &current;
   } catch (...) { std::abort(); }
 }
@@ -431,7 +473,10 @@ GuestTlsCleanupScope::~GuestTlsCleanupScope() {
   // Always drain at the outer callback boundary. Native TLV bookkeeping can
   // itself be torn down before late callbacks, and there may be no later TSD
   // round. Keep depth/draining in this live owned object, never another TLV.
+  // Keep admission true across an immediate handoff to draining. The state
+  // remains owned until destroy_state retires its row after all callbacks.
   if (!current->cleanup_depth && !current->draining) destroy_state(current);
+  else current->refresh_cleanup_admission();
 }
 void require_guest_tls_lifetime() {
   if (!pthread_self_is_exiting_np)
@@ -446,6 +491,18 @@ void require_guest_tls_lifetime() {
   // each JNI return would prematurely destroy state used by its next JNI call;
   // another native destructor registration may already have missed round four.
   if (!current || (!current->draining && !current->cleanup_depth))
+    throw std::runtime_error("unsupported guest entry during unowned native thread teardown");
+}
+void require_prepared_guest_tls_lifetime(uintptr_t incoming_sp) {
+  // Readiness is the caller's precondition. Unlike generic pre-prepare entry,
+  // the late path consumes only scalar prepared-row metadata, never TSD state.
+  if (!pthread_self_is_exiting_np)
+    throw std::runtime_error("Darwin native thread exit-state query unavailable");
+  const int exiting = pthread_self_is_exiting_np();
+  if (!exiting) return;
+  if (exiting != 1)
+    throw std::runtime_error("invalid Darwin native thread exit state");
+  if (!prepared_guest_cleanup_admitted(incoming_sp))
     throw std::runtime_error("unsupported guest entry during unowned native thread teardown");
 }
 void prepare_guest_tls() {

@@ -40,6 +40,19 @@ static bool prepared_mrs_cache_matches() {
   errno = saved_errno;
   return matches;
 }
+static uintptr_t current_native_sp() noexcept {
+  uintptr_t value;
+  __asm__ volatile("mov %0, sp" : "=r"(value));
+  return value;
+}
+static bool prepared_cleanup_matches() {
+  const auto sp = current_native_sp();
+  if (!prepared_guest_cleanup_admitted(sp)) return false;
+  try { require_prepared_guest_tls_lifetime(sp); }
+  catch (...) { return false; }
+  return true;
+}
+static std::atomic<unsigned> ready_unowned_late_checks{0};
 static Loader *resident;
 static std::atomic<int> late_errors{0}, late_callbacks{0}, host_late_calls{0};
 static uintptr_t late_registration, late_destructor, late_first_use;
@@ -121,10 +134,25 @@ struct HostLateCleanup {
   bool armed = false;
   ~HostLateCleanup() {
     if (!armed) return;
+    // Observe actual host ordering rather than assuming language TLS always
+    // precedes the native state-key destructor. An unpublished owned scope is
+    // still a required path below when this earlier row is already retired.
+    if (guest_tls_prepared()) {
+      bool refused = false;
+      const auto sp = current_native_sp();
+      if (prepared_guest_cleanup_admitted(sp)) ++late_errors;
+      try { require_prepared_guest_tls_lifetime(sp); }
+      catch (const std::runtime_error &error) {
+        refused = !std::strcmp(error.what(), "unsupported guest entry during unowned native thread teardown");
+      }
+      if (refused) ++ready_unowned_late_checks;
+      else ++late_errors;
+    }
     GuestTlsCleanupScope cleanup;
     prepare_guest_tls();
     if (!guest_tls_prepared()) ++late_errors;
     if (!prepared_mrs_cache_matches()) ++late_errors;
+    if (!prepared_cleanup_matches()) ++late_errors;
     auto result = invoke(reinterpret_cast<void *>(late_registration), {
         Argument::integer(late_destructor, ArgumentType::Int64),
         Argument::integer(0, ArgumentType::Int64), Argument::integer(0, ArgumentType::Int64)});
@@ -138,6 +166,7 @@ static void late_host_cleanup(void *) {
   prepare_guest_tls();
   if (!guest_tls_prepared()) ++late_errors;
   if (!prepared_mrs_cache_matches()) ++late_errors;
+  if (!prepared_cleanup_matches()) ++late_errors;
   auto result = invoke(reinterpret_cast<void *>(late_registration), {
       Argument::integer(late_destructor, ArgumentType::Int64),
       Argument::integer(0, ArgumentType::Int64), Argument::integer(0, ArgumentType::Int64)});
@@ -387,9 +416,169 @@ static void heap_domain_tests() {
   std::cout << "M5_HEAP_DOMAIN_PASS relocation=1 strong_failure=1 move_token=1 image_orders=2 "
                "stack_orders=2 retry=1 races=32 overflow=1 adapter_cell_spans=1\n";
 }
+static pthread_key_t ready_unowned_key;
+static std::atomic<unsigned> isolated_ready{0}, isolated_refused{0}, isolated_errors{0};
+static void ready_unowned_cleanup(void *) {
+  const auto sp = current_native_sp();
+  if (!guest_tls_prepared()) { ++isolated_errors;return; }
+  ++isolated_ready;
+  if (prepared_guest_cleanup_admitted(sp)) ++isolated_errors;
+  try { require_prepared_guest_tls_lifetime(sp);++isolated_errors; }
+  catch (const std::runtime_error &error) {
+    if (!std::strcmp(error.what(), "unsupported guest entry during unowned native thread teardown"))
+      ++isolated_refused;
+    else ++isolated_errors;
+  } catch (...) { ++isolated_errors; }
+}
+static int isolated_ready_unowned_test() {
+  // Fresh exec places this native key before lazy state_key creation. The
+  // result asserts this host's observed order, not a portable POSIX ordering.
+  require(pthread_key_create(&ready_unowned_key, ready_unowned_cleanup) == 0,
+          "fresh ready-unowned native key");
+  std::thread worker([] {
+    prepare_guest_tls();
+    require(!prepared_guest_cleanup_admitted(current_native_sp()),
+            "fresh prepared row starts without cleanup admission");
+    if (pthread_setspecific(ready_unowned_key, reinterpret_cast<void *>(uintptr_t(1)))) std::abort();
+  });
+  worker.join();
+  require(pthread_key_delete(ready_unowned_key) == 0, "delete fresh ready-unowned key");
+  require(isolated_ready == 1 && isolated_refused == 1 && isolated_errors == 0,
+          "observed native key order exercises a ready but unowned late refusal");
+  std::cout << "M5_PREPARED_CLEANUP_READY_UNOWNED_PASS observed_ready=1 refused=1 "
+               "native_tsd_order=observed_current_host async_proof=0 consumer_proof=0\n";
+  return 0;
+}
+static void run_ready_unowned_helper(const char *executable) {
+  const auto path = std::filesystem::canonical(executable).string();
+  const auto child = fork();
+  require(child >= 0, "spawn ready-unowned fresh exec");
+  if (!child) {
+    execl(path.c_str(), path.c_str(), "--prepared-unowned-late", static_cast<char *>(nullptr));
+    std::_Exit(98);
+  }
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  int status = 0;
+  for (;;) {
+    const auto result = waitpid(child, &status, WNOHANG);
+    if (result == child) break;
+    if (result < 0) {
+      if (errno != EINTR)
+        throw std::runtime_error("ready-unowned fresh exec wait failed");
+      if (std::chrono::steady_clock::now() >= deadline)
+        throw std::runtime_error("ready-unowned fresh exec wait interrupted beyond deadline");
+      continue;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      // waitpid just reported a still-owned nonterminal child. Never signal a
+      // remembered PID after ECHILD or another wait error.
+      (void)kill(child, SIGKILL);
+      while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+      throw std::runtime_error("ready-unowned fresh exec exceeded deadline");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  require(WIFEXITED(status) && WEXITSTATUS(status) == 0,
+          "fresh ready-unowned helper verifies real refusal");
+}
+// These checks inspect real prepared rows and native stack values. They do
+// not create arbitrary stacks or prove asynchronous admission/lifetime safety.
+static void prepared_cleanup_admission_tests() {
+  const auto table = prepared_cleanup_admission_table();
+  require(table.role && !std::strcmp(table.role, "admission") && table.address > 1 &&
+              table.bytes == 32768 && table.bytes < UINTPTR_MAX - table.address,
+          "complete scalar cleanup-admission table extent");
+  const auto end = table.address + uintptr_t(table.bytes);
+  require(!prepared_cleanup_admission_disjoint_stack(table.address, end) &&
+              !prepared_cleanup_admission_disjoint_stack(table.address+1, end-1) &&
+              !prepared_cleanup_admission_disjoint_stack(table.address-1, table.address+1) &&
+              !prepared_cleanup_admission_disjoint_stack(end-1, end+1) &&
+              !prepared_cleanup_admission_disjoint_stack(0, 1) &&
+              !prepared_cleanup_admission_disjoint_stack(3, 2) &&
+              !prepared_cleanup_admission_disjoint_stack(2, 2) &&
+              prepared_cleanup_admission_disjoint_stack(table.address-1, table.address) &&
+              prepared_cleanup_admission_disjoint_stack(end, end+1),
+          "cleanup-admission table rejects overlapping and invalid stack extents");
+  std::atomic<unsigned> checks{0}, drains{0};
+  // Multiple epochs on one ordinary native thread force retirement and row
+  // reuse without relying on reuse of a pthread key or native stack address.
+  std::thread epochs([&] {
+    for (unsigned epoch = 0; epoch < 8; ++epoch) {
+      const auto sp = current_native_sp();
+      require(!guest_tls_prepared() && !prepared_guest_cleanup_admitted(sp),
+              "unprepared and retired epochs cannot inherit cleanup admission");
+      prepare_guest_tls();
+      require(guest_tls_prepared() && !prepared_guest_cleanup_admitted(sp),
+              "ordinary ready row has no owned-cleanup permission");
+      require_prepared_guest_tls_lifetime(sp); // Ordinary entry remains allowed.
+      GuestThreadKeyHandle key;
+      {
+        GuestTlsCleanupScope outer;
+        require(prepared_cleanup_matches(), "outer owned cleanup publishes admission");
+        {
+          GuestTlsCleanupScope inner;
+          require(prepared_cleanup_matches(), "nested owned cleanup retains admission");
+        }
+        require(prepared_cleanup_matches(), "depth two-to-one retains admission");
+        require(!prepared_guest_cleanup_admitted(0) &&
+                    !prepared_guest_cleanup_admitted(UINTPTR_MAX),
+                "invalid SP cannot consume an owned prepared row");
+        key = make_guest_thread_key(closure([&](Capture &) {
+          require(prepared_cleanup_matches(), "drain handoff retains prepared admission");
+          ++drains;
+        }));
+        require(set_guest_thread_value(key, reinterpret_cast<void *>(uintptr_t(1))) == 0,
+                "register real drain callback before outer scope exit");
+      }
+      require(!guest_tls_prepared() && !prepared_guest_cleanup_admitted(sp),
+              "outer cleanup retires admission before row reuse");
+      delete_guest_thread_key(key);
+      ++checks;
+    }
+    {
+      GuestTlsCleanupScope before_publication;
+      require(!guest_tls_prepared() && !prepared_guest_cleanup_admitted(current_native_sp()),
+              "owned but unpublished state has no prepared-row capability");
+      // The generic pre-prepare guard must still admit this ordinary scope.
+      require_guest_tls_lifetime();
+      prepare_guest_tls();
+      require(prepared_cleanup_matches(), "first publication snapshots existing owned depth");
+    }
+    require(!guest_tls_prepared() && !prepared_guest_cleanup_admitted(current_native_sp()),
+            "first-publication scope retires its row");
+  });
+  epochs.join();
+  require(checks == 8 && drains == 8, "all retired epochs and drain handoffs executed");
+  std::atomic<uintptr_t> stacks[2]{};
+  std::atomic<unsigned> foreign_checked{0};
+  std::thread workers[2];
+  for (unsigned i = 0; i < 2; ++i) workers[i] = std::thread([&, i] {
+    GuestTlsCleanupScope cleanup;
+    prepare_guest_tls();
+    const auto sp = current_native_sp();
+    stacks[i].store(sp, std::memory_order_release);
+    domain_wait([&] { return stacks[1-i].load(std::memory_order_acquire) != 0; });
+    require(prepared_guest_cleanup_admitted(sp) &&
+                !prepared_guest_cleanup_admitted(stacks[1-i].load(std::memory_order_acquire)),
+            "native identity cannot consume another live prepared stack");
+    ++foreign_checked;
+    domain_wait([&] { return foreign_checked.load() == 2; });
+  });
+  for (auto &worker : workers) worker.join();
+  std::cout << "M5_PREPARED_CLEANUP_PASS epochs=8 drain_handoffs=8 nested_depth=2 "
+               "owned_before_publication=1 foreign_stacks=2 table_bytes=32768 "
+               "async_proof=0 consumer_proof=0\n";
+}
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && !std::strcmp(argv[1], "--prepared-unowned-late")) {
+      // Bound the helper even if parent waits are repeatedly interrupted.
+      alarm(10);
+      return isolated_ready_unowned_test();
+    }
     require(argc == 2, "usage: tls-probe fixture-directory");
+    run_ready_unowned_helper(argv[0]);
+    prepared_cleanup_admission_tests();
     resident = new Loader({std::filesystem::canonical(argv[1])}, allocation_tracking_personality());
     auto &loader = *resident;
     auto *module = loader.open("libtls-fixture.so");
@@ -513,6 +702,9 @@ int main(int argc, char **argv) {
     int status;
     require(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 97,
             "stack-check failure aborts instead of reporting success");
+    std::cout << "M5_PREPARED_CLEANUP_LATE_PASS owned_host_callbacks=1 owned_native_rounds=4 "
+                 "ready_unowned_observed=" << ready_unowned_late_checks.load()
+              << " host_ordering_dependent=1 async_proof=0 consumer_proof=0\n";
     std::cout << "M5_TLS_MRS_CACHE_PASS direct_accessor=1 ordinary_threads=4 "
                  "late_native_key_rounds=4 host_late_cleanup=1 errno=1 lifetime_lease=0\n";
     std::cout << "M5_TLS_PASS emutls=upstream peer_dso=1 templates=1 zero=1 alignment=128 "
