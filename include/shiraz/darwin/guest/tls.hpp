@@ -52,6 +52,11 @@ public:
 bool registered_guest_heap_contains(uintptr_t pointer, uint64_t bytes);
 void prepare_guest_tls();
 void *guest_tls_base();
+// Native pthread identity for an already prepared ordinary stack. This leaf
+// reads the native read-only TLS register and published cache, without native
+// calls or TLV access. Unsupported/unprepared stacks trap. This is not a fork
+// validity or arbitrary asynchronous-lifetime guarantee.
+extern "C" uintptr_t shiraz_guest_cached_pthread_self() noexcept;
 // Async-signal-safe readiness query only; never initializes native TLS.
 bool guest_tls_prepared() noexcept;
 // Cached pthread-reported extent, published with TLS readiness. This query

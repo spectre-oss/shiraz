@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/memory.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
+#include <atomic>
+#include <csignal>
 #include <filesystem>
 #include <iostream>
 #include <pthread.h>
+#include <thread>
+#include <set>
+#include <sys/wait.h>
+#include <unistd.h>
 using namespace shiraz::guest;
 // Detached threads can finish host key-destructor epilogues after notifying the
 // guest. Match NativeBridge's process-resident image lifetime rather than racing
 // an ELF unload against their final return instructions.
 static Loader *resident = nullptr;
 static Loader *other_resident = nullptr;
+static void unprepared_refusal(int) { std::_Exit(0); }
+static void foreign_stack_refusal(int) { (void)shiraz_guest_cached_pthread_self(); std::_Exit(2); }
 static void require(bool value, const char *message) {
   if (!value) throw std::runtime_error(message);
 }
@@ -18,6 +27,73 @@ static Argument pointer(const void *value) {
 int main(int argc, char **argv) {
   try {
     require(argc == 2, "usage: thread-probe fixture-directory");
+    const pid_t child = fork();
+    require(child >= 0, "fork unprepared identity check");
+    if (!child) {
+      if (guest_tls_prepared() || std::signal(SIGTRAP, unprepared_refusal) == SIG_ERR) std::_Exit(1);
+      (void)shiraz_guest_cached_pthread_self();
+      std::_Exit(2);
+    }
+    int status = 0;
+    pid_t waited;
+    do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+    require(waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+            "unprepared pthread identity must trap rather than return a value");
+    std::atomic<unsigned> identity_errors{0};
+    std::atomic<unsigned> identity_ready{0};
+    uintptr_t native_keys[4]{};
+    std::thread identity_workers[4];
+    for (unsigned index = 0; index < 4; ++index) identity_workers[index] = std::thread([&, index] {
+      prepare_guest_tls();
+      uintptr_t key;
+      asm volatile("mrs %0, tpidrro_el0" : "=r"(key));
+      native_keys[index] = key;
+      ++identity_ready;
+      while (identity_ready < 4) std::this_thread::yield();
+      const auto expected = reinterpret_cast<uintptr_t>(pthread_self());
+      for (unsigned i = 0; i < 5000; ++i) {
+        errno = ELOOP;
+        *guest_errno_location() = EINVAL;
+        if (shiraz_guest_cached_pthread_self() != expected) ++identity_errors;
+        if (errno != ELOOP || *guest_errno_location() != EINVAL) ++identity_errors;
+        uintptr_t observed;
+        asm volatile("mrs %0, tpidrro_el0" : "=r"(observed));
+        if (observed != key) ++identity_errors;
+        if (!(i % 16)) std::this_thread::yield();
+      }
+    });
+    for (auto &worker : identity_workers) worker.join();
+    require(!identity_errors, "cached identity matches native workers and preserves errnos");
+    require(std::set<uintptr_t>(native_keys, native_keys + 4).size() == 4 &&
+                std::set<uintptr_t>(native_keys, native_keys + 4).count(0) == 0,
+            "live native read-only TLS keys are unique and nonzero");
+    prepare_guest_tls();
+    std::atomic<uintptr_t> foreign_low{0};
+    std::atomic<bool> foreign_stop{false};
+    std::thread parked([&] {
+      prepare_guest_tls();
+      auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+      auto size = pthread_get_stacksize_np(pthread_self());
+      if (size < 192 * 1024) std::_Exit(1);
+      foreign_low = high - size;
+      while (!foreign_stop) std::this_thread::yield();
+    });
+    while (!foreign_low) std::this_thread::yield();
+    const pid_t alternate = fork();
+    require(alternate >= 0, "fork foreign-stack identity check");
+    if (!alternate) {
+      stack_t stack{};stack.ss_sp = reinterpret_cast<void *>(foreign_low + 64 * 1024);stack.ss_size = 64 * 1024;
+      struct sigaction action{};action.sa_handler = foreign_stack_refusal;action.sa_flags = SA_ONSTACK;
+      sigemptyset(&action.sa_mask);
+      if (sigaltstack(&stack, nullptr) || sigaction(SIGUSR1, &action, nullptr) ||
+          std::signal(SIGTRAP, unprepared_refusal) == SIG_ERR) std::_Exit(1);
+      raise(SIGUSR1);std::_Exit(3);
+    }
+    do { waited = waitpid(alternate, &status, 0); } while (waited < 0 && errno == EINTR);
+    foreign_stop = true;parked.join();
+    require(waited == alternate && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+            "SP inside another prepared thread stack must not return that thread's identity");
+    std::cout << "M5_SELF_CACHE_PASS workers=4 checks=20000 native_identity=1 errnos=1 unprepared_trap=1 foreign_stack_trap=1 native_keys=unique-stable-observed\n";
     resident = new Loader({std::filesystem::canonical(argv[1])}, native_personality(
         [](const void *code) { return resident && resident->contains_code(code); }));
     auto &loader = *resident;
@@ -28,9 +104,9 @@ int main(int argc, char **argv) {
           .result_integers[0];
     };
     auto self = loader.symbol(module, "pthread_self");
-    require(self.abi == "native/pthread-self-noargs" &&
-                self.address == reinterpret_cast<uintptr_t>(&::pthread_self),
-            "pthread_self binds the identical native no-argument ABI directly");
+    require(self.abi == "prepared/pthread-self-noargs" &&
+                self.address == reinterpret_cast<uintptr_t>(&shiraz_guest_cached_pthread_self),
+            "pthread_self binds the prepared-stack no-argument identity adapter");
     errno = ELOOP;
     require(call("self_identity", {}) == reinterpret_cast<uintptr_t>(pthread_self()) &&
                 errno == ELOOP && *guest_errno_location() == 731,

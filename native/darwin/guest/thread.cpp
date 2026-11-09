@@ -34,13 +34,13 @@ Argument pointer(const void *value) {
 }
 ProviderExport self_export() {
   // No arguments and a pointer result have identical Darwin/AAPCS64 calling
-  // conventions. Bind the native entry directly: no closure capture, boundary
-  // TLS or errno wrapper is needed. This is an opaque native pthread handle,
-  // never a guest TCB pointer. The ABI tag does not certify the native body or
-  // authorize the instruction analyzer to ignore its memory effects.
+  // conventions. The prepared-stack leaf returns the exact native handle
+  // without executing Darwin's pthread_self body on a guest call. No closure,
+  // TLV lookup or errno wrapper is needed. Its ABI tag alone grants no analyzer
+  // memory-effect exemption; bounded body/data-range proof remains separate.
   static_assert(std::is_pointer_v<pthread_t> && sizeof(pthread_t) == 8);
-  return {"pthread_self", "LIBC", reinterpret_cast<uintptr_t>(&::pthread_self),
-          SymbolKind::Function, "native/pthread-self-noargs", false};
+  return {"pthread_self", "LIBC", reinterpret_cast<uintptr_t>(&shiraz_guest_cached_pthread_self),
+          SymbolKind::Function, "prepared/pthread-self-noargs", false};
 }
 void *call_guest(void *function, void *argument) {
   try {

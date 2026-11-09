@@ -74,6 +74,12 @@ std::array<std::atomic<pthread_t>, 4096> prepared_threads{};
 std::array<std::atomic<uintptr_t>, 4096> prepared_stack_low{}, prepared_stack_high{};
 std::array<std::atomic<uintptr_t>, 4096> prepared_guest_bases{};
 std::array<std::atomic<uint64_t>, 4096> prepared_native_ids{};
+std::array<std::atomic<uintptr_t>, 4096> prepared_native_tls_keys{};
+inline uintptr_t native_tls_key() noexcept {
+  uintptr_t key;
+  asm volatile("mrs %0, tpidrro_el0" : "=r"(key));
+  return key;
+}
 static_assert(std::atomic<pthread_t>::is_always_lock_free);
 static_assert(std::atomic<uintptr_t>::is_always_lock_free);
 static_assert(std::atomic<uint64_t>::is_always_lock_free);
@@ -145,6 +151,8 @@ struct ThreadState {
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
     const auto thread = pthread_self();
+    const auto native_key = native_tls_key();
+    if (!native_key) throw ElfError("native read-only TLS identity unavailable");
     uint64_t native_id = 0;
     if (pthread_threadid_np(nullptr, &native_id) || !native_id)
       throw ElfError("native thread identity unavailable");
@@ -156,6 +164,10 @@ struct ThreadState {
     }
     auto &domains = memory_domains();
     std::lock_guard<std::mutex> lock(domains.mutex);
+    for (size_t i = 0; i < prepared_threads.size(); ++i)
+      if (reinterpret_cast<uintptr_t>(prepared_threads[i].load(std::memory_order_acquire)) > 1 &&
+          prepared_native_tls_keys[i].load(std::memory_order_relaxed) == native_key)
+        throw ElfError("duplicate prepared native read-only TLS identity");
     if (overlaps_image(domains, high - size, high))
       throw ElfError("native stack overlaps guest image reservation");
     if (overlaps_range(domains.heaps, high - size, high))
@@ -176,6 +188,7 @@ struct ThreadState {
         prepared_stack_low[i].store(high - size, std::memory_order_relaxed);
         prepared_stack_high[i].store(high, std::memory_order_relaxed);
         prepared_native_ids[i].store(native_id, std::memory_order_relaxed);
+        prepared_native_tls_keys[i].store(native_key, std::memory_order_relaxed);
         prepared_guest_bases[i].store(reinterpret_cast<uintptr_t>(slots.base()), std::memory_order_relaxed);
         prepared_threads[i].store(thread, std::memory_order_release);
         return;
@@ -253,6 +266,7 @@ struct ThreadState {
       // it while we still own the row and domains lock, before any row reuse.
       prepared_guest_bases[prepared_index].store(0, std::memory_order_relaxed);
       prepared_native_ids[prepared_index].store(0, std::memory_order_relaxed);
+      prepared_native_tls_keys[prepared_index].store(0, std::memory_order_relaxed);
       prepared_threads[prepared_index].store(nullptr, std::memory_order_release);
       domains.stacks.erase(stack);
     }
@@ -449,6 +463,25 @@ bool guest_tls_prepared() noexcept {
   for (auto &thread : prepared_threads)
     if (thread.load(std::memory_order_acquire) == current) return true;
   return false;
+}
+extern "C" uintptr_t shiraz_guest_cached_pthread_self() noexcept {
+  uintptr_t sp;
+  asm volatile("mov %0, sp" : "=r"(sp));
+  const auto key = native_tls_key();
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1) continue;
+    if (!key || prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (sp < low || sp >= high) continue;
+    if (prepared_threads[i].load(std::memory_order_acquire) != owner ||
+        prepared_native_tls_keys[i].load(std::memory_order_acquire) != key) continue;
+    return reinterpret_cast<uintptr_t>(owner);
+  }
+  // Returning null would invent a successful pthread_self result. Guest entry
+  // must prepare its native stack before reaching this no-argument adapter.
+  __builtin_trap();
 }
 bool prepared_guest_stack_disjoint(uintptr_t pointer, uint64_t bytes) noexcept {
   if (!pointer || !bytes || bytes > UINTPTR_MAX - pointer) return false;
