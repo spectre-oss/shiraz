@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <thread>
 #include <set>
+#include <string>
 #include <sys/wait.h>
 #include <unistd.h>
 using namespace shiraz::guest;
@@ -50,6 +51,54 @@ int main(int argc, char **argv) {
     const auto native_high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
     require(cached_self_tables_disjoint_stack(native_high - pthread_get_stacksize_np(pthread_self()), native_high),
             "actual prepared stack is disjoint from all complete cache tables");
+    const auto mrs_tables = mrs_access_tables();
+    static_assert(sizeof(mrs_tables.tables) / sizeof(mrs_tables.tables[0]) == 5);
+    require(mrs_tables.rows == 4096, "MRS accessor table row bound");
+    std::set<std::string> mrs_roles;
+    uintptr_t mrs_first = UINTPTR_MAX, mrs_last = 0;
+    for (const auto &table : mrs_tables.tables) {
+      require(table.role && mrs_roles.insert(table.role).second,
+              "MRS accessor table roles are nonnull and unique");
+      require(table.address > 1 && table.bytes == 32768 && table.bytes < UINTPTR_MAX - table.address,
+              "MRS accessor complete table extent with room for edge probes");
+      const uintptr_t end = table.address + uintptr_t(table.bytes);
+      require(!mrs_access_tables_disjoint_stack(table.address, end) &&
+                  !mrs_access_tables_disjoint_stack(table.address + 1, end - 1) &&
+                  !mrs_access_tables_disjoint_stack(table.address, table.address + 1) &&
+                  !mrs_access_tables_disjoint_stack(end - 1, end) &&
+                  !mrs_access_tables_disjoint_stack(table.address - 1, table.address + 1) &&
+                  !mrs_access_tables_disjoint_stack(end - 1, end + 1),
+              "every MRS table refuses whole, interior and boundary-crossing overlap");
+      if (std::string(table.role) == "bases")
+        require(cached_self_tables_disjoint_stack(table.address, end) &&
+                    !mrs_access_tables_disjoint_stack(table.address, end),
+                "fifth MRS bases table adds exclusion beyond the four cached-self tables");
+      for (const auto &other : mrs_tables.tables) {
+        if (&table == &other) continue;
+        require(other.bytes <= UINTPTR_MAX - other.address &&
+                    (end <= other.address || other.address + other.bytes <= table.address),
+                "MRS accessor table extents are pairwise disjoint");
+      }
+      mrs_first = std::min(mrs_first, table.address);
+      mrs_last = std::max(mrs_last, end);
+    }
+    require(mrs_roles == std::set<std::string>({"owners", "keys", "low", "high", "bases"}),
+            "MRS accessor snapshot includes exactly the five read tables");
+    require(mrs_first > 1 && mrs_last < UINTPTR_MAX &&
+                !mrs_access_tables_disjoint_stack(0, 1) &&
+                !mrs_access_tables_disjoint_stack(0, UINTPTR_MAX) &&
+                !mrs_access_tables_disjoint_stack(2, 2) &&
+                !mrs_access_tables_disjoint_stack(3, 2) &&
+                !mrs_access_tables_disjoint_stack(UINTPTR_MAX, 0) &&
+                mrs_access_tables_disjoint_stack(mrs_first - 1, mrs_first) &&
+                mrs_access_tables_disjoint_stack(mrs_last, mrs_last + 1),
+            "MRS table exclusion refuses invalid bounds and admits adjacent outside-union ranges");
+    require(mrs_access_tables_disjoint_stack(native_high - pthread_get_stacksize_np(pthread_self()), native_high),
+            "actual native stack is disjoint from all five complete MRS accessor tables");
+    // Extent predicates only: these synthetic overlap ranges are never used as
+    // actual stacks, and the snapshot grants no row-lifetime or consumer proof.
+    std::cout << "M5_MRS_TABLE_EXCLUSION_PASS tables=5 rows=4096 predicate_only=1 "
+                 "execution_claim=0 consumer_proof=0\n";
     const pid_t child = fork();
     require(child >= 0, "fork unprepared identity check");
     if (!child) {

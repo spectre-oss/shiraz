@@ -164,8 +164,8 @@ struct ThreadState {
     }
     auto &domains = memory_domains();
     std::lock_guard<std::mutex> lock(domains.mutex);
-    if (!cached_self_tables_disjoint_stack(high - size, high))
-      throw ElfError("native stack overlaps cached pthread identity table");
+    if (!mrs_access_tables_disjoint_stack(high - size, high))
+      throw ElfError("native stack overlaps prepared MRS cache table");
     for (size_t i = 0; i < prepared_threads.size(); ++i)
       if (reinterpret_cast<uintptr_t>(prepared_threads[i].load(std::memory_order_acquire)) > 1 &&
           prepared_native_tls_keys[i].load(std::memory_order_relaxed) == native_key)
@@ -315,15 +315,29 @@ CachedSelfTables cached_pthread_self_tables() noexcept {
            {"high", reinterpret_cast<uintptr_t>(prepared_stack_high.data()), sizeof(prepared_stack_high)}},
           prepared_threads.size()};
 }
-bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
-  if (!low || high <= low) return false;
-  const auto cache = cached_pthread_self_tables();
-  if (cache.rows != 4096) return false;
+MrsAccessTables mrs_access_tables() noexcept {
+  static_assert(sizeof(prepared_guest_bases) == 32768);
+  const auto identity = cached_pthread_self_tables();
+  return {{identity.tables[0], identity.tables[1], identity.tables[2], identity.tables[3],
+           {"bases", reinterpret_cast<uintptr_t>(prepared_guest_bases.data()), sizeof(prepared_guest_bases)}},
+          identity.rows};
+}
+namespace {
+template <typename Tables>
+bool cache_tables_disjoint_stack(const Tables &cache, uintptr_t low, uintptr_t high) noexcept {
+  if (!low || high <= low || cache.rows != 4096) return false;
   for (const auto &table : cache.tables) {
-    if (!table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
+    if (!table.address || !table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
     if (low < table.address + table.bytes && table.address < high) return false;
   }
   return true;
+}
+} // namespace
+bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  return cache_tables_disjoint_stack(cached_pthread_self_tables(), low, high);
+}
+bool mrs_access_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  return cache_tables_disjoint_stack(mrs_access_tables(), low, high);
 }
 GuestImageReservation::GuestImageReservation(uintptr_t base, uint64_t bytes) : base_(base) {
   if (!base || !bytes || bytes > UINTPTR_MAX - base)

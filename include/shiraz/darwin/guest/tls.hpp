@@ -73,6 +73,15 @@ CachedSelfTables cached_pthread_self_tables() noexcept;
 // Pure extent predicate over the four real cache tables. It neither registers
 // a stack nor proves that caller-supplied addresses are mapped stack memory.
 bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
+// Default MRS lookup additionally reads the guest-base table. Keep the four
+// pthread-self tables/profile stable while checking the whole MRS read set.
+struct MrsAccessTables {
+  CachedSelfTable tables[5];
+  uint64_t rows;
+};
+// Extents only; no row-content, asynchronous lifetime or code-effects claim.
+MrsAccessTables mrs_access_tables() noexcept;
+bool mrs_access_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
 // Async-signal-safe readiness query only; never initializes native TLS.
 bool guest_tls_prepared() noexcept;
 // Cached pthread-reported extent, published with TLS readiness. This query
