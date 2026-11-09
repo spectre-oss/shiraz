@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/tls.hpp"
+#include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/lifecycle.hpp"
 #include "shiraz/darwin/guest/instruction.hpp"
 #include "guest_io.hpp"
@@ -195,6 +196,11 @@ struct ThreadState {
   }
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
+    // Readiness is consumed in signal context. Initialize this image's native
+    // TLV block during ordinary setup, before publishing any prepared owner.
+    // Errno is separately owned and no longer performs this implicit prewarm.
+    const volatile uintptr_t native_tlv_storage = capture_boundary_storage().address;
+    (void)native_tlv_storage; // Keep address materialization observable under LTO too.
     const auto thread = pthread_self();
     const auto native_key = native_tls_key();
     if (!native_key) throw ElfError("native read-only TLS identity unavailable");

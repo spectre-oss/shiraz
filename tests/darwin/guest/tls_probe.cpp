@@ -3,6 +3,7 @@
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/image.hpp"
+#include "shiraz/darwin/guest/signals.hpp"
 #include "guest_tls_layout.hpp"
 #include <fstream>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <limits.h>
+#include <malloc/malloc.h>
 #include <filesystem>
 #include <iostream>
 #include <mutex>
@@ -581,6 +583,49 @@ static void prepared_cleanup_admission_tests() {
                "owned_before_publication=1 foreign_stacks=2 table_bytes=32768 "
                "async_proof=0 consumer_proof=0\n";
 }
+// Current-host ordinary allocation observation, not a native teardown lease.
+static void native_tlv_publication_tests() {
+  for (bool direct_base : {false, true}) {
+    struct Observation {
+      malloc_statistics_t before{}, after{};
+      bool ready = false, storage = false, boundary = false, outside_handler = false;
+    } observed;
+    std::atomic<bool> ready{false}, start{false}, done{false};
+    std::thread worker([&] {
+      if (direct_base) (void)guest_tls_base();
+      else prepare_guest_tls();
+      observed.ready = guest_tls_prepared();
+      ready.store(true, std::memory_order_release);
+      domain_wait([&] { return start.load(std::memory_order_acquire); });
+      // No main-thread allocation or other worker overlaps these snapshots.
+      // Consuming the address/token prevents eliding the native TLV touches.
+      malloc_zone_statistics(nullptr, &observed.before);
+      auto storage = capture_boundary_storage();
+      volatile uintptr_t address = storage.address;
+      observed.storage = address != 0 && storage.bytes != 0;
+      observed.outside_handler = !in_guest_signal_handler();
+      {
+        CaptureBoundary boundary;
+        observed.boundary = capture_boundary_token() != 0;
+      }
+      observed.boundary = observed.boundary && capture_boundary_token() == 0;
+      malloc_zone_statistics(nullptr, &observed.after);
+      done.store(true, std::memory_order_release);
+    });
+    domain_wait([&] { return ready.load(std::memory_order_acquire); });
+    start.store(true, std::memory_order_release);
+    domain_wait([&] { return done.load(std::memory_order_acquire); });
+    worker.join();
+    require(observed.ready && observed.storage && observed.boundary && observed.outside_handler,
+            "fresh prepared thread exposes native boundary/signal storage");
+    require(observed.before.blocks_in_use == observed.after.blocks_in_use &&
+                observed.before.size_in_use == observed.after.size_in_use,
+            "prepared publication prewarms native TLV before signal readiness");
+  }
+  std::cout << "M5_NATIVE_TLV_PREWARM_PASS fresh_threads=2 prepare=1 direct_base=1 "
+               "net_live_blocks_delta=0 net_live_bytes_delta=0 allocator_scope=malloc_zone_statistics "
+               "native_teardown_lease=0 async_proof=0\n";
+}
 // Ordinary and owned synchronous observations only. Refusal without readiness
 // proves no state publication here; the compiled query check must separately
 // establish its no-call/no-Mach-O-TLV footprint.
@@ -700,6 +745,7 @@ int main(int argc, char **argv) {
     }
     require(argc == 2, "usage: tls-probe fixture-directory");
     run_ready_unowned_helper(argv[0]);
+    native_tlv_publication_tests();
     prepared_errno_tests();
     prepared_cleanup_admission_tests();
     resident = new Loader({std::filesystem::canonical(argv[1])}, allocation_tracking_personality());

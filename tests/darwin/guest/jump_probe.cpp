@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/jump.hpp"
+#include "shiraz/darwin/guest/boundary_token.hpp"
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
 #include <array>
+#include <algorithm>
+#include <atomic>
 #include <csignal>
+#include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <pthread.h>
 #include <sys/wait.h>
 #include <thread>
@@ -25,10 +31,146 @@ static void require(bool value, const char *message) {
 static Argument pointer(const void *value) {
   return Argument::integer(reinterpret_cast<uintptr_t>(value), ArgumentType::Int64);
 }
+static void boundary_reservation_tests() {
+  constexpr size_t workers = 8, per_worker = 512, total = workers * per_worker;
+  std::atomic<uint64_t> counter{1};
+  std::atomic<unsigned> ready{0};
+  std::atomic<bool> start{false};
+  std::array<std::array<uint64_t, per_worker>, workers> tokens{};
+  std::array<std::thread, workers> threads;
+  for (size_t worker = 0; worker < workers; ++worker)
+    threads[worker] = std::thread([&, worker] {
+      ready.fetch_add(1, std::memory_order_release);
+      while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+      for (auto &token : tokens[worker]) token = detail::reserve_boundary_token(counter);
+    });
+  while (ready.load(std::memory_order_acquire) != workers) std::this_thread::yield();
+  start.store(true, std::memory_order_release);
+  for (auto &thread : threads) thread.join();
+  std::array<uint64_t, total> ordered{};
+  for (size_t worker = 0; worker < workers; ++worker)
+    std::copy(tokens[worker].begin(), tokens[worker].end(), ordered.begin() + worker * per_worker);
+  std::sort(ordered.begin(), ordered.end());
+  for (size_t index = 0; index < ordered.size(); ++index)
+    require(ordered[index] == index + 1, "concurrent boundary reservations are unique without gaps");
+  require(counter.load() == total + 1, "boundary reservation counter records every successful token");
+  constexpr auto maximum = std::numeric_limits<uint64_t>::max();
+  for (uint64_t refused : {uint64_t(0), maximum}) {
+    counter.store(refused);
+    require(!detail::reserve_boundary_token(counter) && counter.load() == refused,
+            "zero/exhausted boundary sequence is unchanged on refusal");
+  }
+  counter.store(maximum - 1);
+  ready.store(0); start.store(false);
+  std::array<uint64_t, workers> final{};
+  for (size_t worker = 0; worker < workers; ++worker)
+    threads[worker] = std::thread([&, worker] {
+      ready.fetch_add(1, std::memory_order_release);
+      while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+      final[worker] = detail::reserve_boundary_token(counter);
+    });
+  while (ready.load(std::memory_order_acquire) != workers) std::this_thread::yield();
+  start.store(true, std::memory_order_release);
+  for (auto &thread : threads) thread.join();
+  require(std::count(final.begin(), final.end(), maximum - 1) == 1 &&
+              std::count(final.begin(), final.end(), uint64_t(0)) == std::ptrdiff_t(workers - 1) &&
+              counter.load() == maximum && !detail::reserve_boundary_token(counter),
+          "one final boundary token wins and saturation never wraps");
+}
+namespace {
+static_assert(std::atomic<uint64_t>::is_always_lock_free && std::atomic<unsigned>::is_always_lock_free);
+std::array<std::atomic<uint64_t>, 4> signal_tokens{};
+std::atomic<unsigned> signal_token_count{0}, signal_calls{0}, signal_errors{0};
+void record_signal_token(uint64_t token) noexcept {
+  const auto index = signal_token_count.fetch_add(1, std::memory_order_relaxed);
+  if (!token || index >= signal_tokens.size()) {
+    signal_errors.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  signal_tokens[index].store(token, std::memory_order_relaxed);
+}
+void boundary_signal_handler(int native) {
+  const int saved_errno = errno;
+  const auto previous = capture_boundary_token();
+  if (!previous) signal_errors.fetch_add(1, std::memory_order_relaxed);
+  {
+    CaptureBoundary outer;
+    const auto outer_token = capture_boundary_token();
+    record_signal_token(outer_token);
+    if (native == SIGUSR1 && raise(SIGUSR2)) signal_errors.fetch_add(1, std::memory_order_relaxed);
+    if (capture_boundary_token() != outer_token) signal_errors.fetch_add(1, std::memory_order_relaxed);
+    {
+      CaptureBoundary inner;
+      const auto token = capture_boundary_token();
+      record_signal_token(token);
+      if (token == outer_token) signal_errors.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (capture_boundary_token() != outer_token) signal_errors.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (capture_boundary_token() != previous) signal_errors.fetch_add(1, std::memory_order_relaxed);
+  signal_calls.fetch_add(1, std::memory_order_relaxed);
+  errno = saved_errno;
+}
+struct BoundarySignalScope {
+  struct sigaction previous_first{}, previous_second{};
+  sigset_t previous_mask{}, selected{};
+  bool mask_saved = false, first_installed = false, second_installed = false;
+  void install() {
+    sigemptyset(&selected); sigaddset(&selected, SIGUSR1); sigaddset(&selected, SIGUSR2);
+    require(!pthread_sigmask(SIG_BLOCK, &selected, &previous_mask), "block boundary test signals for setup");
+    mask_saved = true;
+    struct sigaction action{};
+    action.sa_handler = boundary_signal_handler;
+    sigemptyset(&action.sa_mask);
+    require(!sigaction(SIGUSR1, &action, &previous_first), "install first boundary test signal");
+    first_installed = true;
+    require(!sigaction(SIGUSR2, &action, &previous_second), "install nested boundary test signal");
+    second_installed = true;
+    auto active = previous_mask;
+    sigdelset(&active, SIGUSR1); sigdelset(&active, SIGUSR2);
+    require(!pthread_sigmask(SIG_SETMASK, &active, nullptr), "unblock boundary test signals");
+  }
+  ~BoundarySignalScope() {
+    if (!mask_saved) return;
+    if (pthread_sigmask(SIG_BLOCK, &selected, nullptr) ||
+        (second_installed && sigaction(SIGUSR2, &previous_second, nullptr)) ||
+        (first_installed && sigaction(SIGUSR1, &previous_first, nullptr)) ||
+        pthread_sigmask(SIG_SETMASK, &previous_mask, nullptr)) std::abort();
+  }
+};
+} // namespace
+static void boundary_signal_tests() {
+  // Prewarm this image's native TLV block in ordinary code. The handler below
+  // performs no fixture allocation and communicates only through lock-free atoms.
+  (void)capture_boundary_storage();
+  require(!capture_boundary_token(), "boundary signal test starts outside a guest transition");
+  for (auto &token : signal_tokens) token.store(0);
+  signal_token_count.store(0); signal_calls.store(0); signal_errors.store(0);
+  BoundarySignalScope signals;
+  signals.install();
+  uint64_t outer_token;
+  {
+    CaptureBoundary transition;
+    outer_token = capture_boundary_token();
+    require(!raise(SIGUSR1), "deliver actual nested native boundary signals");
+    require(capture_boundary_token() == outer_token, "nested native signals restore the outer boundary");
+  }
+  require(!capture_boundary_token() && signal_calls.load() == 2 && signal_token_count.load() == 4 &&
+              !signal_errors.load(), "nested signal boundaries preserve every interrupted current token");
+  std::array<uint64_t, 5> observed{};
+  observed[0] = outer_token;
+  for (size_t index = 0; index < signal_tokens.size(); ++index) observed[index + 1] = signal_tokens[index].load();
+  std::sort(observed.begin(), observed.end());
+  require(observed[0] && std::adjacent_find(observed.begin(), observed.end()) == observed.end(),
+          "outer and signal boundary tokens are all distinct");
+  std::cout << "M5_BOUNDARY_TOKEN_PASS concurrent_threads=8 tokens=4096 saturation=1 "
+               "nested_native_signals=2 async_stress=0 lifetime_proof=0\n";
+}
 int main(int argc, char **argv) {
   try {
     require(argc == 2, "usage: jump-probe fixture-directory");
     require(!prepared_guest_stack_contains(native_sp()), "unprepared stack query fails closed");
+    boundary_reservation_tests();
     auto base = native_personality();
     auto providers = std::move(base);
     Loader loader({argv[1]}, std::move(providers));
@@ -75,6 +217,7 @@ int main(int argc, char **argv) {
               "setjmp/sigsetjmp really restore mask; underscore and mask-zero variants do not");
     }
     require(!pthread_sigmask(SIG_SETMASK, &original, nullptr), "restore original signal mask");
+    boundary_signal_tests();
     auto aborts = [&](const std::function<void()> &action, const char *reason = nullptr) {
       int descriptors[2];
       require(!pipe(descriptors), "negative jump diagnostic pipe");

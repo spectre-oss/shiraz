@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/closure.hpp"
+#include "shiraz/darwin/guest/boundary_token.hpp"
 #include "shiraz/darwin/guest/jit.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
 #include <cstdio>
@@ -14,18 +15,21 @@
 
 namespace shiraz::guest {
 namespace {
-struct BoundaryState { uint64_t current = 0, next = 1; };
+struct BoundaryState { std::atomic<uint64_t> current{0}, next{1}; };
+static_assert(std::atomic<uint64_t>::is_always_lock_free && sizeof(BoundaryState) == 16);
 thread_local BoundaryState boundary;
 }
-CaptureBoundary::CaptureBoundary() noexcept : previous_(boundary.current) {
-  if (!boundary.next) {
-    std::fprintf(stderr, "SHIRAZ_GUEST_FATAL ABI boundary token exhausted\n");
+CaptureBoundary::CaptureBoundary() noexcept {
+  const auto token = detail::reserve_boundary_token(boundary.next);
+  if (!token) {
+    constexpr char message[] = "SHIRAZ_GUEST_FATAL ABI boundary token exhausted\n";
+    (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
     std::abort();
   }
-  boundary.current = boundary.next++;
+  previous_ = boundary.current.exchange(token, std::memory_order_relaxed);
 }
-CaptureBoundary::~CaptureBoundary() { boundary.current = previous_; }
-uint64_t capture_boundary_token() noexcept { return boundary.current; }
+CaptureBoundary::~CaptureBoundary() { boundary.current.store(previous_, std::memory_order_relaxed); }
+uint64_t capture_boundary_token() noexcept { return boundary.current.load(std::memory_order_relaxed); }
 CaptureBoundaryStorage capture_boundary_storage() noexcept {
   return {reinterpret_cast<uintptr_t>(&boundary), sizeof(boundary)};
 }
