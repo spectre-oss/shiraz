@@ -77,5 +77,10 @@ GuestThreadKeyHandle make_guest_thread_key(void *destructor);
 void delete_guest_thread_key(const GuestThreadKeyHandle &key) noexcept;
 int set_guest_thread_value(const GuestThreadKeyHandle &key, const void *value);
 void *guest_thread_value(const GuestThreadKeyHandle &key);
-std::vector<ProviderExport> tls_exports(CodeValidator validate);
+class Lifecycle;
+// With a lifecycle, C++ thread destructor registration retains the namespace
+// through callback return and rejects shutdown before guest images finalize.
+// The standalone form requires the caller to retain all validated code until
+// native thread cleanup completes. Pthread key callbacks are a separate owner.
+std::vector<ProviderExport> tls_exports(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle = {});
 } // namespace shiraz::guest

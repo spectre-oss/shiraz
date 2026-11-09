@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/tls.hpp"
+#include "shiraz/darwin/guest/lifecycle.hpp"
 #include "shiraz/darwin/guest/instruction.hpp"
 #include "guest_io.hpp"
 #include "guest_tls_layout.hpp"
@@ -28,7 +29,7 @@ struct GuestThreadKey {
   explicit GuestThreadKey(void *function) : destructor(function) {}
 };
 namespace {
-struct Destructor { void *function, *object; };
+struct Destructor { void *function, *object; std::shared_ptr<void> retention; };
 // The async readiness query must not touch a Mach-O TLV on an unprepared
 // thread: doing so could allocate TLS from inside the signal handler.
 std::array<std::atomic<pthread_t>, 4096> prepared_threads{};
@@ -468,9 +469,9 @@ void *guest_thread_value(const GuestThreadKeyHandle &key) {
   auto found = values.find(key);
   return found == values.end() ? nullptr : const_cast<void *>(found->second);
 }
-std::vector<ProviderExport> tls_exports(CodeValidator validate) {
+std::vector<ProviderExport> tls_exports(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle) {
   if (!validate) throw ElfError("guest TLS requires resident-code validation");
-  auto *address = closure([validate = std::move(validate)](Capture &capture) {
+  auto *address = closure([validate = std::move(validate), lifecycle = std::move(lifecycle)](Capture &capture) {
     CallCursor cursor(capture, Convention::Aapcs64);
     void *function = cursor.read<void *>();
     void *object = cursor.read<void *>();
@@ -478,13 +479,23 @@ std::vector<ProviderExport> tls_exports(CodeValidator validate) {
     HostErrno preserve;
     auto &current = live_state();
     int result = -1;
-    if (!function || !validate(function)) {
+    std::shared_ptr<void> retention;
+    try {
+      // Retention precedes any validator access to the Loader/Image. Closing
+      // admission and inspecting the count use the same lifecycle lock.
+      if (lifecycle) retention = lifecycle->retain_thread_callback();
+    } catch (const std::bad_alloc &) {
+      *guest_errno_location() = errno_to_guest(ENOMEM);
+      return_value(capture, result);
+      return;
+    }
+    if ((lifecycle && !retention) || !function || !validate(function)) {
       *guest_errno_location() = errno_to_guest(EINVAL);
     } else if (current.registrations >= 4096) {
       *guest_errno_location() = errno_to_guest(ENOMEM);
     } else {
       try {
-        current.destructors.push_back({function, object});
+        current.destructors.push_back({function, object, std::move(retention)});
         ++current.registrations;
         result = 0;
       } catch (const std::bad_alloc &) {

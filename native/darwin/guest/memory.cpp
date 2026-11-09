@@ -441,7 +441,7 @@ Providers native_personality(CodeValidator validate, std::shared_ptr<Lifecycle> 
         provider.exports.insert(provider.exports.end(),
                                 std::make_move_iterator(semaphores.begin()),
                                 std::make_move_iterator(semaphores.end()));
-        auto tls = tls_exports(validate);
+        auto tls = tls_exports(validate, lifecycle);
         provider.exports.insert(provider.exports.end(),
                                 std::make_move_iterator(tls.begin()),
                                 std::make_move_iterator(tls.end()));

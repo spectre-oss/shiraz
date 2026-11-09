@@ -40,6 +40,19 @@ Selected apps and game rendering already work. Compatibility is still growing:
 apps may encounter missing APIs, graphics issues, or unsupported media features.
 Linux phone support is a future goal.
 
+The Apple Silicon macOS port is experimental. Its guest ELF loader, bionic ABI
+adapters and ART bridge have loaded the unchanged OsmAnd+ APK's seven native
+libraries and completed a meaningful OsmAndCore JNI round trip. Developer fixtures
+run in ordinary and hardened allow-jit-only modes. M5 remains in progress: complete
+TLS consumer and callback lifetime coverage, plus comparison against Android's
+bionic runtime, are still open. These results do not establish a fully functional
+OsmAnd application on macOS or a supported macOS release. See the
+[macOS goal and checklist](docs/macos_final_goal.md).
+
+With the pinned development dependencies prepared, run the native fixture gates
+with `make macos-guest-check`. The full `make check` also includes Linux-specific
+EGL/JNI checks and must be verified on Linux.
+
 ## Get started
 
 Use the [APK builder](https://spectre-oss.github.io/shiraz/#builder) to package an APK

@@ -9,6 +9,11 @@
 - [Web](WEB.md): run apps on a Linux host and interact through a browser.
 - [macOS goal](macos_final_goal.md): native macOS (Apple Silicon, Metal) port target and API checklist.
 
+The macOS M5 loader/ABI work is in progress. Native-library and OsmAndCore JNI
+gates are developer evidence; full OsmAnd application functionality, resizing,
+persistence and performance acceptance remain separate M6 work. See the root
+[README status](../README.md#status) for the current public scope.
+
 Shiraz is experimental and does not provide Android-style app isolation. Read
 the isolation requirements before running APKs. Private session logs and operator
 notes belong outside the Git repository.

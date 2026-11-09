@@ -17,6 +17,12 @@ public:
   void shutdown() const;
   bool closed() const;
   size_t pending() const;
+  // Retain before validating/storing a thread-local guest callback. The token
+  // must survive its full invocation. Shutdown refuses outstanding tokens
+  // before ELF finalizers; it never waits for a thread that may be this caller.
+  // Empty means registration admission is closed. No Image access occurs here.
+  std::shared_ptr<void> retain_thread_callback() const;
+  size_t retained_thread_callbacks() const;
 private:
   struct State;
   std::shared_ptr<State> state_;

@@ -24,6 +24,7 @@ struct Lifecycle::State {
   std::function<void()> before_shutdown;
   std::function<void()> before_quiesce;
   size_t registrations = 0, active = 0, active_drains = 0;
+  size_t thread_callbacks = 0;
   bool attached = false, shutting_down = false, closed = false;
   bool callback_admission_closed = false;
   std::thread::id shutdown_thread;
@@ -146,6 +147,8 @@ struct Lifecycle::State {
       std::unique_lock<std::mutex> lock(mutex);
       callback_admission_closed = true;
       changed.wait(lock, [&] { return !active && !active_drains; });
+      if (thread_callbacks)
+        throw ElfError("guest thread-local callbacks still retain namespace at shutdown");
     }
     // Run ELF finalizers before closing registration/validation. In particular
     // CRT FINI_ARRAY entries may invoke __cxa_finalize or register callbacks.
@@ -216,4 +219,30 @@ void Lifecycle::finalize(void *dso) const { state_->finalize(dso); }
 void Lifecycle::shutdown() const { state_->shutdown(); }
 bool Lifecycle::closed() const { std::lock_guard<std::mutex> lock(state_->mutex); return state_->closed; }
 size_t Lifecycle::pending() const { std::lock_guard<std::mutex> lock(state_->mutex); return state_->entries.size(); }
+std::shared_ptr<void> Lifecycle::retain_thread_callback() const {
+  struct Retention {
+    std::shared_ptr<State> state;
+    bool admitted = false;
+    explicit Retention(std::shared_ptr<State> value) : state(std::move(value)) {
+      std::lock_guard<std::mutex> lock(state->mutex);
+      if (!state->attached || state->closed || state->callback_admission_closed) return;
+      if (state->thread_callbacks == SIZE_MAX) throw ElfError("guest thread callback retention overflow");
+      ++state->thread_callbacks;
+      admitted = true;
+    }
+    ~Retention() {
+      if (!admitted) return;
+      std::lock_guard<std::mutex> lock(state->mutex);
+      if (!state->thread_callbacks) std::terminate();
+      --state->thread_callbacks;
+      state->changed.notify_all();
+    }
+  };
+  auto token = std::make_shared<Retention>(state_);
+  return token->admitted ? std::shared_ptr<void>(std::move(token)) : nullptr;
+}
+size_t Lifecycle::retained_thread_callbacks() const {
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  return state_->thread_callbacks;
+}
 } // namespace shiraz::guest

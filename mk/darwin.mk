@@ -2249,3 +2249,22 @@ macos-guest-relocation-evidence-check: macos-guest-fixture $(MACOS_OUT)/m5/osman
 	$(MACOS_OUT)/m5/relocation-evidence/hardened $(MACOS_OUT)/m5/relocation-evidence --mutable-relocation-report $(MACOS_OUT)/m5/relocation-evidence/hardened.json
 	uv run --no-project python scripts/verify_guest_relocation_fixture.py $(MACOS_OUT)/m5/relocation-evidence/libshiraz_fixture.so $(MACOS_OUT)/m5/relocation-evidence/hardened.json
 macos-guest-check: macos-guest-relocation-evidence-check
+
+# C++ thread-local callback namespace retention; each rejection uses a fresh process.
+.PHONY: macos-guest-tls-retention-check
+$(MACOS_GUEST_DEP_DIR)/tls-retention.o: tests/darwin/guest/deps/tls_retention.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libtls-retention.so: $(MACOS_GUEST_DEP_DIR)/tls-retention.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libtls-retention.so $< -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $@
+$(MACOS_OUT)/m5/tls-retention-probe: tests/darwin/guest/tls_retention_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror $< $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-tls-retention-check: $(MACOS_GUEST_DEP_DIR)/libtls-retention.so $(MACOS_OUT)/m5/tls-retention-probe
+	@for mode in joined pending active validation same-thread unmap; do $(MACOS_OUT)/m5/tls-retention-probe $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+	cp $(MACOS_OUT)/m5/tls-retention-probe $(MACOS_OUT)/m5/tls-retention-hardened.pending
+	mv $(MACOS_OUT)/m5/tls-retention-hardened.pending $(MACOS_OUT)/m5/tls-retention-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/tls-retention-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/tls-retention-hardened
+	@for mode in joined pending active validation same-thread unmap; do $(MACOS_OUT)/m5/tls-retention-hardened $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+macos-guest-check: macos-guest-tls-retention-check
