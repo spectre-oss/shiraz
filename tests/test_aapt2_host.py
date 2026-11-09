@@ -12,6 +12,17 @@ import build_apk_fixture as fixture
 
 
 class NativeAaptTests(unittest.TestCase):
+    def test_real_version_process_on_either_output_stream(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool = Path(directory) / 'aapt2'
+            for stream in ('stdout', 'stderr'):
+                tool.write_text('#!' + sys.executable + '\nimport sys\n'
+                                'assert sys.argv[1:] == ["version"]\n'
+                                'print("Android Asset Packaging Tool (aapt) 2.19", file=sys.' + stream + ')\n')
+                tool.chmod(0o755)
+                self.assertEqual(fixture.aapt2_version(tool),
+                                 'Android Asset Packaging Tool (aapt) 2.19')
+
     def test_arm_without_override_refuses_download(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True), \
                 patch.object(fixture.platform, 'system', return_value='Linux'), \

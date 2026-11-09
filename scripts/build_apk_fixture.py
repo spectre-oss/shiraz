@@ -116,6 +116,15 @@ def aapt2_jar(system=None):
     return 'aapt2-osx.jar' if (system or platform.system()) == 'Darwin' else 'aapt2-linux.jar'
 
 
+def aapt2_version(source):
+    # AOSP aapt2 writes its version to stderr (including Ubuntu's build).
+    version = subprocess.run([str(source), 'version'], check=True, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, timeout=10).stdout.strip()
+    if not version.startswith('Android Asset Packaging Tool (aapt)'):
+        raise ValueError('SHIRAZ_AAPT2 did not identify itself as aapt2')
+    return version
+
+
 def install_aapt2(cache):
     """Install a host compiler; Linux ARM requires an explicit native tool.
 
@@ -139,10 +148,7 @@ def install_aapt2(cache):
         if (expected is None or len(header) != 20 or header[:6] != b'\x7fELF\x02\x01'
                 or int.from_bytes(header[18:20], 'little') != expected):
             raise ValueError('SHIRAZ_AAPT2 must be a native little-endian 64-bit ELF executable')
-        version = subprocess.run([str(source), 'version'], check=True, capture_output=True,
-                                 text=True, timeout=10).stdout.strip()
-        if not version.startswith('Android Asset Packaging Tool (aapt)'):
-            raise ValueError('SHIRAZ_AAPT2 did not identify itself as aapt2')
+        version = aapt2_version(source)
         if source.resolve() != target.resolve():
             shutil.copyfile(source, target)
         target.chmod(0o755)
