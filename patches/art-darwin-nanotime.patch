@@ -1,0 +1,15 @@
+--- a/libcore/ojluni/src/main/native/System.c
++++ b/libcore/ojluni/src/main/native/System.c
+@@ -283,7 +283,12 @@
+ 
+ static jlong System_nanoTime(JNIEnv* env, jclass unused) {
+   struct timespec now;
++#ifdef __APPLE__
++  /* Match Android MONOTONIC and Darwin ART deadlines: exclude system sleep. */
++  clock_gettime(CLOCK_UPTIME_RAW, &now);
++#else
+   clock_gettime(CLOCK_MONOTONIC, &now);
++#endif
+   return now.tv_sec * 1000000000LL + now.tv_nsec;
+ }
+ 

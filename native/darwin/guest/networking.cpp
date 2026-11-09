@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <iterator>
 #include <array>
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <climits>
 #include <cstring>
 #include <fcntl.h>
@@ -30,6 +33,15 @@ namespace {
 namespace b = bionic;
 constexpr size_t address_limit = 128, control_limit = 65536, vector_limit = 1024;
 constexpr size_t transfer_limit = size_t(64) << 20;
+// Opt-in, bounded metadata only: never log addresses, DNS names or payloads.
+template<class T> T trace_network(const char *operation,int fd,T result){
+  int saved=errno;
+  static const bool enabled=[](){const char *value=std::getenv("SHIRAZ_TRACE_GUEST_NETWORK");return value&&std::strcmp(value,"1")==0;}();
+  static std::atomic<unsigned> count{0};
+  if(enabled&&count.fetch_add(1,std::memory_order_relaxed)<1024)
+    std::fprintf(stderr,"SHIRAZ_GUEST_NETWORK operation=%s fd=%d result=%lld host_errno=%d\n",operation,fd,static_cast<long long>(result),result<0?saved:0);
+  errno=saved;return result;
+}
 template<class T, size_t Offset, size_t Width> T get(const void *bytes) {
   static_assert(sizeof(T) == Width); T value;
   std::memcpy(&value, static_cast<const uint8_t *>(bytes) + Offset, Width); return value;
@@ -269,7 +281,7 @@ public:
     }
     output[0] = pair[0]; output[1] = pair[1]; return 0;
   }
-  int connect(int fd, const void *guest, uint32_t size) { Address native; return address_native(guest, size, native) ? ::connect(fd, native.data(), native.size) : -1; }
+  int connect(int fd, const void *guest, uint32_t size) { Address native; return trace_network("connect",fd,address_native(guest, size, native) ? ::connect(fd, native.data(), native.size) : -1); }
   int bind(int fd, const void *guest, uint32_t size) { Address native; return address_native(guest, size, native) ? ::bind(fd, native.data(), native.size) : -1; }
   int listen(int fd, int backlog) { return ::listen(fd, backlog); }
   int shutdown(int fd, int direction) {
@@ -300,7 +312,7 @@ public:
     if (!output && size) return fail(EFAULT);
     int native_flags;
     if (!flags(requested, message_flags, native_flags, EOPNOTSUPP)) return -1;
-    return ::recv(fd, output, size, native_flags);
+    return trace_network("recv",fd,::recv(fd, output, size, native_flags));
   }
   ssize_t transmit(int fd,const void *input,size_t size,int requested) {
     return send_to(fd,input,size,requested,nullptr,0);
@@ -311,7 +323,7 @@ public:
     int native_flags;if(!flags(requested,message_flags,native_flags,EOPNOTSUPP))return -1;
     Address address;
     if(destination && !address_native(destination,length,address))return -1;
-    return ::sendto(fd,input,size,native_flags,destination?address.data():nullptr,destination?address.size:0);
+    return trace_network("send",fd,::sendto(fd,input,size,native_flags,destination?address.data():nullptr,destination?address.size:0));
   }
   ssize_t receive_from(int fd,void *output,size_t size,int requested,void *source,uint32_t *length) {
     if(size>transfer_limit)return fail(EOVERFLOW);

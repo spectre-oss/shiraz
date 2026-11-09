@@ -29,6 +29,7 @@ public final class ActivityRunner {
         private final Application application;
         private ActivityManager activities;
         private android.media.AudioManager audio;
+        private android.media.MediaRouter mediaRouter;
         private HostWindowManager windows;
         private HostSensorManager sensors;
         private android.hardware.display.DisplayManager displays;
@@ -94,6 +95,7 @@ public final class ActivityRunner {
             if(DOWNLOAD_SERVICE.equals(service)){if(downloads==null)downloads=android.app.DownloadManager.shirazForHost(this);return downloads;}
             if(VIBRATOR_SERVICE.equals(service))return new android.os.Vibrator();
             if("uimode".equals(service))return new android.app.UiModeManager(this);
+            if(MEDIA_ROUTER_SERVICE.equals(service)){if(mediaRouter==null)mediaRouter=android.media.MediaRouter.shirazForHost(this);return mediaRouter;}
             if(AUDIO_SERVICE.equals(service)){if(audio==null)audio=android.media.AudioManager.shirazForProcess();return audio;}
             if(POWER_SERVICE.equals(service)){if(power==null)power=new android.os.PowerManager();return power;}
             if(KEYGUARD_SERVICE.equals(service)){if(keyguard==null)keyguard=new android.app.KeyguardManager();return keyguard;}

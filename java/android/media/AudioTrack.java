@@ -44,7 +44,7 @@ public class AudioTrack implements AudioRouting {
  public int getBufferSizeInFrames(){return buffer/(channels*2);}public int getBufferCapacityInFrames(){return getBufferSizeInFrames();}
  public int setBufferSizeInFrames(int frames){return frames<1?ERROR_BAD_VALUE:getBufferSizeInFrames();}
  public synchronized int getPlaybackHeadPosition(){return handle==0?0:(int)NativePlayback.position(handle);}
- public boolean getTimestamp(AudioTimestamp timestamp){if(timestamp==null)throw new NullPointerException("timestamp");return false;}
+ public synchronized boolean getTimestamp(AudioTimestamp timestamp){if(timestamp==null)throw new NullPointerException("timestamp");if(handle==0||state!=PLAYSTATE_PLAYING)return false;long[] value=NativePlayback.timestamp(handle);if(value==null)return false;timestamp.framePosition=value[0];timestamp.nanoTime=value[1];return true;}
  public int getPlaybackRate(){return rate;}public int getUnderrunCount(){return 0;}
  public synchronized int setVolume(float gain){if(!Float.isFinite(gain))return ERROR_BAD_VALUE;volume=Math.max(0,Math.min(1,gain));return SUCCESS;}
  public int setStereoVolume(float left,float right){if(left!=right)throw new UnsupportedOperationException("Independent channel volume");return setVolume(left);}

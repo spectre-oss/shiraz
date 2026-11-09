@@ -2176,10 +2176,60 @@ macos-telegram-framework-smoke: macos-runtime-libs macos-graphics-libs macos-fra
 # AVFoundation capture keeps macOS TCC and Shiraz per-app consent independent.
 $(MACOS_OUT)/capture.exports: scripts/darwin_jni_exports.py java/shiraz/runtime/NativeCapture.java
 	uv run --no-project python scripts/darwin_jni_exports.py java/shiraz/runtime/NativeCapture.java > $@
-$(MACOS_OUT)/libshiraz-capture.so: native/darwin/capture.mm java/shiraz/runtime/NativeCapture.java $(MACOS_OUT)/capture.exports
-	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fobjc-arc -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/capture.exports -Wl,-dead_strip native/darwin/capture.mm -o $@ -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreMedia -framework CoreVideo -pthread
+$(MACOS_OUT)/libshiraz-capture.so: $(CURDIR)/.local/lib/libvo-aacenc.a native/darwin/capture.mm include/shiraz/darwin/audio_clock.hpp java/shiraz/runtime/NativeCapture.java $(MACOS_OUT)/capture.exports
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fobjc-arc -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/capture.exports -Wl,-dead_strip -I$(CURDIR)/.local/include native/darwin/capture.mm $(CURDIR)/.local/lib/libvo-aacenc.a -o $@.fresh -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreMedia -framework CoreVideo -pthread
+	mv -f $@.fresh $@
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-capture.so
 macos-jvm-native: $(MACOS_OUT)/libshiraz-capture.so
+
+.PHONY: macos-capture-api-smoke media-probe-apk
+macos-capture-api-smoke: macos-framework macos-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py DarwinCaptureConsentSmoke --marker DARWIN_CAPTURE_CONSENT_OK
+	uv run --no-project python scripts/java_framework_smoke.py CameraJpegSmoke --marker CAMERA_JPEG_ROTATION_OK
+	PYTHONPATH=src uv run --no-project python -m unittest discover -s tests -p test_darwin_app.py
+media-probe-apk:
+	PYTHONPATH=src uv run --no-project python scripts/build_media_probe.py
+
+$(MACOS_OUT)/playback.exports: scripts/darwin_jni_exports.py java/shiraz/runtime/NativePlayback.java
+	uv run --no-project python scripts/darwin_jni_exports.py java/shiraz/runtime/NativePlayback.java > $@
+$(MACOS_OUT)/libshiraz-playback.so: native/darwin/playback.cpp include/shiraz/darwin/audio_clock.hpp java/shiraz/runtime/NativePlayback.java $(MACOS_OUT)/playback.exports
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/playback.exports -Wl,-dead_strip native/darwin/playback.cpp -o $@.fresh -framework AudioToolbox -framework CoreFoundation -pthread
+	mv -f $@.fresh $@
+macos-runtime-libs macos-jvm-native: $(MACOS_OUT)/libshiraz-playback.so
+
+.PHONY: macos-media-jvm-native macos-playback-api-smoke
+macos-media-jvm-native: $(MACOS_OUT)/libshiraz-playback.so $(MACOS_OUT)/libshiraz-capture.so
+	mkdir -p $(MACOS_JVM_NATIVE)
+	ln -sfn ../libshiraz-playback.so $(MACOS_JVM_NATIVE)/libshiraz-playback.dylib
+	ln -sfn ../libshiraz-capture.so $(MACOS_JVM_NATIVE)/libshiraz-capture.dylib
+$(MACOS_OUT)/extract-aac-fixture: tests/darwin/audio/extract_aac.cpp
+	$(MACOS_CXX) -std=c++17 -O1 -Wall -Wextra -Werror $< -framework AudioToolbox -framework CoreFoundation -o $@
+macos-playback-api-smoke: macos-framework macos-media-jvm-native $(MACOS_OUT)/extract-aac-fixture
+	uv run --no-project python scripts/prepare_darwin_audio_fixture.py
+	uv run --no-project python scripts/java_framework_smoke.py DarwinPlaybackSmoke --marker DARWIN_PLAYBACK_PCM_AAC_OK
+
+$(CURDIR)/.local/lib/libvo-aacenc.a: scripts/bootstrap_capture_codec.py
+	uv run --no-project python scripts/bootstrap_capture_codec.py
+
+.PHONY: macos-aac-encode-api-smoke
+macos-aac-encode-api-smoke: macos-framework macos-media-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py DarwinAacEncodeSmoke --marker DARWIN_AAC_ENCODER_ROUNDTRIP_OK
+
+.PHONY: macos-recorder-api-smoke
+macos-recorder-api-smoke: macos-framework macos-media-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py MediaRecorderStateSmoke --marker MEDIA_RECORDER_STATE_CONSENT_OK
+
+.PHONY: macos-view-alpha-overshoot-smoke
+macos-view-alpha-overshoot-smoke: macos-framework macos-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py ViewAlphaOvershootSmoke --marker VIEW_ALPHA_OVERSHOOT_OK
+
+.PHONY: macos-media-router-smoke
+macos-media-router-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py MediaRouterSmoke --marker MEDIA_ROUTER_LOCAL_OUTPUT_OK
+
+.PHONY: macos-preferences-process-smoke
+macos-preferences-process-smoke: macos-framework
+	uv run --no-project python scripts/preferences_process_smoke.py
 
 # Observe default MRS inputs using production assembly and a private TLS body.
 $(MACOS_OUT)/m5/mrs-quarantine-tls.o: native/darwin/guest/tls.cpp $(MACOS_GUEST_HEADERS)

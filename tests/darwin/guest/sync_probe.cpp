@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/memory.hpp"
+#include "guest_io.hpp"
 #include <filesystem>
 #include <iostream>
 #include <time.h>
@@ -35,9 +36,13 @@ int main(int argc, char **argv) {
     require(nanos(stamp[0], stamp[1]) >= nanos(before.tv_sec, before.tv_nsec) &&
                 nanos(stamp[0], stamp[1]) <= nanos(after.tv_sec, after.tv_nsec),
             "guest monotonic uses native awake uptime rather than Darwin boot-time clock");
+    require(clock_gettime(CLOCK_MONOTONIC,&before)==0,"native suspend-inclusive clock");
+    result=int(invoke(reinterpret_cast<void *>(clock.address),{Argument::integer(bionic::kCLOCK_BOOTTIME),Argument::integer(reinterpret_cast<uintptr_t>(stamp),ArgumentType::Int64)}).result_integers[0]);
+    require(clock_gettime(CLOCK_MONOTONIC,&after)==0&&!result,"translated BOOTTIME clock sample");
+    require(nanos(stamp[0],stamp[1])>=nanos(before.tv_sec,before.tv_nsec)&&nanos(stamp[0],stamp[1])<=nanos(after.tv_sec,after.tv_nsec),"guest BOOTTIME shares suspend-inclusive host clock epoch");
     std::cout << "M5_SYNC_PASS threads=4 counter=4000 once=1 static=1 recursive=1 "
                  "errorcheck=1 condition=signal,broadcast realtime=1 monotonic=1 "
-                 "timeout=1 reacquire=1 guards=1 busy_destroy=1\n";
+                 "boottime=1 boottime_cond_rejected=1 timeout=1 reacquire=1 guards=1 busy_destroy=1\n";
   } catch (const std::exception &error) {
     std::cerr << "FAIL " << error.what() << '\n';
     return 1;

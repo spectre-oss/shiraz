@@ -292,6 +292,9 @@ PATCHES_DARWIN = {
             'libcore/ojluni/src/main/native/linux_close.cpp': '154424efddc69ac211134b1763f23efe82570797900652d931fea26ae2e35dda',
             'libnativehelper/AsynchronousCloseMonitor.cpp': '1a154047dbdfdb712666b64bf65cdd62c585f58c126667075724c944f2d5b290',
         }),
+        ('art-darwin-nanotime.patch', {
+            'libcore/ojluni/src/main/native/System.c': 'caa2de487a286b94f12e64b9da313decb6867c72d9f13440b18f8a751ba9dabc',
+        }),
         # okhttp is not booted on macOS yet: java.net.URL falls back to
         # shiraz.net.http(s).Handler instead of throwing AssertionError.
         ('art-darwin-url-handlers.patch', {  # 2635 bytes

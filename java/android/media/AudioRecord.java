@@ -4,6 +4,7 @@ import shiraz.runtime.CapturePermissions;
 import shiraz.runtime.NativeCapture;
 /** PCM16 host microphone, gated on explicit per-app foreground consent. */
 public class AudioRecord {
+ public static final int TIMEBASE_MONOTONIC=0,TIMEBASE_BOOTTIME=1;
  public static final int STATE_UNINITIALIZED=0,STATE_INITIALIZED=1,RECORDSTATE_STOPPED=1,RECORDSTATE_RECORDING=3;
  public static final int SUCCESS=0,ERROR=-1,ERROR_BAD_VALUE=-2,ERROR_INVALID_OPERATION=-3,ERROR_DEAD_OBJECT=-6,READ_BLOCKING=0,READ_NON_BLOCKING=1;
  private final int source,rate,channels,bufferSize;private final AudioFormat format;
@@ -23,6 +24,10 @@ public class AudioRecord {
  public int read(short[] samples,int offset,int size){if(samples==null||offset<0||size<0||(long)offset+size>samples.length||size>2*1024*1024)return ERROR_BAD_VALUE;byte[] bytes=new byte[size*2];int n=read(bytes,0,bytes.length);if(n<0)return n;for(int i=0;i<n/2;i++)samples[offset+i]=(short)((bytes[i*2]&255)|(bytes[i*2+1]<<8));return n/2;}
  public int read(java.nio.ByteBuffer buffer,int size){if(buffer==null||!buffer.isDirect()||size<0||size>buffer.capacity()||size>4*1024*1024)return ERROR_BAD_VALUE;byte[] bytes=new byte[size];int n=read(bytes,0,size);if(n>0){java.nio.ByteBuffer copy=buffer.duplicate();copy.clear();copy.put(bytes,0,n);}return n;}
  public int getState(){return released?0:1;}public int getRecordingState(){return handle!=0?3:1;}public int getAudioSessionId(){return 1;}public int getAudioSource(){return source;}public int getSampleRate(){return rate;}public int getChannelCount(){return channels;}public int getAudioFormat(){return 2;}public int getBufferSizeInFrames(){return bufferSize/(channels*2);}public AudioFormat getFormat(){return format;}
+ public boolean setPreferredDevice(AudioDeviceInfo device){return !released&&device==null;}
+ public AudioDeviceInfo getPreferredDevice(){return null;}
+ public AudioDeviceInfo getRoutedDevice(){return handle!=0?new AudioDeviceInfo(true):null;}
+ public int getTimestamp(AudioTimestamp timestamp,int timebase){if(timestamp==null)throw new IllegalArgumentException("timestamp");if(timebase!=0&&timebase!=1)return ERROR_BAD_VALUE;long current=handle;if(current==0||timebase==1)return ERROR_INVALID_OPERATION;try{long[] value=NativeCapture.microphoneTimestamp(current);if(value==null)return ERROR_INVALID_OPERATION;timestamp.framePosition=value[0];timestamp.nanoTime=value[1];return SUCCESS;}catch(SecurityException denied){stop();return ERROR_INVALID_OPERATION;}catch(IllegalStateException stopped){return ERROR_DEAD_OBJECT;}}
  public static final class Builder {
   private int source,bufferSize=8192;private AudioFormat format=new AudioFormat.Builder().setSampleRate(44100).setChannelMask(16).build();
   public Builder setAudioSource(int value){source=value;return this;}public Builder setBufferSizeInBytes(int value){bufferSize=value;return this;}public Builder setAudioFormat(AudioFormat value){if(value==null)throw new NullPointerException("format");format=value;return this;}

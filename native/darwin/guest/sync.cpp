@@ -21,11 +21,14 @@ int host_type(int type) {
   if (type == b::kPTHREAD_MUTEX_ERRORCHECK) return PTHREAD_MUTEX_ERRORCHECK;
   throw Failure{EINVAL};
 }
-clockid_t host_clock(int clock) {
+clockid_t host_clock(int clock,bool readable_boottime=false) {
   if (clock == b::kCLOCK_REALTIME) return CLOCK_REALTIME;
   // Darwin CLOCK_MONOTONIC is calendar time minus boot time (includes sleep).
   // Linux MONOTONIC deadlines use the awake uptime domain instead.
   if (clock == b::kCLOCK_MONOTONIC) return CLOCK_UPTIME_RAW;
+  // Linux BOOTTIME includes suspended time; Darwin MONOTONIC has that epoch.
+  // It is readable but is not a valid pthread condition-variable clock.
+  if (readable_boottime && clock == b::kCLOCK_BOOTTIME) return CLOCK_MONOTONIC;
   throw Failure{EINVAL};
 }
 int initial(const void *address, size_t size) {
@@ -367,7 +370,7 @@ public:
 int read_clock(int clock, void *output) {
   if (!output) { errno = EFAULT; return -1; }
   clockid_t host;
-  try { host = host_clock(clock); }
+  try { host = host_clock(clock,true); }
   catch (const Failure &error) { errno = error.code; return -1; }
   timespec value;
   if (clock_gettime(host, &value)) return -1;
@@ -376,7 +379,7 @@ int read_clock(int clock, void *output) {
   return 0;
 }
 int clock_resolution(int clock,void *output){
-  clockid_t native;try{native=host_clock(clock);}catch(const Failure &error){errno=error.code;return -1;}
+  clockid_t native;try{native=host_clock(clock,true);}catch(const Failure &error){errno=error.code;return -1;}
   timespec result{};if(::clock_getres(native,output?&result:nullptr))return -1;
   if(output){int64_t fields[2]={result.tv_sec,result.tv_nsec};std::memcpy(output,fields,16);}return 0;
 }
