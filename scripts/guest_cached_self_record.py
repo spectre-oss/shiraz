@@ -61,7 +61,10 @@ def _name(raw):
 class _MachO:
     """Only thin little-endian ARM64 images with bounded ordinary segments."""
 
-    def __init__(self, source):
+    def __init__(self, source, *, symbol=SYMBOL, body_bytes=BODY_BYTES):
+        if (not isinstance(symbol, str) or not symbol or len(symbol) > 4096 or "\0" in symbol
+                or type(body_bytes) is not int or not 4 <= body_bytes <= 4096 or body_bytes & 3):
+            raise ValueError("invalid bounded Mach-O text selection")
         if not isinstance(source, (bytes, bytearray)) or not 32 <= len(source) <= MAX_BYTES:
             raise ValueError("cached self bridge byte bound")
         self.data = bytes(source)
@@ -155,7 +158,7 @@ class _MachO:
             stop = self.data.find(b"\0", begin, min(strings_offset + strings_size, begin + 4097))
             if stop < 0:
                 raise ValueError("unbounded Mach-O symbol string")
-            if self.data[begin:stop] != SYMBOL.encode():
+            if self.data[begin:stop] != symbol.encode():
                 continue
             # Linked debug builds can retain an N_FUN/STABS observation with
             # the same name. It neither defines nor independently bounds code.
@@ -165,7 +168,7 @@ class _MachO:
                     or not 1 <= section <= len(self.sections)):
                 raise ValueError("cached self symbol is undefined/indirect/debug/resolver")
             selected = self.sections[section - 1]
-            if not self._text(selected, value, BODY_BYTES):
+            if not self._text(selected, value, body_bytes):
                 raise ValueError("cached self symbol is not complete RX text")
             found.append(value)
         if len(found) != 1:

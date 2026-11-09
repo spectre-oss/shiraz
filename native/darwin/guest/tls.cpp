@@ -451,25 +451,22 @@ void *guest_tls_base() {
 // preflight, not a lifetime lease or an asynchronous/native-spill proof.
 extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
                                         uint64_t, uint64_t, uint64_t, uintptr_t original_sp) noexcept {
-  int *const host_error = &errno;
-  const int saved_error = *host_error;
-  const auto current = pthread_self();
-  uint64_t native_id = 0;
-  const int identity_error = pthread_threadid_np(nullptr, &native_id);
-  // Restore errno before loading the guest TP, without a destructor or a
-  // further authored native call on the successful return path after it.
-  *host_error = saved_error;
-  if (identity_error || !native_id)
+  // Read only the opaque native key already checked for nonzero/live-unique
+  // publication. No native calls, TLV lookup or errno writes on success.
+  // Existing entry/owned-cleanup lifetime admission remains required: this
+  // cache snapshot is not an asynchronous or post-fork validity lease.
+  const auto key = native_tls_key();
+  if (!key)
     mrs_failure("SHIRAZ_GUEST_FATAL MRS native thread identity unavailable\n");
   for (size_t i = 0; i < prepared_threads.size(); ++i) {
-    if (prepared_threads[i].load(std::memory_order_acquire) != current ||
-        prepared_native_ids[i].load(std::memory_order_relaxed) != native_id) continue;
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1 ||
+        prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
     const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
     const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
-    // Recheck both ownership observations before the final pointer load.
-    // Native IDs also distinguish ordinary native pthread-handle reuse.
-    if (prepared_threads[i].load(std::memory_order_acquire) != current ||
-        prepared_native_ids[i].load(std::memory_order_acquire) != native_id) continue;
+    // Recheck both publication observations before the final pointer load.
+    if (prepared_threads[i].load(std::memory_order_acquire) != owner ||
+        prepared_native_tls_keys[i].load(std::memory_order_acquire) != key) continue;
     if ((original_sp & 15) || original_sp < low || original_sp >= high)
       mrs_failure("SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
     if (kMrsStackBytesBefore > original_sp - low || kMrsStackBytesAfter > high - original_sp)

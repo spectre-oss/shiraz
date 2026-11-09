@@ -9,7 +9,7 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from guest_cached_self_record import validate_cached_self_binding
+from guest_cached_self_record import _MachO, validate_cached_self_binding
 
 TABLE_OFFSETS = (0x10000, 0x20000, 0x30000, 0x40000)
 WORDS = (
@@ -65,6 +65,16 @@ def fixture(base=0):
 
 
 class CachedSelfRecordTests(unittest.TestCase):
+    def test_explicit_text_selection_remains_bounded_and_exact(self):
+        image, _ = fixture()
+        self.assertEqual(_MachO(image).entry, 0x1000)
+        self.assertEqual(_MachO(image, body_bytes=152).entry, 0x1000)
+        for options in ({'symbol': 'missing'}, {'symbol': ''}, {'symbol': 'bad\0symbol'},
+                        {'body_bytes': True}, {'body_bytes': 0}, {'body_bytes': 5},
+                        {'body_bytes': 4097}, {'body_bytes': 156}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                _MachO(image, **options)
+
     def test_independent_zero_fill_data_and_executable_header_normalization(self):
         for base in (0, 1 << 32):
             image, binding = fixture(base)

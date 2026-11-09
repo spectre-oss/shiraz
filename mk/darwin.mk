@@ -2324,3 +2324,9 @@ macos-guest-native-mapping-check: $(MACOS_OUT)/m5/native-mapping-probe
 macos-guest-check: macos-guest-native-mapping-check
 
 $(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/native_mapping.hpp
+
+.PHONY: macos-guest-mrs-accessor-code-check
+macos-guest-mrs-accessor-code-check: $(MACOS_OUT)/m5/tpidr-thunk-probe $(MACOS_OUT)/libshiraz-guest.so
+	uv run --no-project python scripts/check_guest_mrs_accessor.py $(MACOS_OUT)/m5/tpidr-thunk-probe
+	uv run --no-project python scripts/check_guest_mrs_accessor.py $(MACOS_OUT)/libshiraz-guest.so
+macos-guest-check: macos-guest-mrs-accessor-code-check

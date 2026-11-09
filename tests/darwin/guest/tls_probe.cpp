@@ -27,12 +27,16 @@ static bool prepared_mrs_cache_matches() {
   // execution is covered separately by tpidr-probe.
   if (!guest_tls_prepared()) return false;
   const int saved_errno = errno;
+  int *const guest_error = guest_errno_location();
+  const int saved_guest_errno = *guest_error;
   void *expected = guest_tls_base();
   uintptr_t native_sp;
   __asm__ volatile("mov %0, sp" : "=r"(native_sp));
   errno = ELOOP;
+  *guest_error = ENETUNREACH;
   void *observed = shiraz_guest_tls_access(0, 0, 0, 0, 0, 0, 0, native_sp);
-  const bool matches = observed == expected && errno == ELOOP;
+  const bool matches = observed == expected && errno == ELOOP && *guest_error == ENETUNREACH;
+  *guest_error = saved_guest_errno;
   errno = saved_errno;
   return matches;
 }
