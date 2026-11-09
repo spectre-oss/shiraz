@@ -28,6 +28,7 @@ import guest_allocator_contract
 import guest_cached_self_record
 import guest_callee_effects
 import guest_frame_effects
+import guest_indexed_halfword
 import guest_jump_table
 import guest_memory_contract
 import guest_mrs_window
@@ -473,6 +474,46 @@ def scalar_logical_result(operation, operands, state):
         b ^= mask
     return {"and": a & b, "bic": a & b, "orr": a | b, "orn": a | b,
             "eor": a ^ b, "eon": a ^ b}[operation]
+
+
+def exact_indexed_halfword(instruction, raw, state):
+    """Normalize an exact clean index only within a bounded active stack frame."""
+    profile = guest_indexed_halfword.recognize_indexed_halfword(raw)
+    if profile is None:
+        return None
+    expected = (Operand("reg", profile.data_register),
+                Operand("mem", base=profile.base, index=profile.index))
+    reads = {reg(profile.base), reg(profile.index)}
+    writes = set()
+    if profile.operation == "strh":
+        reads.add(reg(profile.data_register))
+    else:
+        writes.add(reg(profile.data_register))
+    if (instruction.mnemonic != profile.operation or instruction.width != 2
+            or instruction.operands != expected or instruction.writeback
+            or instruction.post_index or instruction.control_transfer
+            or {reg(name) for name in instruction.reads} != reads
+            or {reg(name) for name in instruction.writes} != writes):
+        return None
+    index = reg(profile.index)
+    if (tainted(state.value(index)) or tainted(state.alias(index))
+            or tainted(state.control(index)) or index in state.image_addresses
+            or index in state.return_signatures or tainted(state.value(profile.base))
+            or tainted(state.control(profile.base)) or profile.base in state.image_addresses
+            or profile.base in state.return_signatures):
+        return None
+    displacement = guest_indexed_halfword.exact_halfword_displacement(
+        profile, state.scalar(profile.index))
+    aliases = state.alias(profile.base)
+    if displacement is None or len(aliases) != 1:
+        return None
+    base = next(iter(aliases))
+    if type(base) is not int or abs(base) > 1 << 20:
+        return None
+    address = base + displacement
+    if not - (1 << 20) <= state.sp <= address < address + 2 <= 0:
+        return None
+    return (expected[0], Operand("mem", base=profile.base, displacement=displacement))
 
 
 def clean_vector_and(instruction, raw, state):
@@ -1547,6 +1588,13 @@ class Audit:
                     state.fp = None
                 enqueue(pc + 4, returns, state)
                 continue
+            if op in {"ldrh", "strh"} and any(item.kind == "mem" and item.index for item in operands):
+                raw = self.decode.word(pc) if hasattr(self.decode, "word") else None
+                normalized = exact_indexed_halfword(instruction, raw, state)
+                if normalized is None:
+                    problem(pc, "indexed-halfword-bytes-index-or-active-stack-unproved")
+                    continue
+                operands = normalized
             if op in {"add", "sub"} and len(operands) == 3 and operands[2].kind == "reg":
                 delta = exact_register_delta(operands, state)
                 if delta is None:
@@ -3404,6 +3452,9 @@ class ElfDecoder:
             "return_auth_profile": self.return_auth_profile,
             "return_auth_profile_sha256": hashlib.sha256(
                 Path(guest_return_auth_profile.__file__).read_bytes()
+            ).hexdigest(),
+            "indexed_halfword_reader_sha256": hashlib.sha256(
+                Path(guest_indexed_halfword.__file__).read_bytes()
             ).hexdigest(),
             "mrs_window_reader_sha256": hashlib.sha256(
                 Path(guest_mrs_window.__file__).read_bytes()
