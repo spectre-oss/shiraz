@@ -429,6 +429,210 @@ static void host_barrier() {
                                [&] { return arrived == 4; }))
     throw std::runtime_error("guest errno thread barrier timeout");
 }
+extern "C" void shiraz_test_byte_copy(void *, void *, const void *, size_t, uintptr_t *);
+asm(R"BYTE_COPY_ASM(
+.text
+.p2align 2
+.globl _shiraz_test_byte_copy
+_shiraz_test_byte_copy:
+    stp x29, x30, [sp, #-96]!
+    stp x19, x20, [sp, #16]
+    stp d8, d9, [sp, #32]
+    stp d10, d11, [sp, #48]
+    stp d12, d13, [sp, #64]
+    stp d14, d15, [sp, #80]
+    mov x29, sp
+    mov x20, x0
+    mov x19, x4
+    mov x0, x1
+    mov x1, x2
+    mov x2, x3
+    mov x3, #0x5a5a
+    mov x4, x3
+    mov x5, x3
+    mov x6, x3
+    str x18, [x19, #56]
+    mov x9, sp
+    str x9, [x19, #72]
+    mov x7, #0x5a5a
+    mov x8, #0x5a5a
+    mov x9, #0x5a5a
+    mov x10, #0x5a5a
+    mov x11, #0x5a5a
+    mov x12, #0x5a5a
+    mov x13, #0x5a5a
+    mov x14, #0x5a5a
+    mov x15, #0x5a5a
+    mov x16, #0x5a5a
+    mov x17, #0x5a5a
+    movi v0.16b, #0x5a
+    movi v1.16b, #0x5a
+    movi v2.16b, #0x5a
+    movi v3.16b, #0x5a
+    movi v4.16b, #0x5a
+    movi v5.16b, #0x5a
+    movi v6.16b, #0x5a
+    movi v7.16b, #0x5a
+    movi v8.16b, #0x5a
+    movi v9.16b, #0x5a
+    movi v10.16b, #0x5a
+    movi v11.16b, #0x5a
+    movi v12.16b, #0x5a
+    movi v13.16b, #0x5a
+    movi v14.16b, #0x5a
+    movi v15.16b, #0x5a
+    movi v16.16b, #0x5a
+    movi v17.16b, #0x5a
+    movi v18.16b, #0x5a
+    movi v19.16b, #0x5a
+    movi v20.16b, #0x5a
+    movi v21.16b, #0x5a
+    movi v22.16b, #0x5a
+    movi v23.16b, #0x5a
+    movi v24.16b, #0x5a
+    movi v25.16b, #0x5a
+    movi v26.16b, #0x5a
+    movi v27.16b, #0x5a
+    movi v28.16b, #0x5a
+    movi v29.16b, #0x5a
+    movi v30.16b, #0x5a
+    movi v31.16b, #0x5a
+    blr x20
+    stp q0, q1, [x19, #96]
+    stp q2, q3, [x19, #128]
+    stp q4, q5, [x19, #160]
+    stp q6, q7, [x19, #192]
+    stp q8, q9, [x19, #224]
+    stp q10, q11, [x19, #256]
+    stp q12, q13, [x19, #288]
+    stp q14, q15, [x19, #320]
+    stp q16, q17, [x19, #352]
+    stp q18, q19, [x19, #384]
+    stp q20, q21, [x19, #416]
+    stp q22, q23, [x19, #448]
+    stp q24, q25, [x19, #480]
+    stp q26, q27, [x19, #512]
+    stp q28, q29, [x19, #544]
+    stp q30, q31, [x19, #576]
+    str x7, [x19, #608]
+    str x8, [x19, #616]
+    str x9, [x19, #624]
+    str x10, [x19, #632]
+    str x11, [x19, #640]
+    str x12, [x19, #648]
+    str x13, [x19, #656]
+    str x14, [x19, #664]
+    str x15, [x19, #672]
+    str x16, [x19, #680]
+    str x17, [x19, #688]
+    stp x0, x1, [x19]
+    stp x2, x3, [x19, #16]
+    stp x4, x5, [x19, #32]
+    str x6, [x19, #48]
+    str x18, [x19, #64]
+    mov x9, sp
+    str x9, [x19, #80]
+    ldp d8, d9, [sp, #32]
+    ldp d10, d11, [sp, #48]
+    ldp d12, d13, [sp, #64]
+    ldp d14, d15, [sp, #80]
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #96
+    ret
+)BYTE_COPY_ASM");
+static void byte_copy_tests(const Providers &registry) {
+  using Copy = void *(*)(void *, const void *, size_t);
+  const auto page = size_t(sysconf(_SC_PAGESIZE));
+  require(page >= 4096, "byte copy page size");
+  struct Guarded {
+    void *mapping;
+    size_t page;
+    explicit Guarded(size_t bytes) : mapping(mmap(nullptr, bytes * 3, PROT_NONE,
+        MAP_PRIVATE | MAP_ANON, -1, 0)), page(bytes) {
+      require(mapping != MAP_FAILED, "byte copy guarded mapping");
+      require(!mprotect(static_cast<uint8_t *>(mapping) + page, page, PROT_READ | PROT_WRITE),
+              "byte copy readable middle page");
+    }
+    ~Guarded() { munmap(mapping, page * 3); }
+    uint8_t *data() { return static_cast<uint8_t *>(mapping) + page; }
+  } source(page), destination(page);
+  auto observed_copy = [&](void *entry, void *dst, const void *src, size_t length) {
+    uintptr_t observed[88]{};
+    shiraz_test_byte_copy(entry, dst, src, length, observed);
+    require(observed[0] == reinterpret_cast<uintptr_t>(dst) &&
+                observed[1] == reinterpret_cast<uintptr_t>(src) && observed[2] == length,
+            "byte copy returns destination and preserves source/count registers");
+    for (size_t index = 3; index <= 6; ++index)
+      require(!observed[index], "byte copy scratch cleared on return");
+    require(observed[7] == observed[8] && observed[9] == observed[10],
+            "byte copy preserves platform register and SP");
+    const auto *vectors = reinterpret_cast<const uint8_t *>(observed) + 96;
+    for (size_t index = 0; index < 512; ++index)
+      require(vectors[index] == 0x5a, "byte copy preserves full SIMD register contents");
+    for (size_t index = 76; index < 87; ++index)
+      require(observed[index] == 0x5a5a, "byte copy preserves unused scratch GPRs");
+  };
+  size_t cases = 0;
+  for (const char *name : {"memcpy", "memmove"}) {
+    const ProviderExport *selected = nullptr;
+    for (const auto &item : registry.modules().at("libc.so").exports)
+      if (item.name == name) selected = &item;
+    require(selected && selected->abi == (std::strcmp(name, "memcpy") == 0
+                ? "memory/byte-copy-v1" : "memory/byte-move-v1"), "explicit byte leaf binding");
+    auto function = reinterpret_cast<Copy>(selected->address);
+    int *guest_error = guest_errno_location();
+    *guest_error = 777;
+    errno = ELOOP;
+    require(function(nullptr, nullptr, 0) == nullptr, "zero-length byte copy does not touch null");
+    require(function(destination.data(), source.data(), 0) == destination.data(), "zero copy return");
+    for (size_t length : {size_t(0), size_t(1), size_t(2), size_t(7), size_t(8), size_t(15),
+                          size_t(16), size_t(31), size_t(32), size_t(112), size_t(255), page}) {
+      for (bool at_end : {false, true}) {
+        auto *src = source.data() + (at_end ? page - length : 0);
+        auto *dst = destination.data() + (at_end ? page - length : 0);
+        for (size_t index = 0; index < length; ++index) src[index] = uint8_t(index * 37 + 19);
+        std::memset(destination.data(), 0xa5, page);
+        require(!mprotect(source.data(), page, PROT_READ), "source read-only guard");
+        observed_copy(reinterpret_cast<void *>(function), dst, src, length);
+        require(!std::memcmp(dst, src, length), "byte copy guarded payload");
+        if (dst != destination.data()) require(dst[-1] == 0xa5, "no byte before destination");
+        if (dst + length != destination.data() + page) require(dst[length] == 0xa5, "no byte after destination");
+        require(!mprotect(source.data(), page, PROT_READ | PROT_WRITE), "restore source writes");
+        ++cases;
+      }
+    }
+    if (std::strcmp(name, "memmove") == 0) {
+      for (size_t length : {size_t(2), size_t(7), size_t(16), size_t(112), size_t(255)}) {
+        for (bool at_end : {false, true}) for (bool backward : {false, true}) {
+          std::vector<uint8_t> expected(page);
+          for (size_t i = 0; i < page; ++i) expected[i] = destination.data()[i] = uint8_t(i * 19 + 3);
+          const size_t begin = at_end ? page - length - 1 : 0;
+          const size_t src = begin + (backward ? 0 : 1), dst = begin + (backward ? 1 : 0);
+          std::memmove(expected.data() + dst, expected.data() + src, length);
+          observed_copy(reinterpret_cast<void *>(function), destination.data() + dst,
+                        destination.data() + src, length);
+          require(!std::memcmp(destination.data(), expected.data(), page),
+                  "guarded overlapping byte move matches independent expected page");
+          ++cases;
+        }
+      }
+    }
+    require(errno == ELOOP && *guest_error == 777, "byte leaves preserve both errno domains");
+    for (size_t src = 0; src < 16; ++src) for (size_t dst = 0; dst < 16; ++dst)
+      for (size_t length = 0; length <= 64; ++length) {
+        if (std::strcmp(name, "memcpy") == 0 && src < dst + length && dst < src + length) continue;
+        uint8_t actual[96], expected[96];
+        for (size_t i = 0; i < sizeof(actual); ++i) actual[i] = expected[i] = uint8_t(i * 13 + 1);
+        std::memmove(expected + dst, expected + src, length);
+        require(function(actual + dst, actual + src, length) == actual + dst &&
+                    !std::memcmp(actual, expected, sizeof(actual)), "byte copy/move alignment and overlap corpus");
+        ++cases;
+      }
+  }
+  std::cout << "M5_BYTE_COPY_PASS cases=" << cases
+            << " guard_pages=1 readonly_source=1 overlap=1 zero_null=1 return_arguments=1 scratch_clear=1 untouched_gprs=11 simd_full=32 platform_sp=1 errno=1 host_libc_dispatch=0 app_execution=0\n";
+}
+
 int main(int argc, char **argv) {
   try {
     if (argc == 2 && std::strcmp(argv[1], "--malloc-unprepared") == 0)
@@ -451,6 +655,7 @@ int main(int argc, char **argv) {
     require(rejected_object && rejected_null && rejected_empty,
             "nonreturning metadata rejects objects, null pointers and empty closures");
     auto registry = core_personality();
+    byte_copy_tests(registry);
     malloc_admission_tests(argv[0], registry);
     scalar_scratch_tests(registry);
     Provider helper{"libfixture_host.so", {}, {}, false};

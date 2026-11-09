@@ -149,6 +149,18 @@ class GuestBindingEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "managed malloc contract requires exact native binding"):
             self.augment(**identity)
 
+    def test_byte_memory_contract_requires_bridge_and_exact_row(self):
+        identity = self.terminal_binding()
+        self.binding.clear()
+        self.binding.update(malloc_binding(), symbol="memcpy", abi="memory/byte-copy-v1", relocation=32)
+        with self.assertRaisesRegex(ValueError, "byte memory contract requires bridge identity"):
+            self.augment()
+        report = self.augment(**identity)
+        self.assertEqual(report["modules"][0]["bindings"][0]["abi"], "memory/byte-copy-v1")
+        self.binding["addend"] = 4
+        with self.assertRaisesRegex(ValueError, "byte memory contract requires exact native binding"):
+            self.augment(**identity)
+
     def test_terminal_contract_cannot_label_interior_entry_or_object(self):
         for field, value in (
             ("addend", 4),

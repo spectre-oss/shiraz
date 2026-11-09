@@ -325,3 +325,64 @@ _shiraz_guest_managed_malloc_entry:
 .cfi_def_cfa sp, 0
     ret
 .cfi_endproc
+
+// First-party byte-copy leaves: only the argument ranges are accessed.
+// No host dispatch, SP/TLS access, vector state, callee saves or LR writes.
+// x0/x1/x2 are preserved; x3..x6 are zero on normal return; NZCV is clobbered.
+// Like C memcpy/memmove, callers must supply valid non-wrapping object ranges.
+.p2align 2
+.globl _shiraz_guest_memcpy_entry
+_shiraz_guest_memcpy_entry:
+.cfi_startproc
+    cbz x2, Lshiraz_copy_done
+    mov x3, x0
+    mov x4, x1
+    mov x5, x2
+Lshiraz_copy_forward:
+    ldrb w6, [x4], #1
+    strb w6, [x3], #1
+    subs x5, x5, #1
+    b.ne Lshiraz_copy_forward
+Lshiraz_copy_done:
+    mov x3, xzr
+    mov x4, xzr
+    mov x5, xzr
+    mov x6, xzr
+    ret
+.cfi_endproc
+
+.p2align 2
+.globl _shiraz_guest_memmove_entry
+_shiraz_guest_memmove_entry:
+.cfi_startproc
+    cbz x2, Lshiraz_move_done
+    cmp x0, x1
+    b.ls Lshiraz_move_forward_setup
+    sub x3, x0, x1
+    cmp x3, x2
+    b.hs Lshiraz_move_forward_setup
+    add x3, x0, x2
+    add x4, x1, x2
+    mov x5, x2
+Lshiraz_move_backward:
+    ldrb w6, [x4, #-1]!
+    strb w6, [x3, #-1]!
+    subs x5, x5, #1
+    b.ne Lshiraz_move_backward
+    b Lshiraz_move_done
+Lshiraz_move_forward_setup:
+    mov x3, x0
+    mov x4, x1
+    mov x5, x2
+Lshiraz_move_forward:
+    ldrb w6, [x4], #1
+    strb w6, [x3], #1
+    subs x5, x5, #1
+    b.ne Lshiraz_move_forward
+Lshiraz_move_done:
+    mov x3, xzr
+    mov x4, xzr
+    mov x5, xzr
+    mov x6, xzr
+    ret
+.cfi_endproc

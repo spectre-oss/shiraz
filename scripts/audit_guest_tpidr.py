@@ -27,6 +27,7 @@ import guest_allocator_contract
 import guest_callee_effects
 import guest_frame_effects
 import guest_jump_table
+import guest_memory_contract
 import guest_mrs_window
 import guest_native_target
 
@@ -2311,6 +2312,7 @@ class ElfBindingMetadata:
             # Keep legacy adapters unknown; reject malformed claimed identity.
             guest_native_target.validate_native_target(binding)
             guest_allocator_contract.managed_malloc_binding(binding)
+            guest_memory_contract.byte_memory_binding(binding)
             self.proof[slot] = dict(binding)
         if self.trusted_provider_contracts:
             self.mrs_window_record = validated_window
@@ -2504,6 +2506,16 @@ class ElfBindingMetadata:
                 "bridge_sha256": self.provider_bridge["sha256"],
                 "reason": "verified-explicit-nonreturning-noargs-provider",
             }
+        if guest_memory_contract.byte_memory_binding(proof):
+            if not self.trusted_provider_contracts:
+                return {**result, "reason": "byte-memory-contract-untrusted"}
+            if (addend != 0 or proof.get("relocation_type") != kind or info & 15 != 2 or
+                    (required_library is not None and proof["provider"] != required_library)):
+                return {**result, "reason": "byte-memory-binding-mismatch"}
+            # A leaf's exact argument-only accesses do not prove caller ranges.
+            return {**result, "abi": proof["abi"],
+                    "bridge_sha256": self.provider_bridge["sha256"],
+                    "reason": "byte-memory-requires-proved-read-write-ranges"}
         if guest_allocator_contract.managed_malloc_binding(proof):
             if not self.trusted_provider_contracts:
                 return {**result, "reason": "managed-malloc-contract-untrusted"}
@@ -2653,6 +2665,9 @@ class ElfDecoder:
             ).hexdigest(),
             "native_target_reader_sha256": hashlib.sha256(
                 Path(guest_native_target.__file__).read_bytes()
+            ).hexdigest(),
+            "memory_contract_reader_sha256": hashlib.sha256(
+                Path(guest_memory_contract.__file__).read_bytes()
             ).hexdigest(),
             "allocator_contract_reader_sha256": hashlib.sha256(
                 Path(guest_allocator_contract.__file__).read_bytes()

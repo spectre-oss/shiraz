@@ -17,6 +17,8 @@
 
 namespace shiraz::guest {
 extern "C" void *shiraz_guest_managed_malloc_entry(size_t);
+extern "C" void *shiraz_guest_memcpy_entry(void *, const void *, size_t);
+extern "C" void *shiraz_guest_memmove_entry(void *, const void *, size_t);
 int *guest_errno_location() {
   static thread_local int value = 0;
   return &value;
@@ -247,8 +249,11 @@ Providers core_personality() {
     libc.exports.push_back(fixed_export(name, "LIBC", function, policy));
   };
   add(&guest_errno_location, "__errno");
-  add(&std::memcpy, "memcpy");
-  add(&std::memmove, "memmove");
+  // Direct AAPCS64 leaves: no generic Capture frame or native libc fallback.
+  libc.exports.push_back({"memcpy", "LIBC", reinterpret_cast<uintptr_t>(&shiraz_guest_memcpy_entry),
+                          SymbolKind::Function, "memory/byte-copy-v1", false});
+  libc.exports.push_back({"memmove", "LIBC", reinterpret_cast<uintptr_t>(&shiraz_guest_memmove_entry),
+                          SymbolKind::Function, "memory/byte-move-v1", false});
   add(&std::memset, "memset");
   add(&std::memcmp, "memcmp");
   add(&memory_find, "memchr");

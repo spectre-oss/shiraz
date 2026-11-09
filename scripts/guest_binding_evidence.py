@@ -7,6 +7,7 @@ import struct
 from pathlib import Path
 
 from guest_allocator_contract import managed_malloc_binding
+from guest_memory_contract import byte_memory_binding
 from guest_native_target import validate_native_target
 
 MAX_REPORT = 64 * 1024 * 1024
@@ -149,6 +150,8 @@ def augment_binding_report(
                 raise ValueError("malformed or duplicate binding report relocation")
             if type(binding.get("nonreturning", False)) is not bool:
                 raise ValueError("invalid nonreturning binding contract")
+            if byte_memory_binding(binding) and bridge_identity is None:
+                raise ValueError("byte memory contract requires bridge identity")
             native_target = validate_native_target(binding)
             if managed_malloc_binding(binding) and bridge_identity is None:
                 raise ValueError("managed malloc contract requires bridge identity")
