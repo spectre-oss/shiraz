@@ -1,9 +1,13 @@
---- a/external/wolfssljni/src/java/com/wolfssl/WolfSSLX509StoreCtx.java
-+++ b/external/wolfssljni/src/java/com/wolfssl/WolfSSLX509StoreCtx.java
-@@ -72,3 +72,5 @@
-             for (int i = 0; i < derCerts.length; i++) {
--                byte[] derCert = derCerts[i];
-+                /* The pinned native wolfSSL GetCerts stack is issuer-first.
-+                 * X509TrustManager requires the peer certificate first. */
-+                byte[] derCert = derCerts[derCerts.length - 1 - i];
-                 certs[i] = new WolfSSLCertificate(derCert);
+--- a/external/wolfssljni/native/com_wolfssl_WolfSSLX509StoreCtx.c
++++ b/external/wolfssljni/native/com_wolfssl_WolfSSLX509StoreCtx.c
+@@ -86,7 +86,9 @@
+             }
+             XMEMCPY(buf, der, derSz);
+             (*jenv)->ReleaseByteArrayElements(jenv, derArr, buf, 0);
+-            (*jenv)->SetObjectArrayElement(jenv, certArr, i, derArr);
++            /* Pinned wolfSSL's store stack is root-first. JSSE trust managers
++             * require the TLS peer/leaf at index zero. */
++            (*jenv)->SetObjectArrayElement(jenv, certArr, skNum - 1 - i, derArr);
+             (*jenv)->DeleteLocalRef(jenv, derArr);
+         }
+     }

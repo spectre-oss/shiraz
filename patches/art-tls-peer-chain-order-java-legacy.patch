@@ -1,0 +1,10 @@
+# Legacy Java reversal retained solely for verified cached-tree migration.
+--- a/external/wolfssljni/src/java/com/wolfssl/WolfSSLX509StoreCtx.java
++++ b/external/wolfssljni/src/java/com/wolfssl/WolfSSLX509StoreCtx.java
+@@ -72,3 +72,5 @@
+             for (int i = 0; i < derCerts.length; i++) {
+-                byte[] derCert = derCerts[i];
++                /* The pinned native wolfSSL GetCerts stack is issuer-first.
++                 * X509TrustManager requires the peer certificate first. */
++                byte[] derCert = derCerts[derCerts.length - 1 - i];
+                 certs[i] = new WolfSSLCertificate(derCert);

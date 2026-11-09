@@ -8,10 +8,10 @@ import json
 import os
 import platform
 import shutil
-from pathlib import Path
 import subprocess
 import tarfile
 import urllib.request
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = ROOT / '.local'
@@ -98,10 +98,15 @@ PATCHES = {
             'external/wolfssljni/src/java/com/wolfssl/provider/jsse/WolfSSLTrustManager.java': '962f58b73551dfa46f315958aeee457a5a4b39b3abab73b7a6608fac37f4185e',
         }),
         ('art-tls-alpn-api.patch', {
-            'libcore/ojluni/src/main/java/javax/net/ssl/SSLParameters.java': '5805b2daa1cb91329268aca39b6c9666fcda73d475d9ffd7a470835a75a90410',
-            'libcore/ojluni/src/main/java/javax/net/ssl/SSLSocket.java': '18d505f4345953e2a66c964afd31338e515379a99613cdf095e6587848e2a0e6',
+            'libcore/ojluni/src/main/java/javax/net/ssl/SSLParameters.java': 'ca8434b8c732c44b483413c52ece1570020e55801f8d587c214a702bd887cf02',
+            'libcore/ojluni/src/main/java/javax/net/ssl/SSLSocket.java': 'a31cc95c94ccfa2e5840b2d9cdc1f1a9f878a7a85bc4462f84b587d08f24bee9',
         }),
-        ('art-tls-peer-chain-order.patch', {
+        # Recognize the old Java-only recipe, then restore its pinned input.
+        # The native patch below owns the single peer-first chain conversion.
+        ('art-tls-peer-chain-order-java-legacy.patch', {
+            'external/wolfssljni/src/java/com/wolfssl/WolfSSLX509StoreCtx.java': '0c69dab434202f3165f64ac85dc3dce59dfedb98da6d02ae980f1114ac8a153b',
+        }),
+        ('art-tls-peer-chain-order-java-reset.patch', {
             'external/wolfssljni/src/java/com/wolfssl/WolfSSLX509StoreCtx.java': 'df67d2ba23f85e35ffd144369f6219ff8061776380de53fa8b8a09149499c7a2',
         }),
         ('art-tls-cache-lifetime.patch', {
@@ -311,7 +316,58 @@ def run(argv, cwd=ROOT, env=None):
     subprocess.run([str(x) for x in argv], cwd=cwd, env=env, check=True)
 
 
+def validate_patch_recipes(patches, name='dependency'):
+    """Check recipe identity and declared coverage before touching dependencies."""
+    def safe_path(value):
+        return (isinstance(value, str) and value and not Path(value).is_absolute()
+                and not any(part in ('..', '.git') for part in Path(value).parts)
+                and '\\' not in value and '\0' not in value)
+
+    seen = set()
+    for patch, files in patches:
+        if not safe_path(patch) or patch in seen:
+            raise SystemExit(f'{name}: unsafe or duplicate dependency patch name: {patch}')
+        seen.add(patch)
+        path = ROOT / 'patches' / patch
+        if not path.is_file() or path.is_symlink():
+            raise SystemExit(f'{name}: missing or non-regular dependency patch: {patch}')
+        if not isinstance(files, dict) or not files or any(not safe_path(file) for file in files):
+            raise SystemExit(f'{name}: unsafe or empty declared patch targets: {patch}')
+        # Metadata parsing must not inherit a containing checkout's path
+        # prefix when a source archive is unpacked inside another repository.
+        metadata_env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(ROOT.parent))
+        for variable in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_PREFIX'):
+            metadata_env.pop(variable, None)
+        result = subprocess.run(['git', 'apply', '--numstat', '-z', '--', str(path)],
+                                cwd=ROOT, env=metadata_env, capture_output=True, check=False)
+        if result.returncode:
+            raise SystemExit(f'{name}: malformed dependency patch: {patch}')
+        targets = set()
+        for record in result.stdout.split(b'\0'):
+            if not record:
+                continue
+            fields = record.split(b'\t', 2)
+            try:
+                if len(fields) != 3 or not fields[0].isdigit() or not fields[1].isdigit():
+                    raise ValueError('non-text or rename record')
+                target = fields[2].decode('utf-8')
+                if not safe_path(target):
+                    raise ValueError('unsafe target')
+            except (UnicodeDecodeError, ValueError):
+                raise SystemExit(f'{name}: unsupported dependency patch target record: {patch}') from None
+            targets.add(target)
+        if targets != set(files):
+            raise SystemExit(f'{name}: dependency patch targets differ from recipe: {patch}')
+
+
 def sources():
+    selected = {}
+    for name in SOURCES:
+        patches = PATCHES.get(name, [])
+        if platform.system() == 'Darwin':
+            patches = patches + PATCHES_DARWIN.get(name, [])
+        validate_patch_recipes(patches, name=name)
+        selected[name] = patches
     for name, (url, revision) in SOURCES.items():
         directory = ROOT / 'context' / name
         if not directory.exists():
@@ -324,14 +380,12 @@ def sources():
         if actual != revision:
             raise SystemExit(f'{name}: local revision differs from pin; refusing to overwrite')
         dirty = subprocess.check_output(['git', 'diff', '--no-ext-diff', '--name-only', 'HEAD'], cwd=directory, text=True)
-        patches = PATCHES.get(name, [])
-        if platform.system() == 'Darwin':
-            patches = patches + PATCHES_DARWIN.get(name, [])
+        patches = selected[name]
         expected_files = {file: checksum for _, files in patches for file, checksum in files.items()}
         changed = set(dirty.splitlines())
         if not changed.issubset(expected_files):
             raise SystemExit(f'{name}: unrecognized tracked changes; refusing to build')
-        def digest(file):
+        def digest(file, directory=directory):
             path = directory / file
             return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
@@ -342,9 +396,9 @@ def sources():
         # `git clean` removes patch-created (untracked) files while tracked files keep
         # their final content. Recreate only those files, from the last patch that
         # writes each one, when everything else already matches the final recipe.
-        def in_head(file):
+        def in_head(file, directory=directory):
             return subprocess.run(['git', 'cat-file', '-e', f'HEAD:{file}'], cwd=directory,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
 
         missing = [file for file, checksum in expected_files.items()
                    if current[file] is None and checksum is not None and not in_head(file)]
@@ -377,7 +431,7 @@ def sources():
             state = {}
             for file in paths:
                 original = subprocess.run(['git', 'show', f'HEAD:{file}'], cwd=directory,
-                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                          capture_output=True, check=False)
                 state[file] = hashlib.sha256(original.stdout).hexdigest() if original.returncode == 0 else None
             ordered = sorted(indices)
             snapshots = [dict(state)]
@@ -472,7 +526,7 @@ def main():
         run(['make', 'install'], cwd=build, env=env)
         return
     if args.stage == 'network':
-        from bootstrap_boot import desugar_boot, NETWORK_MODULES, MODULES
+        from bootstrap_boot import MODULES, NETWORK_MODULES, desugar_boot
         build_wolfssl(env)
         run(['make', '-j2', *MODULES, *NETWORK_MODULES, '____PREFIX=' + str(PREFIX), '____LIBDIR=lib'], cwd=ROOT / 'context/art_standalone', env=env)
         desugar_boot(ROOT, MODULES + NETWORK_MODULES)
