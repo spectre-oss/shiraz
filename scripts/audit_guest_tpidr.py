@@ -25,6 +25,7 @@ from pathlib import Path
 
 import guest_allocator_contract
 import guest_callee_effects
+import guest_frame_effects
 import guest_jump_table
 import guest_mrs_window
 import guest_native_target
@@ -373,7 +374,7 @@ def opaque_load_register(name):
                                     and reg(name) in {f"x{i}" for i in range(31)}) or name in {"xzr", "wzr"}
 
 
-def caller_prologue(decode, root, caller):
+def caller_prologue(decode, root, caller, *, helper_evidence=None):
     """Model only a straight-line prologue from an independently proved entry.
 
     The caller must supply the entry metadata proof. This routine never searches
@@ -382,6 +383,8 @@ def caller_prologue(decode, root, caller):
     if root & 3 or caller & 3 or not 0 <= caller - root <= 4 * MAX_CALLER_PRELUDE:
         raise MetadataUnavailable("caller prelude alignment/instruction bound")
     state = State()
+    helpers = []
+    helper_steps = 0
 
     def assign(name, alias):
         state.set_alias(name, alias)
@@ -395,6 +398,37 @@ def caller_prologue(decode, root, caller):
         if item is None:
             raise MetadataUnavailable("caller prelude undecodable")
         op, operands = item.mnemonic, item.operands
+        if op == "bl" and len(operands) == 1 and operands[0].kind == "imm":
+            lookup = getattr(decode, "frame_prologue", None)
+            effects = lookup(operands[0].value) if lookup is not None else None
+            if effects is None:
+                raise MetadataUnavailable("caller prelude unsupported outlined frame")
+            helper_steps += effects.body_size // 4
+            if ((caller - root) // 4 + helper_steps > MAX_CALLER_PRELUDE
+                    or state.sp & 15 or state.sp >= 0
+                    or max(root, effects.entry) < min(caller, effects.entry + effects.body_size)):
+                raise MetadataUnavailable("caller prelude outlined frame context/bound")
+            for name, offset in effects.saves:
+                slot = state.sp + offset
+                if (slot < state.sp or slot + 8 > 0 or slot & 7
+                        or abs(slot) > 1 << 20
+                        or slot not in state.stack and len(state.stack) >= MAX_STACK_SLOTS):
+                    raise MetadataUnavailable("caller prelude outlined frame save bound")
+                state.stack[slot] = CLEAN
+                state.stack_aliases[slot] = state.alias(name)
+                for mapping in (state.stack_returns, state.stack_images, state.stack_signatures):
+                    mapping.pop(slot, None)
+            assign("x29", frozenset({state.sp}))
+            # BL replaces LR; unknown entry LR must never survive this call.
+            for mapping in (state.registers, state.aliases, state.return_values,
+                            state.return_signatures, state.image_addresses, state.constants):
+                mapping.pop("x30", None)
+            state.zero_upper.discard("x30")
+            helpers.append({"call": hex(pc), "entry": hex(effects.entry),
+                            "body_size": effects.body_size,
+                            "body_sha256": effects.body_sha256,
+                            "instructions": effects.body_size // 4})
+            continue
         if op in {"nop", "bti"}:
             continue
         if op in {"paciasp", "pacibsp", "autiasp", "autibsp"}:
@@ -479,6 +513,8 @@ def caller_prologue(decode, root, caller):
         raise MetadataUnavailable("caller prelude unsupported instruction:" + op)
     if state.sp & 15:
         raise MetadataUnavailable("caller prelude unaligned call SP")
+    if helper_evidence is not None:
+        helper_evidence.extend(helpers)
     return state
 
 
@@ -2624,6 +2660,9 @@ class ElfDecoder:
             "jump_table_reader_sha256": hashlib.sha256(
                 Path(guest_jump_table.__file__).read_bytes()
             ).hexdigest(),
+            "frame_effects_sha256": hashlib.sha256(
+                Path(guest_frame_effects.__file__).read_bytes()
+            ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()
             ).hexdigest(),
@@ -2772,13 +2811,20 @@ class ElfDecoder:
             "excludes": ["arbitrary-host-cleanup-epochs", "general-Loader-shutdown-quiescence"],
         }
 
+    def frame_prologue(self, address):
+        def word(pc):
+            raw = self.word(pc)
+            return int.from_bytes(raw, "little") if raw is not None else None
+        return guest_frame_effects.recognize(word, address)
+
     def caller_frame(self, caller):
         try:
             metadata = self.bindings or ElfBindingMetadata(
                 self.data, "<caller-context>"
             )
             root, size, source = metadata.caller_function(caller, with_source=True)
-            state = caller_prologue(self, root, caller)
+            helpers = []
+            state = caller_prologue(self, root, caller, helper_evidence=helpers)
         except MetadataUnavailable as error:
             return None, {"status": "unknown", "reason": str(error)}
         return state, {
@@ -2787,6 +2833,7 @@ class ElfDecoder:
             "entry": hex(root),
             "size": size,
             "instructions": (caller - root) // 4,
+            "outlined_helpers": helpers,
             "sp": state.sp,
             "fp": state.fp,
             "scope": "straight-line path from this metadata entry to selected BL only; alternate entries and complete helper references unproved",

@@ -215,6 +215,12 @@ class NamespaceDecoder:
         if "entry" in evidence:
             evidence["entry_relative"] = evidence["entry"]
             evidence["entry"] = hex(index * STRIDE + int(evidence["entry"], 16))
+        if "outlined_helpers" in evidence:
+            evidence["outlined_helpers"] = [
+                {**helper, **{key: hex(index * STRIDE + int(helper[key], 16))
+                              for key in ("call", "entry")}}
+                for helper in evidence["outlined_helpers"]
+            ]
         if state is not None:
             for mapping in (state.image_addresses, state.stack_images):
                 for key, value in list(mapping.items()):
