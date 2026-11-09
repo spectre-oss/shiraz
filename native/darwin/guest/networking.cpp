@@ -4,6 +4,7 @@
 #include "shiraz/darwin/guest/events.hpp"
 #include "guest_io.hpp"
 #include <algorithm>
+#include <iterator>
 #include <array>
 #include <climits>
 #include <cstring>
@@ -330,7 +331,7 @@ public:
 };
 enum class OptionKind { Int, Error, Type, Byte, Timeval, Linger, Address4, Membership4, Membership6 };
 struct Option { int level, name, native_level, native_name; OptionKind kind; };
-const std::vector<Option> options{
+const Option options[]{
   {int(b::kSOL_SOCKET), int(b::kSO_REUSEADDR), SOL_SOCKET, SO_REUSEADDR, OptionKind::Int},
   {int(b::kSOL_SOCKET), int(b::kSO_REUSEPORT), SOL_SOCKET, SO_REUSEPORT, OptionKind::Int},
   {int(b::kSOL_SOCKET), int(b::kSO_KEEPALIVE), SOL_SOCKET, SO_KEEPALIVE, OptionKind::Int},
@@ -376,8 +377,8 @@ const std::vector<Option> options{
 };
 int Network::option(int fd, int level, int name, void *value, uint32_t *size, bool setting) {
   if (!size || (!value && *size)) return fail(EFAULT);
-  auto found = std::find_if(options.begin(), options.end(), [&](const auto &item) { return item.level == level && item.name == name; });
-  if (found == options.end()) return fail(ENOPROTOOPT);
+  auto found = std::find_if(std::begin(options), std::end(options), [&](const auto &item) { return item.level == level && item.name == name; });
+  if (found == std::end(options)) return fail(ENOPROTOOPT);
   const auto &option = *found;
   std::array<uint8_t, 128> native{}, guest{};
   socklen_t native_size = 0; size_t guest_size = 0;

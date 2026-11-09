@@ -341,8 +341,8 @@ Interval logarithm_interval(const Big &a, const Big &b, unsigned precision) {
   throw Limit{};
 }
 Interval logarithm_two(unsigned precision) {
-  static std::mutex mutex;
-  static std::map<unsigned, Interval> cache;
+  static auto &mutex = *new std::mutex;
+  static auto &cache = *new std::map<unsigned, Interval>;
   { std::lock_guard<std::mutex> lock(mutex); auto found = cache.find(precision); if (found != cache.end()) return found->second; }
   auto value = logarithm_interval(Big(1), Big(3), precision);
   std::lock_guard<std::mutex> lock(mutex);

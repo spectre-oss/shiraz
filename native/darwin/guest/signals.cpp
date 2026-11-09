@@ -157,7 +157,7 @@ struct Slot {
   const void *owner = nullptr;
 };
 std::array<Slot, NSIG> slots;
-std::mutex dispositions;
+auto &dispositions = *new std::mutex;
 struct MaskCounter { std::atomic<size_t> dirty{0}; };
 struct MaskLease {
   std::shared_ptr<MaskCounter> counter;

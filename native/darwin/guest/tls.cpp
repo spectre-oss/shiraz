@@ -25,11 +25,49 @@ extern "C" int pthread_self_is_exiting_np(void) __attribute__((weak_import));
 namespace shiraz::guest {
 struct GuestThreadKey {
   std::atomic<bool> active{true};
-  void *destructor;
-  explicit GuestThreadKey(void *function) : destructor(function) {}
+  std::mutex mutex;
+  void *const destructor;
+  const std::shared_ptr<Lifecycle> lifecycle;
+  size_t queued_values = 0;
+  // One token epoch covers all queued values. Selected callbacks copy it
+  // before clearing their slot, so concurrent deletion cannot unpin them.
+  std::shared_ptr<void> queued_retention;
+  explicit GuestThreadKey(void *function, std::shared_ptr<Lifecycle> owner)
+      : destructor(function), lifecycle(std::move(owner)) {}
 };
 namespace {
 struct Destructor { void *function, *object; std::shared_ptr<void> retention; };
+// Call only for an existing nonnull per-thread value. Deletion has already
+// reset the logical queued count; stale deleted slots must not decrement it.
+void discard_key_value(const GuestThreadKeyHandle &key) {
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    if (key->active.load(std::memory_order_relaxed) && key->destructor) {
+      if (!key->queued_values) std::terminate();
+      if (!--key->queued_values) retired = std::move(key->queued_retention);
+    }
+  }
+  // Retention destruction takes the lifecycle mutex. Never do it under the
+  // key mutex or while invoking guest code.
+}
+struct SelectedKeyCallback {
+  void *function = nullptr;
+  std::shared_ptr<void> retention;
+};
+SelectedKeyCallback select_key_callback(const GuestThreadKeyHandle &key) {
+  SelectedKeyCallback selected;
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    if (!key->active.load(std::memory_order_relaxed) || !key->destructor) return selected;
+    if (!key->queued_values || (key->lifecycle && !key->queued_retention)) std::terminate();
+    selected.function = key->destructor;
+    selected.retention = key->queued_retention;
+    if (!--key->queued_values) retired = std::move(key->queued_retention);
+  }
+  return selected;
+}
 // The async readiness query must not touch a Mach-O TLV on an unprepared
 // thread: doing so could allocate TLS from inside the signal handler.
 std::array<std::atomic<pthread_t>, 4096> prepared_threads{};
@@ -178,10 +216,13 @@ struct ThreadState {
         auto found = key_values.find(key);
         if (found == key_values.end() || !found->second) continue;
         const void *value = found->second;
+        auto selected = select_key_callback(key);
         key_values.erase(found); // POSIX clears the slot before the callback.
-        if (!key->active.load(std::memory_order_acquire)) continue;
+        if (!selected.function) continue;
         try {
-          invoke(key->destructor, {Argument::integer(reinterpret_cast<uintptr_t>(value),
+          // selected.retention survives the complete invoke return, even if
+          // another thread deletes this key after selection.
+          invoke(selected.function, {Argument::integer(reinterpret_cast<uintptr_t>(value),
                                                      ArgumentType::Int64)});
         } catch (...) {
           std::fprintf(stderr, "SHIRAZ_GUEST_FATAL pthread key destructor failure\n");
@@ -195,7 +236,12 @@ struct ThreadState {
     // POSIX does not promise to destroy values endlessly reset by destructors.
     // Discard residual slots after the fixed guest pass budget; do not schedule
     // additional native callbacks or dereference application-owned payloads.
-    key_values.clear();
+    while (!key_values.empty()) {
+      auto found = key_values.begin();
+      auto key = found->first;
+      key_values.erase(found);
+      discard_key_value(key);
+    }
     if (prepared_index != prepared_threads.size()) {
       auto &domains = memory_domains();
       std::lock_guard<std::mutex> lock(domains.mutex);
@@ -444,23 +490,60 @@ bool prepared_guest_stack_window(uintptr_t anchor, uint64_t before, uint64_t aft
   }
   return false;
 }
-GuestThreadKeyHandle make_guest_thread_key(void *destructor) {
-  return std::make_shared<GuestThreadKey>(destructor);
+GuestThreadKeyHandle make_guest_thread_key(void *destructor, std::shared_ptr<Lifecycle> lifecycle) {
+  return std::make_shared<GuestThreadKey>(destructor, std::move(lifecycle));
 }
 void delete_guest_thread_key(const GuestThreadKeyHandle &key) noexcept {
-  key->active.store(false, std::memory_order_release);
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    key->active.store(false, std::memory_order_release);
+    key->queued_values = 0;
+    retired = std::move(key->queued_retention);
+  }
+  // Raw values retained in foreign thread maps cannot select a callback now.
+  // Previously selected callbacks own independent copies of this token epoch.
 }
 int set_guest_thread_value(const GuestThreadKeyHandle &key, const void *value) {
   if (!key->active.load(std::memory_order_acquire)) return EINVAL;
+  // Acquire admission before publication, outside the key mutex. A temporary
+  // token also protects the zero-to-nonzero handoff from namespace shutdown.
+  std::shared_ptr<void> candidate;
+  if (value && key->destructor && key->lifecycle) {
+    candidate = key->lifecycle->retain_thread_callback();
+    if (!candidate) return EINVAL;
+  }
   auto &values = live_state().key_values;
-  // Deleted keys from any namespace need no destructor and must not accumulate
-  // across create/delete churn on a long-lived thread.
+  // Deletion reset these keys' queued counts/tokens; stale values have no
+  // ownership to release and must not accumulate during create/delete churn.
   for (auto it = values.begin(); it != values.end();)
     if (!it->first->active.load(std::memory_order_acquire)) it = values.erase(it);
     else ++it;
-  if (!value) { values.erase(key); return 0; }
-  if (!values.count(key) && values.size() >= 4096) return EAGAIN;
-  values[key] = value;
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    if (!key->active.load(std::memory_order_relaxed)) return EINVAL;
+    auto found = values.find(key);
+    if (!value) {
+      if (found != values.end()) {
+        values.erase(found);
+        if (key->destructor) {
+          if (!key->queued_values) std::terminate();
+          if (!--key->queued_values) retired = std::move(key->queued_retention);
+        }
+      }
+    } else if (found != values.end()) {
+      found->second = value; // Replacement neither allocates nor adds a value.
+    } else {
+      if (values.size() >= 4096 || key->queued_values == SIZE_MAX) return EAGAIN;
+      // Allocate the map node before changing count/token state. On failure,
+      // the old values and queued ownership remain unchanged; candidate drops
+      // outside this lock during unwinding.
+      values.emplace(key, value);
+      if (key->destructor && !key->queued_values++)
+        key->queued_retention = std::move(candidate);
+    }
+  }
   return 0;
 }
 void *guest_thread_value(const GuestThreadKeyHandle &key) {

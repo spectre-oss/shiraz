@@ -429,7 +429,7 @@ Providers native_personality(CodeValidator validate, std::shared_ptr<Lifecycle> 
                               std::make_move_iterator(exports.begin()),
                               std::make_move_iterator(exports.end()));
       if (validate) {
-        auto threads = thread_exports(validate);
+        auto threads = thread_exports(validate, lifecycle);
         provider.exports.insert(provider.exports.end(),
                                 std::make_move_iterator(threads.begin()),
                                 std::make_move_iterator(threads.end()));

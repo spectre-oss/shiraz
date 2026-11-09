@@ -45,7 +45,9 @@ adapters and ART bridge have loaded the unchanged OsmAnd+ APK's seven native
 libraries and completed a meaningful OsmAndCore JNI round trip. Developer fixtures
 run in ordinary and hardened allow-jit-only modes. M5 remains in progress: complete
 TLS consumer and callback lifetime coverage, plus comparison against Android's
-bionic runtime, are still open. These results do not establish a fully functional
+bionic runtime, are still open. NativeBridge namespaces remain resident for the
+process lifetime; explicit VM namespace teardown is not supported. These results
+do not establish a fully functional
 OsmAnd application on macOS or a supported macOS release. See the
 [macOS goal and checklist](docs/macos_final_goal.md).
 

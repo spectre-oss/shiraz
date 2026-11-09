@@ -25,14 +25,31 @@
 
 namespace {
 thread_local std::string last_error;
-auto mutex = std::make_shared<std::recursive_mutex>();
-std::shared_ptr<const shiraz::guest::CodeValidator> code_validation;
-std::shared_ptr<shiraz::guest::Lifecycle> lifecycle;
-std::shared_ptr<shiraz::guest::SignalRuntime> signals;
-std::shared_ptr<shiraz::guest::CleanupRuntime> cleanup;
-std::unique_ptr<shiraz::guest::Loader> loader;
-std::vector<std::string> binding_load_order;
-std::vector<int> binding_load_flags;
+// ART can release its dlopen reference before pthread TLS cleanup has run.
+// NativeBridge has no namespace-quiescence protocol: registered JNI entries,
+// provider closures and thread callbacks therefore have process lifetime.
+// Keep their complete owner graph and this DSO resident until OS reclamation.
+// Scoped Loader users still finalize/unmap, refusing outstanding callbacks.
+struct ProcessNamespace {
+  std::shared_ptr<std::recursive_mutex> mutex = std::make_shared<std::recursive_mutex>();
+  std::shared_ptr<const shiraz::guest::CodeValidator> code_validation;
+  std::shared_ptr<shiraz::guest::Lifecycle> lifecycle;
+  std::shared_ptr<shiraz::guest::SignalRuntime> signals;
+  std::shared_ptr<shiraz::guest::CleanupRuntime> cleanup;
+  std::unique_ptr<shiraz::guest::Loader> loader;
+  std::vector<std::string> binding_load_order;
+  std::vector<int> binding_load_flags;
+  void *bridge_reference = nullptr;
+};
+auto &process_namespace = *new ProcessNamespace;
+auto &mutex = process_namespace.mutex;
+auto &code_validation = process_namespace.code_validation;
+auto &lifecycle = process_namespace.lifecycle;
+auto &signals = process_namespace.signals;
+auto &cleanup = process_namespace.cleanup;
+auto &loader = process_namespace.loader;
+auto &binding_load_order = process_namespace.binding_load_order;
+auto &binding_load_flags = process_namespace.binding_load_flags;
 bool initialize(const android::NativeBridgeRuntimeCallbacks *callbacks,
                 const char *, const char *) {
   try {
@@ -68,6 +85,15 @@ void *load(const char *path, int flags) {
     std::lock_guard<std::recursive_mutex> lock(*mutex);
     auto canonical = std::filesystem::canonical(path);
     if (!loader) {
+      if (!process_namespace.bridge_reference) {
+        Dl_info image{};
+        if (!::dladdr(reinterpret_cast<void *>(&supported), &image) || !image.dli_fname)
+          throw shiraz::guest::ElfError("cannot identify resident NativeBridge image");
+        process_namespace.bridge_reference = ::dlopen(image.dli_fname, RTLD_NOW | RTLD_LOCAL);
+        if (!process_namespace.bridge_reference)
+          throw shiraz::guest::ElfError("cannot retain process-lifetime NativeBridge image");
+        std::fprintf(stderr, "SHIRAZ_GUEST_NAMESPACE_LIFETIME process=1 explicit_unmap=0 bridge_reference=1\n");
+      }
       std::function<void()> close_audio;
       lifecycle = std::make_shared<shiraz::guest::Lifecycle>(shiraz::guest::is_guest_code);
       signals = std::make_shared<shiraz::guest::SignalRuntime>(shiraz::guest::is_guest_code);

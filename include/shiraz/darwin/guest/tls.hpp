@@ -71,16 +71,18 @@ bool prepared_guest_stack_disjoint(uintptr_t pointer, uint64_t bytes) noexcept;
 // Handles have namespace-independent identity and stay alive while any thread
 // retains a value. Deletion suppresses future selections, never invokes a
 // destructor. A callback already selected during concurrent deletion may finish.
+class Lifecycle;
 struct GuestThreadKey;
 using GuestThreadKeyHandle = std::shared_ptr<GuestThreadKey>;
-GuestThreadKeyHandle make_guest_thread_key(void *destructor);
+// An optional owner retains callback code while active nonnull values or
+// selected callbacks exist. Application payload objects remain caller-owned.
+GuestThreadKeyHandle make_guest_thread_key(void *destructor, std::shared_ptr<Lifecycle> lifecycle = {});
 void delete_guest_thread_key(const GuestThreadKeyHandle &key) noexcept;
 int set_guest_thread_value(const GuestThreadKeyHandle &key, const void *value);
 void *guest_thread_value(const GuestThreadKeyHandle &key);
-class Lifecycle;
 // With a lifecycle, C++ thread destructor registration retains the namespace
 // through callback return and rejects shutdown before guest images finalize.
 // The standalone form requires the caller to retain all validated code until
-// native thread cleanup completes. Pthread key callbacks are a separate owner.
+// native thread cleanup completes. Pthread keys use their own value retention.
 std::vector<ProviderExport> tls_exports(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle = {});
 } // namespace shiraz::guest

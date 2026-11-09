@@ -44,8 +44,8 @@ struct Mirror {
   uint32_t generation = 0;
 };
 static_assert(sizeof(void *) == 8 && sizeof(float) == 4);
-std::mutex mirrors_mutex;
-std::map<uintptr_t, std::unique_ptr<Mirror>> mirrors;
+auto &mirrors_mutex = *new std::mutex;
+auto &mirrors = *new std::map<uintptr_t, std::unique_ptr<Mirror>>;
 size_t allocated_bytes = 0;
 template<class T, size_t N> void put(std::array<uint8_t,N>& out, size_t offset, T value) {
   std::memcpy(out.data()+offset, &value, sizeof(value));
@@ -99,11 +99,11 @@ void fail(JNIEnv* env,const char* type,const char* message) {
   jclass cls=env->FindClass(type);
   if(cls){env->ThrowNew(cls,message);env->DeleteLocalRef(cls);}
 }
-std::mutex field_mutex;
+auto &field_mutex = *new std::mutex;
 jclass path_class=nullptr;
 jmethodID prepare_method=nullptr;
 jfieldID path_field=nullptr;
-std::shared_ptr<const std::function<bool(const void *)>> reader_validator;
+auto &reader_validator = *new std::shared_ptr<const std::function<bool(const void *)>>;
 bool cache_path_class(JNIEnv* env,jclass actual) {
   // Raw host JNI produces a real field ID. Cache it before nCreate publishes
   // any nonzero mirror so reads through reflected/inherited/backing-name field

@@ -372,7 +372,8 @@ struct Epoll {
   std::map<int,std::shared_ptr<EpollWatch>> watches;
   std::vector<std::shared_ptr<EpollWatch>> identities;
 };
-std::mutex epolls_mutex;std::map<int,std::shared_ptr<Epoll>> epolls;
+auto &epolls_mutex = *new std::mutex;
+auto &epolls = *new std::map<int,std::shared_ptr<Epoll>>;
 std::shared_ptr<Epoll> epoll_lookup(int fd){std::lock_guard<std::mutex> lock(epolls_mutex);auto it=epolls.find(fd);return it==epolls.end()?nullptr:it->second;}
 int epoll_create_flags(int flags){
   if(!same_process() || in_guest_signal_handler())return failure(ENOTSUP);

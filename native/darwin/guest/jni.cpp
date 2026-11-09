@@ -54,7 +54,7 @@ JNINativeInterface env_table{};
 JNIInvokeInterface vm_table{};
 static_assert(sizeof(JNIInvokeInterface) == 8 * sizeof(void *));
 ShadowVM vm_state{};
-std::mutex vm_mutex;
+auto &vm_mutex = *new std::mutex;
 std::once_flag tables_once;
 JNIEnv *unwrap(JNIEnv *env) {
   auto *thread_env = current_env();
@@ -419,8 +419,8 @@ void *native_trampoline(void *guest, const std::string &shorty) {
   validate_shorty(shorty);
   if (!guest || !is_guest_code(guest))
     throw std::runtime_error("native entry is outside guest executable images");
-  static std::mutex mutex;
-  static std::map<std::pair<uintptr_t, std::string>, void *> cache;
+  static auto &mutex = *new std::mutex;
+  static auto &cache = *new std::map<std::pair<uintptr_t, std::string>, void *>;
   std::lock_guard<std::mutex> lock(mutex);
   auto key = std::make_pair(reinterpret_cast<uintptr_t>(guest), shorty);
   auto found = cache.find(key);
