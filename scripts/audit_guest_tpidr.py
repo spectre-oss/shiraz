@@ -481,6 +481,86 @@ def stack_fact_slots(state):
     return traced, protected
 
 
+def paired_vector_stack_copy(first, second, state):
+    """Exact adjacent LDP Q/Q; STP Q/Q stack copy, with retained SIMD taint.
+
+    Snapshot all four 8-byte lanes before any store (overlap is permitted).
+    This is not a generic SIMD transfer: later vector consumers remain opaque.
+    """
+    if second is None or second.address != first.address + 4:
+        return None
+    registers = None
+    addresses = []
+    for item, operation in ((first, "ldp"), (second, "stp")):
+        if (item.mnemonic != operation or item.width != 16 or item.writeback
+                or item.post_index or item.control_transfer or len(item.operands) != 3):
+            return None
+        left, right, memory = item.operands
+        names = (left.value, right.value)
+        if (any(operand.kind != "reg" or operand.shift or operand.shift_amount or operand.extend
+                for operand in (left, right))
+                or any(name not in {f"q{i}" for i in range(32)} for name in names)
+                or names[0] == names[1] or registers is not None and names != registers
+                or memory.kind != "mem" or memory.index or memory.shift or memory.shift_amount
+                or memory.extend or type(memory.displacement) is not int
+                or not -1024 <= memory.displacement <= 1008 or memory.displacement % 16
+                or not (full_width_gpr(memory.base) or memory.base == "sp")
+                or tainted(state.value(memory.base))):
+            return None
+        allowed_reads = {reg(memory.base)} | (set(names) if operation == "stp" else set())
+        if (any(reg(name) not in allowed_reads for name in item.reads)
+                or any(name not in (names if operation == "ldp" else ()) for name in item.writes)):
+            return None
+        aliases = state.alias(memory.base)
+        if len(aliases) != 1 or type(next(iter(aliases))) is not int:
+            return None
+        address = next(iter(aliases)) + memory.displacement
+        if (address % 8 or abs(address) > 1 << 20
+                or not state.sp <= address < address + 32 <= 0):
+            return None
+        addresses.append(address)
+        registers = names
+    source, destination = addresses
+    if state.native_memory_may_contain_tp:
+        return None
+    if (state.native_stack_clobber_below is not None and any(
+            source + offset < state.native_stack_clobber_below
+            and source + offset not in state.native_stack_rewritten for offset in range(0, 32, 8))):
+        return None
+    mappings = ("stack", "stack_aliases", "stack_returns", "stack_images", "stack_signatures")
+    # Refuse misaligned overlapping facts rather than slicing symbolic pointers.
+    if any((source < slot + 8 and slot < source + 32 or
+            destination < slot + 8 and slot < destination + 32) and slot % 8
+           for name in mappings for slot in getattr(state, name)):
+        return None
+    slots = {destination + offset for offset in range(0, 32, 8)}
+    if len(set(state.stack) | slots) > MAX_STACK_SLOTS:
+        return None
+    post = state.copy()
+    for name in mappings:
+        before, after = getattr(state, name), getattr(post, name)
+        for offset in range(0, 32, 8):
+            target = destination + offset
+            after.pop(target, None)
+            if source + offset in before:
+                after[target] = before[source + offset]
+    for index, name in enumerate(registers):
+        lanes = {source + index * 16, source + index * 16 + 8}
+        protected = any(
+            (tainted(value) if mapping in {"stack", "stack_aliases", "stack_returns"} else True)
+            for mapping in mappings for slot, value in getattr(state, mapping).items() if slot in lanes)
+        # Q writes cover all views. Opaque facts prevent laundering through a
+        # D/S/H/B/V alias without claiming affine SIMD arithmetic support.
+        for prefix in ("b", "h", "s", "d", "q", "v"):
+            view = prefix + name[1:]
+            post.set(view, OPAQUE_VALUE if protected else CLEAN)
+            post.set_alias(view, CLEAN)
+    post.native_stack_rewritten.difference_update(slots)
+    if post.native_stack_clobber_below is not None:
+        post.native_stack_rewritten.update(slots)
+    return post, source, destination
+
+
 def shift_pointer_offset(value, delta):
     return value if value is None or value is OPAQUE else value + delta
 
@@ -704,6 +784,7 @@ class Audit:
         managed_malloc_observations = set()
         jump_tables = {}
         byte_copy_observations = set()
+        vector_stack_copies = set()
         relocated_pointer_loads = {}
         indirect_edges = {}
 
@@ -865,6 +946,13 @@ class Audit:
                     state.fp = None
                 enqueue(pc + 4, returns, state)
                 continue
+            if instruction.mnemonic == "ldp" and instruction.width == 16:
+                copied = paired_vector_stack_copy(instruction, self.decode(pc + 4), state)
+                if copied is not None:
+                    post, source, destination = copied
+                    vector_stack_copies.add((pc, source, destination))
+                    enqueue(pc + 8, returns, post)
+                    continue
             jump = (self.decode.byte_jump_table(pc)
                     if instruction.mnemonic in {"cmp", "ubfx", "lsr"} and hasattr(self.decode, "byte_jump_table") else None)
             if jump is not None:
@@ -2111,6 +2199,12 @@ class Audit:
             "indirect_edges": [{"pc": hex(pc), "target": hex(target), "operation": op,
                                 "function": entry}
                                for (pc, target, op), entry in sorted(indirect_edges.items())],
+            "vector_stack_copies": [
+                {"load": hex(pc), "store": hex(pc + 4), "source": source,
+                 "destination": destination, "bytes": 32,
+                 "scope": "exact stack lanes; vector views retain opaque pointer taint"}
+                for pc, source, destination in sorted(vector_stack_copies)
+            ],
             "conditional_byte_copies": [
                 {"entry": hex(pc), "source_kind": kind, "source": source,
                  "destination_stack_offset": destination, "bytes": size,
