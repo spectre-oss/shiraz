@@ -361,6 +361,57 @@ def exact_register_delta(operands, state):
     return value - (1 << 64) if value & (1 << 63) else value
 
 
+SCALAR_LOGICAL_OPS = frozenset({"and", "bic", "orr", "orn", "eor", "eon"})
+
+
+def scalar_logical_result(operation, operands, state):
+    """Non-flag-setting A64 logical register form; unknown bits stay unknown.
+
+    A narrow view of an address is still an address consumer. This transfer
+    deliberately refuses such inputs rather than manufacturing an integer or
+    losing the dependency through a W register, shift, or complement.
+    """
+    if operation not in SCALAR_LOGICAL_OPS or len(operands) != 3:
+        raise ValueError("logical register form")
+    destination, left, right = operands
+    if any(item.kind != "reg" or not isinstance(item.value, str) for item in operands):
+        raise ValueError("logical register operands")
+    prefix = destination.value[:1]
+    allowed = {f"{prefix}{i}" for i in range(31)} | {prefix + "zr"}
+    if prefix not in {"w", "x"} or any(item.value not in allowed for item in operands):
+        raise ValueError("logical register widths")
+    width = 32 if prefix == "w" else 64
+    if (any(item.shift or item.shift_amount or item.extend for item in (destination, left))
+            or right.extend or right.shift not in {"", "lsl", "lsr", "asr", "ror"}
+            or type(right.shift_amount) is not int or not 0 <= right.shift_amount < width
+            or not right.shift and right.shift_amount):
+        raise ValueError("logical register modifier")
+    for item in (left, right):
+        name = reg(item.value)
+        if (tainted(state.value(name)) or tainted(state.alias(name))
+                or tainted(state.control(name)) or name in state.return_signatures
+                or name in state.image_addresses):
+            raise ValueError("logical register address input")
+    a, b = state.scalar(left.value), state.scalar(right.value)
+    if a is None or b is None:
+        return None
+    mask = (1 << width) - 1
+    a, b = a & mask, b & mask
+    amount = right.shift_amount
+    if right.shift == "lsl":
+        b = (b << amount) & mask
+    elif right.shift == "lsr":
+        b >>= amount
+    elif right.shift == "asr":
+        b = ((b - (1 << width) if b >> (width - 1) else b) >> amount) & mask
+    elif right.shift == "ror" and amount:
+        b = ((b >> amount) | (b << (width - amount))) & mask
+    if operation in {"bic", "orn", "eon"}:
+        b ^= mask
+    return {"and": a & b, "bic": a & b, "orr": a | b, "orn": a | b,
+            "eor": a ^ b, "eon": a ^ b}[operation]
+
+
 def stack_fact_slots(state):
     traced = {slot for slot, value in state.stack.items() if tainted(value)}
     protected = traced | {
@@ -1175,6 +1226,29 @@ class Audit:
                         enqueue(binding["target"], returns, state)
                     continue
             op, operands = instruction.mnemonic, instruction.operands
+            if (op in SCALAR_LOGICAL_OPS and len(operands) == 3
+                    and all(item.kind == "reg" for item in operands)):
+                try:
+                    scalar = scalar_logical_result(op, operands, state)
+                    if (instruction.control_transfer or instruction.writeback
+                            or instruction.post_index or instruction.width not in {4, 8}
+                            or instruction.width != (4 if operands[0].value.startswith("w") else 8)
+                            or any(not isinstance(name, str) for name in (*instruction.reads, *instruction.writes))
+                            or any(reg(name) != reg(operands[0].value) for name in instruction.writes)
+                            or any(reg(name) not in {reg(item.value) for item in operands[1:]}
+                                   for name in instruction.reads)):
+                        raise ValueError("logical register effects")
+                except ValueError as error:
+                    problem(pc, str(error))
+                    continue
+                destination = operands[0].value
+                state.set(destination, CLEAN)
+                state.set_alias(destination, CLEAN)
+                state.set_scalar(destination, scalar)
+                if reg(destination) == "x29":
+                    state.fp = None
+                enqueue(pc + 4, returns, state)
+                continue
             if op in {"add", "sub"} and len(operands) == 3 and operands[2].kind == "reg":
                 delta = exact_register_delta(operands, state)
                 if delta is None:
