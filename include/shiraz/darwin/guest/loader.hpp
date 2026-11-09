@@ -50,6 +50,11 @@ struct LoadedModuleInfo {
   uint64_t adds = 0, subs = 0;
   ImageMetrics metrics;
 };
+struct RelocationSnapshot {
+  const Elf &elf;
+  const std::vector<uint64_t> &values;
+  const ImageMetrics &metrics;
+};
 struct LoadedAddressInfo {
   bool found = false;
   uintptr_t base = 0, symbol_address = 0;
@@ -105,6 +110,8 @@ public:
   size_t constructor_count() const;
   size_t rewritten_thread_pointers() const;
   const std::vector<BindingRecord> &bindings() const;
+  // Caller serializes namespace access and retains the Loader/Image lifetime.
+  RelocationSnapshot relocation_snapshot(const std::string &module_path) const;
 
 private:
   struct State;

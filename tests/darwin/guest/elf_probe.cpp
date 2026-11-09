@@ -116,6 +116,25 @@ int main(int argc, char **argv) {
     }
     uint32_t dyld_count = _dyld_image_count();
     Image first(bytes), second(bytes);
+    require(first.metrics().relocations_verified && second.metrics().relocations_verified &&
+                first.metrics().verified_relocations == parsed.relocations.size() &&
+                first.relocation_values().size() == parsed.relocations.size(),
+            "complete relocation readback published before constructors");
+    for (size_t i = 0; i < parsed.relocations.size(); ++i) {
+      uint64_t observed = 0;
+      std::memcpy(&observed, reinterpret_cast<const void *>(first.load_bias() + parsed.relocations[i].address), 8);
+      require(observed == first.relocation_values()[i], "independent slot read matches saved relocation value");
+    }
+    Image retry(bytes, Image::Mapping::Deferred);
+    bool resolve_failed = false;
+    try { retry.relocate([](size_t) -> uintptr_t { throw ElfError("fixture resolver refusal"); }); }
+    catch (const ElfError &) { resolve_failed = true; }
+    require(resolve_failed && !retry.metrics().relocations_verified && retry.relocation_values().empty(),
+            "failed resolution cannot publish readback success");
+    retry.relocate([&](size_t index) { return retry.address(index); });
+    retry.seal();
+    require(retry.metrics().relocations_verified && retry.relocation_values().size() == parsed.relocations.size(),
+            "resolution retry publishes only complete readback");
     require(_dyld_image_count() == dyld_count,
             "ELF must not be registered with dyld");
     require(*static_cast<long *>(first.symbol("guest_state")) == 0,
@@ -124,6 +143,19 @@ int main(int argc, char **argv) {
             "constructor exactly once");
     require(invoke(first.symbol("guest_read"), {}).result_integers[0] == 237,
             "relocations/BSS/constructor");
+    const auto pointer_address = reinterpret_cast<uintptr_t>(first.symbol("guest_pointer"));
+    size_t pointer_index = parsed.relocations.size();
+    for (size_t i = 0; i < parsed.relocations.size(); ++i)
+      if (first.load_bias() + parsed.relocations[i].address == pointer_address) pointer_index = i;
+    require(pointer_index < parsed.relocations.size(), "mutable pointer has relocation evidence");
+    const auto saved_pointer = first.relocation_values()[pointer_index];
+    const auto changed_pointer = reinterpret_cast<uintptr_t>(second.symbol("guest_state"));
+    std::memcpy(reinterpret_cast<void *>(pointer_address), &changed_pointer, 8);
+    require(first.relocation_values()[pointer_index] == saved_pointer && changed_pointer != saved_pointer,
+            "historical relocation snapshot survives later valid writable data mutation");
+    std::memcpy(reinterpret_cast<void *>(pointer_address), &saved_pointer, 8);
+    std::cout << "M5_RELOCATION_READBACK_PASS slots=" << parsed.relocations.size()
+              << " kinds=4 before_init=1 failed_resolve_unpublished=1 retry=1 historical_snapshot=1 raw_pointers_in_report=0\n";
     require(*static_cast<long *>(second.symbol("guest_state")) == 0,
             "second image isolation");
     require(second.initialize() == 1, "second constructor");

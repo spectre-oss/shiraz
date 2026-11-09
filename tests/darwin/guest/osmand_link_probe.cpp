@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Real library link-only diagnostic. Never executes constructors or JNI_OnLoad.
+// Real-library mode links only. Separate first-party mutable fixture mode
+// executes its constructor; neither mode is APK app acceptance.
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/binding_evidence.hpp"
 #include "shiraz/darwin/guest/dynamic.hpp"
@@ -50,7 +51,24 @@ int binding_report(const char *directory, const char *output) {
   return 0;
 }
 }
+static int mutable_relocation_report(const char *directory, const char *output) {
+  Loader loader({std::filesystem::canonical(directory)});
+  auto *module = loader.open("libshiraz_fixture.so");
+  auto pointer = loader.symbol(module, "guest_pointer");
+  auto replacement = loader.symbol(module, "guest_bss");
+  if (!pointer.found || !replacement.found || loader.constructor_count() != 1)
+    throw ElfError("mutable relocation fixture symbols/constructor");
+  std::memcpy(reinterpret_cast<void *>(pointer.address), &replacement.address, 8);
+  const auto count = write_binding_evidence(loader, std::filesystem::absolute(output),
+                                            "nativebridge", {"libshiraz_fixture.so"});
+  std::printf("M5_MUTABLE_RELOCATION_REPORT_PASS named=%zu constructors=1 fixture_only=1 app_execution=0\n", count);
+  return 0;
+}
 int main(int argc, char **argv) {
+  if (argc == 4 && std::string(argv[2]) == "--mutable-relocation-report") {
+    try { return mutable_relocation_report(argv[1], argv[3]); }
+    catch (const std::exception &error) { std::fprintf(stderr, "M5_MUTABLE_RELOCATION_REPORT_FAIL reason=%s\n", error.what()); return 1; }
+  }
   if (argc == 4 && std::string(argv[2]) == "--bindings-json") {
     try { return binding_report(argv[1], argv[3]); }
     catch (const std::exception &error) { std::fprintf(stderr, "M5_OSMAND_BINDING_REPORT_FAIL reason=%s\n", error.what()); return 1; }

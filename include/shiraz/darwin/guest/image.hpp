@@ -15,6 +15,8 @@ struct ImageMetrics {
   uint64_t parse_ns = 0, map_ns = 0, rewrite_ns = 0, bind_ns = 0, init_ns = 0;
   size_t expected_constructors = 0, executed_constructors = 0;
   bool initialized = false;
+  size_t verified_relocations = 0;
+  bool relocations_verified = false;
 };
 // Mapping, binding and execution are separate stages. Deferred images cannot
 // run constructors until the whole load group has bound and been sealed.
@@ -39,6 +41,9 @@ public:
   size_t finalize();
   const ImageMetrics &metrics() const { return metrics_; }
   const Elf &elf() const { return elf_; }
+  // Historical values read back immediately after relocation, before seal/init.
+  // Guest constructors may subsequently mutate writable pointer objects.
+  const std::vector<uint64_t> &relocation_values() const { return relocation_values_; }
   uintptr_t load_bias() const { return reinterpret_cast<uintptr_t>(base_) - elf_.first_page; }
   uint64_t mapping_size() const { return mapping_size_; }
   size_t rewritten_thread_pointers() const { return analysis_.sites.size(); }
@@ -50,6 +55,7 @@ private:
   void *at(uint64_t address, uint64_t size) const;
   ImageMetrics metrics_;
   Elf elf_;
+  std::vector<uint64_t> relocation_values_;
   ThreadPointerAnalysis analysis_;
   uintptr_t syscall_dispatcher_ = 0;
   std::unique_ptr<UnwindRegistration> unwind_;

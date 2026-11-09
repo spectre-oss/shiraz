@@ -339,6 +339,7 @@ def main():
             native_bridge=bridge,
             bridge_sha256=bridge_sha256,
             verify_inventory=True,
+            verify_all_relocations=True,
         )
     except (OSError, ValueError, TypeError, KeyError) as error:
         binding_error = str(error)

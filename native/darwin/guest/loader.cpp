@@ -609,6 +609,12 @@ size_t Loader::rewritten_thread_pointers() const {
     if (pair.second->image) count += pair.second->image->rewritten_thread_pointers();
   return count;
 }
+RelocationSnapshot Loader::relocation_snapshot(const std::string &module_path) const {
+  for (auto *module : state_->order)
+    if (module->image && module->key == module_path)
+      return {module->image->elf(), module->image->relocation_values(), module->image->metrics()};
+  throw ElfError("relocation snapshot module is not loaded");
+}
 const std::vector<BindingRecord> &Loader::bindings() const {
   return state_->records;
 }

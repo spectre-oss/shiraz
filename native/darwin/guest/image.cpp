@@ -139,6 +139,15 @@ void Image::relocate(const std::function<uintptr_t(size_t)> &resolve) {
   JitWriteScope writable;
   for (size_t i = 0; i < values.size(); ++i)
     std::memcpy(at(elf_.relocations[i].address, 8), &values[i], 8);
+  for (size_t i = 0; i < values.size(); ++i) {
+    // Parser requires eight-byte aligned writable slots. Volatile forces a
+    // real load rather than letting the compiler forward the preceding store.
+    const uint64_t observed = *static_cast<const volatile uint64_t *>(at(elf_.relocations[i].address, 8));
+    if (observed != values[i]) throw ElfError("guest relocation readback mismatch");
+  }
+  relocation_values_.swap(values);
+  metrics_.verified_relocations = relocation_values_.size();
+  metrics_.relocations_verified = true;
   link_state_ = LinkState::Relocated;
   metrics_.bind_ns = elapsed(bind_start);
 }

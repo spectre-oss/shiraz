@@ -2234,3 +2234,18 @@ $(MACOS_OUT)/m5/finalize-sanitized: tests/darwin/guest/finalize_probe.cpp $(MACO
 macos-guest-finalize-sanitize-check: macos-guest-finalize-fixture $(MACOS_OUT)/m5/finalize-sanitized
 	$(MACOS_OUT)/m5/finalize-sanitized $(MACOS_GUEST_DEP_DIR)
 macos-guest-check: macos-guest-finalize-check macos-guest-finalize-sanitize-check
+
+# Complete relocation evidence, including a valid mutable ABS64 pointer object.
+.PHONY: macos-guest-relocation-evidence-check
+macos-guest-relocation-evidence-check: macos-guest-fixture $(MACOS_OUT)/m5/osmand-link-probe scripts/verify_guest_relocation_fixture.py scripts/guest_binding_evidence.py
+	mkdir -p $(MACOS_OUT)/m5/relocation-evidence
+	cp $(MACOS_OUT)/m5/fixture.so $(MACOS_OUT)/m5/relocation-evidence/libshiraz_fixture.so
+	$(MACOS_OUT)/m5/osmand-link-probe $(MACOS_OUT)/m5/relocation-evidence --mutable-relocation-report $(MACOS_OUT)/m5/relocation-evidence/ordinary.json
+	uv run --no-project python scripts/verify_guest_relocation_fixture.py $(MACOS_OUT)/m5/relocation-evidence/libshiraz_fixture.so $(MACOS_OUT)/m5/relocation-evidence/ordinary.json
+	cp $(MACOS_OUT)/m5/osmand-link-probe $(MACOS_OUT)/m5/relocation-evidence/hardened.pending
+	mv $(MACOS_OUT)/m5/relocation-evidence/hardened.pending $(MACOS_OUT)/m5/relocation-evidence/hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/relocation-evidence/hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/relocation-evidence/hardened
+	$(MACOS_OUT)/m5/relocation-evidence/hardened $(MACOS_OUT)/m5/relocation-evidence --mutable-relocation-report $(MACOS_OUT)/m5/relocation-evidence/hardened.json
+	uv run --no-project python scripts/verify_guest_relocation_fixture.py $(MACOS_OUT)/m5/relocation-evidence/libshiraz_fixture.so $(MACOS_OUT)/m5/relocation-evidence/hardened.json
+macos-guest-check: macos-guest-relocation-evidence-check

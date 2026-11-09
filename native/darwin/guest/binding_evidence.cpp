@@ -274,7 +274,7 @@ size_t write_binding_evidence(const Loader &loader, const std::filesystem::path 
     comma = true; json.add(std::to_string(flags));
   }
   json.add("],\"modules\":[");
-  size_t count = 0;
+  size_t count = 0, all_count = 0;
   comma = false;
   for (const auto &pair : modules) {
     const auto &name = pair.first;
@@ -293,58 +293,111 @@ size_t write_binding_evidence(const Loader &loader, const std::filesystem::path 
       if (site_comma) json.add(",");
       site_comma = true; json.add(std::to_string(site));
     }
-    json.add("]},\"elf_sha256\":null,\"bindings\":[");
-    bool binding_comma = false;
-    for (const auto &relocation : module.elf.relocations) {
-      // Only callable pointer slots used by PLT/GOT analysis. Relative and
-      // ABS64/data relocation semantics are outside this evidence format.
-      if (relocation.type != 1025 && relocation.type != 1026) continue;
-      if (!relocation.symbol || relocation.symbol >= module.elf.symbols.size()) continue;
-      if (++count > 200000) throw ElfError("binding report record limit");
-      if (!mapped(module.elf, relocation.address, 8)) throw ElfError("binding slot outside guest LOAD");
-      const auto &symbol = module.elf.symbols[relocation.symbol];
-      uintptr_t slot;
-      std::memcpy(&slot, reinterpret_cast<const void *>(module.info.load_bias + relocation.address), 8);
-      const Binding *binding = nullptr;
-      auto found = records.find({name, symbol.name, symbol.version.name});
-      if (found != records.end()) for (const auto *record : found->second) {
-        const auto &candidate = record->binding;
-        if (candidate.address + uint64_t(relocation.addend) != slot) continue;
-        if (binding && (binding->provider != candidate.provider || binding->abi != candidate.abi ||
-                        binding->kind != candidate.kind || binding->found != candidate.found ||
-                        binding->nonreturning != candidate.nonreturning))
-          throw ElfError("ambiguous actual binding record for relocation");
-        binding = &candidate;
-      }
-      if (binding_comma) json.add(",");
-      binding_comma = true;
-      json.add("{\"relocation\":" + std::to_string(relocation.address));
-      json.add(",\"relocation_type\":" + std::to_string(relocation.type));
-      json.add(",\"addend\":" + std::to_string(relocation.addend));
-      json.add(",\"symbol\":"); json.string(symbol.name);
-      json.add(",\"version\":"); json.string(symbol.version.name);
-      json.add(",\"provider\":"); json.string(binding ? binding->provider : "");
-      json.add(",\"provider_elf_sha256\":null,\"target\":");
-      auto provider = binding ? modules.find(binding->provider) : modules.end();
-      bool guest = binding && binding->found && provider != modules.end() &&
-          (binding->abi == "guest-AAPCS64" || binding->abi == "guest-local-AAPCS64") &&
-          slot >= provider->second.info.load_bias &&
-          mapped(provider->second.elf, slot - provider->second.info.load_bias, 1);
-      if (guest) json.add(std::to_string(slot - provider->second.info.load_bias));
-      else json.add("null");
-      json.add(",\"kind\":");
-      json.string(!binding ? "unknown" : binding->kind == SymbolKind::Function ? "function" :
-                  binding->kind == SymbolKind::Object ? "object" : "unknown");
-      json.add(",\"abi\":"); json.string(binding ? binding->abi : "unrecorded");
-      json.add(",\"nonreturning\":" + std::string(binding && binding->nonreturning ? "true" : "false"));
-      if (binding && binding->abi == "native/pthread-self-noargs") {
-        if (symbol.name != "pthread_self" ||
-            (!symbol.version.name.empty() && symbol.version.name != "LIBC") || relocation.addend)
-          throw ElfError("native identity binding symbol/version/addend mismatch");
-        native_self_identity(json, *binding, slot);
-      }
-      json.add("}");
+    const auto snapshot = loader.relocation_snapshot(module.info.name);
+    if (!snapshot.metrics.relocations_verified ||
+        snapshot.metrics.verified_relocations != snapshot.values.size() ||
+        snapshot.values.size() != module.elf.relocations.size() ||
+        snapshot.elf.relocations.size() != module.elf.relocations.size())
+      throw ElfError("binding report requires complete verified relocations");
+    for (size_t index = 0; index < module.elf.relocations.size(); ++index) {
+      const auto &original = snapshot.elf.relocations[index];
+      const auto &current = module.elf.relocations[index];
+      if (original.address != current.address || original.type != current.type ||
+          original.symbol != current.symbol || original.addend != current.addend)
+        throw ElfError("binding report source relocation changed since load");
     }
+    json.add("]},\"elf_sha256\":null,\"relocation_inventory\":{\"profile\":1,");
+    json.add("\"verification\":\"read-back-after-relocate-before-seal\",\"verified_count\":" +
+             std::to_string(snapshot.values.size()) + ",\"records\":[");
+    bool relocation_comma = false;
+    for (const auto &relocation : module.elf.relocations) {
+      if (++all_count > 200000) throw ElfError("complete relocation report record limit");
+      if (relocation_comma) json.add(",");
+      relocation_comma = true;
+      json.add("{\"relocation\":" + std::to_string(relocation.address) +
+               ",\"relocation_type\":" + std::to_string(relocation.type) +
+               ",\"symbol_index\":" + std::to_string(relocation.symbol) +
+               ",\"addend\":" + std::to_string(relocation.addend) + "}");
+    }
+    json.add("]},\"absolute_binding_snapshot\":\"read-back-after-relocate-before-seal\",\"bindings\":[");
+    auto append_bindings = [&](bool absolute) {
+
+      bool binding_comma = false;
+      for (const auto &relocation : module.elf.relocations) {
+        if (absolute ? relocation.type != 257 : (relocation.type != 1025 && relocation.type != 1026)) continue;
+        if ((!absolute && !relocation.symbol) || relocation.symbol >= module.elf.symbols.size()) continue;
+        if (!absolute && ++count > 200000) throw ElfError("binding report record limit");
+        if (!mapped(module.elf, relocation.address, 8)) throw ElfError("binding slot outside guest LOAD");
+        const auto &symbol = module.elf.symbols[relocation.symbol];
+        uintptr_t slot;
+        std::memcpy(&slot, reinterpret_cast<const void *>(module.info.load_bias + relocation.address), 8);
+        const auto relocation_index = size_t(&relocation - module.elf.relocations.data());
+        const auto selected_value = absolute ? snapshot.values.at(relocation_index) : uint64_t(slot);
+        const Binding *binding = nullptr;
+        Binding local;
+        if (!relocation.symbol) {
+          local = {0, name, "ELF-null-symbol", SymbolKind::Unknown, true};
+          binding = &local;
+        } else if (symbol.section && ((symbol.info >> 4) == 0 ||
+                   (symbol.visibility & 3) != 0 || symbol.version.index == 0)) {
+          auto address = symbol.section == 0xfff1 ? uintptr_t(symbol.address) :
+              module.info.load_bias + symbol.address;
+          local = {address, name, "guest-local-AAPCS64",
+                   (symbol.info & 15) == 2 ? SymbolKind::Function :
+                   (symbol.info & 15) == 1 ? SymbolKind::Object : SymbolKind::Unknown, true};
+          if (address + uint64_t(relocation.addend) == selected_value) binding = &local;
+        }
+        auto found = records.find({name, symbol.name, symbol.version.name});
+        if (found != records.end()) for (const auto *record : found->second) {
+          const auto &candidate = record->binding;
+          if (candidate.address + uint64_t(relocation.addend) != selected_value) continue;
+          if (binding && (binding->provider != candidate.provider || binding->abi != candidate.abi ||
+                          binding->kind != candidate.kind || binding->found != candidate.found ||
+                          binding->nonreturning != candidate.nonreturning))
+            throw ElfError("ambiguous actual binding record for relocation");
+          binding = &candidate;
+        }
+        if (absolute) {
+          if (!binding) throw ElfError("absolute relocation has no selected binding evidence");
+          if (binding->address + uint64_t(relocation.addend) != selected_value)
+            throw ElfError("absolute relocation selected value disagrees with snapshot");
+        }
+        if (binding_comma) json.add(",");
+        binding_comma = true;
+        json.add("{\"relocation\":" + std::to_string(relocation.address));
+        json.add(",\"relocation_type\":" + std::to_string(relocation.type));
+        json.add(",\"addend\":" + std::to_string(relocation.addend));
+        if (absolute) json.add(",\"usage\":\"absolute-address\",\"symbol_index\":" +
+            std::to_string(relocation.symbol) + ",\"current_slot_matches_link\":" +
+            std::string(uint64_t(slot) == selected_value ? "true" : "false"));
+        json.add(",\"symbol\":"); json.string(symbol.name);
+        json.add(",\"version\":"); json.string(symbol.version.name);
+        json.add(",\"provider\":"); json.string(binding ? binding->provider : "");
+        json.add(",\"provider_elf_sha256\":null,\"target\":");
+        auto provider = binding ? modules.find(binding->provider) : modules.end();
+        bool guest = binding && binding->found && provider != modules.end() &&
+            (binding->abi == "guest-AAPCS64" || binding->abi == "guest-local-AAPCS64") &&
+            selected_value >= provider->second.info.load_bias &&
+            mapped(provider->second.elf, selected_value - provider->second.info.load_bias, 1);
+        if (guest) json.add(std::to_string(selected_value - provider->second.info.load_bias));
+        else json.add("null");
+        json.add(",\"kind\":");
+        json.string(!binding ? "unknown" : binding->kind == SymbolKind::Function ? "function" :
+                    binding->kind == SymbolKind::Object ? "object" : "unknown");
+        json.add(",\"abi\":"); json.string(binding ? binding->abi : "unrecorded");
+        json.add(",\"nonreturning\":" + std::string(binding && binding->nonreturning ? "true" : "false"));
+        if (!absolute && binding && binding->abi == "native/pthread-self-noargs") {
+          if (symbol.name != "pthread_self" ||
+              (!symbol.version.name.empty() && symbol.version.name != "LIBC") || relocation.addend)
+            throw ElfError("native identity binding symbol/version/addend mismatch");
+          native_self_identity(json, *binding, slot);
+        }
+        json.add("}");
+      }
+    };
+    append_bindings(false);
+    json.add("],\"absolute_bindings\":[");
+    append_bindings(true);
     json.add("]}");
   }
   json.add("]}\n");
