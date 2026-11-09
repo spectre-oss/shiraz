@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from check_guest_malloc_body import SYMBOL, branch_inventory, check_malloc_body
@@ -71,6 +72,9 @@ class MallocBodyInventoryTests(unittest.TestCase):
             self.assertEqual((row['entry'], row['end'], row['body_bytes']),
                              (0x1000, 0x1010, 16))
             self.assertEqual(len(row['known_branch_encodings']), 3)
+            self.assertEqual(row['direct_call_target_identities'][0]['kind'],
+                             'unresolved-direct-target')
+            self.assertFalse(row['direct_call_declared_identity_coverage'])
             self.assertTrue(row['symbol_to_next_start_extent_verified'])
             for key in ('complete_control_flow_verified', 'memory_effects_verified',
                         'transitive_calls_verified', 'exception_edges_verified',
@@ -84,6 +88,34 @@ class MallocBodyInventoryTests(unittest.TestCase):
             path.write_bytes(image)
             with self.assertRaises(ValueError):
                 check_malloc_body(path)
+
+    def test_helper_call_identity_does_not_grant_transitive_effects(self):
+        image = image_fixture(deltas=(0x1000, 0x20, 0x10))
+        names = b'\0' + SYMBOL.encode() + b'\0_helper\0'
+        struct.pack_into('<IIII', image, COMMAND - 24 + 8, 0x4000, 2, 0x4040, len(names))
+        image[0x4040:0x4040+len(names)] = names
+        struct.pack_into('<IBBHQ', image, 0x4010, len(SYMBOL.encode()) + 2, 0xf, 1, 0, 0x1020)
+        words = (0x94000008, 0xd63f0100, 0xd65f03c0) + (0xd503201f,) * 5
+        image[0x1000:0x1020] = struct.pack('<8I', *words)
+        image[0x1020:0x1030] = struct.pack('<4I', 0x94000001, 0xd65f03c0,
+                                        0xd503201f, 0xd503201f)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'bridge'
+            path.write_bytes(image)
+            row = check_malloc_body(path)
+            helper, = row['direct_call_target_identities']
+            self.assertEqual(helper['names'], ('_helper',))
+            self.assertEqual((helper['entry'], helper['end']), (0x1020, 0x1030))
+            self.assertEqual(helper['known_branch_encodings'][0]['kind'], 'call')
+            self.assertFalse(helper['semantics_verified'])
+            self.assertTrue(row['direct_call_declared_identity_coverage'])
+            self.assertFalse(row['transitive_calls_verified'])
+            self.assertFalse(row['indirect_call_targets_verified'])
+            self.assertFalse(row['native_memory_purity_verified'])
+            for budget in ('MAX_DIRECT_TARGETS', 'MAX_TARGET_METADATA_VISITS'):
+                with patch('check_guest_malloc_body.' + budget, 0), \
+                        self.assertRaisesRegex(ValueError, 'budget'):
+                    check_malloc_body(path)
 
 
 if __name__ == '__main__':

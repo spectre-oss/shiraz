@@ -5,18 +5,43 @@
 This is a work list for transitive native-body validation. It scans every word
 in an independently bounded function, including cold/unreachable words. It does
 not decode general instructions, identify every possible control transfer,
-resolve imports/TLV calls, or prove memory accesses or exception edges safe.
+resolve live imports/TLV calls, or prove memory accesses or exception edges safe.
 """
 import argparse
 import hashlib
 import json
+import struct
 from pathlib import Path
 
 from guest_cached_self_record import MAX_BYTES
-from guest_native_function import read_native_function
+from guest_native_function import read_native_function, read_native_function_at
+from guest_native_import import read_native_import
 
 SYMBOL = '_shiraz_guest_managed_malloc_body'
 UINT64_END = 1 << 64
+MAX_DIRECT_TARGETS = 64
+MAX_TARGET_METADATA_VISITS = 8_000_000
+
+
+def _target_budget(data, count):
+    if count > MAX_DIRECT_TARGETS:
+        raise ValueError('native body distinct-call target budget')
+    # The independently bounded function reader has validated these commands.
+    # Each target performs at most three full symbol scans and one function-
+    # start payload scan. Payload bytes conservatively bound start entries.
+    cursor = 32
+    symbols, start_bytes = None, None
+    for _ in range(struct.unpack_from('<I', data, 16)[0]):
+        command, size = struct.unpack_from('<II', data, cursor)
+        if command == 2:
+            symbols = struct.unpack_from('<I', data, cursor + 12)[0]
+        elif command == 0x26:
+            start_bytes = struct.unpack_from('<I', data, cursor + 12)[0]
+        cursor += size
+    if symbols is None or start_bytes is None:
+        raise ValueError('native body lacks metadata-work bound')
+    if count * (symbols * 3 + start_bytes) > MAX_TARGET_METADATA_VISITS:
+        raise ValueError('native body target metadata-work budget')
 
 
 def branch_inventory(body, entry):
@@ -61,20 +86,52 @@ def check_malloc_body(path):
     with path.open('rb') as stream:
         data = stream.read(MAX_BYTES + 1)
     function = read_native_function(data, SYMBOL)
+    branches = branch_inventory(function.body, function.entry)
+    targets = sorted({row['target'] for row in branches if row['kind'] == 'call'})
+    _target_budget(data, len(targets))
+    identities = []
+    for target in targets:
+        identity = read_native_function_at(data, SYMBOL, target)
+        if identity is not None:
+            helper = identity.function
+            identities.append({
+                'target': target, 'kind': 'same-file-text-symbols', 'names': identity.names,
+                'entry': helper.entry, 'end': helper.end, 'body_bytes': len(helper.body),
+                'body_sha256': hashlib.sha256(helper.body).hexdigest(),
+                'known_branch_encodings': branch_inventory(helper.body, helper.entry),
+                'semantics_verified': False,
+            })
+            continue
+        imported = read_native_import(data, SYMBOL, target)
+        if imported is not None:
+            identities.append({
+                'target': target, 'kind': 'declared-import-stub',
+                'symbol': imported.symbol, 'library_ordinal': imported.library_ordinal,
+                'slot': imported.slot,
+                'stub_body_sha256': hashlib.sha256(imported.stub_body).hexdigest(),
+                'live_binding_verified': False, 'semantics_verified': False,
+            })
+        else:
+            identities.append({'target': target, 'kind': 'unresolved-direct-target',
+                               'semantics_verified': False})
     return {
         'image_sha256': hashlib.sha256(data).hexdigest(),
         'coordinate_system': 'file Mach-O VM addresses before slide',
         'symbol': SYMBOL, 'entry': function.entry, 'end': function.end,
         'body_sha256': hashlib.sha256(function.body).hexdigest(),
         'body_bytes': len(function.body),
-        'known_branch_encodings': branch_inventory(function.body, function.entry),
+        'known_branch_encodings': branches,
+        'direct_call_target_identities': identities,
+        'direct_call_declared_identity_coverage': all(
+            row['kind'] != 'unresolved-direct-target' for row in identities),
+        'indirect_call_targets_verified': False,
         'symbol_to_next_start_extent_verified': True,
         'exclusive_instruction_provenance_verified': False,
         'complete_control_flow_verified': False,
         'memory_effects_verified': False, 'transitive_calls_verified': False,
         'exception_edges_verified': False, 'execution_claim': False,
         'native_memory_purity_verified': False, 'consumer_proof': False,
-        'scope': 'complete bounded bytes; partial syntactic branch inventory only',
+        'scope': 'bounded main/helper bytes and direct-call declarations; partial branch inventory, no transitive effects',
     }
 
 
