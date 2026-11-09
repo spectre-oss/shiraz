@@ -2180,3 +2180,27 @@ $(MACOS_OUT)/libshiraz-capture.so: native/darwin/capture.mm java/shiraz/runtime/
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fobjc-arc -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/capture.exports -Wl,-dead_strip native/darwin/capture.mm -o $@ -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreMedia -framework CoreVideo -pthread
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-capture.so
 macos-jvm-native: $(MACOS_OUT)/libshiraz-capture.so
+
+# Observe default MRS inputs using production assembly and a private TLS body.
+$(MACOS_OUT)/m5/mrs-quarantine-tls.o: native/darwin/guest/tls.cpp $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -Dshiraz_guest_tls_access=shiraz_test_actual_tls_access -c $< -o $@
+$(MACOS_OUT)/m5/mrs-quarantine-probe: tests/darwin/guest/mrs_quarantine_probe.cpp tests/darwin/guest/mrs_quarantine_entry.S tests/darwin/guest/tpidr_probe.S $(MACOS_OUT)/m5/mrs-quarantine-tls.o $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/mrs_quarantine_probe.cpp tests/darwin/guest/mrs_quarantine_entry.S tests/darwin/guest/tpidr_probe.S $(MACOS_OUT)/m5/mrs-quarantine-tls.o $(filter-out native/darwin/guest/tls.cpp,$(MACOS_GUEST_SOURCES)) -o $@
+.PHONY: macos-guest-mrs-quarantine-check
+macos-guest-mrs-quarantine-check: macos-guest-unwind-fixture $(MACOS_OUT)/m5/mrs-quarantine-probe
+	$(MACOS_OUT)/m5/mrs-quarantine-probe $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
+	cp $(MACOS_OUT)/m5/mrs-quarantine-probe $(MACOS_OUT)/m5/mrs-quarantine-hardened.pending
+	mv $(MACOS_OUT)/m5/mrs-quarantine-hardened.pending $(MACOS_OUT)/m5/mrs-quarantine-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/mrs-quarantine-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/mrs-quarantine-hardened
+	$(MACOS_OUT)/m5/mrs-quarantine-hardened $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
+$(MACOS_OUT)/m5/mrs-quarantine-tls-sanitized.o: native/darwin/guest/tls.cpp $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Dshiraz_guest_tls_access=shiraz_test_actual_tls_access -c $< -o $@
+$(MACOS_OUT)/m5/mrs-quarantine-sanitized: tests/darwin/guest/mrs_quarantine_probe.cpp tests/darwin/guest/mrs_quarantine_entry.S tests/darwin/guest/tpidr_probe.S $(MACOS_OUT)/m5/mrs-quarantine-tls-sanitized.o $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/darwin/guest/mrs_quarantine_probe.cpp tests/darwin/guest/mrs_quarantine_entry.S tests/darwin/guest/tpidr_probe.S $(MACOS_OUT)/m5/mrs-quarantine-tls-sanitized.o $(filter-out native/darwin/guest/tls.cpp,$(MACOS_GUEST_SOURCES)) -o $@
+.PHONY: macos-guest-mrs-quarantine-sanitize-check
+macos-guest-mrs-quarantine-sanitize-check: macos-guest-unwind-fixture $(MACOS_OUT)/m5/mrs-quarantine-sanitized
+	$(MACOS_OUT)/m5/mrs-quarantine-sanitized $(MACOS_GUEST_DEP_DIR)/libunwind-fixture.so
+macos-guest-check: macos-guest-mrs-quarantine-check macos-guest-mrs-quarantine-sanitize-check
