@@ -185,6 +185,7 @@ h1 { font-size: clamp(3rem,6.2vw,5.6rem); line-height: 1.1; letter-spacing: -.06
 .experimental-notice .eyebrow { color: #dfc48e; margin-bottom: 14px; }
 .experimental-notice h2 { color: #f0d69f; margin: 0 0 18px; font-size: clamp(1.8rem,3vw,2.4rem); line-height: 1.2; font-weight: 450; letter-spacing: -.035em; }
 .experimental-notice p:not(.eyebrow) { color: #e0d5c0; font-size: 14px; line-height: 1.85; margin: 0; }
+.experimental-notice p.experimental-macos { margin-top: 10px; }
 .experimental-notice p.experimental-security { color: #c9bda6; font-size: 12px; margin-top: 16px; }
 .experimental-notice + .shiraz-web { border-top: 0; }
 @media(max-width:700px) { .experimental-notice { padding-block: 38px; }.experimental-notice p:not(.eyebrow) { font-size: 13px; }.experimental-notice p.experimental-security { font-size: 12px; } }
