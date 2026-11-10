@@ -25,12 +25,17 @@ from enum import Enum
 from pathlib import Path
 
 import guest_allocator_contract
+import guest_cached_self_record
 import guest_callee_effects
 import guest_frame_effects
+import guest_indexed_halfword
 import guest_jump_table
 import guest_memory_contract
 import guest_mrs_window
 import guest_native_target
+import guest_prepared_cleanup_record
+import guest_scalar_widening
+import guest_swap_effects
 
 MAX_BYTES = 256 << 20
 MAX_SITES = 131072
@@ -39,6 +44,7 @@ MAX_CONTEXTS = 4096
 MAX_CALL_DEPTH = 4
 MAX_STACK_SLOTS = 256
 MAX_VALUES = 8
+MAX_SCALAR_VARIANTS = 4
 MAX_TOTAL_STEPS = 2_000_000
 MAX_CALLER_PRELUDE = 64
 MAX_BYTE_COPY = 4096
@@ -211,7 +217,7 @@ class State:
             set(self.zero_upper),
         )
 
-    def fingerprint(self):
+    def fingerprint(self, *, include_scalars=True):
         # Missing register facts and explicit CLEAN facts have identical reads,
         # liveness and limits. Canonicalize those defaults, without dropping
         # stack entries: even CLEAN spill slots affect bounded slot accounting.
@@ -221,8 +227,8 @@ class State:
             self.native_stack_clobber_below,
             self.native_memory_may_contain_tp,
             tuple(sorted(self.native_stack_rewritten)),
-            tuple(sorted(self.constants.items())),
-            tuple(sorted(self.zero_upper)),
+            tuple(sorted(self.constants.items())) if include_scalars else (),
+            tuple(sorted(self.zero_upper)) if include_scalars else (),
             *(
                 tuple(sorted((key, value) for key, value in mapping.items()
                              if not defaults or value != CLEAN))
@@ -471,6 +477,76 @@ def scalar_logical_result(operation, operands, state):
             "eor": a ^ b, "eon": a ^ b}[operation]
 
 
+def exact_indexed_halfword(instruction, raw, state):
+    """Normalize an exact clean index only within a bounded active stack frame."""
+    profile = guest_indexed_halfword.recognize_indexed_halfword(raw)
+    if profile is None:
+        return None
+    expected = (Operand("reg", profile.data_register),
+                Operand("mem", base=profile.base, index=profile.index))
+    reads = {reg(profile.base), reg(profile.index)}
+    writes = set()
+    if profile.operation == "strh":
+        reads.add(reg(profile.data_register))
+    else:
+        writes.add(reg(profile.data_register))
+    if (instruction.mnemonic != profile.operation or instruction.width != 2
+            or instruction.operands != expected or instruction.writeback
+            or instruction.post_index or instruction.control_transfer
+            or {reg(name) for name in instruction.reads} != reads
+            or {reg(name) for name in instruction.writes} != writes):
+        return None
+    index = reg(profile.index)
+    if (tainted(state.value(index)) or tainted(state.alias(index))
+            or tainted(state.control(index)) or index in state.image_addresses
+            or index in state.return_signatures or tainted(state.value(profile.base))
+            or tainted(state.control(profile.base)) or profile.base in state.image_addresses
+            or profile.base in state.return_signatures):
+        return None
+    displacement = guest_indexed_halfword.exact_halfword_displacement(
+        profile, state.scalar(profile.index))
+    aliases = state.alias(profile.base)
+    if displacement is None or len(aliases) != 1:
+        return None
+    base = next(iter(aliases))
+    if type(base) is not int or abs(base) > 1 << 20:
+        return None
+    address = base + displacement
+    if not - (1 << 20) <= state.sp <= address < address + 2 <= 0:
+        return None
+    return (expected[0], Operand("mem", base=profile.base, displacement=displacement))
+
+
+def clean_vector_and(instruction, raw, state):
+    """Exact 128-bit AND with provenance-free sources; no numeric SIMD facts."""
+    if type(raw) is not bytes or len(raw) != 4:
+        return None
+    word = int.from_bytes(raw, "little")
+    if word & 0xFFE0FC00 != 0x4E201C00:
+        return None
+    names = tuple(f"v{index}" for index in (word & 31, (word >> 5) & 31, (word >> 16) & 31))
+    if (instruction.mnemonic != "and" or instruction.width != 8
+            or instruction.operands != tuple(Operand("reg", name) for name in names)
+            or instruction.writeback or instruction.post_index or instruction.control_transfer
+            or set(instruction.reads) != set(names[1:]) or set(instruction.writes) != {names[0]}):
+        return None
+    mappings = (state.registers, state.aliases, state.return_values)
+    for name in names[1:]:
+        for prefix in ("b", "h", "s", "d", "q", "v"):
+            view = prefix + name[1:]
+            if (any(tainted(mapping.get(view, CLEAN)) for mapping in mappings)
+                    or view in state.image_addresses or view in state.return_signatures):
+                return None
+    post = state.copy()
+    for prefix in ("b", "h", "s", "d", "q", "v"):
+        view = prefix + names[0][1:]
+        for mapping_name in ("registers", "aliases", "return_values", "image_addresses",
+                             "return_signatures", "constants"):
+            getattr(post, mapping_name).pop(view, None)
+        post.zero_upper.discard(view)
+    return post
+
+
 def stack_fact_slots(state):
     traced = {slot for slot, value in state.stack.items() if tainted(value)}
     protected = traced | {
@@ -478,6 +554,86 @@ def stack_fact_slots(state):
         for slot, value in mapping.items() if tainted(value)
     } | set(state.stack_images) | set(state.stack_signatures)
     return traced, protected
+
+
+def paired_vector_stack_copy(first, second, state):
+    """Exact adjacent LDP Q/Q; STP Q/Q stack copy, with retained SIMD taint.
+
+    Snapshot all four 8-byte lanes before any store (overlap is permitted).
+    This is not a generic SIMD transfer: later vector consumers remain opaque.
+    """
+    if second is None or second.address != first.address + 4:
+        return None
+    registers = None
+    addresses = []
+    for item, operation in ((first, "ldp"), (second, "stp")):
+        if (item.mnemonic != operation or item.width != 16 or item.writeback
+                or item.post_index or item.control_transfer or len(item.operands) != 3):
+            return None
+        left, right, memory = item.operands
+        names = (left.value, right.value)
+        if (any(operand.kind != "reg" or operand.shift or operand.shift_amount or operand.extend
+                for operand in (left, right))
+                or any(name not in {f"q{i}" for i in range(32)} for name in names)
+                or names[0] == names[1] or registers is not None and names != registers
+                or memory.kind != "mem" or memory.index or memory.shift or memory.shift_amount
+                or memory.extend or type(memory.displacement) is not int
+                or not -1024 <= memory.displacement <= 1008 or memory.displacement % 16
+                or not (full_width_gpr(memory.base) or memory.base == "sp")
+                or tainted(state.value(memory.base))):
+            return None
+        allowed_reads = {reg(memory.base)} | (set(names) if operation == "stp" else set())
+        if (any(reg(name) not in allowed_reads for name in item.reads)
+                or any(name not in (names if operation == "ldp" else ()) for name in item.writes)):
+            return None
+        aliases = state.alias(memory.base)
+        if len(aliases) != 1 or type(next(iter(aliases))) is not int:
+            return None
+        address = next(iter(aliases)) + memory.displacement
+        if (address % 8 or abs(address) > 1 << 20
+                or not state.sp <= address < address + 32 <= 0):
+            return None
+        addresses.append(address)
+        registers = names
+    source, destination = addresses
+    if state.native_memory_may_contain_tp:
+        return None
+    if (state.native_stack_clobber_below is not None and any(
+            source + offset < state.native_stack_clobber_below
+            and source + offset not in state.native_stack_rewritten for offset in range(0, 32, 8))):
+        return None
+    mappings = ("stack", "stack_aliases", "stack_returns", "stack_images", "stack_signatures")
+    # Refuse misaligned overlapping facts rather than slicing symbolic pointers.
+    if any((source < slot + 8 and slot < source + 32 or
+            destination < slot + 8 and slot < destination + 32) and slot % 8
+           for name in mappings for slot in getattr(state, name)):
+        return None
+    slots = {destination + offset for offset in range(0, 32, 8)}
+    if len(set(state.stack) | slots) > MAX_STACK_SLOTS:
+        return None
+    post = state.copy()
+    for name in mappings:
+        before, after = getattr(state, name), getattr(post, name)
+        for offset in range(0, 32, 8):
+            target = destination + offset
+            after.pop(target, None)
+            if source + offset in before:
+                after[target] = before[source + offset]
+    for index, name in enumerate(registers):
+        lanes = {source + index * 16, source + index * 16 + 8}
+        protected = any(
+            (tainted(value) if mapping in {"stack", "stack_aliases", "stack_returns"} else True)
+            for mapping in mappings for slot, value in getattr(state, mapping).items() if slot in lanes)
+        # Q writes cover all views. Opaque facts prevent laundering through a
+        # D/S/H/B/V alias without claiming affine SIMD arithmetic support.
+        for prefix in ("b", "h", "s", "d", "q", "v"):
+            view = prefix + name[1:]
+            post.set(view, OPAQUE_VALUE if protected else CLEAN)
+            post.set_alias(view, CLEAN)
+    post.native_stack_rewritten.difference_update(slots)
+    if post.native_stack_clobber_below is not None:
+        post.native_stack_rewritten.update(slots)
+    return post, source, destination
 
 
 def shift_pointer_offset(value, delta):
@@ -680,11 +836,12 @@ def caller_prologue(decode, root, caller, *, helper_evidence=None):
 
 class Audit:
     def __init__(self, decode, *, max_steps=MAX_STEPS, max_contexts=MAX_CONTEXTS,
-                 track_opaque_loads=False):
+                 track_opaque_loads=False, scalar_widening=True):
         self.decode = decode
         self.max_steps = max_steps
         self.max_contexts = max_contexts
         self.track_opaque_loads = track_opaque_loads
+        self.scalar_widening = scalar_widening
 
     def site(self, address, caller=None, *, entry_context=False):
         if entry_context and caller is not None:
@@ -703,8 +860,13 @@ class Audit:
         managed_malloc_observations = set()
         jump_tables = {}
         byte_copy_observations = set()
+        vector_stack_copies = set()
         relocated_pointer_loads = {}
         indirect_edges = {}
+        scalar_domains = (guest_scalar_widening.ScalarWidening(
+            max_groups=max(0, self.max_contexts), max_variants=MAX_SCALAR_VARIANTS)
+            if self.scalar_widening else None)
+        scalar_widenings = {}
 
         def problem(pc, reason):
             reasons.add((pc, reason))
@@ -767,9 +929,9 @@ class Audit:
 
         def enqueue(pc, returns, state):
             observe_stack_facts(state)
-            # A union at a join loses correlations between register values,
-            # spill contents and stack addresses. Keep each exact abstract state
-            # separately; an unsafe path remains a sticky problem for the site.
+            # Preserve every distinct pointer/stack/control/lifetime partition.
+            # Scalar envelopes may only forget numeric precision inside one
+            # identical non-scalar partition; earlier problems stay sticky.
             for mapping in (
                 state.registers,
                 state.stack,
@@ -784,6 +946,27 @@ class Audit:
             key = (pc, returns, state.fingerprint())
             if key in states:
                 return
+            if scalar_domains is not None:
+                merged = scalar_domains.observe(
+                    (pc, returns, state.fingerprint(include_scalars=False)),
+                    state.constants, state.zero_upper)
+                if merged is None:
+                    problem(pc, "context-limit")
+                    return
+                if merged.widened:
+                    if merged.dropped_constants or merged.dropped_zero_upper:
+                        record = scalar_widenings.setdefault(pc, [0, set(), set()])
+                        record[0] += 1
+                        record[1].update(merged.dropped_constants)
+                        record[2].update(merged.dropped_zero_upper)
+                    state = state.copy()
+                    # set_scalar(None) does not invalidate an existing fact.
+                    # Replace the domains so forgotten values cannot survive.
+                    state.constants = dict(merged.constants)
+                    state.zero_upper = set(merged.zero_upper)
+                    key = (pc, returns, state.fingerprint())
+                    if key in states:
+                        return
             if len(states) >= self.max_contexts:
                 problem(pc, "context-limit")
                 return
@@ -864,6 +1047,13 @@ class Audit:
                     state.fp = None
                 enqueue(pc + 4, returns, state)
                 continue
+            if instruction.mnemonic == "ldp" and instruction.width == 16:
+                copied = paired_vector_stack_copy(instruction, self.decode(pc + 4), state)
+                if copied is not None:
+                    post, source, destination = copied
+                    vector_stack_copies.add((pc, source, destination))
+                    enqueue(pc + 8, returns, post)
+                    continue
             jump = (self.decode.byte_jump_table(pc)
                     if instruction.mnemonic in {"cmp", "ubfx", "lsr"} and hasattr(self.decode, "byte_jump_table") else None)
             if jump is not None:
@@ -980,11 +1170,14 @@ class Audit:
             )
             if summary is None and instruction.mnemonic == "bti" and hasattr(self.decode, "cas64"):
                 summary = self.decode.cas64(pc)
+            if summary is None and instruction.mnemonic == "bti" and hasattr(self.decode, "swap64"):
+                summary = self.decode.swap64(pc)
             if summary is not None:
                 # Atomic helper writes are not exact ordinary stack stores.
                 state.native_stack_rewritten.clear()
                 compare = getattr(summary, "memory_compare", None)
-                operation = "atomic-cas64" if compare else "atomic-add32"
+                swap = isinstance(summary, guest_swap_effects.Atomic64SwapEffects)
+                operation = "atomic-cas64" if compare else "atomic-swap64" if swap else "atomic-add32"
                 callee_effects[pc] = {
                     "entry": hex(pc),
                     "kind": "exact-" + operation,
@@ -1002,8 +1195,9 @@ class Audit:
                         for path in summary.paths
                     ],
                 }
-                if compare:
+                if compare or swap:
                     callee_effects[pc]["memory_order"] = summary.memory_order
+                if compare:
                     if tainted(state.value(compare)):
                         problem(pc, "thread-pointer-atomic-compare")
                     if tainted(state.alias(compare)):
@@ -1026,6 +1220,14 @@ class Audit:
                 )
                 if tainted(aliases) and slot is None:
                     problem(pc, "mixed-stack-address-atomic-access")
+                # Arithmetic/prelude readers already bound normal aliases.
+                # Revalidate at this effect boundary as well: an injected or
+                # future metadata path must not turn modular A64 aliasing into
+                # distinct unbounded Python stack slots and erase the result.
+                if slot is not None and (type(slot) is not int or abs(slot) > 1 << 20
+                                         or abs(slot + summary.rmw_width) > 1 << 20):
+                    problem(pc, "atomic-stack-range-unproved")
+                    continue
                 image = state.image(summary.memory_base)
                 # The helper's capability flag is also a memory read. An ELF
                 # ownership check does not prove separation from initial SP.
@@ -1098,6 +1300,54 @@ class Audit:
                             "kind": "native-provider-nonreturning",
                             "binding": dict(binding),
                         }
+                        continue
+                    if binding.get("effect") == "cached-self":
+                        if (not returns or state.signature("x30") is not None or
+                                state.control("x30") != frozenset({returns[-1][0]}) or
+                                state.sp != returns[-1][1]):
+                            problem(pc, "cached-self-return-continuation-unproved")
+                            continue
+                        continuation = returns[-1][0]
+                        call = self.decode(continuation - 4)
+                        # An outlined guest helper may tail-B into this PLT.
+                        # Its intervening instructions were already traversed;
+                        # the readonly no-argument leaf needs the originating
+                        # BL's unchanged SP/LR, not an invented direct call.
+                        if (call is None or call.mnemonic != "bl" or len(call.operands) != 1 or
+                                call.operands[0].kind != "imm" or self.decode(call.operands[0].value) is None):
+                            problem(pc, "cached-self-originating-bl-unproved")
+                            continue
+                        read_slot = binding.get("read_slot")
+                        _, protected = stack_fact_slots(state)
+                        low = min(protected) - anchor_sp if protected else 0
+                        high = max(protected) + 8 - anchor_sp if protected else 0
+                        if state.native_memory_may_contain_tp:
+                            problem(pc, "cached-self-latent-native-copies-unproved")
+                            continue
+                        if (mrs_window is None or binding.get("stack_exclusion_profile") != 1 or
+                                type(read_slot) is not int or not 0 <= read_slot <= (1 << 64) - 8 or
+                                not hasattr(self.decode, "owned_image_data") or
+                                self.decode.owned_image_data(read_slot, 8) is not True or
+                                low < -mrs_window["before"] or high > mrs_window["after"]):
+                            problem(pc, "cached-self-table-stack-separation-unproved")
+                            continue
+                        image_stack_separation.add((pc, read_slot, 8, low, high))
+                        observe_owned_image_access(pc, read_slot, 8, True, False)
+                        post = state.copy()
+                        # The exact leaf writes x0/x8..x16; PLT also writes x17.
+                        # Its x9 is the incoming SP, not an opaque clean value.
+                        for name in (*binding["clobbers"], "x17", "nzcv"):
+                            post.set(name, CLEAN)
+                            post.set_alias(name, CLEAN)
+                        post.set_alias(binding["sp_copy_register"], frozenset({state.sp}))
+                        callee_effects[pc] = {
+                            "entry": hex(pc), "kind": "conditional-cached-pthread-self",
+                            "binding": dict(binding),
+                            "call_origin": hex(continuation - 4),
+                            "decoded_tail_forwarding": call.operands[0].value != pc,
+                            "scope": "exact readonly leaf and private table/stack exclusion; prepared normal/owned synchronous entries only",
+                        }
+                        enqueue(continuation, returns[:-1], post)
                         continue
                     if binding.get("effect") == "byte-memory":
                         if (not returns or state.signature("x30") is not None or
@@ -1307,6 +1557,15 @@ class Audit:
                 state.set_alias("nzcv", CLEAN)
                 enqueue(pc + 4, returns, state)
                 continue
+            if (op == "and" and operands and operands[0].kind == "reg"
+                    and operands[0].value.startswith("v")):
+                raw = self.decode.word(pc) if hasattr(self.decode, "word") else None
+                post = clean_vector_and(instruction, raw, state)
+                if post is None:
+                    problem(pc, "vector-and-bytes-effects-or-provenance-unproved")
+                    continue
+                enqueue(pc + 4, returns, post)
+                continue
             if (op in SCALAR_LOGICAL_OPS and len(operands) == 3
                     and all(item.kind == "reg" for item in operands)):
                 try:
@@ -1330,6 +1589,13 @@ class Audit:
                     state.fp = None
                 enqueue(pc + 4, returns, state)
                 continue
+            if op in {"ldrh", "strh"} and any(item.kind == "mem" and item.index for item in operands):
+                raw = self.decode.word(pc) if hasattr(self.decode, "word") else None
+                normalized = exact_indexed_halfword(instruction, raw, state)
+                if normalized is None:
+                    problem(pc, "indexed-halfword-bytes-index-or-active-stack-unproved")
+                    continue
+                operands = normalized
             if op in {"add", "sub"} and len(operands) == 3 and operands[2].kind == "reg":
                 delta = exact_register_delta(operands, state)
                 if delta is None:
@@ -2052,6 +2318,13 @@ class Audit:
             "steps": steps,
             "analysis_strategy": "bounded-exact-state-partitions",
             "state_partitions": len(states),
+            "scalar_widening": self.scalar_widening,
+            "scalar_widenings": [
+                {"pc": hex(pc), "applications": row[0], "constants_dropped": sorted(row[1]),
+                 "zero_upper_dropped": sorted(row[2]),
+                 "scope": "identical non-scalar facts; numeric information only forgotten"}
+                for pc, row in sorted(scalar_widenings.items())
+            ],
             "mrs_window_record": mrs_window,
             "conditional_image_stack_separation": [
                 {"pc": hex(pc), "analysis_image_address": hex(start), "read_width": width,
@@ -2062,6 +2335,12 @@ class Audit:
             "indirect_edges": [{"pc": hex(pc), "target": hex(target), "operation": op,
                                 "function": entry}
                                for (pc, target, op), entry in sorted(indirect_edges.items())],
+            "vector_stack_copies": [
+                {"load": hex(pc), "store": hex(pc + 4), "source": source,
+                 "destination": destination, "bytes": 32,
+                 "scope": "exact stack lanes; vector views retain opaque pointer taint"}
+                for pc, source, destination in sorted(vector_stack_copies)
+            ],
             "conditional_byte_copies": [
                 {"entry": hex(pc), "source_kind": kind, "source": source,
                  "destination_stack_offset": destination, "bytes": size,
@@ -2159,6 +2438,8 @@ class ElfBindingMetadata:
         self.relocation_writes = set()
         self.static_rodata_safe = True
         self.proof = {}
+        self.cached_self_proofs = {}
+        self.prepared_cleanup_proof = None
         self.proof_hash = None
         self.provider_bridge = None
         self.trusted_provider_contracts = False
@@ -2702,6 +2983,7 @@ class ElfBindingMetadata:
 
     def load_proof(self, report, report_hash):
         self.mrs_window_record = None
+        self.prepared_cleanup_proof = None
         if (
             not isinstance(report, dict)
             or type(report.get("schema")) is not int
@@ -2751,6 +3033,20 @@ class ElfBindingMetadata:
                     "provider bridge identity disagrees with binding report"
                 )
             self.trusted_provider_contracts = True
+        prepared_bridge_bytes = None
+        if "prepared_cleanup" in report:
+            if not isinstance(report["prepared_cleanup"], dict):
+                raise ValueError("prepared cleanup snapshot object required")
+            # An untrusted record receives schema validation only. Exact file
+            # matching is available solely under the explicit bridge contract.
+            if self.trusted_provider_contracts:
+                with Path(self.provider_bridge["path"]).open("rb") as stream:
+                    prepared_bridge_bytes = stream.read((256 << 20) + 1)
+                if (not 0 < len(prepared_bridge_bytes) <= 256 << 20 or
+                        hashlib.sha256(prepared_bridge_bytes).hexdigest() != self.provider_bridge["sha256"]):
+                    raise ValueError("prepared cleanup bridge changed during proof validation")
+            self.prepared_cleanup_proof = guest_prepared_cleanup_record.validate_prepared_cleanup_record(
+                report["prepared_cleanup"], prepared_bridge_bytes)
         if own is None:
             return
         if own["elf_sha256"] != self.elf_sha256:
@@ -2761,6 +3057,16 @@ class ElfBindingMetadata:
         bindings = own.get("bindings")
         if not isinstance(bindings, list) or len(bindings) > 200000:
             raise ValueError("binding evidence relocation bound")
+        bridge_bytes = prepared_bridge_bytes
+        cached_records = {}
+        if bridge_bytes is None and self.trusted_provider_contracts and any(
+            isinstance(binding, dict) and "cached_self" in binding for binding in bindings
+        ):
+            with Path(self.provider_bridge["path"]).open("rb") as stream:
+                bridge_bytes = stream.read((256 << 20) + 1)
+            if (not 0 < len(bridge_bytes) <= 256 << 20 or
+                    hashlib.sha256(bridge_bytes).hexdigest() != self.provider_bridge["sha256"]):
+                raise ValueError("cached self bridge changed during proof validation")
         for binding in bindings:
             if not isinstance(binding, dict):
                 raise TypeError("invalid binding evidence record")
@@ -2786,6 +3092,14 @@ class ElfBindingMetadata:
             # Identity is a diagnostic snapshot, not a native effect grant.
             # Keep legacy adapters unknown; reject malformed claimed identity.
             guest_native_target.validate_native_target(binding)
+            guest_cached_self_record.validate_cached_self_binding(binding)
+            if bridge_bytes is not None and "cached_self" in binding:
+                key = json.dumps(binding["cached_self"], sort_keys=True, separators=(",", ":"))
+                if key not in cached_records:
+                    cached_records[key] = guest_cached_self_record.validate_cached_self_binding(binding, bridge_bytes)
+                validated = cached_records[key]
+                if validated is not None:
+                    self.cached_self_proofs[slot] = validated.effects
             guest_allocator_contract.managed_malloc_binding(binding)
             guest_memory_contract.byte_memory_binding(binding)
             self.proof[slot] = dict(binding)
@@ -2955,6 +3269,27 @@ class ElfBindingMetadata:
             return {**result, "reason": "namespace-binding-proof-missing"}
         if proof["symbol"] != symbol or proof["version"] != requested_version:
             raise ValueError("binding evidence symbol/version mismatch")
+        if proof["abi"] == "prepared/pthread-self-noargs":
+            if not self.trusted_provider_contracts:
+                return {**result, "reason": "cached-self-contract-untrusted"}
+            if (addend != 0 or proof.get("addend") != 0 or
+                    proof.get("relocation_type") != kind or info & 15 != 2 or
+                    (required_library is not None and proof["provider"] != required_library)):
+                return {**result, "reason": "cached-self-binding-mismatch"}
+            effect = self.cached_self_proofs.get(slot)
+            if effect is None:
+                return {**result, "reason": "cached-self-body-profile-unavailable"}
+            return {
+                **result, "effect": "cached-self", "provider": proof["provider"],
+                "bridge_sha256": self.provider_bridge["sha256"], "read_slot": slot,
+                "body_sha256": effect.body_sha256, "body_size": effect.body_size,
+                "rows": effect.rows, "clobbers": list(effect.clobbers),
+                "sp_copy_register": effect.sp_copy_register,
+                "stack_exclusion_profile": 1,
+                "tables": [{"role": table.role, "native_vmaddr": table.address,
+                            "bytes": table.byte_count} for table in effect.tables],
+                "reason": "verified-first-party-cached-self-body",
+            }
         if proof.get("nonreturning", False):
             if not self.trusted_provider_contracts:
                 return {**result, "reason": "native-provider-contract-untrusted"}
@@ -3135,6 +3470,12 @@ class ElfDecoder:
             "return_auth_profile_sha256": hashlib.sha256(
                 Path(guest_return_auth_profile.__file__).read_bytes()
             ).hexdigest(),
+            "indexed_halfword_reader_sha256": hashlib.sha256(
+                Path(guest_indexed_halfword.__file__).read_bytes()
+            ).hexdigest(),
+            "prepared_cleanup_record_reader_sha256": hashlib.sha256(
+                Path(guest_prepared_cleanup_record.__file__).read_bytes()
+            ).hexdigest(),
             "mrs_window_reader_sha256": hashlib.sha256(
                 Path(guest_mrs_window.__file__).read_bytes()
             ).hexdigest(),
@@ -3153,8 +3494,14 @@ class ElfDecoder:
             "frame_effects_sha256": hashlib.sha256(
                 Path(guest_frame_effects.__file__).read_bytes()
             ).hexdigest(),
+            "scalar_widening_sha256": hashlib.sha256(
+                Path(guest_scalar_widening.__file__).read_bytes()
+            ).hexdigest(),
             "callee_effects_sha256": hashlib.sha256(
                 Path(guest_callee_effects.__file__).read_bytes()
+            ).hexdigest(),
+            "swap_effects_sha256": hashlib.sha256(
+                Path(guest_swap_effects.__file__).read_bytes()
             ).hexdigest(),
             "bindings_sha256": hashlib.sha256(
                 Path(capstone.__file__).read_bytes()
@@ -3252,6 +3599,9 @@ class ElfDecoder:
 
     def cas64(self, address):
         return self.atomic_effect(address, guest_callee_effects.recognize_cas64)
+
+    def swap64(self, address):
+        return self.atomic_effect(address, guest_swap_effects.recognize_swap64)
 
     def atomic_effect(self, address, recognize):
         if self.bindings is None:
@@ -3481,6 +3831,8 @@ def main():
         "--guest-library-dir", type=Path,
         help="explicit directory of all hash-matched recorded guest ELFs; enables bounded cross-ELF body traversal",
     )
+    parser.add_argument("--no-scalar-widening", dest="scalar_widening", action="store_false",
+                        help="retain every exact integer partition for diagnostic comparison")
     args = parser.parse_args()
     if args.entry_context and args.caller is not None:
         parser.error("--entry-context and --caller are mutually exclusive")
@@ -3516,13 +3868,14 @@ def main():
         else:
             result = Audit(
                 decoder, max_steps=min(MAX_STEPS, MAX_TOTAL_STEPS - total_steps),
-                track_opaque_loads=args.track_opaque_loads,
+                track_opaque_loads=args.track_opaque_loads, scalar_widening=args.scalar_widening,
             ).site(site, caller=args.caller, entry_context=args.entry_context)
         total_steps += result.get("steps", 0)
         results.append(result)
     report = {
         "schema": 1,
         "experimental_opaque_load_tracking": args.track_opaque_loads,
+        "scalar_widening": args.scalar_widening,
         "analyzer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "decoder": "capstone-5.0.3",
         "decoder_identity": decoder.identity,
@@ -3542,6 +3895,7 @@ def main():
             "call_depth": MAX_CALL_DEPTH,
             "stack_slots": MAX_STACK_SLOTS,
             "values_per_join": MAX_VALUES,
+            "scalar_variants_before_widening": MAX_SCALAR_VARIANTS,
             "total_steps": MAX_TOTAL_STEPS,
             "caller_prelude_instructions": MAX_CALLER_PRELUDE,
             "byte_copy_bytes": MAX_BYTE_COPY,

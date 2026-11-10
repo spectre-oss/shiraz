@@ -1649,3 +1649,15 @@ else
 landing-compatibility-data: framework
 endif
 	uv run --no-project python scripts/update_compatibility_tracker.py
+
+# Functional concurrency regression for the pinned host DX dependency.
+DX_JAR ?= $(ART_HOST)/framework/dx.jar
+.PHONY: dx-method-handles-check
+dx-method-handles-check:
+	uv run --no-project python scripts/check_dx_method_handles.py --dx-jar "$(DX_JAR)"
+
+# Check every recorded postimage from the pin, even when a cache already looks final.
+BOOTSTRAP_PATCH_HOST ?= $(shell uname -s)
+.PHONY: bootstrap-patch-check
+bootstrap-patch-check:
+	uv run --no-project python scripts/check_bootstrap_patches.py --host "$(BOOTSTRAP_PATCH_HOST)"

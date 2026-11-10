@@ -40,12 +40,21 @@ Selected apps and game rendering already work. Compatibility is still growing:
 apps may encounter missing APIs, graphics issues, or unsupported media features.
 Linux phone support is a future goal.
 
+The Linux [v0.338.7 prerelease](https://github.com/spectre-oss/shiraz/releases/tag/v0.338.7)
+provides x86-64 and ARM64 browser base AppImages, a browser builder, and an
+amd64 web package. Both architecture builds and packaging checks passed CI.
+
 The Apple Silicon macOS port is experimental. Its guest ELF loader, bionic ABI
 adapters and ART bridge have loaded the unchanged OsmAnd+ APK's seven native
 libraries and completed a meaningful OsmAndCore JNI round trip. Developer fixtures
-run in ordinary and hardened allow-jit-only modes. M5 remains in progress: complete
+run in ordinary and hardened allow-jit-only modes. Cached native thread identity
+effects are checked against the compiled bridge body and private table ranges.
+Guest errno cells have explicit ownership through ordinary and scoped cleanup;
+the remaining TLS caller contexts still fail closed. M5 remains in progress: complete
 TLS consumer and callback lifetime coverage, plus comparison against Android's
-bionic runtime, are still open. These results do not establish a fully functional
+bionic runtime, are still open. NativeBridge namespaces remain resident for the
+process lifetime; explicit VM namespace teardown is not supported. These results
+do not establish a fully functional
 OsmAnd application on macOS or a supported macOS release. See the
 [macOS goal and checklist](docs/macos_final_goal.md).
 

@@ -7,8 +7,10 @@ import struct
 from pathlib import Path
 
 from guest_allocator_contract import managed_malloc_binding
+from guest_cached_self_record import validate_cached_self_binding
 from guest_memory_contract import byte_memory_binding
 from guest_native_target import validate_native_target
+from guest_prepared_cleanup_record import validate_prepared_cleanup_record
 
 MAX_REPORT = 64 * 1024 * 1024
 MAX_BINDINGS = 200000
@@ -127,12 +129,15 @@ def _validate_binding_rows(bindings, hashes, names, bridge_identity, *, absolute
                     type(binding.get("symbol_index")) is not int or
                     not 0 <= binding["symbol_index"] < 1 << 32 or
                     type(binding.get("current_slot_matches_link")) is not bool or
-                    "native_target" in binding):
+                    "native_target" in binding or "cached_self" in binding):
                 raise ValueError("absolute binding address snapshot required")
         else:
             if byte_memory_binding(binding) and bridge_identity is None:
                 raise ValueError("byte memory contract requires bridge identity")
             native_target = validate_native_target(binding)
+            validate_cached_self_binding(binding)
+            if "cached_self" in binding and bridge_identity is None:
+                raise ValueError("cached pthread self record requires bridge identity")
             if managed_malloc_binding(binding) and bridge_identity is None:
                 raise ValueError("managed malloc contract requires bridge identity")
             if native_target is not None:
@@ -204,6 +209,7 @@ def augment_binding_report(
             raise ValueError("binding report ELF changed since APK verification")
         module["elf_sha256"] = hashes[name]
     bridge_identity = None
+    bridge_bytes = None
     if native_bridge is not None:
         native_bridge = Path(native_bridge).resolve(strict=True)
         if (
@@ -211,7 +217,8 @@ def augment_binding_report(
             or not 0 < native_bridge.stat().st_size <= 256 << 20
         ):
             raise ValueError("native bridge identity size bound")
-        actual_bridge_hash = hashlib.sha256(bounded_read(native_bridge, 256 << 20)).hexdigest()
+        bridge_bytes = bounded_read(native_bridge, 256 << 20)
+        actual_bridge_hash = hashlib.sha256(bridge_bytes).hexdigest()
         if not isinstance(bridge_sha256, str) or actual_bridge_hash != bridge_sha256:
             raise ValueError("native bridge changed since pre-execution identity")
         bridge_identity = {
@@ -221,6 +228,14 @@ def augment_binding_report(
         }
     elif bridge_sha256 is not None:
         raise ValueError("native bridge path required for identity")
+    if "prepared_cleanup" in report:
+        if bridge_identity is None:
+            raise ValueError("prepared cleanup snapshot requires bridge identity")
+        if not isinstance(report["prepared_cleanup"], dict):
+            raise ValueError("prepared cleanup snapshot object required")
+        # Check mapped/file consistency against the same bytes whose identity
+        # was verified above. This does not grant native-body effects.
+        validate_prepared_cleanup_record(report["prepared_cleanup"], bridge_bytes)
     total = 0
     total_absolute = 0
     total_relocations = 0

@@ -273,6 +273,11 @@ def main():
         stderr=(work / "stderr.log").read_text(errors="replace"),
     )
     (work / "run.log").write_text(result.stdout + result.stderr)
+    process_namespace = any(
+        line.lstrip("\0")
+        == "SHIRAZ_GUEST_NAMESPACE_LIFETIME process=1 explicit_unmap=0 bridge_reference=1"
+        for line in result.stderr.splitlines()
+    )
     phases = {}
     onloads = {}
     malformed_evidence = False
@@ -380,6 +385,8 @@ def main():
                 "native_dependency_sha256": native_digests,
                 "basemap_sha256": map_digest,
                 "app_execution": False,
+                "namespace_lifetime": "process" if process_namespace else None,
+                "namespace_unmap_verified": False,
                 "core_requested": args.core,
                 "library_phase_metrics": phases,
                 "jni_onload_versions": onloads,
@@ -394,6 +401,7 @@ def main():
     print(result.stdout + result.stderr, end="")
     if (
         result.returncode
+        or not process_namespace
         or timed_out
         or malformed_evidence
         or "M5_OSMAND_NATIVE_LOAD_PASS " not in result.stdout

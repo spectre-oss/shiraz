@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# AOSP MethodHandlesSection at art_standalone a1edfc40e8cea3644d80e4e776d3fa7fc397a1c2.
+# Original Apache-2.0 copyright/license notice remains in the dependency file.
+# Class translation can run on both a worker and CallerRunsPolicy producer.
+diff --git a/dalvik/dx/src/com/android/dx/dex/file/MethodHandlesSection.java b/dalvik/dx/src/com/android/dx/dex/file/MethodHandlesSection.java
+--- a/dalvik/dx/src/com/android/dx/dex/file/MethodHandlesSection.java
++++ b/dalvik/dx/src/com/android/dx/dex/file/MethodHandlesSection.java
+@@ -58,4 +58,4 @@
+-    public void intern(CstMethodHandle methodHandle) {
++    public synchronized void intern(CstMethodHandle methodHandle) {
+         if (methodHandle == null) {
+             throw new NullPointerException("methodHandle == null");
+         }

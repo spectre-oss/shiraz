@@ -39,6 +39,14 @@ def environment(work):
         # dyld resolves ART and Shiraz libraries through @rpath and absolute
         # java.library.path entries; no search-path variables (and no DYLD_*).
         del env['LD_LIBRARY_PATH']
+    elif unwind := env.get('SHIRAZ_LIBUNWIND_SO8'):
+        # The flake builds bionic_translation against libunwind >=1.8.
+        # Its SONAME also exists in older system packages: dropping the pinned
+        # runtime path would load that older ABI before ART can even start.
+        library = Path(unwind)
+        if not library.is_absolute() or not library.is_file():
+            raise ValueError('SHIRAZ_LIBUNWIND_SO8 must name an existing absolute library path')
+        env['LD_LIBRARY_PATH'] = str(library.parent) + ':' + env['LD_LIBRARY_PATH']
     return env
 
 

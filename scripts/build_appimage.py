@@ -2,19 +2,24 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Build a relocatable, native-launcher AppImage from an unchanged architecture-matched APK."""
 import argparse
+import errno
 import fcntl
 import hashlib
+import http.client
 import json
 import os
-from pathlib import Path
 import platform
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import sysconfig
+import time
+import urllib.error
 import urllib.request
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -22,8 +27,9 @@ sys.path.insert(0, str(ROOT / 'src'))
 from package_aot import compile_package
 from package_desktop import package_desktop
 from retain_appimages import prune
-from shiraz.apk import inspect_apk, FormatError
-from shiraz.runtime import application_metadata, properties_text, JARS, HOST, NAME
+
+from shiraz.apk import FormatError, inspect_apk
+from shiraz.runtime import HOST, JARS, NAME, application_metadata, properties_text
 
 DOWNLOADS = {
     'appimagetool': ('https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage', 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0'),
@@ -51,24 +57,48 @@ def sha256(path):
     return h.hexdigest()
 
 
+def transient_download_error(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (408, 429, 500, 502, 503, 504)
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, (TimeoutError, ConnectionError, http.client.IncompleteRead)):
+        return True
+    if isinstance(reason, socket.gaierror):
+        return reason.errno == socket.EAI_AGAIN
+    return isinstance(reason, OSError) and reason.errno in (
+        errno.ETIMEDOUT, errno.ECONNRESET, errno.ECONNABORTED,
+        errno.EHOSTUNREACH, errno.ENETUNREACH,
+    )
+
+
 def fetch(name, cache, architecture="x86_64"):
     url, digest = ARM64_DOWNLOADS[name] if architecture == "aarch64" and name in ARM64_DOWNLOADS else DOWNLOADS[name]
     dest = cache / name
     if not dest.exists():
         temp = dest.with_suffix('.download')
-        try:
-            with urllib.request.urlopen(url, timeout=60) as response, temp.open('wb') as out:
-                total = 0
-                while chunk := response.read(1024 * 1024):
-                    total += len(chunk)
-                    if total > 64 * 1024 * 1024:
-                        raise RuntimeError('Packaging download exceeds limit')
-                    out.write(chunk)
-            if sha256(temp) != digest:
-                raise RuntimeError('Packaging download checksum mismatch: ' + name)
-            temp.replace(dest)
-        finally:
-            temp.unlink(missing_ok=True)
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(url, timeout=60) as response, temp.open('wb') as out:
+                    total = 0
+                    while chunk := response.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > 64 * 1024 * 1024:
+                            raise RuntimeError('Packaging download exceeds limit')
+                        out.write(chunk)
+                if sha256(temp) != digest:
+                    raise RuntimeError('Packaging download checksum mismatch: ' + name)
+                temp.replace(dest)
+                break
+            except (OSError, http.client.HTTPException) as error:
+                retry = transient_download_error(error)
+                if isinstance(error, urllib.error.HTTPError):
+                    error.close()
+                if not retry or attempt == 2:
+                    raise
+                print(f'{name}: transient download failure; retry {attempt + 1}/2: {error}', file=sys.stderr)
+                time.sleep(attempt + 1)
+            finally:
+                temp.unlink(missing_ok=True)
     if sha256(dest) != digest:
         raise RuntimeError('Cached packaging tool checksum mismatch: ' + name)
     if name != 'mozilla-ca.pem':
@@ -312,6 +342,7 @@ def notices(share, libraries):
 
 
 from package_native import extract_native
+
 
 def build(args):
     patchelf = shutil.which('patchelf') or ROOT/'.local/bin/patchelf'

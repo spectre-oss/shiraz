@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/thread.hpp"
+#include "shiraz/darwin/guest/lifecycle.hpp"
 #include "shiraz/darwin/guest/cleanup.hpp"
 #include "shiraz/darwin/guest/signals.hpp"
 #include "guest_io.hpp"
@@ -33,13 +34,13 @@ Argument pointer(const void *value) {
 }
 ProviderExport self_export() {
   // No arguments and a pointer result have identical Darwin/AAPCS64 calling
-  // conventions. Bind the native entry directly: no closure capture, boundary
-  // TLS or errno wrapper is needed. This is an opaque native pthread handle,
-  // never a guest TCB pointer. The ABI tag does not certify the native body or
-  // authorize the instruction analyzer to ignore its memory effects.
+  // conventions. The prepared-stack leaf returns the exact native handle
+  // without executing Darwin's pthread_self body on a guest call. No closure,
+  // TLV lookup or errno wrapper is needed. Its ABI tag alone grants no analyzer
+  // memory-effect exemption; bounded body/data-range proof remains separate.
   static_assert(std::is_pointer_v<pthread_t> && sizeof(pthread_t) == 8);
-  return {"pthread_self", "LIBC", reinterpret_cast<uintptr_t>(&::pthread_self),
-          SymbolKind::Function, "native/pthread-self-noargs", false};
+  return {"pthread_self", "LIBC", reinterpret_cast<uintptr_t>(&shiraz_guest_cached_pthread_self),
+          SymbolKind::Function, "prepared/pthread-self-noargs", false};
 }
 void *call_guest(void *function, void *argument) {
   try {
@@ -54,10 +55,12 @@ class Threads : public std::enable_shared_from_this<Threads> {
   struct Start {
     std::shared_ptr<Threads> state;
     std::shared_ptr<Record> record;
+    std::shared_ptr<void> retention;
     void *function, *argument;
   };
   std::mutex mutex_;
   CodeValidator validate_;
+  const std::shared_ptr<Lifecycle> lifecycle_;
   std::map<void *, Attributes> attributes_;
   std::map<uintptr_t, std::shared_ptr<Record>> records_;
   std::map<uint32_t, GuestThreadKeyHandle> keys_;
@@ -79,7 +82,8 @@ class Threads : public std::enable_shared_from_this<Threads> {
     return found == attributes_.end() ? nullptr : &found->second;
   }
 public:
-  explicit Threads(CodeValidator validate) : validate_(std::move(validate)) {}
+  explicit Threads(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle)
+      : validate_(std::move(validate)), lifecycle_(std::move(lifecycle)) {}
   int attr_init(void *address) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!address || attributes_.count(address)) return EINVAL;
@@ -184,7 +188,13 @@ public:
     return 0;
   }
   int create(uint64_t *output, void *address, void *function, void *argument) {
-    if (!output || !function || !validate_(function)) return EINVAL;
+    if (!output || !function) return EINVAL;
+    // Admission precedes captured-code validation and child publication. The
+    // child owns this token through invoke, cleanup and its wrapper return.
+    // Native TSD callbacks have their own queued/selected retention tokens.
+    auto retention = lifecycle_ ? lifecycle_->retain_thread_callback() : nullptr;
+    if (lifecycle_ && !retention) return EINVAL;
+    if (!validate_(function)) return EINVAL;
     std::lock_guard<std::mutex> lock(mutex_);
     Attributes config;
     if (address) {
@@ -207,7 +217,7 @@ public:
       return error;
     auto record = std::make_shared<Record>();
     record->detached = config.detached;
-    auto start = std::make_unique<Start>(Start{shared_from_this(), record, function, argument});
+    auto start = std::make_unique<Start>(Start{shared_from_this(), record, std::move(retention), function, argument});
     // Reserve the registry node before creating a live thread.
     records_.emplace(0, record);
     error = ::pthread_create(&record->host, &host, entry, start.get());
@@ -255,11 +265,18 @@ public:
     return error;
   }
   int key_create(uint32_t *output, void *destructor) {
-    if (!output || (destructor && !validate_(destructor))) return EINVAL;
+    if (!output) return EINVAL;
+    // Even key creation with no initial value can race captured code
+    // validation. Empty keys do not retain code after publication.
+    auto retention = lifecycle_ ? lifecycle_->retain_thread_callback() : nullptr;
+    if (lifecycle_ && !retention) return EINVAL;
+    if (destructor && !validate_(destructor)) return EINVAL;
+    auto handle = make_guest_thread_key(destructor, lifecycle_);
     std::lock_guard<std::mutex> lock(mutex_);
     if (keys_.size() >= 4096 || next_key_ > INT32_MAX) return EAGAIN;
-    uint32_t guest = next_key_++;
-    keys_.emplace(guest, make_guest_thread_key(destructor));
+    const uint32_t guest = next_key_;
+    keys_.emplace(guest, std::move(handle));
+    ++next_key_;
     std::memcpy(output, &guest, sizeof(guest));
     return 0;
   }
@@ -303,9 +320,9 @@ ProviderExport method(const char *name, std::shared_ptr<Threads> state,
           "pthread/translated", false};
 }
 } // namespace
-std::vector<ProviderExport> thread_exports(CodeValidator validate) {
+std::vector<ProviderExport> thread_exports(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle) {
   if (!validate) throw ElfError("pthread adapters require guest code validation");
-  auto state = std::make_shared<Threads>(std::move(validate));
+  auto state = std::make_shared<Threads>(std::move(validate), std::move(lifecycle));
   std::vector<ProviderExport> result{
     method("pthread_attr_init", state, &Threads::attr_init),
     method("pthread_attr_destroy", state, &Threads::attr_destroy),

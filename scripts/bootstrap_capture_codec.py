@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Build pinned Apache-2.0 VisualOn AAC in the local prefix, without host installs."""
-from pathlib import Path
 import hashlib
+import platform
 import subprocess
 import tarfile
 import urllib.request
+from pathlib import Path
+
 ROOT=Path(__file__).resolve().parents[1]
 VERSION='0.1.3'
 URL='https://downloads.sourceforge.net/opencore-amr/vo-aacenc-0.1.3.tar.gz'
@@ -23,8 +25,13 @@ def main():
     source=directory/f'vo-aacenc-{VERSION}'
     if not source.is_dir():
         with tarfile.open(archive) as tar:tar.extractall(directory,filter='data')
-    if not (ROOT/'.local/lib/libvo-aacenc.so').exists():
-        subprocess.run(['./configure','--prefix='+str(ROOT/'.local'),'--disable-static'],cwd=source,check=True)
+    darwin=platform.system()=='Darwin'
+    library='libvo-aacenc.a' if darwin else 'libvo-aacenc.so'
+    if not (ROOT/'.local/lib'/library).exists():
+        if (source/'Makefile').exists():
+            subprocess.run(['make','clean'],cwd=source,check=True)
+        options=['--disable-shared','--enable-static','--with-pic'] if darwin else ['--disable-static']
+        subprocess.run(['./configure','--prefix='+str(ROOT/'.local'),*options],cwd=source,check=True)
         subprocess.run(['make','-j4'],cwd=source,check=True)
         subprocess.run(['make','install'],cwd=source,check=True)
     destination=ROOT/'.local/share/shiraz/capture-codec'

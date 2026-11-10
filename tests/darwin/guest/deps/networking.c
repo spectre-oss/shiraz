@@ -179,3 +179,22 @@ int run_network_rights(void) {
   CHECK(close(pair[0]) == 0 && close(pair[1]) == 0 && close(source[0]) == 0 && close(source[1]) == 0);
   return 0;
 }
+
+/* Optional public req_pq exchange only; no Telegram account/auth material.
+ * Wire format: https://core.telegram.org/mtproto/auth_key and /mtproto-transports. */
+int run_mtproto_pq(const char *host,int port,const unsigned char *request,int length,unsigned char *reply,int capacity) {
+  if(!host||!request||!reply||port<1||port>65535||length<1||length>4096||capacity<41||capacity>4096)return -8;
+  struct addrinfo hints={0},*addresses=0;hints.ai_family=AF_INET;hints.ai_socktype=SOCK_STREAM;hints.ai_flags=AI_NUMERICHOST;
+  if(getaddrinfo(host,0,&hints,&addresses)!=0||!addresses)return -1;
+  struct sockaddr_in address;memcpy(&address,addresses->ai_addr,sizeof(address));freeaddrinfo(addresses);address.sin_port=(uint16_t)((port>>8)|((port&255)<<8));
+  int fd=socket(AF_INET,SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC,0);if(fd<0)return -2;
+  int result=-3;struct pollfd waiting={fd,POLLOUT,0};
+  if(connect(fd,(struct sockaddr *)&address,sizeof(address))!=0&&errno!=EINPROGRESS)goto done;
+  if(poll(&waiting,1,5000)!=1)goto done;
+  int error=0;socklen_t size=sizeof(error);if(getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&size)!=0||error)goto done;
+  int sent=0;while(sent<length){ssize_t n=send(fd,request+sent,(size_t)(length-sent),MSG_NOSIGNAL);if(n>0)sent+=(int)n;else if(n<0&&(errno==EAGAIN||errno==EINTR)){if(poll(&waiting,1,5000)!=1)goto done;}else goto done;}
+  waiting.events=POLLIN;int received=0,wanted=1;
+  while(received<wanted){if(poll(&waiting,1,5000)!=1){result=-4;goto done;}ssize_t n=recv(fd,reply+received,(size_t)(wanted-received),0);if(n<0&&(errno==EAGAIN||errno==EINTR))continue;if(n<=0){result=-5;goto done;}received+=(int)n;if(received==1){if(reply[0]>=127){result=-6;goto done;}wanted=1+reply[0]*4;if(wanted<41||wanted>capacity){result=-7;goto done;}}}
+  result=received;
+ done:close(fd);return result;
+}

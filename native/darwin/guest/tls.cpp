@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/tls.hpp"
+#include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/lifecycle.hpp"
 #include "shiraz/darwin/guest/instruction.hpp"
 #include "guest_io.hpp"
@@ -11,6 +12,7 @@
 #include <map>
 #include <iterator>
 #include <mutex>
+#include <memory>
 #include <vector>
 #include <utility>
 #include <pthread.h>
@@ -25,17 +27,67 @@ extern "C" int pthread_self_is_exiting_np(void) __attribute__((weak_import));
 namespace shiraz::guest {
 struct GuestThreadKey {
   std::atomic<bool> active{true};
-  void *destructor;
-  explicit GuestThreadKey(void *function) : destructor(function) {}
+  std::mutex mutex;
+  void *const destructor;
+  const std::shared_ptr<Lifecycle> lifecycle;
+  size_t queued_values = 0;
+  // One token epoch covers all queued values. Selected callbacks copy it
+  // before clearing their slot, so concurrent deletion cannot unpin them.
+  std::shared_ptr<void> queued_retention;
+  explicit GuestThreadKey(void *function, std::shared_ptr<Lifecycle> owner)
+      : destructor(function), lifecycle(std::move(owner)) {}
 };
 namespace {
 struct Destructor { void *function, *object; std::shared_ptr<void> retention; };
+// Call only for an existing nonnull per-thread value. Deletion has already
+// reset the logical queued count; stale deleted slots must not decrement it.
+void discard_key_value(const GuestThreadKeyHandle &key) {
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    if (key->active.load(std::memory_order_relaxed) && key->destructor) {
+      if (!key->queued_values) std::terminate();
+      if (!--key->queued_values) retired = std::move(key->queued_retention);
+    }
+  }
+  // Retention destruction takes the lifecycle mutex. Never do it under the
+  // key mutex or while invoking guest code.
+}
+struct SelectedKeyCallback {
+  void *function = nullptr;
+  std::shared_ptr<void> retention;
+};
+SelectedKeyCallback select_key_callback(const GuestThreadKeyHandle &key) {
+  SelectedKeyCallback selected;
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    if (!key->active.load(std::memory_order_relaxed) || !key->destructor) return selected;
+    if (!key->queued_values || (key->lifecycle && !key->queued_retention)) std::terminate();
+    selected.function = key->destructor;
+    selected.retention = key->queued_retention;
+    if (!--key->queued_values) retired = std::move(key->queued_retention);
+  }
+  return selected;
+}
 // The async readiness query must not touch a Mach-O TLV on an unprepared
 // thread: doing so could allocate TLS from inside the signal handler.
 std::array<std::atomic<pthread_t>, 4096> prepared_threads{};
 std::array<std::atomic<uintptr_t>, 4096> prepared_stack_low{}, prepared_stack_high{};
 std::array<std::atomic<uintptr_t>, 4096> prepared_guest_bases{};
 std::array<std::atomic<uint64_t>, 4096> prepared_native_ids{};
+std::array<std::atomic<uintptr_t>, 4096> prepared_native_tls_keys{};
+// Only the boolean cleanup_depth || draining is published here. Readers must
+// never recover ThreadState or guest TP storage to decide prepared admission.
+std::array<std::atomic<uintptr_t>, 4096> prepared_cleanup_admission{};
+// Separate native errno allocations are owned by ThreadState through cleanup.
+// No residence in a destructible Mach-O TLV block is cached here.
+std::array<std::atomic<uintptr_t>, 4096> prepared_errno_cells{};
+inline uintptr_t native_tls_key() noexcept {
+  uintptr_t key;
+  asm volatile("mrs %0, tpidrro_el0" : "=r"(key));
+  return key;
+}
 static_assert(std::atomic<pthread_t>::is_always_lock_free);
 static_assert(std::atomic<uintptr_t>::is_always_lock_free);
 static_assert(std::atomic<uint64_t>::is_always_lock_free);
@@ -75,6 +127,35 @@ uintptr_t guard() {
   }();
   return value;
 }
+pthread_once_t errno_key_once = PTHREAD_ONCE_INIT;
+pthread_key_t errno_key;
+void destroy_errno_owner(void *opaque) {
+  delete static_cast<std::shared_ptr<int> *>(opaque);
+}
+void initialize_errno_key() {
+  if (pthread_key_create(&errno_key, destroy_errno_owner)) std::abort();
+}
+std::shared_ptr<int> native_errno_cell() {
+  if (pthread_once(&errno_key_once, initialize_errno_key)) std::abort();
+  if (auto *owner = static_cast<std::shared_ptr<int> *>(pthread_getspecific(errno_key)))
+    return *owner;
+  if (!pthread_self_is_exiting_np)
+    throw ElfError("Darwin native thread exit-state query unavailable for errno");
+  const int exiting = pthread_self_is_exiting_np();
+  if (exiting != 0 && exiting != 1) throw ElfError("invalid native errno thread exit state");
+  auto cell = std::make_shared<int>(0);
+  if (!exiting) {
+    // Preserve errno identity/value across ordinary guest-state epochs. The
+    // native key and each live ThreadState independently retain the cell, so
+    // either native destructor order is safe.
+    auto owner = std::make_unique<std::shared_ptr<int>>(cell);
+    if (pthread_setspecific(errno_key, owner.get())) std::abort();
+    owner.release();
+  }
+  // A late owned guest epoch retains its own cell. Do not install another TSD
+  // value after this key's final destructor pass may already have completed.
+  return cell;
+}
 struct TlsSlotStorage {
   static_assert(bionic::kTlsMinSlot >= -16 && bionic::kTlsMinSlot <= 0 &&
                 bionic::kTlsMaxSlot >= 0 && bionic::kTlsMaxSlot <= 63);
@@ -95,6 +176,10 @@ struct ThreadState {
   // Backing covers the pinned slot range; private slot contents remain
   // unimplemented. This is still a canary-only personality, not a bionic TCB.
   TlsSlotStorage slots;
+  // Keep errno physically separate from guest TP/slot storage. Its ownership
+  // follows this state through every guest destructor, independent of dyld's
+  // native TLV teardown order. No prepared reader dereferences ThreadState.
+  std::shared_ptr<int> error_cell = native_errno_cell();
   std::vector<Destructor> destructors;
   std::map<GuestThreadKeyHandle, const void *, std::owner_less<GuestThreadKeyHandle>> key_values;
   size_t registrations = 0;
@@ -104,9 +189,21 @@ struct ThreadState {
   ThreadState() {
     slots.base()[bionic::kTlsStackGuardSlot] = guard();
   }
+  void refresh_cleanup_admission() noexcept {
+    if (prepared_index != prepared_threads.size())
+      prepared_cleanup_admission[prepared_index].store(cleanup_depth || draining,
+                                                       std::memory_order_release);
+  }
   void publish() {
     if (prepared_index != prepared_threads.size()) return;
+    // Readiness is consumed in signal context. Initialize this image's native
+    // TLV block during ordinary setup, before publishing any prepared owner.
+    // Errno is separately owned and no longer performs this implicit prewarm.
+    const volatile uintptr_t native_tlv_storage = capture_boundary_storage().address;
+    (void)native_tlv_storage; // Keep address materialization observable under LTO too.
     const auto thread = pthread_self();
+    const auto native_key = native_tls_key();
+    if (!native_key) throw ElfError("native read-only TLS identity unavailable");
     uint64_t native_id = 0;
     if (pthread_threadid_np(nullptr, &native_id) || !native_id)
       throw ElfError("native thread identity unavailable");
@@ -116,8 +213,20 @@ struct ThreadState {
       std::fprintf(stderr, "SHIRAZ_GUEST_FATAL native stack extent unavailable\n");
       std::abort();
     }
+    const auto error_address = reinterpret_cast<uintptr_t>(error_cell.get());
+    if (!error_address || error_address % alignof(int) || error_address > UINTPTR_MAX - sizeof(int) ||
+        (error_address < high && high - size < error_address + sizeof(int)))
+      throw ElfError("prepared guest errno cell overlaps native stack or is invalid");
     auto &domains = memory_domains();
     std::lock_guard<std::mutex> lock(domains.mutex);
+    if (!mrs_access_tables_disjoint_stack(high - size, high) ||
+        !prepared_cleanup_admission_disjoint_stack(high - size, high) ||
+        !prepared_guest_errno_disjoint_stack(high - size, high))
+      throw ElfError("native stack overlaps prepared TLS admission/cache table");
+    for (size_t i = 0; i < prepared_threads.size(); ++i)
+      if (reinterpret_cast<uintptr_t>(prepared_threads[i].load(std::memory_order_acquire)) > 1 &&
+          prepared_native_tls_keys[i].load(std::memory_order_relaxed) == native_key)
+        throw ElfError("duplicate prepared native read-only TLS identity");
     if (overlaps_image(domains, high - size, high))
       throw ElfError("native stack overlaps guest image reservation");
     if (overlaps_range(domains.heaps, high - size, high))
@@ -138,7 +247,11 @@ struct ThreadState {
         prepared_stack_low[i].store(high - size, std::memory_order_relaxed);
         prepared_stack_high[i].store(high, std::memory_order_relaxed);
         prepared_native_ids[i].store(native_id, std::memory_order_relaxed);
+        prepared_native_tls_keys[i].store(native_key, std::memory_order_relaxed);
         prepared_guest_bases[i].store(reinterpret_cast<uintptr_t>(slots.base()), std::memory_order_relaxed);
+        // An owned cleanup scope can precede this first publication.
+        prepared_cleanup_admission[i].store(cleanup_depth || draining, std::memory_order_relaxed);
+        prepared_errno_cells[i].store(error_address, std::memory_order_relaxed);
         prepared_threads[i].store(thread, std::memory_order_release);
         return;
       }
@@ -178,10 +291,13 @@ struct ThreadState {
         auto found = key_values.find(key);
         if (found == key_values.end() || !found->second) continue;
         const void *value = found->second;
+        auto selected = select_key_callback(key);
         key_values.erase(found); // POSIX clears the slot before the callback.
-        if (!key->active.load(std::memory_order_acquire)) continue;
+        if (!selected.function) continue;
         try {
-          invoke(key->destructor, {Argument::integer(reinterpret_cast<uintptr_t>(value),
+          // selected.retention survives the complete invoke return, even if
+          // another thread deletes this key after selection.
+          invoke(selected.function, {Argument::integer(reinterpret_cast<uintptr_t>(value),
                                                      ArgumentType::Int64)});
         } catch (...) {
           std::fprintf(stderr, "SHIRAZ_GUEST_FATAL pthread key destructor failure\n");
@@ -195,7 +311,12 @@ struct ThreadState {
     // POSIX does not promise to destroy values endlessly reset by destructors.
     // Discard residual slots after the fixed guest pass budget; do not schedule
     // additional native callbacks or dereference application-owned payloads.
-    key_values.clear();
+    while (!key_values.empty()) {
+      auto found = key_values.begin();
+      auto key = found->first;
+      key_values.erase(found);
+      discard_key_value(key);
+    }
     if (prepared_index != prepared_threads.size()) {
       auto &domains = memory_domains();
       std::lock_guard<std::mutex> lock(domains.mutex);
@@ -205,8 +326,11 @@ struct ThreadState {
       if (stack == domains.stacks.end() || stack->second != high) std::abort();
       // Keep this cache live through all guest cleanup above, then invalidate
       // it while we still own the row and domains lock, before any row reuse.
+      prepared_cleanup_admission[prepared_index].store(0, std::memory_order_release);
+      prepared_errno_cells[prepared_index].store(0, std::memory_order_release);
       prepared_guest_bases[prepared_index].store(0, std::memory_order_relaxed);
       prepared_native_ids[prepared_index].store(0, std::memory_order_relaxed);
+      prepared_native_tls_keys[prepared_index].store(0, std::memory_order_relaxed);
       prepared_threads[prepared_index].store(nullptr, std::memory_order_release);
       domains.stacks.erase(stack);
     }
@@ -220,6 +344,7 @@ void destroy_state(void *opaque) {
   // execute so nested TLS access and atexit registration see this live state.
   if (pthread_setspecific(state_key, current)) std::abort();
   current->draining = true;
+  current->refresh_cleanup_admission();
   delete current;
   if (pthread_setspecific(state_key, nullptr)) std::abort();
 }
@@ -243,6 +368,105 @@ template <size_t N> [[noreturn]] void mrs_failure(const char (&message)[N]) noex
   std::abort();
 }
 } // namespace
+int *guest_errno_location() {
+  // Generic access may initialize native guest state, but never publishes a
+  // prepared row. The allocator uses the no-initialization snapshot below.
+  HostErrno preserve;
+  return live_state().error_cell.get();
+}
+CachedSelfTables cached_pthread_self_tables() noexcept {
+  static_assert(sizeof(prepared_threads) == 32768 &&
+                sizeof(prepared_native_tls_keys) == 32768 &&
+                sizeof(prepared_stack_low) == 32768 && sizeof(prepared_stack_high) == 32768);
+  return {{{"owners", reinterpret_cast<uintptr_t>(prepared_threads.data()), sizeof(prepared_threads)},
+           {"keys", reinterpret_cast<uintptr_t>(prepared_native_tls_keys.data()), sizeof(prepared_native_tls_keys)},
+           {"low", reinterpret_cast<uintptr_t>(prepared_stack_low.data()), sizeof(prepared_stack_low)},
+           {"high", reinterpret_cast<uintptr_t>(prepared_stack_high.data()), sizeof(prepared_stack_high)}},
+          prepared_threads.size()};
+}
+MrsAccessTables mrs_access_tables() noexcept {
+  static_assert(sizeof(prepared_guest_bases) == 32768);
+  const auto identity = cached_pthread_self_tables();
+  return {{identity.tables[0], identity.tables[1], identity.tables[2], identity.tables[3],
+           {"bases", reinterpret_cast<uintptr_t>(prepared_guest_bases.data()), sizeof(prepared_guest_bases)}},
+          identity.rows};
+}
+namespace {
+template <typename Tables>
+bool cache_tables_disjoint_stack(const Tables &cache, uintptr_t low, uintptr_t high) noexcept {
+  if (!low || high <= low || cache.rows != 4096) return false;
+  for (const auto &table : cache.tables) {
+    if (!table.address || !table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
+    if (low < table.address + table.bytes && table.address < high) return false;
+  }
+  return true;
+}
+} // namespace
+bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  return cache_tables_disjoint_stack(cached_pthread_self_tables(), low, high);
+}
+bool mrs_access_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  return cache_tables_disjoint_stack(mrs_access_tables(), low, high);
+}
+CachedSelfTable prepared_cleanup_admission_table() noexcept {
+  static_assert(sizeof(prepared_cleanup_admission) == 32768);
+  return {"admission", reinterpret_cast<uintptr_t>(prepared_cleanup_admission.data()),
+          sizeof(prepared_cleanup_admission)};
+}
+bool prepared_cleanup_admission_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  if (!low || high <= low) return false;
+  const auto table = prepared_cleanup_admission_table();
+  if (!table.address || !table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
+  return high <= table.address || table.address + table.bytes <= low;
+}
+bool prepared_guest_cleanup_admitted(uintptr_t incoming_sp) noexcept {
+  const auto key = native_tls_key();
+  if (!key || !incoming_sp || (incoming_sp & 15)) return false;
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1 ||
+        prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (low >= high || incoming_sp < low || incoming_sp >= high ||
+        prepared_cleanup_admission[i].load(std::memory_order_acquire) != 1) return false;
+    return prepared_threads[i].load(std::memory_order_acquire) == owner &&
+           prepared_native_tls_keys[i].load(std::memory_order_acquire) == key &&
+           prepared_cleanup_admission[i].load(std::memory_order_acquire) == 1;
+  }
+  return false;
+}
+CachedSelfTable prepared_guest_errno_table() noexcept {
+  static_assert(sizeof(prepared_errno_cells) == 32768);
+  return {"errno-cells", reinterpret_cast<uintptr_t>(prepared_errno_cells.data()),
+          sizeof(prepared_errno_cells)};
+}
+bool prepared_guest_errno_disjoint_stack(uintptr_t low, uintptr_t high) noexcept {
+  if (!low || high <= low) return false;
+  const auto table = prepared_guest_errno_table();
+  if (!table.address || !table.bytes || table.bytes > UINTPTR_MAX - table.address) return false;
+  return high <= table.address || table.address + table.bytes <= low;
+}
+int *prepared_guest_errno_location(uintptr_t incoming_sp) noexcept {
+  const auto key = native_tls_key();
+  if (!key || !incoming_sp || (incoming_sp & 15)) return nullptr;
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1 ||
+        prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (low >= high || incoming_sp < low || incoming_sp >= high) return nullptr;
+    const auto cell = prepared_errno_cells[i].load(std::memory_order_acquire);
+    if (!cell || cell % alignof(int) || cell > UINTPTR_MAX - sizeof(int) ||
+        (cell < high && low < cell + sizeof(int))) return nullptr;
+    if (prepared_threads[i].load(std::memory_order_acquire) != owner ||
+        prepared_native_tls_keys[i].load(std::memory_order_acquire) != key ||
+        prepared_errno_cells[i].load(std::memory_order_acquire) != cell) return nullptr;
+    return reinterpret_cast<int *>(cell);
+  }
+  return nullptr;
+}
 GuestImageReservation::GuestImageReservation(uintptr_t base, uint64_t bytes) : base_(base) {
   if (!base || !bytes || bytes > UINTPTR_MAX - base)
     throw ElfError("invalid guest image reservation extent");
@@ -324,6 +548,7 @@ GuestTlsCleanupScope::GuestTlsCleanupScope() noexcept {
     auto &current = live_state();
     if (current.cleanup_depth == 4096) std::abort();
     ++current.cleanup_depth;
+    current.refresh_cleanup_admission();
     state_ = &current;
   } catch (...) { std::abort(); }
 }
@@ -335,7 +560,10 @@ GuestTlsCleanupScope::~GuestTlsCleanupScope() {
   // Always drain at the outer callback boundary. Native TLV bookkeeping can
   // itself be torn down before late callbacks, and there may be no later TSD
   // round. Keep depth/draining in this live owned object, never another TLV.
+  // Keep admission true across an immediate handoff to draining. The state
+  // remains owned until destroy_state retires its row after all callbacks.
   if (!current->cleanup_depth && !current->draining) destroy_state(current);
+  else current->refresh_cleanup_admission();
 }
 void require_guest_tls_lifetime() {
   if (!pthread_self_is_exiting_np)
@@ -350,6 +578,18 @@ void require_guest_tls_lifetime() {
   // each JNI return would prematurely destroy state used by its next JNI call;
   // another native destructor registration may already have missed round four.
   if (!current || (!current->draining && !current->cleanup_depth))
+    throw std::runtime_error("unsupported guest entry during unowned native thread teardown");
+}
+void require_prepared_guest_tls_lifetime(uintptr_t incoming_sp) {
+  // Readiness is the caller's precondition. Unlike generic pre-prepare entry,
+  // the late path consumes only scalar prepared-row metadata, never TSD state.
+  if (!pthread_self_is_exiting_np)
+    throw std::runtime_error("Darwin native thread exit-state query unavailable");
+  const int exiting = pthread_self_is_exiting_np();
+  if (!exiting) return;
+  if (exiting != 1)
+    throw std::runtime_error("invalid Darwin native thread exit state");
+  if (!prepared_guest_cleanup_admitted(incoming_sp))
     throw std::runtime_error("unsupported guest entry during unowned native thread teardown");
 }
 void prepare_guest_tls() {
@@ -369,25 +609,22 @@ void *guest_tls_base() {
 // preflight, not a lifetime lease or an asynchronous/native-spill proof.
 extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
                                         uint64_t, uint64_t, uint64_t, uintptr_t original_sp) noexcept {
-  int *const host_error = &errno;
-  const int saved_error = *host_error;
-  const auto current = pthread_self();
-  uint64_t native_id = 0;
-  const int identity_error = pthread_threadid_np(nullptr, &native_id);
-  // Restore errno before loading the guest TP, without a destructor or a
-  // further authored native call on the successful return path after it.
-  *host_error = saved_error;
-  if (identity_error || !native_id)
+  // Read only the opaque native key already checked for nonzero/live-unique
+  // publication. No native calls, TLV lookup or errno writes on success.
+  // Existing entry/owned-cleanup lifetime admission remains required: this
+  // cache snapshot is not an asynchronous or post-fork validity lease.
+  const auto key = native_tls_key();
+  if (!key)
     mrs_failure("SHIRAZ_GUEST_FATAL MRS native thread identity unavailable\n");
   for (size_t i = 0; i < prepared_threads.size(); ++i) {
-    if (prepared_threads[i].load(std::memory_order_acquire) != current ||
-        prepared_native_ids[i].load(std::memory_order_relaxed) != native_id) continue;
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1 ||
+        prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
     const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
     const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
-    // Recheck both ownership observations before the final pointer load.
-    // Native IDs also distinguish ordinary native pthread-handle reuse.
-    if (prepared_threads[i].load(std::memory_order_acquire) != current ||
-        prepared_native_ids[i].load(std::memory_order_acquire) != native_id) continue;
+    // Recheck both publication observations before the final pointer load.
+    if (prepared_threads[i].load(std::memory_order_acquire) != owner ||
+        prepared_native_tls_keys[i].load(std::memory_order_acquire) != key) continue;
     if ((original_sp & 15) || original_sp < low || original_sp >= high)
       mrs_failure("SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
     if (kMrsStackBytesBefore > original_sp - low || kMrsStackBytesAfter > high - original_sp)
@@ -403,6 +640,25 @@ bool guest_tls_prepared() noexcept {
   for (auto &thread : prepared_threads)
     if (thread.load(std::memory_order_acquire) == current) return true;
   return false;
+}
+extern "C" uintptr_t shiraz_guest_cached_pthread_self() noexcept {
+  uintptr_t sp;
+  asm volatile("mov %0, sp" : "=r"(sp));
+  const auto key = native_tls_key();
+  for (size_t i = 0; i < prepared_threads.size(); ++i) {
+    const auto owner = prepared_threads[i].load(std::memory_order_acquire);
+    if (reinterpret_cast<uintptr_t>(owner) <= 1) continue;
+    if (!key || prepared_native_tls_keys[i].load(std::memory_order_relaxed) != key) continue;
+    const auto low = prepared_stack_low[i].load(std::memory_order_relaxed);
+    const auto high = prepared_stack_high[i].load(std::memory_order_relaxed);
+    if (sp < low || sp >= high) continue;
+    if (prepared_threads[i].load(std::memory_order_acquire) != owner ||
+        prepared_native_tls_keys[i].load(std::memory_order_acquire) != key) continue;
+    return reinterpret_cast<uintptr_t>(owner);
+  }
+  // Returning null would invent a successful pthread_self result. Guest entry
+  // must prepare its native stack before reaching this no-argument adapter.
+  __builtin_trap();
 }
 bool prepared_guest_stack_disjoint(uintptr_t pointer, uint64_t bytes) noexcept {
   if (!pointer || !bytes || bytes > UINTPTR_MAX - pointer) return false;
@@ -444,23 +700,60 @@ bool prepared_guest_stack_window(uintptr_t anchor, uint64_t before, uint64_t aft
   }
   return false;
 }
-GuestThreadKeyHandle make_guest_thread_key(void *destructor) {
-  return std::make_shared<GuestThreadKey>(destructor);
+GuestThreadKeyHandle make_guest_thread_key(void *destructor, std::shared_ptr<Lifecycle> lifecycle) {
+  return std::make_shared<GuestThreadKey>(destructor, std::move(lifecycle));
 }
 void delete_guest_thread_key(const GuestThreadKeyHandle &key) noexcept {
-  key->active.store(false, std::memory_order_release);
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    key->active.store(false, std::memory_order_release);
+    key->queued_values = 0;
+    retired = std::move(key->queued_retention);
+  }
+  // Raw values retained in foreign thread maps cannot select a callback now.
+  // Previously selected callbacks own independent copies of this token epoch.
 }
 int set_guest_thread_value(const GuestThreadKeyHandle &key, const void *value) {
   if (!key->active.load(std::memory_order_acquire)) return EINVAL;
+  // Acquire admission before publication, outside the key mutex. A temporary
+  // token also protects the zero-to-nonzero handoff from namespace shutdown.
+  std::shared_ptr<void> candidate;
+  if (value && key->destructor && key->lifecycle) {
+    candidate = key->lifecycle->retain_thread_callback();
+    if (!candidate) return EINVAL;
+  }
   auto &values = live_state().key_values;
-  // Deleted keys from any namespace need no destructor and must not accumulate
-  // across create/delete churn on a long-lived thread.
+  // Deletion reset these keys' queued counts/tokens; stale values have no
+  // ownership to release and must not accumulate during create/delete churn.
   for (auto it = values.begin(); it != values.end();)
     if (!it->first->active.load(std::memory_order_acquire)) it = values.erase(it);
     else ++it;
-  if (!value) { values.erase(key); return 0; }
-  if (!values.count(key) && values.size() >= 4096) return EAGAIN;
-  values[key] = value;
+  std::shared_ptr<void> retired;
+  {
+    std::lock_guard<std::mutex> lock(key->mutex);
+    if (!key->active.load(std::memory_order_relaxed)) return EINVAL;
+    auto found = values.find(key);
+    if (!value) {
+      if (found != values.end()) {
+        values.erase(found);
+        if (key->destructor) {
+          if (!key->queued_values) std::terminate();
+          if (!--key->queued_values) retired = std::move(key->queued_retention);
+        }
+      }
+    } else if (found != values.end()) {
+      found->second = value; // Replacement neither allocates nor adds a value.
+    } else {
+      if (values.size() >= 4096 || key->queued_values == SIZE_MAX) return EAGAIN;
+      // Allocate the map node before changing count/token state. On failure,
+      // the old values and queued ownership remain unchanged; candidate drops
+      // outside this lock during unwinding.
+      values.emplace(key, value);
+      if (key->destructor && !key->queued_values++)
+        key->queued_retention = std::move(candidate);
+    }
+  }
   return 0;
 }
 void *guest_thread_value(const GuestThreadKeyHandle &key) {

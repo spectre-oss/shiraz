@@ -923,10 +923,10 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     protected void onDraw(Canvas canvas) { }
     private float transitionAlpha=1;
     public float getTransitionAlpha(){return transitionAlpha;}
-    public void setTransitionAlpha(float value){if(!Float.isFinite(value)||value<0||value>1)throw new IllegalArgumentException("Transition alpha must be in [0,1]");if(transitionAlpha!=value){transitionAlpha=value;invalidate();}}
+    public void setTransitionAlpha(float value){if(!Float.isFinite(value))throw new IllegalArgumentException("Transition alpha must be finite");if(transitionAlpha!=value){transitionAlpha=value;invalidate();}}
     private float alpha=1;
     public float getAlpha(){return alpha;}
-    public void setAlpha(float value){if(!Float.isFinite(value)||value<0||value>1)throw new IllegalArgumentException("View alpha must be in [0,1]");if(alpha!=value){alpha=value;invalidate();}}
+    public void setAlpha(float value){if(!Float.isFinite(value))throw new IllegalArgumentException("View alpha must be finite");if(alpha!=value){alpha=value;invalidate();}}
     public static final int OVER_SCROLL_ALWAYS=0,OVER_SCROLL_IF_CONTENT_SCROLLS=1,OVER_SCROLL_NEVER=2;
     private int scrollX,scrollY,overScrollMode=OVER_SCROLL_ALWAYS;
     public interface OnScrollChangeListener{void onScrollChange(View view,int x,int y,int oldX,int oldY);}
@@ -1061,7 +1061,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         if(outlineProvider!=null){if(backgroundDrawable!=null)backgroundDrawable.setBounds(0,0,getWidth(),getHeight());outlineProvider.getOutline(this,outline);}
         return outline;
     }
-    public final void shirazDrawShadow(Canvas canvas){if(getZ()>0&&alpha*transitionAlpha>0&&outlineProvider!=null)canvas.shirazDrawOutlineShadow(resolveOutline(),getZ(),alpha*transitionAlpha);}
+    public final void shirazDrawShadow(Canvas canvas){if(getZ()>0&&alpha*transitionAlpha>0&&outlineProvider!=null)canvas.shirazDrawOutlineShadow(resolveOutline(),getZ(),Math.max(0,Math.min(1,alpha))*Math.max(0,Math.min(1,transitionAlpha)));}
     private ViewOutlineProvider outlineProvider=ViewOutlineProvider.BACKGROUND;
     private boolean clipToOutline;
     public void setOutlineProvider(ViewOutlineProvider provider){outlineProvider=provider;invalidateOutline();}
@@ -1100,7 +1100,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         int saved=canvas.getSaveCount();
         try{
             if(parent==null){canvas.save();shirazApplyLegacyAnimation(canvas,getDrawingTime());}
-            float drawAlpha=alpha*transitionAlpha*animationAlpha;if(drawAlpha==0){invalidated=false;return;}
+            float drawAlpha=Math.max(0,Math.min(1,alpha))*Math.max(0,Math.min(1,transitionAlpha))*Math.max(0,Math.min(1,animationAlpha));if(drawAlpha==0){invalidated=false;return;}
             if(clipBounds!=null){canvas.save();canvas.clipRect(clipBounds);}
             if(revealOwner!=null){
                 canvas.save();android.graphics.Path circle=new android.graphics.Path();

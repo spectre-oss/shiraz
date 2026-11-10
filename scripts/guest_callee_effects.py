@@ -118,10 +118,10 @@ def recognize_atomic32(read_word, entry, allocated_readable_data):
 
 
 def recognize_cas64(read_word, entry, allocated_readable_data):
-    """Recognize three complete 64-bit outlined compare-and-swap bodies.
+    """Recognize four complete 64-bit outlined compare-and-swap bodies.
 
     Input ownership and byte-reading contracts are identical to recognize_atomic32.
-    The three accepted memory orders have independently matched LSE, exclusive
+    The four accepted memory orders have independently matched LSE, exclusive
     load and exclusive store words. Mixed-order or changed bodies are refused.
 
     Every return produces the observed memory value in x0. x0 is a comparison
@@ -148,10 +148,11 @@ def recognize_cas64(read_word, entry, allocated_readable_data):
     if any(words[index] != expected for index, expected in fixed.items()):
         return None
     memory_orders = {
-        # CAS/CASA/CASAL x0,x1,[x2]; LDXR/LDAXR x0,[x2];
+        # CAS/CASA/CASL/CASAL x0,x1,[x2]; LDXR/LDAXR x0,[x2];
         # STXR/STLXR w17,x1,[x2]. No unobserved form is inferred.
         (0xC8A07C41, 0xC85F7C40, 0xC8117C41): "relaxed",
         (0xC8E07C41, 0xC85FFC40, 0xC8117C41): "acquire",
+        (0xC8A0FC41, 0xC85F7C40, 0xC811FC41): "release",
         (0xC8E0FC41, 0xC85FFC40, 0xC811FC41): "acquire-release",
     }
     memory_order = memory_orders.get((words[4], words[7], words[10]))

@@ -10,7 +10,7 @@ public abstract class Context {
     public static final String NFC_SERVICE="nfc";
     public static final String VIBRATOR_SERVICE="vibrator";
     public static final String UI_MODE_SERVICE="uimode";
-    public static final String AUDIO_SERVICE="audio";
+    public static final String AUDIO_SERVICE="audio",MEDIA_ROUTER_SERVICE="media_router";
     public static final String STORAGE_SERVICE="storage";
     private ContentResolver contentResolver;
     public synchronized ContentResolver getContentResolver(){if(contentResolver==null)contentResolver=new ContentResolver(this);return contentResolver;}
@@ -78,6 +78,7 @@ public abstract class Context {
         if (serviceClass == android.os.Vibrator.class) return VIBRATOR_SERVICE;
         if (serviceClass == android.app.UiModeManager.class) return UI_MODE_SERVICE;
         if (serviceClass == android.media.AudioManager.class) return AUDIO_SERVICE;
+        if (serviceClass == android.media.MediaRouter.class) return MEDIA_ROUTER_SERVICE;
         if (serviceClass == android.view.textservice.TextServicesManager.class) return "textservices";
         if (serviceClass == null) throw new NullPointerException("serviceClass");
         if (serviceClass == android.view.inputmethod.InputMethodManager.class) return INPUT_METHOD_SERVICE;

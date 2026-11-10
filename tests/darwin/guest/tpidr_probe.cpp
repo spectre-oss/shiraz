@@ -31,11 +31,12 @@ extern "C" void shiraz_guest_stack_check_fail();
 extern "C" void *shiraz_guest_tls_access(uint64_t, uint64_t, uint64_t, uint64_t,
                                         uint64_t, uint64_t, uint64_t, uintptr_t) noexcept;
 struct alignas(16) Result {
-  uint64_t integers[31], sp, nzcv, fpcr, fpsr, padding;
+  uint64_t integers[31], sp, nzcv, fpcr, fpsr, retired_scratch_nonzero;
   uint8_t vectors[32][16];
   uint64_t expected_sp, original_x18;
 };
-static_assert(sizeof(Result) == 816 && offsetof(Result, vectors) == 288);
+static_assert(sizeof(Result) == 816 && offsetof(Result, vectors) == 288 &&
+              offsetof(Result, retired_scratch_nonzero) == 280);
 struct ForeignCall { void (*entry)(Result *); Result *result; };
 extern "C" int shiraz_test_other_stack(void *, int (*)(void *), void *);
 static int foreign_mrs(void *opaque) {
@@ -69,6 +70,10 @@ static void verify(const Result &result, unsigned target, uintptr_t tls) {
     if (result.integers[reg] != expected)
       throw std::runtime_error("TPIDR register mismatch target=" + std::to_string(target) +
                                " reg=" + std::to_string(reg));
+  }
+  // A discarded XZR MRS has no trampoline footprint to inspect.
+  if (target != 31) {
+    require(result.retired_scratch_nonzero == 0, "retired trampoline frame is fully cleared");
   }
   require(result.sp == result.expected_sp && !(result.sp & 15), "SP restored exactly");
   require(result.nzcv == 0xa0000000 && result.fpcr == 0x02c00000 && result.fpsr == 0x0800001f,
@@ -144,6 +149,28 @@ static void mrs_refusal(const char *executable, const char *mode, const char *ex
       << " diagnostic=" << diagnostic << std::endl;
   require(refused, "fresh MRS refusal child reaches exact fatal diagnostic");
 }
+static void check_return_branch() {
+  constexpr uintptr_t site = 0x20000000;
+  for (auto island : {site - (uintptr_t(1) << 27), site - 64, site + 64,
+                     site + (uintptr_t(1) << 27) - 32}) {
+    const auto patch = plan_thread_pointer(site, 0xd53bd040, island);
+    uint32_t instruction, clear;
+    std::memcpy(&instruction, patch.island.data() + 24, 4);
+    std::memcpy(&clear, patch.island.data() + 20, 4);
+    require((instruction & 0xfc000000u) == 0x14000000u && clear == 0xa93f7fffu,
+            "new continuation/retired outer clear shape");
+    int64_t delta = instruction & 0x03ffffffu;
+    if (delta & (int64_t(1) << 25)) delta -= int64_t(1) << 26;
+    const auto pc = island + 24;
+    const auto target = delta < 0 ? pc - uintptr_t(-delta * 4) : pc + uintptr_t(delta * 4);
+    require(target == site + 4, "signed return branch resolves exact continuation");
+  }
+  bool refused = false;
+  try { (void)plan_thread_pointer(site, 0xd53bd040, site + (uintptr_t(1) << 27) - 16); }
+  catch (const std::exception &) { refused = true; }
+  require(refused, "new return-PC offset rejects old-only boundary");
+  std::cout << "M5_MRS_ISLAND_RETURN_PASS signed_directions=2 new_edge_refused=1\n";
+}
 static void check_mrs_window(const char *executable) {
   const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
   const auto low = high - pthread_get_stacksize_np(pthread_self());
@@ -183,13 +210,15 @@ int main(int argc, char **argv) {
     size_t used = 0;
     {
       JitWriteScope writable;
+      for (int placement = 0; placement < 2; ++placement)
       for (int stress = 0; stress < 3; ++stress) for (unsigned target = 0; target < 32; ++target) {
         if (target == 18) continue;
         if (stress == 2 && target != 0) continue;
-        auto *start = memory + used;
+        auto *block = memory + used;
+        auto *start = block + (placement ? 64 : 0);
         auto *site = start + site_offset;
-        auto *island = start + ((length + 15) & ~size_t(15));
-        used = size_t(island + 64 - memory);
+        auto *island = placement ? block : start + ((length + 15) & ~size_t(15));
+        used = size_t((placement ? start + ((length + 15) & ~size_t(15)) : island + 64) - memory);
         require(used <= size, "bounded TPIDR test programs");
         std::memcpy(start, shiraz_tpidr_test_start, length);
         uint32_t original = stress == 2 ? 0xd4000001u : 0xd53bd040u | target;
@@ -204,7 +233,16 @@ int main(int argc, char **argv) {
         if (patch.uses_island) {
           uintptr_t unwind_pc = 0;
           uint32_t accessor_kind = 0;
-          std::memcpy(&unwind_pc, patch.island.data() + 24, sizeof(unwind_pc));
+          uint32_t continuation_branch = 0;
+          std::memcpy(&continuation_branch, patch.island.data() + 24, sizeof(continuation_branch));
+          require((continuation_branch & 0xfc000000u) == 0x14000000u,
+                  "continuation is an exact B instruction");
+          int64_t displacement = continuation_branch & 0x03ffffffu;
+          if (displacement & (int64_t(1) << 25)) displacement -= int64_t(1) << 26;
+          const auto branch_pc = uintptr_t(island) + 24;
+          unwind_pc = displacement < 0 ? branch_pc - uintptr_t(-displacement * 4)
+                                       : branch_pc + uintptr_t(displacement * 4);
+
           std::memcpy(&accessor_kind, patch.island.data() + 52, sizeof(accessor_kind));
           require(unwind_pc == uintptr_t(site) + 4,
                   "island unwind PC must be the exact guest continuation");
@@ -280,6 +318,7 @@ int main(int argc, char **argv) {
       } else require(false, "known MRS child mode");
       return 98;
     }
+    check_return_branch();
     check_mrs_window(argv[0]);
     for (const auto &program : programs) {
       Result result{};
@@ -354,7 +393,10 @@ int main(int argc, char **argv) {
     mrs_refusal(argv[0], "--mrs-foreign", "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
     mrs_refusal(argv[0], "--mrs-released", "SHIRAZ_GUEST_FATAL MRS SP outside prepared native stack extent\n");
     require(munmap(memory, size) == 0, "TPIDR test cleanup");
-    std::cout << "M5_TPIDR_THUNK_PASS targets=31 accessors=2 gpr=31 vector_bits=4096 "
+    std::cout << "M5_MRS_SCRATCH_CLEAR_PASS shared_bytes=832 island_bytes=16 words=106 "
+                 "island_placements=2 actual_default_targets=30 generic_stress=1 syscall=1 "
+                 "deeper_native_frames=unclaimed async_proof=0\n";
+    std::cout << "M5_TPIDR_THUNK_PASS island_placements=2 targets=31 accessors=2 gpr=31 vector_bits=4096 "
                  "flags=NZCV,FPCR,FPSR sp=1 lr=1 pac=1 threads=4 malformed=6 guard=1 corruption_abort=1 "
                  "host_tpidr_written=0 elf_auto_rewrite=0 unwind_verified=0\n";
     std::cout << "M5_TPIDR_STACK_PASS foreign_stack_rejected=1 original_sp=1 syscall_arguments=7\n";

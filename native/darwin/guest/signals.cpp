@@ -157,7 +157,7 @@ struct Slot {
   const void *owner = nullptr;
 };
 std::array<Slot, NSIG> slots;
-std::mutex dispositions;
+auto &dispositions = *new std::mutex;
 struct MaskCounter { std::atomic<size_t> dirty{0}; };
 struct MaskLease {
   std::shared_ptr<MaskCounter> counter;
@@ -193,9 +193,10 @@ MaskLease *mask_lease(const std::shared_ptr<MaskCounter> &counter, uint64_t base
   return result;
 }
 static_assert(std::atomic<const Record *>::is_always_lock_free &&
-              std::atomic<unsigned>::is_always_lock_free);
-thread_local unsigned handling_depth = 0;
-thread_local const void *handling_owner = nullptr;
+              std::atomic<unsigned>::is_always_lock_free &&
+              std::atomic<const void *>::is_always_lock_free);
+thread_local std::atomic<unsigned> handling_depth{0};
+thread_local std::atomic<const void *> handling_owner{nullptr};
 extern "C" void shiraz_guest_signal_call(uintptr_t, int);
 void handler(int native) {
   int previous_errno = errno;
@@ -214,15 +215,14 @@ void handler(int native) {
       (void)::write(STDERR_FILENO, text, sizeof(text) - 1);
       ::_exit(128 + record->guest);
     }
-    auto *previous = handling_owner;
-    handling_owner = record->owner;
-    ++handling_depth;
+    auto *previous = handling_owner.exchange(record->owner, std::memory_order_relaxed);
+    handling_depth.fetch_add(1, std::memory_order_relaxed);
     {
       CaptureBoundary transition;
       shiraz_guest_signal_call(record->action.handler, record->guest);
     }
-    --handling_depth;
-    handling_owner = previous;
+    handling_depth.fetch_sub(1, std::memory_order_relaxed);
+    handling_owner.store(previous, std::memory_order_relaxed);
   }
   slot.active.fetch_sub(1, std::memory_order_seq_cst);
   errno = previous_errno;
@@ -456,7 +456,7 @@ struct SignalRuntime::State {
     if (error || mask_key_error) throw ElfError("cannot allocate guest signal-mask key");
   }
   int mask(int how, const uint64_t *input, uint64_t *output) {
-    if (handling_depth) return fail(ENOTSUP);
+    if (handling_depth.load(std::memory_order_relaxed)) return fail(ENOTSUP);
     uint64_t requested = 0;
     sigset_t selected{};
     if (input) {
@@ -513,7 +513,7 @@ struct SignalRuntime::State {
   }
   int pending(uint64_t *output) {
     if (!output) return fail(EFAULT);
-    if (handling_depth) return fail(ENOTSUP);
+    if (handling_depth.load(std::memory_order_relaxed)) return fail(ENOTSUP);
     std::lock_guard<std::mutex> lock(dispositions);
     if (closed || closing || !attached) return fail(ENOSYS);
     sigset_t native{};
@@ -524,7 +524,7 @@ struct SignalRuntime::State {
     return 0;
   }
   int action(int number, const GuestAction *input, GuestAction *output) {
-    if (handling_depth)
+    if (handling_depth.load(std::memory_order_relaxed))
       return fail(ENOTSUP); // Never lock from an async callback.
     int native = host_signal(number);
     if (native <= 0)
@@ -618,7 +618,8 @@ struct SignalRuntime::State {
     return action(number, &input, &old) ? UINTPTR_MAX : old.handler;
   }
   void shutdown() {
-    if (handling_depth && handling_owner == this)
+    if (handling_depth.load(std::memory_order_relaxed) &&
+        handling_owner.load(std::memory_order_relaxed) == this)
       throw ElfError("cannot unmap an executing guest signal callback");
     std::array<bool, NSIG> wait{};
     {
@@ -664,7 +665,7 @@ struct SignalRuntime::State {
 };
 SignalRuntime::SignalRuntime(CodeValidator validate)
     : state_(std::make_shared<State>(std::move(validate))) {}
-bool in_guest_signal_handler() noexcept { return handling_depth != 0; }
+bool in_guest_signal_handler() noexcept { return handling_depth.load(std::memory_order_relaxed) != 0; }
 int guest_thread_signal(pthread_t thread,int signal){
   int native=host_signal(signal);if(native<0)return signal>0&&signal<=64?ENOTSUP:EINVAL;
   return ::pthread_kill(thread,native);

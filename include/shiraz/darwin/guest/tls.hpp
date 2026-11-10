@@ -18,6 +18,9 @@ public:
 // Ordinary native entries preserve state for the entire pthread lifetime.
 // Uses an explicitly admitted Darwin exit-state SPI; missing capability fails.
 void require_guest_tls_lifetime();
+// Prepared-only allocator admission. Call only after readiness is established;
+// generic pre-prepare entry must retain require_guest_tls_lifetime().
+void require_prepared_guest_tls_lifetime(uintptr_t incoming_sp);
 // Versioned admission contract: live Image reservations and prepared native
 // stack extents cannot overlap. This does not describe arbitrary host memory.
 inline constexpr uint32_t kImageStackExclusionProfile = 1;
@@ -52,6 +55,49 @@ public:
 bool registered_guest_heap_contains(uintptr_t pointer, uint64_t bytes);
 void prepare_guest_tls();
 void *guest_tls_base();
+// Native pthread identity for an already prepared ordinary stack. This leaf
+// reads the native read-only TLS register and published cache, without native
+// calls or TLV access. Unsupported/unprepared stacks trap. This is not a fork
+// validity or arbitrary asynchronous-lifetime guarantee.
+extern "C" uintptr_t shiraz_guest_cached_pthread_self() noexcept;
+struct CachedSelfTable {
+  const char *role;
+  uintptr_t address;
+  uint64_t bytes;
+};
+struct CachedSelfTables {
+  CachedSelfTable tables[4];
+  uint64_t rows;
+};
+inline constexpr uint32_t kCachedSelfStackExclusionProfile = 1;
+// Addresses/extents only, never live row contents. This snapshot is not an
+// asynchronous lifetime lease or a compiled-body effects certificate.
+CachedSelfTables cached_pthread_self_tables() noexcept;
+// Pure extent predicate over the four real cache tables. It neither registers
+// a stack nor proves that caller-supplied addresses are mapped stack memory.
+bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
+// Default MRS lookup additionally reads the guest-base table. Keep the four
+// pthread-self tables/profile stable while checking the whole MRS read set.
+struct MrsAccessTables {
+  CachedSelfTable tables[5];
+  uint64_t rows;
+};
+// Extents only; no row-content, asynchronous lifetime or code-effects claim.
+MrsAccessTables mrs_access_tables() noexcept;
+bool mrs_access_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
+// Scalar owned-cleanup admission metadata, separate from the MRS read set.
+// Extent snapshots and predicates do not establish row lifetime or code effects.
+CachedSelfTable prepared_cleanup_admission_table() noexcept;
+bool prepared_cleanup_admission_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
+// Ordinary prepared-thread snapshot: no ThreadState, TSD or guest-base lookup.
+// Not a post-fork or asynchronous lifetime lease; exact stack membership only.
+bool prepared_guest_cleanup_admitted(uintptr_t incoming_sp) noexcept;
+// Prepared state-owned native errno residence, physically separate from TP.
+// No Mach-O TLV resolution/initialization occurs in this query. Null means
+// unprepared, invalid SP or unavailable metadata; no lifetime lease follows.
+int *prepared_guest_errno_location(uintptr_t incoming_sp) noexcept;
+CachedSelfTable prepared_guest_errno_table() noexcept;
+bool prepared_guest_errno_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
 // Async-signal-safe readiness query only; never initializes native TLS.
 bool guest_tls_prepared() noexcept;
 // Cached pthread-reported extent, published with TLS readiness. This query
@@ -71,16 +117,18 @@ bool prepared_guest_stack_disjoint(uintptr_t pointer, uint64_t bytes) noexcept;
 // Handles have namespace-independent identity and stay alive while any thread
 // retains a value. Deletion suppresses future selections, never invokes a
 // destructor. A callback already selected during concurrent deletion may finish.
+class Lifecycle;
 struct GuestThreadKey;
 using GuestThreadKeyHandle = std::shared_ptr<GuestThreadKey>;
-GuestThreadKeyHandle make_guest_thread_key(void *destructor);
+// An optional owner retains callback code while active nonnull values or
+// selected callbacks exist. Application payload objects remain caller-owned.
+GuestThreadKeyHandle make_guest_thread_key(void *destructor, std::shared_ptr<Lifecycle> lifecycle = {});
 void delete_guest_thread_key(const GuestThreadKeyHandle &key) noexcept;
 int set_guest_thread_value(const GuestThreadKeyHandle &key, const void *value);
 void *guest_thread_value(const GuestThreadKeyHandle &key);
-class Lifecycle;
 // With a lifecycle, C++ thread destructor registration retains the namespace
 // through callback return and rejects shutdown before guest images finalize.
 // The standalone form requires the caller to retain all validated code until
-// native thread cleanup completes. Pthread key callbacks are a separate owner.
+// native thread cleanup completes. Pthread keys use their own value retention.
 std::vector<ProviderExport> tls_exports(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle = {});
 } // namespace shiraz::guest

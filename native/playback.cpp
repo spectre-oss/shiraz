@@ -90,3 +90,6 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_shiraz_runtime_NativePlayback_decod
  std::vector<jbyte> pcm(samples.size()*2);for(size_t i=0;i<samples.size();++i){pcm[2*i]=samples[i]&255;pcm[2*i+1]=(uint16_t(samples[i])>>8)&255;}
  jint values[]={info.samplerate,info.channels};env->SetIntArrayRegion(format,0,2,values);jbyteArray out=env->NewByteArray(pcm.size());if(out)env->SetByteArrayRegion(out,0,pcm.size(),pcm.data());return out;
 });}
+
+// The ALSA bridge has not negotiated a monotonic hardware timestamp mode.
+extern "C" JNIEXPORT jlongArray JNICALL Java_shiraz_runtime_NativePlayback_timestamp(JNIEnv*,jclass,jlong){return nullptr;}

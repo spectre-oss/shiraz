@@ -7,6 +7,7 @@ import http.server
 import json
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -15,6 +16,13 @@ from art_smoke import HOST, JARS, NATIVE, ROOT, environment
 
 from shiraz.apk import inspect_apk
 from shiraz.runtime import application_metadata, properties_text
+
+
+def fail_vm(message, result):
+    """Expose bounded VM diagnostics without including the generated PKI files."""
+    for name, output in (('stdout', result.stdout), ('stderr', result.stderr)):
+        print(f'{name} (last 16384 characters):\n{output[-16384:]}', file=sys.stderr)
+    raise SystemExit(f'{message} (exit {result.returncode})')
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -106,7 +114,8 @@ try:
     custom=subprocess.run(command[:-2]+['custom'],env=environment(work),capture_output=True,text=True,timeout=20)
     (work/'custom-stdout.log').write_text(custom.stdout)
     (work/'custom-stderr.log').write_text(custom.stderr)
-    if custom.returncode or 'CUSTOM_TLS_DEFAULTS_PRESERVED' not in custom.stdout: raise SystemExit('Custom TLS defaults test failed')
+    if custom.returncode or 'CUSTOM_TLS_DEFAULTS_PRESERVED' not in custom.stdout:
+        fail_vm('Custom TLS defaults test failed', custom)
     if args.apk:
         apk=args.apk.resolve()
         facts=application_metadata(inspect_apk(apk)['manifest'],apk,work/'apk-data')
@@ -118,7 +127,7 @@ try:
     (work/'stdout.log').write_text(result.stdout)
     (work/'stderr.log').write_text(result.stderr)
     if result.returncode or 'ANDROID_TLS_BRIDGE_VERIFIED' not in result.stdout.splitlines():
-        raise SystemExit('ART TLS bridge smoke failed; inspect '+str(work)+' logs')
+        fail_vm('ART TLS bridge smoke failed; inspect '+str(work)+' logs', result)
     if args.apk:
         assert 'EXACT_APK_TLS_VERIFIED' in result.stdout.splitlines()
         assert 'EXACT_APK_HTTP_VERIFIED' in result.stdout.splitlines()

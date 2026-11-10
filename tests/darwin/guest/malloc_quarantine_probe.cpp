@@ -31,6 +31,7 @@ struct alignas(16) Probe {
   std::array<uint64_t, 17> scratch_x;
   std::array<std::array<uint8_t, 16>, 32> scratch_q;
   uint64_t after_x18;
+  uint64_t retired_frame_nonzero;
 };
 static_assert(offsetof(BodySnapshot, sp) == 248 && offsetof(BodySnapshot, q) == 256);
 static_assert(sizeof(BodySnapshot) == 768);
@@ -38,7 +39,7 @@ static_assert(offsetof(Probe, expected_x18) == 8 && offsetof(Probe, result) == 1
 static_assert(offsetof(Probe, preserved_x) == 24 && offsetof(Probe, preserved_d) == 112);
 static_assert(offsetof(Probe, upper_canary) == 176 && offsetof(Probe, scratch_x) == 184);
 static_assert(offsetof(Probe, scratch_q) == 320 && offsetof(Probe, after_x18) == 832);
-static_assert(sizeof(Probe) == 848);
+static_assert(offsetof(Probe, retired_frame_nonzero) == 840 && sizeof(Probe) == 848);
 BodySnapshot observed;
 uint64_t observed_lower_canary;
 unsigned bodies = 0, unwind_passes = 0, unwind_recoveries = 0;
@@ -153,6 +154,8 @@ int main() {
     }
     ok &= require(observed_lower_canary == 0x5a5a, "lower footprint canary at body admission");
     ok &= require(probe.upper_canary == 0x6b6b, "upper caller canary after return");
+    ok &= require(probe.retired_frame_nonzero == 0,
+                  "all 160 retired production entry frame bytes cleared before any subsequent call");
     auto *pointer = reinterpret_cast<void *>(probe.result);
     if (size == UINT64_MAX) {
       ok &= require(!pointer && *guest_errno_location() == bionic::kENOMEM,
@@ -177,6 +180,7 @@ int main() {
               "body_interposed_for_snapshot=1 real_typed_body=1 entry_frame=160 "
               "snapshot_before_cpp=1 errno=preserved domains=registered "
               "unwind_passes=%u recovered_tp=%u actual_guest_tp_seed=1 guard_preserved=1 "
-              "scratch_return_clear=1 guest_mrs=0 art=0 native_memory_purity=0 async_proof=0\n",
+              "scratch_return_clear=1 retired_frame_clear=160 guest_mrs=0 art=0 "
+              "native_memory_purity=0 async_proof=0\n",
               cases, allocations, unwind_passes, unwind_recoveries);
 }

@@ -51,7 +51,7 @@ def main():
             vm = HOST / "bin/dalvikvm"
         commands = [
             ("openjdk", ["java", "-Xcheck:jni", "-Djava.library.path=" + str(NATIVE / "jvm-native" if DARWIN else NATIVE), "-cp", str(classes) + ":" + classpath, args.class_name]),
-            ("art", [str(vm), "-Xbootclasspath:" + ":".join(str(HOST / "framework" / name) for name in JARS), "-Xcheck:jni", "-Xusejit:false", "-Xint", "-Xnoimage-dex2oat", "-Djava.library.path=" + str(NATIVE), "-cp", str(ROOT / "build/shiraz-framework.jar") + ":" + str(jar), args.class_name]),
+            ("art", [str(vm), "-Xbootclasspath:" + ":".join(str(HOST / "framework" / name) for name in JARS), "-Xcheck:jni", "-Xusejit:false", "-Xint", "-Xnoimage-dex2oat", "-Djava.library.path=" + str(NATIVE) + ":" + str(HOST / "lib64"), "-cp", str(ROOT / "build/shiraz-framework.jar") + ":" + str(jar), args.class_name]),
         ]
         for runtime, command in commands:
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30, check=False)

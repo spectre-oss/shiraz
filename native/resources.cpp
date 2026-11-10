@@ -217,7 +217,8 @@ static jlong openResources(JNIEnv* env,jbyteArray path,jobjectArray splits,jbyte
         jlong id = next_id++;
         registry.emplace(id, std::move(resources));
         return id;
-    } catch (const std::bad_alloc&) { error(env, "java/lang/OutOfMemoryError", "Cannot allocate APK resources"); }
+    } catch (const std::invalid_argument& failure) { error(env, "java/lang/IllegalArgumentException", failure.what()); }
+      catch (const std::bad_alloc&) { error(env, "java/lang/OutOfMemoryError", "Cannot allocate APK resources"); }
       catch (const std::exception&) { error(env, "java/lang/IllegalStateException", "Cannot initialize APK resource manager"); }
     return 0;
 }

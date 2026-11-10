@@ -668,7 +668,7 @@ macos-guest-fixture: macos-guest-toolchain $(MACOS_OUT)/m5/fixture.o
 
 MACOS_GUEST_CPPFLAGS := -Iinclude -I$(MACOS_OUT)/m5 -I.deps/capstone/src/include
 MACOS_GUEST_SOURCES := native/darwin/guest/providers.cpp native/darwin/guest/lifecycle.cpp native/darwin/guest/jump.cpp native/darwin/guest/jump.S native/darwin/guest/dynamic.cpp native/darwin/guest/tls.cpp native/darwin/guest/instruction.cpp native/darwin/guest/decode.cpp native/darwin/guest/unwind.cpp native/darwin/guest/unwind_runtime.cpp native/darwin/guest/tpidr.S native/darwin/guest/loader.cpp native/darwin/guest/jit.cpp native/darwin/guest/elf.cpp native/darwin/guest/image.cpp native/darwin/guest/call.cpp native/darwin/guest/va_list.cpp native/darwin/guest/closure.cpp native/darwin/guest/invoke.S .deps/capstone/build/libcapstone.a
-MACOS_GUEST_HEADERS := $(MACOS_OUT)/m5/guest_tls_layout.hpp include/shiraz/darwin/guest/unwind.hpp include/shiraz/darwin/guest/unwind_runtime.hpp include/shiraz/darwin/guest/decode.hpp include/shiraz/darwin/guest/instruction.hpp include/shiraz/darwin/guest/tls.hpp include/shiraz/darwin/guest/providers.hpp include/shiraz/darwin/guest/lifecycle.hpp include/shiraz/darwin/guest/jump.hpp $(MACOS_OUT)/m5/guest_errno.hpp include/shiraz/darwin/guest/loader.hpp include/shiraz/darwin/guest/dynamic.hpp include/shiraz/darwin/guest/jit.hpp include/shiraz/darwin/guest/elf.hpp include/shiraz/darwin/guest/image.hpp include/shiraz/darwin/guest/call.hpp include/shiraz/darwin/guest/va_list.hpp include/shiraz/darwin/guest/closure.hpp $(MACOS_OUT)/m5/guest_io.hpp
+MACOS_GUEST_HEADERS := $(MACOS_OUT)/m5/guest_tls_layout.hpp include/shiraz/darwin/guest/unwind.hpp include/shiraz/darwin/guest/unwind_runtime.hpp include/shiraz/darwin/guest/decode.hpp include/shiraz/darwin/guest/instruction.hpp include/shiraz/darwin/guest/tls.hpp include/shiraz/darwin/guest/providers.hpp include/shiraz/darwin/guest/lifecycle.hpp include/shiraz/darwin/guest/jump.hpp $(MACOS_OUT)/m5/guest_errno.hpp include/shiraz/darwin/guest/loader.hpp include/shiraz/darwin/guest/dynamic.hpp include/shiraz/darwin/guest/jit.hpp include/shiraz/darwin/guest/elf.hpp include/shiraz/darwin/guest/image.hpp include/shiraz/darwin/guest/call.hpp include/shiraz/darwin/guest/va_list.hpp include/shiraz/darwin/guest/closure.hpp include/shiraz/darwin/guest/boundary_token.hpp $(MACOS_OUT)/m5/guest_io.hpp
 $(MACOS_OUT)/m5/elf-probe: tests/darwin/guest/elf_probe.cpp tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
 	mkdir -p $(dir $@)
 	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/guest/elf_probe.cpp tests/darwin/guest/stack_entry.S $(MACOS_GUEST_SOURCES) -o $@
@@ -2176,10 +2176,60 @@ macos-telegram-framework-smoke: macos-runtime-libs macos-graphics-libs macos-fra
 # AVFoundation capture keeps macOS TCC and Shiraz per-app consent independent.
 $(MACOS_OUT)/capture.exports: scripts/darwin_jni_exports.py java/shiraz/runtime/NativeCapture.java
 	uv run --no-project python scripts/darwin_jni_exports.py java/shiraz/runtime/NativeCapture.java > $@
-$(MACOS_OUT)/libshiraz-capture.so: native/darwin/capture.mm java/shiraz/runtime/NativeCapture.java $(MACOS_OUT)/capture.exports
-	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fobjc-arc -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/capture.exports -Wl,-dead_strip native/darwin/capture.mm -o $@ -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreMedia -framework CoreVideo -pthread
+$(MACOS_OUT)/libshiraz-capture.so: $(CURDIR)/.local/lib/libvo-aacenc.a native/darwin/capture.mm include/shiraz/darwin/audio_clock.hpp java/shiraz/runtime/NativeCapture.java $(MACOS_OUT)/capture.exports
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fobjc-arc -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/capture.exports -Wl,-dead_strip -I$(CURDIR)/.local/include native/darwin/capture.mm $(CURDIR)/.local/lib/libvo-aacenc.a -o $@.fresh -framework AVFoundation -framework AudioToolbox -framework Foundation -framework CoreMedia -framework CoreVideo -pthread
+	mv -f $@.fresh $@
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-capture.so
 macos-jvm-native: $(MACOS_OUT)/libshiraz-capture.so
+
+.PHONY: macos-capture-api-smoke media-probe-apk
+macos-capture-api-smoke: macos-framework macos-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py DarwinCaptureConsentSmoke --marker DARWIN_CAPTURE_CONSENT_OK
+	uv run --no-project python scripts/java_framework_smoke.py CameraJpegSmoke --marker CAMERA_JPEG_ROTATION_OK
+	PYTHONPATH=src uv run --no-project python -m unittest discover -s tests -p test_darwin_app.py
+media-probe-apk:
+	PYTHONPATH=src uv run --no-project python scripts/build_media_probe.py
+
+$(MACOS_OUT)/playback.exports: scripts/darwin_jni_exports.py java/shiraz/runtime/NativePlayback.java
+	uv run --no-project python scripts/darwin_jni_exports.py java/shiraz/runtime/NativePlayback.java > $@
+$(MACOS_OUT)/libshiraz-playback.so: native/darwin/playback.cpp include/shiraz/darwin/audio_clock.hpp java/shiraz/runtime/NativePlayback.java $(MACOS_OUT)/playback.exports
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror -fPIC $(MACOS_DYLIB) -Wl,-exported_symbols_list,$(MACOS_OUT)/playback.exports -Wl,-dead_strip native/darwin/playback.cpp -o $@.fresh -framework AudioToolbox -framework CoreFoundation -pthread
+	mv -f $@.fresh $@
+macos-runtime-libs macos-jvm-native: $(MACOS_OUT)/libshiraz-playback.so
+
+.PHONY: macos-media-jvm-native macos-playback-api-smoke
+macos-media-jvm-native: $(MACOS_OUT)/libshiraz-playback.so $(MACOS_OUT)/libshiraz-capture.so
+	mkdir -p $(MACOS_JVM_NATIVE)
+	ln -sfn ../libshiraz-playback.so $(MACOS_JVM_NATIVE)/libshiraz-playback.dylib
+	ln -sfn ../libshiraz-capture.so $(MACOS_JVM_NATIVE)/libshiraz-capture.dylib
+$(MACOS_OUT)/extract-aac-fixture: tests/darwin/audio/extract_aac.cpp
+	$(MACOS_CXX) -std=c++17 -O1 -Wall -Wextra -Werror $< -framework AudioToolbox -framework CoreFoundation -o $@
+macos-playback-api-smoke: macos-framework macos-media-jvm-native $(MACOS_OUT)/extract-aac-fixture
+	uv run --no-project python scripts/prepare_darwin_audio_fixture.py
+	uv run --no-project python scripts/java_framework_smoke.py DarwinPlaybackSmoke --marker DARWIN_PLAYBACK_PCM_AAC_OK
+
+$(CURDIR)/.local/lib/libvo-aacenc.a: scripts/bootstrap_capture_codec.py
+	uv run --no-project python scripts/bootstrap_capture_codec.py
+
+.PHONY: macos-aac-encode-api-smoke
+macos-aac-encode-api-smoke: macos-framework macos-media-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py DarwinAacEncodeSmoke --marker DARWIN_AAC_ENCODER_ROUNDTRIP_OK
+
+.PHONY: macos-recorder-api-smoke
+macos-recorder-api-smoke: macos-framework macos-media-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py MediaRecorderStateSmoke --marker MEDIA_RECORDER_STATE_CONSENT_OK
+
+.PHONY: macos-view-alpha-overshoot-smoke
+macos-view-alpha-overshoot-smoke: macos-framework macos-jvm-native
+	uv run --no-project python scripts/java_framework_smoke.py ViewAlphaOvershootSmoke --marker VIEW_ALPHA_OVERSHOOT_OK
+
+.PHONY: macos-media-router-smoke
+macos-media-router-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py MediaRouterSmoke --marker MEDIA_ROUTER_LOCAL_OUTPUT_OK
+
+.PHONY: macos-preferences-process-smoke
+macos-preferences-process-smoke: macos-framework
+	uv run --no-project python scripts/preferences_process_smoke.py
 
 # Observe default MRS inputs using production assembly and a private TLS body.
 $(MACOS_OUT)/m5/mrs-quarantine-tls.o: native/darwin/guest/tls.cpp $(MACOS_GUEST_HEADERS)
@@ -2268,3 +2318,65 @@ macos-guest-tls-retention-check: $(MACOS_GUEST_DEP_DIR)/libtls-retention.so $(MA
 	codesign --verify --strict $(MACOS_OUT)/m5/tls-retention-hardened
 	@for mode in joined pending active validation same-thread unmap; do $(MACOS_OUT)/m5/tls-retention-hardened $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
 macos-guest-check: macos-guest-tls-retention-check
+.PHONY: macos-guest-key-retention-check
+$(MACOS_GUEST_DEP_DIR)/key-retention.o: tests/darwin/guest/deps/key_retention.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libkey-retention.so: $(MACOS_GUEST_DEP_DIR)/key-retention.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libkey-retention.so $< -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $@
+$(MACOS_OUT)/m5/key-retention-probe: tests/darwin/guest/key_retention_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror $< $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-key-retention-check: $(MACOS_GUEST_DEP_DIR)/libkey-retention.so $(MACOS_OUT)/m5/key-retention-probe
+	@for mode in joined pending same-thread clear delete active-delete exhaustion multi active-delete-release; do $(MACOS_OUT)/m5/key-retention-probe $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+	cp $(MACOS_OUT)/m5/key-retention-probe $(MACOS_OUT)/m5/key-retention-hardened.pending
+	mv $(MACOS_OUT)/m5/key-retention-hardened.pending $(MACOS_OUT)/m5/key-retention-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/key-retention-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/key-retention-hardened
+	@for mode in joined pending same-thread clear delete active-delete exhaustion multi active-delete-release; do $(MACOS_OUT)/m5/key-retention-hardened $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+macos-guest-check: macos-guest-key-retention-check
+
+$(MACOS_OUT)/m5/namespace-lifetime-probe: tests/darwin/guest/namespace_lifetime_probe.cpp
+	mkdir -p $(dir $@)
+	$(CXX) -I$(MACOS_GUEST_ART)/system/core/libnativebridge/include -I$(MACOS_GUEST_ART)/libnativehelper/include/nativehelper -std=c++17 -O2 -g -Wall -Wextra -Werror $< -o $@
+.PHONY: macos-guest-namespace-lifetime-check
+macos-guest-namespace-lifetime-check: $(MACOS_OUT)/m5/namespace-lifetime-probe $(MACOS_OUT)/libshiraz-guest.so $(MACOS_GUEST_DEP_DIR)/libkey-retention.so
+	$(MACOS_OUT)/m5/namespace-lifetime-probe $(abspath $(MACOS_OUT)/libshiraz-guest.so) $(abspath $(MACOS_GUEST_DEP_DIR)/libkey-retention.so)
+macos-guest-check: macos-guest-namespace-lifetime-check
+.PHONY: macos-guest-thread-retention-check
+$(MACOS_GUEST_DEP_DIR)/thread-retention.o: tests/darwin/guest/deps/thread_retention.c $(MACOS_OUT)/m5/guest_io.hpp
+	mkdir -p $(dir $@)
+	xcrun clang --target=aarch64-linux-android24 -mno-outline-atomics -ffreestanding -fPIC -fno-stack-protector -O2 -Wall -Wextra -Werror -c $< -o $@
+$(MACOS_GUEST_DEP_DIR)/libthread-retention.so: $(MACOS_GUEST_DEP_DIR)/thread-retention.o $(MACOS_GUEST_DEP_DIR)/libc-link.so
+	$(MACOS_GUEST_LD) $(MACOS_GUEST_LD_FLAGS) --no-undefined -soname libthread-retention.so $< -L$(MACOS_GUEST_DEP_DIR) -l:libc-link.so -o $@
+$(MACOS_OUT)/m5/thread-retention-probe: tests/darwin/guest/thread_retention_probe.cpp $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_IO_HEADERS) $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS)
+	mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) $(MACOS_GUEST_ICU_CFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror $< $(MACOS_GUEST_IO_SOURCES) $(MACOS_GUEST_SOURCES) -lz $(MACOS_GUEST_ICU_LIBS) -o $@
+macos-guest-thread-retention-check: $(MACOS_GUEST_DEP_DIR)/libthread-retention.so $(MACOS_OUT)/m5/thread-retention-probe
+	@for mode in joined active validation; do $(MACOS_OUT)/m5/thread-retention-probe $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+	cp $(MACOS_OUT)/m5/thread-retention-probe $(MACOS_OUT)/m5/thread-retention-hardened.pending
+	mv $(MACOS_OUT)/m5/thread-retention-hardened.pending $(MACOS_OUT)/m5/thread-retention-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/thread-retention-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/thread-retention-hardened
+	@for mode in joined active validation; do $(MACOS_OUT)/m5/thread-retention-hardened $(MACOS_GUEST_DEP_DIR) $$mode || exit $$?; done
+macos-guest-check: macos-guest-thread-retention-check
+.PHONY: macos-guest-native-mapping-check
+$(MACOS_OUT)/m5/native-mapping-probe: tests/darwin/guest/native_mapping_probe.cpp native/darwin/guest/native_mapping.hpp
+	mkdir -p $(dir $@)
+	$(CXX) -iquote . -std=c++17 -O2 -g -Wall -Wextra -Werror $< -o $@
+macos-guest-native-mapping-check: $(MACOS_OUT)/m5/native-mapping-probe
+	$(MACOS_OUT)/m5/native-mapping-probe
+	cp $(MACOS_OUT)/m5/native-mapping-probe $(MACOS_OUT)/m5/native-mapping-hardened.pending
+	mv $(MACOS_OUT)/m5/native-mapping-hardened.pending $(MACOS_OUT)/m5/native-mapping-hardened
+	codesign --force --sign - --options runtime --entitlements tests/darwin/guest/jit.entitlements $(MACOS_OUT)/m5/native-mapping-hardened
+	codesign --verify --strict $(MACOS_OUT)/m5/native-mapping-hardened
+	$(MACOS_OUT)/m5/native-mapping-hardened
+macos-guest-check: macos-guest-native-mapping-check
+
+$(MACOS_OUT)/libshiraz-guest.so: native/darwin/guest/native_mapping.hpp
+
+.PHONY: macos-guest-mrs-accessor-code-check
+macos-guest-mrs-accessor-code-check: $(MACOS_OUT)/m5/tpidr-thunk-probe $(MACOS_OUT)/libshiraz-guest.so
+	uv run --no-project python scripts/check_guest_mrs_accessor.py $(MACOS_OUT)/m5/tpidr-thunk-probe
+	uv run --no-project python scripts/check_guest_mrs_accessor.py $(MACOS_OUT)/libshiraz-guest.so
+macos-guest-check: macos-guest-mrs-accessor-code-check

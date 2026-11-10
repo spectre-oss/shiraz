@@ -101,3 +101,8 @@ extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeCapture_cameraS
 extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeCapture_cameraCount(JNIEnv*,jclass){
  for(int i=0;i<64;i++){char path[32];std::snprintf(path,sizeof(path),"/dev/video%d",i);if(::access(path,F_OK)==0)return 1;}return 0;
 }
+
+// This ALSA subset does not negotiate the driver's monotonic timestamp mode.
+extern "C" JNIEXPORT jlongArray JNICALL Java_shiraz_runtime_NativeCapture_microphoneTimestamp(JNIEnv*,jclass,jlong){return nullptr;}
+
+extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeCapture_cameraSnapshot(JNIEnv* env,jclass type,jlong handle){return Java_shiraz_runtime_NativeCapture_cameraFrame(env,type,handle);}

@@ -1,14 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/memory.hpp"
+#include "shiraz/darwin/guest/tls.hpp"
+#include <algorithm>
+#include <atomic>
+#include <csignal>
 #include <filesystem>
 #include <iostream>
 #include <pthread.h>
+#include <thread>
+#include <set>
+#include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 using namespace shiraz::guest;
 // Detached threads can finish host key-destructor epilogues after notifying the
 // guest. Match NativeBridge's process-resident image lifetime rather than racing
 // an ELF unload against their final return instructions.
 static Loader *resident = nullptr;
 static Loader *other_resident = nullptr;
+static void unprepared_refusal(int) { std::_Exit(0); }
+static void foreign_stack_refusal(int) { (void)shiraz_guest_cached_pthread_self(); std::_Exit(2); }
 static void require(bool value, const char *message) {
   if (!value) throw std::runtime_error(message);
 }
@@ -18,6 +29,143 @@ static Argument pointer(const void *value) {
 int main(int argc, char **argv) {
   try {
     require(argc == 2, "usage: thread-probe fixture-directory");
+    const auto tables = cached_pthread_self_tables();
+    require(tables.rows == 4096, "cached self table row bound");
+    uintptr_t first = UINTPTR_MAX, last = 0;
+    for (const auto &table : tables.tables) {
+      require(table.address && table.bytes == 32768 && table.bytes <= UINTPTR_MAX - table.address,
+              "cached self complete table extent");
+      const uintptr_t end = table.address + uintptr_t(table.bytes);
+      require(!cached_self_tables_disjoint_stack(table.address, end) &&
+                  !cached_self_tables_disjoint_stack(table.address - 1, table.address + 1) &&
+                  !cached_self_tables_disjoint_stack(end - 1, end + 1),
+              "cache overlap refused without using cache memory as an actual stack");
+      first = std::min(first, table.address);last = std::max(last, end);
+    }
+    require(!cached_self_tables_disjoint_stack(0, 1) &&
+                !cached_self_tables_disjoint_stack(2, 2) &&
+                !cached_self_tables_disjoint_stack(3, 2) &&
+                cached_self_tables_disjoint_stack(first - 1, first) &&
+                cached_self_tables_disjoint_stack(last, last + 1),
+            "cached table exclusion checks empty ranges and exact boundaries");
+    const auto native_high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+    require(cached_self_tables_disjoint_stack(native_high - pthread_get_stacksize_np(pthread_self()), native_high),
+            "actual prepared stack is disjoint from all complete cache tables");
+    const auto mrs_tables = mrs_access_tables();
+    static_assert(sizeof(mrs_tables.tables) / sizeof(mrs_tables.tables[0]) == 5);
+    require(mrs_tables.rows == 4096, "MRS accessor table row bound");
+    std::set<std::string> mrs_roles;
+    uintptr_t mrs_first = UINTPTR_MAX, mrs_last = 0;
+    for (const auto &table : mrs_tables.tables) {
+      require(table.role && mrs_roles.insert(table.role).second,
+              "MRS accessor table roles are nonnull and unique");
+      require(table.address > 1 && table.bytes == 32768 && table.bytes < UINTPTR_MAX - table.address,
+              "MRS accessor complete table extent with room for edge probes");
+      const uintptr_t end = table.address + uintptr_t(table.bytes);
+      require(!mrs_access_tables_disjoint_stack(table.address, end) &&
+                  !mrs_access_tables_disjoint_stack(table.address + 1, end - 1) &&
+                  !mrs_access_tables_disjoint_stack(table.address, table.address + 1) &&
+                  !mrs_access_tables_disjoint_stack(end - 1, end) &&
+                  !mrs_access_tables_disjoint_stack(table.address - 1, table.address + 1) &&
+                  !mrs_access_tables_disjoint_stack(end - 1, end + 1),
+              "every MRS table refuses whole, interior and boundary-crossing overlap");
+      if (std::string(table.role) == "bases")
+        require(cached_self_tables_disjoint_stack(table.address, end) &&
+                    !mrs_access_tables_disjoint_stack(table.address, end),
+                "fifth MRS bases table adds exclusion beyond the four cached-self tables");
+      for (const auto &other : mrs_tables.tables) {
+        if (&table == &other) continue;
+        require(other.bytes <= UINTPTR_MAX - other.address &&
+                    (end <= other.address || other.address + other.bytes <= table.address),
+                "MRS accessor table extents are pairwise disjoint");
+      }
+      mrs_first = std::min(mrs_first, table.address);
+      mrs_last = std::max(mrs_last, end);
+    }
+    require(mrs_roles == std::set<std::string>({"owners", "keys", "low", "high", "bases"}),
+            "MRS accessor snapshot includes exactly the five read tables");
+    require(mrs_first > 1 && mrs_last < UINTPTR_MAX &&
+                !mrs_access_tables_disjoint_stack(0, 1) &&
+                !mrs_access_tables_disjoint_stack(0, UINTPTR_MAX) &&
+                !mrs_access_tables_disjoint_stack(2, 2) &&
+                !mrs_access_tables_disjoint_stack(3, 2) &&
+                !mrs_access_tables_disjoint_stack(UINTPTR_MAX, 0) &&
+                mrs_access_tables_disjoint_stack(mrs_first - 1, mrs_first) &&
+                mrs_access_tables_disjoint_stack(mrs_last, mrs_last + 1),
+            "MRS table exclusion refuses invalid bounds and admits adjacent outside-union ranges");
+    require(mrs_access_tables_disjoint_stack(native_high - pthread_get_stacksize_np(pthread_self()), native_high),
+            "actual native stack is disjoint from all five complete MRS accessor tables");
+    // Extent predicates only: these synthetic overlap ranges are never used as
+    // actual stacks, and the snapshot grants no row-lifetime or consumer proof.
+    std::cout << "M5_MRS_TABLE_EXCLUSION_PASS tables=5 rows=4096 predicate_only=1 "
+                 "execution_claim=0 consumer_proof=0\n";
+    const pid_t child = fork();
+    require(child >= 0, "fork unprepared identity check");
+    if (!child) {
+      if (guest_tls_prepared() || std::signal(SIGTRAP, unprepared_refusal) == SIG_ERR) std::_Exit(1);
+      (void)shiraz_guest_cached_pthread_self();
+      std::_Exit(2);
+    }
+    int status = 0;
+    pid_t waited;
+    do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+    require(waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+            "unprepared pthread identity must trap rather than return a value");
+    std::atomic<unsigned> identity_errors{0};
+    std::atomic<unsigned> identity_ready{0};
+    uintptr_t native_keys[4]{};
+    std::thread identity_workers[4];
+    for (unsigned index = 0; index < 4; ++index) identity_workers[index] = std::thread([&, index] {
+      prepare_guest_tls();
+      uintptr_t key;
+      asm volatile("mrs %0, tpidrro_el0" : "=r"(key));
+      native_keys[index] = key;
+      ++identity_ready;
+      while (identity_ready < 4) std::this_thread::yield();
+      const auto expected = reinterpret_cast<uintptr_t>(pthread_self());
+      for (unsigned i = 0; i < 5000; ++i) {
+        errno = ELOOP;
+        *guest_errno_location() = EINVAL;
+        if (shiraz_guest_cached_pthread_self() != expected) ++identity_errors;
+        if (errno != ELOOP || *guest_errno_location() != EINVAL) ++identity_errors;
+        uintptr_t observed;
+        asm volatile("mrs %0, tpidrro_el0" : "=r"(observed));
+        if (observed != key) ++identity_errors;
+        if (!(i % 16)) std::this_thread::yield();
+      }
+    });
+    for (auto &worker : identity_workers) worker.join();
+    require(!identity_errors, "cached identity matches native workers and preserves errnos");
+    require(std::set<uintptr_t>(native_keys, native_keys + 4).size() == 4 &&
+                std::set<uintptr_t>(native_keys, native_keys + 4).count(0) == 0,
+            "live native read-only TLS keys are unique and nonzero");
+    prepare_guest_tls();
+    std::atomic<uintptr_t> foreign_low{0};
+    std::atomic<bool> foreign_stop{false};
+    std::thread parked([&] {
+      prepare_guest_tls();
+      auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+      auto size = pthread_get_stacksize_np(pthread_self());
+      if (size < 192 * 1024) std::_Exit(1);
+      foreign_low = high - size;
+      while (!foreign_stop) std::this_thread::yield();
+    });
+    while (!foreign_low) std::this_thread::yield();
+    const pid_t alternate = fork();
+    require(alternate >= 0, "fork foreign-stack identity check");
+    if (!alternate) {
+      stack_t stack{};stack.ss_sp = reinterpret_cast<void *>(foreign_low + 64 * 1024);stack.ss_size = 64 * 1024;
+      struct sigaction action{};action.sa_handler = foreign_stack_refusal;action.sa_flags = SA_ONSTACK;
+      sigemptyset(&action.sa_mask);
+      if (sigaltstack(&stack, nullptr) || sigaction(SIGUSR1, &action, nullptr) ||
+          std::signal(SIGTRAP, unprepared_refusal) == SIG_ERR) std::_Exit(1);
+      raise(SIGUSR1);std::_Exit(3);
+    }
+    do { waited = waitpid(alternate, &status, 0); } while (waited < 0 && errno == EINTR);
+    foreign_stop = true;parked.join();
+    require(waited == alternate && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+            "SP inside another prepared thread stack must not return that thread's identity");
+    std::cout << "M5_SELF_CACHE_PASS workers=4 checks=20000 native_identity=1 errnos=1 unprepared_trap=1 foreign_stack_trap=1 native_keys=unique-stable-observed\n";
     resident = new Loader({std::filesystem::canonical(argv[1])}, native_personality(
         [](const void *code) { return resident && resident->contains_code(code); }));
     auto &loader = *resident;
@@ -28,9 +176,9 @@ int main(int argc, char **argv) {
           .result_integers[0];
     };
     auto self = loader.symbol(module, "pthread_self");
-    require(self.abi == "native/pthread-self-noargs" &&
-                self.address == reinterpret_cast<uintptr_t>(&::pthread_self),
-            "pthread_self binds the identical native no-argument ABI directly");
+    require(self.abi == "prepared/pthread-self-noargs" &&
+                self.address == reinterpret_cast<uintptr_t>(&shiraz_guest_cached_pthread_self),
+            "pthread_self binds the prepared-stack no-argument identity adapter");
     errno = ELOOP;
     require(call("self_identity", {}) == reinterpret_cast<uintptr_t>(pthread_self()) &&
                 errno == ELOOP && *guest_errno_location() == 731,

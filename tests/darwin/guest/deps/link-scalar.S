@@ -534,3 +534,7 @@ sigpending:
 .type strnlen, %function
 strnlen:
  brk #0
+.global send
+.type send, %function
+send:
+  ret

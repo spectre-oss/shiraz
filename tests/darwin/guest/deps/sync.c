@@ -36,6 +36,8 @@ static void *worker(void *unused) {
   return 0;
 }
 int run_sync(void) {
+  struct timespec boot;
+  CHECK(clock_gettime(CLOCK_BOOTTIME, &boot) == 0 && boot.tv_sec > 0 && boot.tv_nsec >= 0 && boot.tv_nsec < 1000000000);
   errno = EDOM;
   pthread_t threads[4];
   for (int i = 0; i < 4; ++i) CHECK(pthread_create(&threads[i], 0, worker, 0) == 0);
@@ -71,6 +73,7 @@ int run_sync(void) {
         pthread_mutex_trylock(&mutex.value) == EBUSY);
   CHECK(pthread_mutex_destroy(&mutex.value) == EBUSY);
   CHECK(pthread_condattr_init(&cattr.value) == 0);
+  CHECK(pthread_condattr_setclock(&cattr.value, CLOCK_BOOTTIME) == EINVAL);
   CHECK(pthread_condattr_setclock(&cattr.value, CLOCK_MONOTONIC) == 0);
   clockid_t clock;
   CHECK(pthread_condattr_getclock(&cattr.value, &clock) == 0 && clock == CLOCK_MONOTONIC);

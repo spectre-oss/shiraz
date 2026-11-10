@@ -321,8 +321,28 @@ _shiraz_guest_managed_malloc_entry:
     ldp x29, x30, [sp, #80]
 .cfi_restore x29
 .cfi_restore x30
-    add sp, sp, #160
-.cfi_def_cfa sp, 0
+    // All saved guest state is restored before erasing this entry's frame.
+    // Deeper native frames and asynchronous observers are outside this scope.
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 144
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 128
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 112
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 96
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 80
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 64
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 48
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 32
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 16
+    stp xzr, xzr, [sp], #16
+.cfi_def_cfa_offset 0
     ret
 .cfi_endproc
 

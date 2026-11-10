@@ -6,14 +6,16 @@ import fcntl
 import hashlib
 import json
 import re
-from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import tarfile
 import zipfile
 import zlib
+from pathlib import Path, PurePosixPath
+
+from build_apk_fixture import fetch, install_aapt2
+
 from shiraz.framework_resources import ResourceIndex
-from build_apk_fixture import DOWNLOADS, aapt2_jar, fetch
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMIT = '7e7ea0991020d15cdb69c5da933c282c92f884ef'
@@ -94,11 +96,7 @@ def main():
     for name, data in outputs.items():
         target = source / name; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)
     manifest = build / 'AndroidManifest.xml'; manifest.write_text('<manifest package="android"/>\n')
-    tool_archive = cache / aapt2_jar(); tool_url, tool_hash = DOWNLOADS[aapt2_jar()]
-    fetch(tool_archive, tool_url, tool_hash, 16 * 1024 * 1024)
-    with zipfile.ZipFile(tool_archive) as tools_zip:
-        if tools_zip.getinfo('aapt2').file_size > 32 * 1024 * 1024: raise ValueError('compiler exceeds size limit')
-        compiler = cache / 'aapt2'; compiler.write_bytes(tools_zip.read('aapt2')); compiler.chmod(0o755)
+    compiler, compiler_provenance = install_aapt2(cache)
     compiled = build / 'compiled.zip'; apk = build / 'framework-res.pending.apk'
     subprocess.run([str(compiler), 'compile', '--dir', str(source / 'res'), '-o', str(compiled), '--legacy'], check=True, timeout=120)
     # aapt2 assigns the reserved framework package ID 0x01 to package "android".
@@ -110,7 +108,7 @@ def main():
     actual = {name: int(ident, 16) for ident, name in re.findall(r'^\s*resource (0x[0-9a-fA-F]+) (\S+)', dump, re.MULTILINE)}
     index.validate_ids(actual, selected)
     report = {'source': URL, 'commit': COMMIT, 'source_sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
-              'source_content_sha256': CONTENT_SHA256, 'aapt2_sha256': tool_hash, 'seeds': seeds,
+              'source_content_sha256': CONTENT_SHA256, 'aapt2_sha256': compiler_provenance.get('archive_sha256', compiler_provenance['binary_sha256']), 'aapt2': compiler_provenance, 'seeds': seeds,
               'selected_resources': len(selected), 'source_resources': source_count, 'source_files': provenance,
               'selection_scope': 'Static XML closure from explicit named seeds; not proof of arbitrary dynamic resource use',
               'public_ids': {'/'.join(key): f'0x{index.public[key]:08x}' for key in sorted(selected) if key in index.public}}

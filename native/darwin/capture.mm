@@ -4,11 +4,18 @@
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #include <jni.h>
+extern "C" {
+#include <vo-aacenc/voAAC.h>
+#include <vo-aacenc/cmnMemory.h>
+}
+#include "shiraz/darwin/audio_clock.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <ctime>
+#include <mach/mach_time.h>
 #include <deque>
 #include <map>
 #include <memory>
@@ -17,6 +24,8 @@
 #include <vector>
 
 namespace {
+thread_local unsigned callbackDepth=0;
+struct CaptureCallbackScope {CaptureCallbackScope(){++callbackDepth;}~CaptureCallbackScope(){--callbackDepth;}};
 struct Media {
   enum Kind { Microphone, Camera, Encoder } kind;
   std::mutex mutex;
@@ -24,6 +33,7 @@ struct Media {
   bool closed=false,failed=false,tapInstalled=false;
   int rate=0,channels=0,width=0,height=0;
   uint64_t frame=0,readFrame=0;
+  uint64_t audioFrames=0,audioEpoch=0,audioTime=0;
   std::deque<uint8_t> pcm;
   std::vector<jint> pixels;
   AVAudioEngine *engine=nil;
@@ -31,14 +41,17 @@ struct Media {
   AVCaptureSession *session=nil;
   id delegate=nil;
   dispatch_queue_t queue=nullptr;
-  AudioConverterRef encoder=nullptr;
+  VO_AUDIO_CODECAPI codec{};VO_HANDLE encoder=nullptr;VO_MEM_OPERATOR memory{};
   explicit Media(Kind value):kind(value){}
   void stop(){
     {std::lock_guard<std::mutex> lock(mutex);if(closed)return;closed=true;changed.notify_all();}
-    // Do not hold the sample mutex while joining framework callbacks.
-    if(engine){if(tapInstalled)[engine.inputNode removeTapOnBus:0];[engine stop];engine=nil;converter=nil;}
-    if(session){[session stopRunning];session=nil;delegate=nil;queue=nullptr;}
-    if(encoder){AudioConverterDispose(encoder);encoder=nullptr;}
+    // Do not hold the sample mutex while joining framework callbacks. An open
+    // failure can leave the final shared owner on a sample callback itself.
+    AVAudioEngine *audio=engine;AVCaptureSession *video=session;id keepDelegate=delegate;bool removeTap=tapInstalled;
+    engine=nil;converter=nil;session=nil;delegate=nil;queue=nullptr;
+    dispatch_block_t shutdown=^{if(audio){if(removeTap)[audio.inputNode removeTapOnBus:0];[audio stop];}if(video.isRunning)[video stopRunning];(void)keepDelegate;};
+    if(callbackDepth)dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),shutdown);else shutdown();
+    if(encoder){codec.Uninit(encoder);encoder=nullptr;}
     std::lock_guard<std::mutex> lock(mutex);pcm.clear();pixels.clear();
   }
   ~Media(){stop();}
@@ -94,7 +107,7 @@ void videoFrame(const std::shared_ptr<Media>& state,CMSampleBufferRef sample){
 @end
 @implementation ShirazCameraSamples
 - (void)captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sample fromConnection:(AVCaptureConnection *)connection {
-  (void)output;(void)connection;if(auto state=owner.lock())videoFrame(state,sample);
+  CaptureCallbackScope scope;(void)output;(void)connection;if(auto state=owner.lock())videoFrame(state,sample);
 }
 @end
 
@@ -109,18 +122,22 @@ extern "C" JNIEXPORT jlong JNICALL Java_shiraz_runtime_NativeCapture_microphoneO
   state->converter=[[AVAudioConverter alloc] initFromFormat:hardware toFormat:target];if(!state->converter)throw std::runtime_error("Microphone PCM conversion unavailable");
   AVAudioConverter *converter=state->converter;
   std::weak_ptr<Media> weak=state;
-  AVAudioNodeTapBlock tap=^(AVAudioPCMBuffer *buffer,AVAudioTime *){
-    auto current=weak.lock();if(!current)return;
+  AVAudioNodeTapBlock tap=^(AVAudioPCMBuffer *buffer,AVAudioTime *time){
+    CaptureCallbackScope scope;auto current=weak.lock();if(!current)return;
     @autoreleasepool {try{
       AVAudioFrameCount capacity=AVAudioFrameCount(std::ceil(buffer.frameLength*double(rate)/hardware.sampleRate)+32);
       AVAudioPCMBuffer *converted=[[AVAudioPCMBuffer alloc] initWithPCMFormat:target frameCapacity:capacity];
+      if(!converted)throw std::bad_alloc();
       __block bool supplied=false;NSError *failure=nil;
       auto status=[converter convertToBuffer:converted error:&failure withInputFromBlock:^AVAudioBuffer *(AVAudioPacketCount,AVAudioConverterInputStatus *inputStatus){if(supplied){*inputStatus=AVAudioConverterInputStatus_NoDataNow;return nil;}supplied=true;*inputStatus=AVAudioConverterInputStatus_HaveData;return buffer;}];
       std::lock_guard<std::mutex> lock(current->mutex);if(current->closed)return;
       if(status==AVAudioConverterOutputStatus_Error||failure){current->failed=true;current->changed.notify_all();return;}
       size_t count=size_t(converted.frameLength)*channels*2;auto *bytes=static_cast<const uint8_t *>(converted.audioBufferList->mBuffers[0].mData);
+      // Anchor the converted stream to the engine's hardware-buffer host time,
+      // rather than reporting the later Java read time as the capture time.
+      if(!current->audioEpoch&&time.hostTimeValid)current->audioEpoch=shiraz::darwin::audio_monotonic_nanos(time.hostTime);
       size_t maximum=size_t(rate)*channels*2*2;while(current->pcm.size()+count>maximum&&!current->pcm.empty())current->pcm.pop_front();
-      if(bytes&&count<=maximum)current->pcm.insert(current->pcm.end(),bytes,bytes+count);current->changed.notify_all();
+      if(bytes&&count<=maximum){current->pcm.insert(current->pcm.end(),bytes,bytes+count);current->audioFrames+=converted.frameLength;if(current->audioEpoch)current->audioTime=current->audioEpoch+(current->audioFrames/uint64_t(rate))*1000000000+(current->audioFrames%uint64_t(rate))*1000000000/uint64_t(rate);}current->changed.notify_all();
     }catch(...){std::lock_guard<std::mutex> lock(current->mutex);current->failed=true;current->changed.notify_all();}}
   };
   AVAudioFrameCount frames=AVAudioFrameCount(std::ceil(hardware.sampleRate/10));
@@ -143,6 +160,11 @@ extern "C" JNIEXPORT jint JNICALL Java_shiraz_runtime_NativeCapture_microphoneRe
   size_t count=std::min(size_t(length),state->pcm.size());count-=count%(state->channels*2);std::vector<jbyte> bytes(count);
   for(size_t i=0;i<count;i++){bytes[i]=jbyte(state->pcm.front());state->pcm.pop_front();}lock.unlock();if(count)env->SetByteArrayRegion(output,offset,jsize(count),bytes.data());return jint(count);
 });}
+extern "C" JNIEXPORT jlongArray JNICALL Java_shiraz_runtime_NativeCapture_microphoneTimestamp(JNIEnv *env,jclass,jlong handle){return checked(env,[&]()->jlongArray{
+  if(!allowed(env,"android.permission.RECORD_AUDIO")||!hostPermission(env,AVMediaTypeAudio,false))return nullptr;
+  auto state=get(handle,Media::Microphone);std::lock_guard<std::mutex> lock(state->mutex);if(state->closed||state->failed||!state->audioTime)return nullptr;
+  jlong values[]={jlong(state->audioFrames),jlong(state->audioTime)};auto out=env->NewLongArray(2);if(out)env->SetLongArrayRegion(out,0,2,values);return out;
+});}
 extern "C" JNIEXPORT jlong JNICALL Java_shiraz_runtime_NativeCapture_cameraOpen(JNIEnv *env,jclass){return checked(env,[&]()->jlong{
   if(!allowed(env,"android.permission.CAMERA")||!hostPermission(env,AVMediaTypeVideo,true))return 0;
   AVCaptureDevice *device=[AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];if(!device)throw std::runtime_error("No host camera is available");
@@ -163,6 +185,28 @@ extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeCapture_cameraF
   if(state->closed||state->failed)throw std::runtime_error("Camera capture stopped");if(state->frame==state->readFrame)return nullptr;
   auto pixels=state->pixels;state->readFrame=state->frame;lock.unlock();auto out=env->NewIntArray(jsize(pixels.size()));if(out)env->SetIntArrayRegion(out,0,jsize(pixels.size()),pixels.data());return out;
 });}
+extern "C" JNIEXPORT jintArray JNICALL Java_shiraz_runtime_NativeCapture_cameraSnapshot(JNIEnv *env,jclass,jlong handle){return checked(env,[&]()->jintArray{
+  if(!allowed(env,"android.permission.CAMERA")||!hostPermission(env,AVMediaTypeVideo,false))return nullptr;
+  auto state=get(handle,Media::Camera);std::vector<jint> pixels;{std::lock_guard<std::mutex> lock(state->mutex);if(state->closed||state->failed||state->pixels.empty())throw std::runtime_error("No live camera frame");pixels=state->pixels;}
+  auto out=env->NewIntArray(jsize(pixels.size()));if(out)env->SetIntArrayRegion(out,0,jsize(pixels.size()),pixels.data());return out;
+});}
 extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeCapture_close(JNIEnv *env,jclass,jlong handle){checked(env,[&]()->int{std::shared_ptr<Media> state;{std::lock_guard<std::mutex> lock(registryMutex);auto found=registry.find(handle);if(found==registry.end())return 0;state=found->second;registry.erase(found);}state->stop();return 0;});}
-extern "C" JNIEXPORT jlong JNICALL Java_shiraz_runtime_NativeCapture_aacOpen(JNIEnv *env,jclass,jint,jint,jint){error(env,"java/lang/UnsupportedOperationException","Darwin AAC recording bridge is not implemented");return 0;}
-extern "C" JNIEXPORT jbyteArray JNICALL Java_shiraz_runtime_NativeCapture_aacEncode(JNIEnv *env,jclass,jlong,jbyteArray){error(env,"java/lang/UnsupportedOperationException","Darwin AAC recording bridge is not implemented");return nullptr;}
+extern "C" JNIEXPORT jlong JNICALL Java_shiraz_runtime_NativeCapture_aacOpen(JNIEnv *env,jclass,jint rate,jint channels,jint bitrate){return checked(env,[&]()->jlong{
+  const int rates[]={8000,11025,12000,16000,22050,24000,32000,44100,48000};
+  if(std::find(std::begin(rates),std::end(rates),rate)==std::end(rates)||channels<1||channels>2||bitrate<8000||bitrate>320000)throw std::invalid_argument("AAC-LC configuration");
+  auto state=std::make_shared<Media>(Media::Encoder);state->rate=rate;state->channels=channels;
+  if(voGetAACEncAPI(&state->codec)!=VO_ERR_NONE)throw std::runtime_error("AAC API initialization failed");
+  state->memory.Alloc=cmnMemAlloc;state->memory.Copy=cmnMemCopy;state->memory.Free=cmnMemFree;state->memory.Set=cmnMemSet;state->memory.Check=cmnMemCheck;
+  VO_CODEC_INIT_USERDATA user{};user.memflag=VO_IMF_USERMEMOPERATOR;user.memData=&state->memory;
+  if(state->codec.Init(&state->encoder,VO_AUDIO_CodingAAC,&user)!=VO_ERR_NONE)throw std::runtime_error("AAC encoder initialization failed");
+  AACENC_PARAM parameters{};parameters.sampleRate=rate;parameters.nChannels=channels;parameters.bitRate=bitrate;parameters.adtsUsed=0;
+  if(state->codec.SetParam(state->encoder,VO_PID_AAC_ENCPARAM,&parameters)!=VO_ERR_NONE)throw std::invalid_argument("Unsupported AAC parameters");return add(state);
+});}
+extern "C" JNIEXPORT jbyteArray JNICALL Java_shiraz_runtime_NativeCapture_aacEncode(JNIEnv *env,jclass,jlong handle,jbyteArray input){return checked(env,[&]()->jbyteArray{
+  auto state=get(handle,Media::Encoder);std::lock_guard<std::mutex> lock(state->mutex);
+  if(state->closed)throw std::runtime_error("AAC encoder closed");if(!input||env->GetArrayLength(input)!=1024*state->channels*2)throw std::invalid_argument("AAC requires one PCM16 frame");
+  std::vector<jbyte> pcm(size_t(1024*state->channels*2));env->GetByteArrayRegion(input,0,jsize(pcm.size()),pcm.data());if(env->ExceptionCheck())return nullptr;
+  VO_CODECBUFFER source{},output{};VO_AUDIO_OUTPUTINFO info{};source.Buffer=reinterpret_cast<VO_PBYTE>(pcm.data());source.Length=VO_U32(pcm.size());unsigned char encoded[8192];output.Buffer=encoded;output.Length=sizeof(encoded);
+  if(state->codec.SetInputData(state->encoder,&source)!=VO_ERR_NONE||state->codec.GetOutputData(state->encoder,&output,&info)!=VO_ERR_NONE||!output.Length||output.Length>sizeof(encoded))throw std::runtime_error("AAC frame encoding failed");
+  auto result=env->NewByteArray(jsize(output.Length));if(result)env->SetByteArrayRegion(result,0,jsize(output.Length),reinterpret_cast<jbyte *>(encoded));return result;
+});}

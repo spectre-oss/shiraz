@@ -7,6 +7,8 @@
 #include "shiraz/darwin/guest/path.hpp"
 #include "shiraz/darwin/guest/descriptor.hpp"
 #include <cstdio>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -54,8 +56,37 @@ JNINativeInterface env_table{};
 JNIInvokeInterface vm_table{};
 static_assert(sizeof(JNIInvokeInterface) == 8 * sizeof(void *));
 ShadowVM vm_state{};
-std::mutex vm_mutex;
+auto &vm_mutex = *new std::mutex;
 std::once_flag tables_once;
+bool trace_network_callbacks(){static const bool enabled=[](){const char *value=std::getenv("SHIRAZ_TRACE_GUEST_NETWORK");return value&&std::strcmp(value,"1")==0;}();return enabled;}
+auto &trace_methods_mutex = *new std::mutex;
+auto &trace_methods = *new std::map<jmethodID,int>;
+auto &trace_natives_mutex = *new std::mutex;
+auto &trace_natives = *new std::map<const void *,std::string>;
+bool trace_rpc_type(JNIEnv *host,jlong address,uint32_t &type){
+  HostErrno preserve;
+  if(!address||host->ExceptionCheck())return false;
+  // Read exactly the public TL constructor, never request fields or strings.
+  jclass klass=host->FindClass("org/telegram/tgnet/NativeByteBuffer");
+  if(!klass){host->ExceptionClear();return false;}
+  jmethodID getter=host->GetStaticMethodID(klass,"native_getJavaByteBuffer","(J)Ljava/nio/ByteBuffer;");
+  jobject buffer=nullptr;if(getter){jvalue argument{};argument.j=address;buffer=host->CallStaticObjectMethodA(klass,getter,&argument);}
+  bool valid=false;
+  if(!host->ExceptionCheck()&&buffer){jlong size=host->GetDirectBufferCapacity(buffer);void *bytes=host->GetDirectBufferAddress(buffer);if(size>=4&&bytes){std::memcpy(&type,bytes,4);valid=true;}}
+  if(host->ExceptionCheck())host->ExceptionClear();
+  if(buffer)host->DeleteLocalRef(buffer);host->DeleteLocalRef(klass);return valid;
+}
+void trace_callback(jmethodID method,const jvalue *values){
+  HostErrno preserve;
+  if(!trace_network_callbacks())return;
+  int kind=0;{std::lock_guard<std::mutex> lock(trace_methods_mutex);auto found=trace_methods.find(method);if(found!=trace_methods.end())kind=found->second;}
+  static std::atomic<unsigned> count{0};if(!kind||count.fetch_add(1,std::memory_order_relaxed)>=512)return;
+  const char *name=kind==1?"onConnectionStateChanged":kind==2?"onRequestComplete":"onUnparsedMessageReceived";
+  if(kind==1&&values)std::fprintf(stderr,"SHIRAZ_TELEGRAM_CALLBACK name=%s state=%d account=%d\n",name,values[0].i,values[1].i);
+  else if(kind==2&&values&&current_env()&&runtime_callbacks&&std::strcmp(runtime_callbacks->getMethodShorty(current_env()->host,method),"VIIJILIJJI")==0)
+    std::fprintf(stderr,"SHIRAZ_TELEGRAM_CALLBACK name=%s account=%d token=%d error_code=%d response_present=%d\n",name,values[0].i,values[1].i,values[3].i,values[2].j!=0);
+  else std::fprintf(stderr,"SHIRAZ_TELEGRAM_CALLBACK name=%s\n",name);
+}
 JNIEnv *unwrap(JNIEnv *env) {
   auto *thread_env = current_env();
   if (!thread_env || env != &thread_env->guest ||
@@ -218,6 +249,7 @@ Upcall upcall(Capture &capture, Family family, Variant variant) {
     }
     call.values.push_back(value);
   }
+  trace_callback(method,call.values.data());
   return call;
 }
 void build_tables() {
@@ -254,6 +286,19 @@ void build_tables() {
       }));
 #include "guest_jni_slots.inc"
 #undef SHIRAZ_ENV_SLOT
+  env_table.GetStaticMethodID = reinterpret_cast<decltype(env_table.GetStaticMethodID)>(closure([](Capture &capture){
+    CallCursor cursor(capture,Convention::Aapcs64);JNIEnv *host=unwrap(cursor.read<JNIEnv *>());jclass klass=cursor.read<jclass>();const char *name=cursor.read<const char *>();const char *signature=cursor.read<const char *>();
+    jmethodID method=host->functions->GetStaticMethodID(host,klass,name,signature);
+    if(method&&trace_network_callbacks()&&name&&signature){int kind=0;
+      if(!std::strcmp(name,"onConnectionStateChanged")&&!std::strcmp(signature,"(II)V"))kind=1;
+      else if(!std::strcmp(name,"onRequestComplete"))kind=2;
+      else if(!std::strcmp(name,"onUnparsedMessageReceived"))kind=3;
+      if(kind){std::lock_guard<std::mutex> lock(trace_methods_mutex);if(trace_methods.size()<16)trace_methods[method]=kind;}
+    }return_value(capture,method);
+  }));
+  env_table.CallStaticVoidMethodA = reinterpret_cast<decltype(env_table.CallStaticVoidMethodA)>(closure([](Capture &capture){
+    CallCursor cursor(capture,Convention::Aapcs64);JNIEnv *host=unwrap(cursor.read<JNIEnv *>());jclass klass=cursor.read<jclass>();jmethodID method=cursor.read<jmethodID>();const jvalue *values=cursor.read<const jvalue *>();trace_callback(method,values);host->functions->CallStaticVoidMethodA(host,klass,method,values);
+  }));
   env_table.GetFieldID = reinterpret_cast<decltype(env_table.GetFieldID)>(
       closure([](Capture &capture) {
         CallCursor cursor(capture, Convention::Aapcs64);
@@ -309,6 +354,12 @@ void build_tables() {
               if (!methods[i].fnPtr || bounded(methods[i].name).empty())
                 throw std::runtime_error("invalid guest native registration");
               auto entry = methods[i];
+              if(trace_network_callbacks()){
+                std::string name=bounded(entry.name);
+                if(name=="native_sendRequest"||name=="native_cancelRequest"||name=="native_resumeNetwork"||name=="native_setNetworkAvailable"){
+                  std::lock_guard<std::mutex> lock(trace_natives_mutex);if(trace_natives.size()<32)trace_natives[entry.fnPtr]=name;
+                }
+              }
               entry.fnPtr = native_trampoline(
                   entry.fnPtr, signature_shorty(entry.signature));
               wrapped.push_back(entry);
@@ -419,8 +470,8 @@ void *native_trampoline(void *guest, const std::string &shorty) {
   validate_shorty(shorty);
   if (!guest || !is_guest_code(guest))
     throw std::runtime_error("native entry is outside guest executable images");
-  static std::mutex mutex;
-  static std::map<std::pair<uintptr_t, std::string>, void *> cache;
+  static auto &mutex = *new std::mutex;
+  static auto &cache = *new std::map<std::pair<uintptr_t, std::string>, void *>;
   std::lock_guard<std::mutex> lock(mutex);
   auto key = std::make_pair(reinterpret_cast<uintptr_t>(guest), shorty);
   auto found = cache.find(key);
@@ -472,6 +523,16 @@ void *native_trampoline(void *guest, const std::string &shorty) {
         break;
       default:
         throw std::runtime_error("invalid JNI native argument");
+      }
+    }
+    if(trace_network_callbacks()){
+      HostErrno preserve;std::string name;{std::lock_guard<std::mutex> lock(trace_natives_mutex);auto found=trace_natives.find(guest);if(found!=trace_natives.end())name=found->second;}
+      static std::atomic<unsigned> count{0};if(!name.empty()&&count.fetch_add(1,std::memory_order_relaxed)<512){
+        if(name=="native_sendRequest"&&shorty=="VIJIIIZII"){
+          uint32_t type=0;bool known=trace_rpc_type(host,jlong(args[3].bits),type);
+          std::fprintf(stderr,"SHIRAZ_TELEGRAM_NATIVE name=native_sendRequest account=%d token=%d rpc_type=%08x type_available=%d\n",int32_t(args[2].bits),int32_t(args[8].bits),type,known);
+        }
+        else std::fprintf(stderr,"SHIRAZ_TELEGRAM_NATIVE name=%s\n",name.c_str());
       }
     }
     auto result = invoke(guest, args);

@@ -10,6 +10,7 @@ public final class NativePlayback {
  public static native long trackOpen(int rate,int channels,int bytes);
  public static native int write(long handle,byte[] pcm,int offset,int length,boolean blocking,float gain);
  public static native long position(long handle);
+ public static native long[] timestamp(long handle);
  public static native void control(long handle,int action);
  public static native void close(long handle);
 }
