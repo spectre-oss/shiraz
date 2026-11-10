@@ -1,2 +1,2 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-<network-security-config><base-config><trust-anchors><certificates src="user"/></trust-anchors></base-config></network-security-config>
+<network-security-config><base-config><trust-anchors><certificates src="system"/><certificates src="user"/></trust-anchors></base-config></network-security-config>

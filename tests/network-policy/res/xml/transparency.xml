@@ -1,0 +1,8 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true"><certificateTransparency enabled="false"/></base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <certificateTransparency enabled="true"/>
+        <domain includeSubdomains="true">example.com</domain>
+    </domain-config>
+</network-security-config>

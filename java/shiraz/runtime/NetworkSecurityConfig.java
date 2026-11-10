@@ -107,17 +107,28 @@ public final class NetworkSecurityConfig {
                 if(!names.add(name))throw bad("Duplicate domain");if(domains.size()>=1024)throw bad("Domain count limit");
                 domains.add(new Domain(name,Boolean.TRUE.equals(bool(child,"includeSubdomains")),rule));count++;
             }else if(child.name.equals("domain-config"))domainConfig(child,rule,depth+1);
-            else if(!child.name.equals("trust-anchors")&&!child.name.equals("pin-set"))throw unsupported(child.name);
+            else if(!child.name.equals("trust-anchors")&&!child.name.equals("pin-set")&&!child.name.equals("certificateTransparency"))throw unsupported(child.name);
         }
         if(count==0)throw bad("domain-config requires a domain");
         directives(node,rule);
     }
     private void directives(BinaryXml.Node node,Rule rule){
+        boolean transparency=false;
         for(BinaryXml.Node child:children(node)){
+            if(child.name.equals("certificateTransparency")){if(transparency)throw bad("Duplicate certificateTransparency");transparency=true;certificateTransparency(child);continue;}
             if(child.name.equals("trust-anchors")){if(rule.anchors!=null)throw bad("Duplicate trust-anchors");rule.anchors=trust(child,false);}
             else if(child.name.equals("pin-set")){if(!node.name.equals("domain-config"))throw bad("pin-set requires domain-config");if(rule.pins!=null)throw bad("Duplicate pin-set");rule.pins=pins(child);}
             else if(!node.name.equals("domain-config")||!child.name.equals("domain")&&!child.name.equals("domain-config"))throw unsupported(child.name);
         }
+    }
+    /**
+     * Android reads certificateTransparency only from API 36. Shiraz profiles API 27,
+     * where AOSP XmlConfigSource skips unknown tags (context/reference-network/XmlConfigSource-api27.java), so it is validated and ignored.
+     */
+    private void certificateTransparency(BinaryXml.Node node){
+        tag(node,"certificateTransparency");attributes(node,"enabled");
+        if(value(node,"enabled")==null)throw bad("certificateTransparency requires enabled");bool(node,"enabled");
+        if(!children(node).isEmpty())throw bad("certificateTransparency contains elements");
     }
     private List<Anchor> trust(BinaryXml.Node node,boolean debug){
         tag(node,"trust-anchors");attributes(node);List<Anchor> anchors=new ArrayList<Anchor>();
@@ -128,6 +139,9 @@ public final class NetworkSecurityConfig {
             if(src==null)throw bad("Missing certificate source");
             X509Certificate[] certs=null;
             if(src.type==3&&"system".equals(src.text)){} // Default host public roots.
+            // Android's user-added CA store. Shiraz provides no user CA store, so
+            // this source contributes no roots, matching a device with none installed.
+            else if(src.type==3&&"user".equals(src.text))certs=new X509Certificate[0];
             else if(src.type==1){
                 byte[] bytes=booleans.certificateResource(src);if(bytes==null||bytes.length==0||bytes.length>1024*1024||(certificateBytes+=bytes.length)>4*1024*1024)throw bad("Certificate resource bounds");
                 try{

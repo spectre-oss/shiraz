@@ -20,11 +20,16 @@ public final class NetworkConfigSmoke {
         host("example.com",true);host("www.example.com",true);host("EXAMPLE.COM.",true);
         host("secure.example.com",false);host("sub.secure.example.com",false);host("inherited.example.com",false);
         host("badexample.com",false);host("example.com.evil",false);host("default.example.org",false);host("other.org",false);
-        for(String config:new String[]{"pins","custom_ca","duplicate","invalid_bool","duplicate_base","duplicate_trust","namespace","unknown_attribute"}){
+        for(String config:new String[]{"pins","unsupported_source","duplicate","invalid_bool","duplicate_base","duplicate_trust","namespace","unknown_attribute","duplicate_transparency"}){
             try{HostNetworkPolicy.install(facts(apk,"@xml/"+config));throw new AssertionError("invalid/unsupported policy accepted: "+config);}
             catch(IllegalArgumentException|UnsupportedOperationException expected){}
             host("example.com",true);host("secure.example.com",false);
         }
+        // Android user CA store: Shiraz has none, so it adds no roots but is accepted.
+        HostNetworkPolicy.install(facts(apk,"@xml/custom_ca"));host("example.com",false);host("other.org",false);
+        HostNetworkPolicy.install(facts(apk,"@xml/user_only"));host("other.org",false);
+        // API 36 certificateTransparency is ignored by the API 27 profile, as AOSP skips it there.
+        HostNetworkPolicy.install(facts(apk,"@xml/transparency"));host("other.org",true);host("www.example.com",false);
         Properties defaults=facts(apk,"@xml/defaults");defaults.setProperty("usesCleartextTraffic","true");HostNetworkPolicy.install(defaults);
         host("example.com",false);host("other.org",false); // XML ignores manifest explicit true.
         defaults.setProperty("targetSdk","27");defaults.setProperty("usesCleartextTraffic","false");HostNetworkPolicy.install(defaults);
