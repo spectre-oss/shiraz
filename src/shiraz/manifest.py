@@ -18,6 +18,8 @@ class BinaryXml:
         self.strings = []
         self.references = {}
         self.typed_values = {}
+        # Resource tables hold modified UTF-8 (CESU-8 surrogates); manifests stay strict.
+        self.utf8_errors = 'strict'
 
     def need(self, start, length, end=None):
         if start < 0 or length < 0 or start + length > (len(self.data) if end is None else end):
@@ -61,7 +63,7 @@ class BinaryXml:
                 self.need(p, length + 1, string_end)
                 if self.data[p + length] != 0:
                     raise ManifestError('unterminated UTF-8 string')
-                result.append(self.data[p:p + length].decode('utf-8'))
+                result.append(self.data[p:p + length].decode('utf-8', self.utf8_errors))
             else:
                 length, = self.unpack('<H', p, string_end); p += 2
                 if length & 0x8000:

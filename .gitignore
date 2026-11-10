@@ -89,3 +89,4 @@ __pycache__/
 !/docs/others/
 /docs/others/*
 !/docs/others/droidloom.md
+/macos/Launcher/.build/

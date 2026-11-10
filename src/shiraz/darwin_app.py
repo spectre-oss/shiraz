@@ -6,12 +6,20 @@ import os
 import plistlib
 import shutil
 from pathlib import Path
+from typing import Optional
 
 from .apk import FormatError
 
 
-def prepare_app_bundle(work: Path, vm: Path, host: Path, package: str) -> Path:
-    """Copy the unchanged ART executable into an app bundle; never patch or sign it."""
+MAX_ICON = 4 * 1024 * 1024
+
+
+def prepare_app_bundle(work: Path, vm: Path, host: Path, package: str, icon: Optional[Path] = None) -> Path:
+    """Copy the unchanged ART executable into an app bundle; never patch or sign it.
+
+    `icon` is an optional .icns (the Shiraz ghost from macos/icons) shown in the
+    Dock and app switcher while the APK runs. A missing icon is not an error.
+    """
     vm = vm.resolve(strict=True)
     if not vm.is_file() or vm.stat().st_size > 64 * 1024 * 1024:
         raise FormatError("Invalid Darwin ART executable")
@@ -36,6 +44,20 @@ def prepare_app_bundle(work: Path, vm: Path, host: Path, package: str) -> Path:
         "NSCameraUsageDescription": "Shiraz provides camera access to this Android app after you grant it camera permission.",
         "NSMicrophoneUsageDescription": "Shiraz provides microphone access to this Android app after you grant it microphone permission.",
     }
+    if icon is not None and icon.is_file():
+        if icon.stat().st_size > MAX_ICON or icon.read_bytes()[:4] != b"icns":
+            raise FormatError("Darwin app icon must be an .icns file")
+        resources = contents / "Resources"
+        target = resources / "Shiraz.icns"
+        if resources.is_symlink() or target.is_symlink():
+            raise FormatError("Darwin app resources must not be symlinks")
+        resources.mkdir(exist_ok=True)
+        data = icon.read_bytes()
+        if not target.is_file() or target.read_bytes() != data:
+            fresh = resources / ".Shiraz.icns.fresh"
+            fresh.write_bytes(data)
+            os.replace(fresh, target)
+        info["CFBundleIconFile"] = "Shiraz"
     # Atomic replacement retains a stable executable path and unchanged Mach-O bytes.
     temporary = executable.with_name(".ShirazHost.fresh")
     if temporary.is_symlink() or executable.is_symlink():

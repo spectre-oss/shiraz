@@ -5,6 +5,7 @@ import sys
 import zipfile
 from pathlib import Path
 from .apk import FormatError, inspect_apk
+from .app_icon import extract_icon
 from .runtime import run_activity
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,9 +15,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog='shiraz', description='Shiraz APK-to-Linux toolchain (experimental)')
     parser.add_argument('--version', action='version', version='Shiraz ' + (ROOT / 'VERSION').read_text().strip())
     sub = parser.add_subparsers(dest='command', required=True)
-    for command in ('inspect', 'plan', 'run'):
+    for command in ('inspect', 'plan', 'run', 'icon'):
         p = sub.add_parser(command)
         p.add_argument('apk', type=Path)
+        if command == 'icon':
+            p.add_argument('--output-dir', type=Path, required=True, help='Receives icon.json and the unchanged icon image files')
         if command == 'run':
             p.add_argument('--native-split', type=Path, help='Matching native-only ABI split APK; code/resource splits are unsupported')
             p.add_argument('--width', type=int, default=360)
@@ -30,6 +33,9 @@ def main(argv=None):
             p.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == 'icon':
+            print(json.dumps(extract_icon(args.apk, args.output_dir), indent=2, sort_keys=True))
+            return 0
         report = inspect_apk(args.apk)
         if args.command == 'run':
             return run_activity(args.apk, report, width=args.width, height=args.height, frames=args.frames, snapshot=args.snapshot, timeout=args.timeout, log_level=args.log_level, device_profile=args.device_profile, native_split=args.native_split)

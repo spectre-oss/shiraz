@@ -826,7 +826,7 @@ def run_activity(apk, report, *, width=360, height=640, frames=None, snapshot=No
         profile_values = validate_device_profile(device_profile) if device_profile else {}
         if darwin:
             from .darwin_app import prepare_app_bundle
-            vm = prepare_app_bundle(work, vm, HOST, package)
+            vm = prepare_app_bundle(work, vm, HOST, package, icon=ROOT / 'build/icons/shiraz.icns')
         command, env = launch_command(
             system, root=ROOT, host=HOST, environ=os.environ, vm=vm, classpath=classpath,
             framework_resources=framework_resources, work=work, data=data, app_lib=app_lib, metadata=metadata,

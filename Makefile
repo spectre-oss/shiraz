@@ -1661,3 +1661,5 @@ BOOTSTRAP_PATCH_HOST ?= $(shell uname -s)
 .PHONY: bootstrap-patch-check
 bootstrap-patch-check:
 	uv run --no-project python scripts/check_bootstrap_patches.py --host "$(BOOTSTRAP_PATCH_HOST)"
+
+include mk/launcher.mk

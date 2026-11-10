@@ -35,6 +35,24 @@ class DarwinAppTests(unittest.TestCase):
             with self.assertRaises(FormatError):
                 prepare_app_bundle(root / "run", vm, host, "org.example.app")
 
+    def test_optional_icon_is_copied_and_validated(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "art" / "lib64").mkdir(parents=True)
+            vm = root / "dalvikvm"
+            vm.write_bytes(b"\xcf\xfa\xed\xfe" + bytes(16))
+            icon = root / "shiraz.icns"
+            icon.write_bytes(b"icns" + bytes(12))
+            executable = prepare_app_bundle(root / "run", vm, root / "art", "org.example.app", icon=icon)
+            contents = executable.parent.parent
+            self.assertEqual((contents / "Resources" / "Shiraz.icns").read_bytes(), icon.read_bytes())
+            self.assertEqual(plistlib.loads((contents / "Info.plist").read_bytes())["CFBundleIconFile"], "Shiraz")
+            missing = prepare_app_bundle(root / "run2", vm, root / "art", "org.example.app", icon=root / "absent.icns")
+            self.assertNotIn("CFBundleIconFile", plistlib.loads((missing.parent.parent / "Info.plist").read_bytes()))
+            icon.write_bytes(b"PNG not icns")
+            with self.assertRaises(FormatError):
+                prepare_app_bundle(root / "run", vm, root / "art", "org.example.app", icon=icon)
+
     def test_non_macho_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
