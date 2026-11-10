@@ -83,7 +83,7 @@ PATCHES = {
             'art/runtime/thread.cc': '2df7108d93021291d88116eb07694d39d0adb23b704ba7884c6c5bfc77d6c31b',
         }),
         ('art-managed-diagnostics.patch', {
-            'art/runtime/interpreter/interpreter.cc': '6e52434cf9d8ee90abe781934433abb19d3122ae4e44fa50db0b1edf88453f2a',
+            'art/runtime/interpreter/interpreter.cc': '4b73302fd5c0d138b05ff545fd608b1e91af16b39b88477636c0826d35d1978a',
         }),
         ('art-reflection-diagnostics.patch', {
             'art/runtime/reflection.cc': '1197d545b93db726a972043324b582a8ed9cb1ff610864ed174de60d3b846342',
@@ -226,7 +226,7 @@ PATCHES_DARWIN = {
             'art/runtime/gc/space/large_object_space.cc': '50345dc2b9a86053c22cd4908be652e1ecda9827e20653de19fdda0ca7b12cb2',
             'art/runtime/gc/space/rosalloc_space.cc': '3cd81b690b493d2fca1fd924fe1443142daba32808eb84056405b8b222a3255d',
             'art/runtime/gc/space/space.cc': '86db7278df7bcd19c074703ff20c21a00d7fb584756a319ab15981cad44b3264',
-            'art/runtime/interpreter/interpreter.cc': 'afd0e4c76139d2cef6e9f78f33b58ccbcd7b2eee0a5f97187af0107e95ec6b96',
+            'art/runtime/interpreter/interpreter.cc': '93bd384d9cfe1542151c4d390274a5637514485a566ab2d197e1dac5aa75daa9',
             'art/runtime/interpreter/interpreter_common.cc': 'ce6df15bb441d2a283a2d0d690a7b2fbb799dd87937007e350b983923444dcea',
             'art/runtime/lock_word-inl.h': 'b77e952394bfe4d003fd570be365687d37c0c87717d634fa3eabe7b6fecc481c',
             'art/runtime/lock_word.h': '2eb0cfb4430f5d369194d1c15ffd99462e436cc3f502ab4818752d1aac4dda47',

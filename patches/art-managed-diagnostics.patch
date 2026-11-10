@@ -21,7 +21,7 @@
 +    bool from_deoptimize = false) REQUIRES_SHARED(Locks::mutator_lock_) {
 +  JValue result = ExecuteImpl(self, accessor, shadow_frame, result_register,
 +                             stay_in_interpreter, from_deoptimize);
-+  const char* filter = getenv("SHIRAZ_TRACE_MANAGED_METHOD");
++  static const char* const filter = getenv("SHIRAZ_TRACE_MANAGED_METHOD");
 +  ArtMethod* method = shadow_frame.GetMethod();
 +  if (filter != nullptr && filter[0] != '\0' && !self->IsExceptionPending() &&
 +      method->PrettyMethod().find(filter) != std::string::npos &&
