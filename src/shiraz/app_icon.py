@@ -87,22 +87,26 @@ class ResourceTable:
                 chunks.append((pos, size, pos + length))
             pos += length
 
-    def values(self, res_id):
-        """Every configuration's (density, data_type, data) for one resource ID."""
+    def values(self, res_id, locale=False):
+        """Every configuration's (density, data_type, data) for one resource ID.
+
+        With `locale`, each tuple also carries the config's packed language
+        and region (0 for the default, unqualified locale)."""
         key, entry = ((res_id >> 24) & 0xFF, (res_id >> 16) & 0xFF), res_id & 0xFFFF
         result = []
         for start, header, end in self.chunks.get(key, ()):
             _, flags, _, count, entries_start = self._unpack('<BBHII', start + 8, end)
             config_size, = self._unpack('<I', start + 20, end)
-            density = 0
+            density = language = 0
             if config_size >= 16 and header >= 20 + 16:
+                language, = self._unpack('<I', start + 20 + 8, end)
                 density, = self._unpack('<H', start + 20 + 14, end)
             offset = self._entry_offset(start + header, flags, count, entry, end)
             if offset is None:
                 continue
             value = self._entry_value(start + entries_start + offset, end)
             if value is not None:
-                result.append((density,) + value)
+                result.append((density,) + value + ((language,) if locale else ()))
         return result
 
     def _entry_offset(self, table, flags, count, entry, end):
@@ -253,6 +257,48 @@ class IconResolver:
                 raise FormatError('adaptive icon has no supported layers')
             return {'kind': 'adaptive', **layers}
         raise FormatError('launcher icon has no supported image')
+
+
+def resolve_label(apk):
+    """The application label in the default locale, following references."""
+    with zipfile.ZipFile(apk) as archive:
+        try:
+            manifest_info = archive.getinfo('AndroidManifest.xml')
+            if manifest_info.file_size > MAX_MANIFEST:
+                raise FormatError('AndroidManifest.xml exceeds size limit')
+            manifest = inspect_manifest(archive.read(manifest_info))
+        except KeyError:
+            raise FormatError('APK is missing AndroidManifest.xml') from None
+        except (ManifestError, UnicodeDecodeError) as exc:
+            raise FormatError(f'manifest: {exc}') from None
+        res_id = manifest.get('application_label_resource', 0)
+        literal = manifest.get('application_label')
+        if not res_id:
+            if literal and not literal.startswith('@'):
+                return literal
+            raise FormatError('APK declares no application label')
+        try:
+            table_info = archive.getinfo('resources.arsc')
+        except KeyError:
+            raise FormatError('APK is missing resources.arsc') from None
+        if table_info.file_size > MAX_TABLE:
+            raise FormatError('resources.arsc exceeds size limit')
+        table = ResourceTable(archive.read(table_info))
+    for _ in range(MAX_DEPTH):
+        values = table.values(res_id, locale=True)
+        values.sort(key=lambda value: value[3] != 0)  # Default locale first.
+        if not values:
+            break
+        _, data_type, data, _ = values[0]
+        if data_type == TYPE_STRING:
+            label = table.string(data).strip()
+            if label:
+                return label[:200]
+            break
+        if data_type != TYPE_REFERENCE or not data:
+            break
+        res_id = data
+    raise FormatError('application label has no string value')
 
 
 def image_suffix(name):

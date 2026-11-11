@@ -7,7 +7,7 @@ import unittest
 import zipfile
 
 from shiraz.apk import FormatError
-from shiraz.app_icon import ResourceTable, extract_icon
+from shiraz.app_icon import ResourceTable, extract_icon, resolve_label
 from shiraz.cli import main
 
 ANDROID = 'http://schemas.android.com/apk/res/android'
@@ -65,13 +65,14 @@ def binary_xml(elements):
     return struct.pack('<HHI', 3, 8, 8 + len(pooled) + len(chunks)) + pooled + bytes(chunks)
 
 
-def manifest(icon):
-    return binary_xml([('manifest', [('package', STRING, 'sample.app')], [('application', [('icon', REF, icon)], [])])])
+def manifest(icon, label=None):
+    attrs = [('icon', REF, icon)] + ([('label', REF, label)] if label else [])
+    return binary_xml([('manifest', [('package', STRING, 'sample.app')], [('application', attrs, [])])])
 
 
-def type_chunk(type_id, entries, density=0, flags=0):
+def type_chunk(type_id, entries, density=0, flags=0, language=b'\0\0\0\0'):
     """entries: {entry_index: (data_type, data, compact)}; flags 1=sparse, 2=offset16."""
-    config = struct.pack('<IIIBBH', 28, 0, 0, 0, 0, density) + bytes(12)
+    config = struct.pack('<III', 28, 0, 0)[:8] + language + struct.pack('<BBH', 0, 0, density) + bytes(12)
     blobs, offsets = bytearray(), {}
     for index, (data_type, data, compact) in sorted(entries.items()):
         offsets[index] = len(blobs)
@@ -109,10 +110,10 @@ class AppIconTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
-    def apk(self, files, icon=0x7F010000):
+    def apk(self, files, icon=0x7F010000, label=None):
         path = self.root / 'app.apk'
         with zipfile.ZipFile(path, 'w') as archive:
-            archive.writestr('AndroidManifest.xml', manifest(icon))
+            archive.writestr('AndroidManifest.xml', manifest(icon, label))
             for name, data in files.items():
                 archive.writestr(name, data)
         return path
@@ -199,6 +200,18 @@ class AppIconTests(unittest.TestCase):
         fanout = table(['res/a.png'], levels)
         with self.assertRaisesRegex(FormatError, 'budget'):
             extract_icon(self.apk({'resources.arsc': fanout, 'res/a.png': PNG}), self.root / 'out')
+
+    def test_label_prefers_default_locale_and_follows_references(self):
+        arsc = table(['Bonjour', 'Hello', 'res/a.png'], [
+            type_chunk(3, {0: (STRING, 0, False)}, language=b'fr\0\0'),
+            type_chunk(3, {0: (STRING, 1, False), 1: (REF, 0x7F030000, True)}),
+        ])
+        self.assertEqual(resolve_label(self.apk({'resources.arsc': arsc}, label=0x7F030001)), 'Hello')
+        loop = table([], [type_chunk(3, {0: (REF, 0x7F030000, False)})])
+        with self.assertRaisesRegex(FormatError, 'no string value'):
+            resolve_label(self.apk({'resources.arsc': loop}, label=0x7F030000))
+        with self.assertRaisesRegex(FormatError, 'no application label'):
+            resolve_label(self.apk({'resources.arsc': arsc}))
 
     def test_cli_reports_missing_icon(self):
         apk = self.apk({'resources.arsc': table([], [])}, icon=0)

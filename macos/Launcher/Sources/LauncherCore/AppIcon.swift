@@ -100,6 +100,35 @@ public struct AppIcon: Decodable, Equatable, Sendable {
         return context.makeImage()
     }
 
+    /// A representative colour for tinting: the average of the icon's
+    /// saturated, opaque pixels, or of all opaque pixels for grey icons.
+    public static func accentColor(of image: CGImage) -> CGColor? {
+        let side = 24
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        guard drawn else { return nil }
+        var vivid = (r: 0.0, g: 0.0, b: 0.0, n: 0.0)
+        var any = (r: 0.0, g: 0.0, b: 0.0, n: 0.0)
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let a = Double(pixels[i + 3]) / 255
+            guard a > 0.6 else { continue }
+            let (r, g, b) = (Double(pixels[i]) / 255 / a, Double(pixels[i + 1]) / 255 / a, Double(pixels[i + 2]) / 255 / a)
+            let high = max(r, g, b), low = min(r, g, b)
+            any = (any.r + r, any.g + g, any.b + b, any.n + 1)
+            if high - low > 0.25 && high > 0.25 { vivid = (vivid.r + r, vivid.g + g, vivid.b + b, vivid.n + 1) }
+        }
+        let pick = vivid.n >= 8 ? vivid : any
+        guard pick.n > 0 else { return nil }
+        return CGColor(srgbRed: pick.r / pick.n, green: pick.g / pick.n, blue: pick.b / pick.n, alpha: 1)
+    }
+
     static func aspectFit(_ image: CGImage, in rect: CGRect) -> CGRect {
         let scale = min(rect.width / CGFloat(image.width), rect.height / CGFloat(image.height))
         let size = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)

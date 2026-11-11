@@ -26,6 +26,16 @@ public struct AppEntry: Codable, Identifiable, Hashable, Sendable {
     public var sha256: String
     public var importedAt: Date
     public var settings: AppSettings
+    // Optional so entry.json files written before these fields still decode.
+    public var favorite: Bool?
+    /// The APK's `android:label` in the default locale, from `shiraz label`.
+    public var label: String?
+    public var lastLaunchedAt: Date?
+
+    public var isFavorite: Bool {
+        get { favorite ?? false }
+        set { favorite = newValue ? true : nil }
+    }
 
     public init(report: InspectReport, importedAt: Date = Date(), settings: AppSettings = AppSettings()) {
         packageName = report.manifest.package
@@ -46,9 +56,10 @@ public struct AppEntry: Codable, Identifiable, Hashable, Sendable {
         return .unsupported("Only \(nativeAbis.joined(separator: ", ")) native code. The macOS runtime needs arm64-v8a.")
     }
 
-    /// The package name without its vendor prefix, as a readable fallback
-    /// until label and icon resources are parsed.
+    /// The APK's label, or the package name's last component until it is known.
     public var displayName: String {
-        packageName.split(separator: ".").last.map(String.init) ?? packageName
+        if let label, !label.isEmpty { return label }
+        let tail = packageName.split(separator: ".").last.map(String.init) ?? packageName
+        return tail.prefix(1).uppercased() + tail.dropFirst()
     }
 }

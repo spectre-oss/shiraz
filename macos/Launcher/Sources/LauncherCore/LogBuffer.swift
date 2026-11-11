@@ -4,7 +4,41 @@ import Foundation
 public struct LogLine: Identifiable, Hashable, Sendable {
     public var id: Int
     public var text: String
+    /// True when the line came from stderr. The runtime writes all of its
+    /// diagnostics there, so this is not a severity; see `level`.
     public var isError: Bool
+
+    public enum Level: Int, Comparable, Sendable {
+        case debug, info, warning, error
+        public static func < (a: Level, b: Level) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    /// Severity read from the line itself: Android logcat priority
+    /// (`E/Tag(`), Shiraz markers, and Python failures.
+    public var level: Level { Self.level(of: text) }
+
+    public static func level(of text: String) -> Level {
+        let trimmed = text.drop { $0 == " " }
+        if trimmed.count > 2, trimmed.dropFirst().first == "/" {
+            switch trimmed.first {
+            case "E", "F", "A": return .error
+            case "W": return .warning
+            case "D", "V": return .debug
+            case "I": return .info
+            default: break
+            }
+        }
+        if trimmed.hasPrefix("Traceback") || trimmed.hasPrefix("FATAL")
+            || trimmed.hasPrefix("SHIRAZ_ERROR") || trimmed.contains("Exception:")
+            || trimmed.range(of: #"^[A-Za-z_.]*Error\b"#, options: .regularExpression) != nil {
+            return .error
+        }
+        if trimmed.hasPrefix("SHIRAZ_UNSUPPORTED") || trimmed.hasPrefix("SHIRAZ_HOST_UNAVAILABLE")
+            || trimmed.hasPrefix("WARNING") || trimmed.hasPrefix("Warning:") {
+            return .warning
+        }
+        return .info
+    }
 }
 
 /// Bounded, line-oriented log. Splits chunks on newlines, keeps partial
@@ -53,7 +87,11 @@ public struct LogBuffer: Sendable {
     }
 
     private mutating func push(_ raw: String, stream: StreamKind) {
-        var text = raw.unicodeScalars.last == "\r" ? String(raw.unicodeScalars.dropLast()) : raw
+        // Drop control characters (NUL padding, stray CR, escape bytes) that
+        // would otherwise render as garbage and hide logcat prefixes; keep tabs.
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: raw.unicodeScalars.filter { $0 == "\t" || !($0.value < 0x20 || $0.value == 0x7F) })
+        var text = String(scalars)
         if text.count > maxLineLength { text = String(text.prefix(maxLineLength)) + "…" }
         lines.append(LogLine(id: nextID, text: text, isError: stream == .stderr))
         nextID += 1

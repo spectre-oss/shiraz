@@ -368,3 +368,29 @@ private let sampleReport = Data("""
         await store.extractIcon(for: "../evil.pkg") { _, _ in Issue.record("must not run for an invalid package") }
     }
 }
+
+@Test func logLevelReadsSeverityFromContent() {
+    #expect(LogLine.level(of: "E/ShirazHost( 1969): Could not create image space") == .error)
+    #expect(LogLine.level(of: "W/Thing(1): careful") == .warning)
+    #expect(LogLine.level(of: "I/wolfssljni( 1969): Unable to set FIPS callback") == .info)
+    #expect(LogLine.level(of: "D/x(1): y") == .debug)
+    #expect(LogLine.level(of: "SHIRAZ_UNSUPPORTED PR_SET_DUMPABLE: core dumps disabled") == .warning)
+    #expect(LogLine.level(of: "SHIRAZ_RUNTIME version=0.338.0") == .info)
+    #expect(LogLine.level(of: "Traceback (most recent call last):") == .error)
+    #expect(LogLine.level(of: "RuntimeError: boom") == .error)
+    #expect(LogLine.level(of: "java.lang.IllegalStateException: bad") == .error)
+}
+
+@Test func everyUnimplementedFeatureThrows() {
+    for feature in Feature.allCases {
+        #expect(throws: NotImplementedError(feature: feature)) { try feature.perform() }
+        #expect(!feature.title.isEmpty)
+    }
+}
+
+@Test func logBufferDropsControlCharacters() {
+    var log = LogBuffer()
+    log.append(Data("\u{0}E/Host( 1): bad\r\nok\tdone\n".utf8), stream: .stderr)
+    #expect(log.lines.map(\.text) == ["E/Host( 1): bad", "ok\tdone"])
+    #expect(log.lines.first?.level == .error)
+}

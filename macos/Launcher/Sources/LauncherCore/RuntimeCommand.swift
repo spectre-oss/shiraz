@@ -7,6 +7,10 @@ public enum RuntimeCommand {
         ["inspect", apk.path]
     }
 
+    public static func label(apk: URL) -> [String] {
+        ["label", apk.path]
+    }
+
     public static func icon(apk: URL, outputDirectory: URL) -> [String] {
         ["icon", apk.path, "--output-dir", outputDirectory.path]
     }

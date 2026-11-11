@@ -5,7 +5,7 @@ import sys
 import zipfile
 from pathlib import Path
 from .apk import FormatError, inspect_apk
-from .app_icon import extract_icon
+from .app_icon import extract_icon, resolve_label
 from .runtime import run_activity
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,7 +15,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog='shiraz', description='Shiraz APK-to-Linux toolchain (experimental)')
     parser.add_argument('--version', action='version', version='Shiraz ' + (ROOT / 'VERSION').read_text().strip())
     sub = parser.add_subparsers(dest='command', required=True)
-    for command in ('inspect', 'plan', 'run', 'icon'):
+    for command in ('inspect', 'plan', 'run', 'icon', 'label'):
         p = sub.add_parser(command)
         p.add_argument('apk', type=Path)
         if command == 'icon':
@@ -33,6 +33,9 @@ def main(argv=None):
             p.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == 'label':
+            print(json.dumps({'label': resolve_label(args.apk)}, ensure_ascii=False))
+            return 0
         if args.command == 'icon':
             print(json.dumps(extract_icon(args.apk, args.output_dir), indent=2, sort_keys=True))
             return 0

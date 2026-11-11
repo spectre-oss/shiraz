@@ -29,8 +29,13 @@ public struct LibraryStore: Sendable {
 
     public init(directory: URL) { self.directory = directory }
 
+    /// `SHIRAZ_LAUNCHER_LIBRARY` points the launcher at another library,
+    /// for development and UI testing without touching the user's apps.
     public static var defaultDirectory: URL {
-        URL.applicationSupportDirectory.appending(path: "Shiraz Launcher", directoryHint: .isDirectory)
+        if let path = ProcessInfo.processInfo.environment["SHIRAZ_LAUNCHER_LIBRARY"], !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return URL.applicationSupportDirectory.appending(path: "Shiraz Launcher", directoryHint: .isDirectory)
     }
 
     private var appsDirectory: URL { directory.appending(path: "apps", directoryHint: .isDirectory) }
@@ -44,6 +49,10 @@ public struct LibraryStore: Sendable {
 
     public func apkURL(for package: String) -> URL {
         appsDirectory.appending(path: package, directoryHint: .isDirectory).appending(path: "app.apk")
+    }
+
+    public func apkSize(for package: String) -> Int64? {
+        (try? apkURL(for: package).resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
     }
 
     public func iconDirectory(for package: String) -> URL {
