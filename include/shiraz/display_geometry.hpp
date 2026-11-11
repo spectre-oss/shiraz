@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "shiraz/compositor.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -13,6 +14,13 @@ inline Viewport input_viewport(int pixelWidth,int pixelHeight,int logicalWidth,i
 // SDL input/window coordinates are logical; Android surfaces use physical pixels.
 struct DisplayGeometry {
     int logicalWidth,logicalHeight,pixelWidth,pixelHeight,densityDpi;
+    // Both axes share one backing scale (within rounding) and it is in range.
+    static bool consistent(int lw,int lh,int pw,int ph) {
+        if(lw<1||lh<1||pw<1||ph<1)return false;
+        const double sx=double(pw)/lw,sy=double(ph)/lh;
+        const double density=160.0*sx;
+        return std::abs(sx-sy)<=2.0/std::min(lw,lh)+0.01*std::max(sx,sy)&&density>=1&&density<=1280;
+    }
     static DisplayGeometry from(int lw,int lh,int pw,int ph) {
         if(lw<1||lh<1||pw<1||ph<1||lw>8192||lh>8192||pw>8192||ph>8192||uint64_t(pw)*ph>16*1024*1024)
             throw std::invalid_argument("Invalid host display geometry");

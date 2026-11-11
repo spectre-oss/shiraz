@@ -284,7 +284,7 @@ void present(const Surface& initial, const std::string& title, int frames, const
     std::cerr << "SHIRAZ_PRESENTATION renderer=" << (rendererInfo.name ? rendererInfo.name : "unknown")
               << " accelerated=" << ((rendererInfo.flags & SDL_RENDERER_ACCELERATED) != 0)
               << " vsync=" << ((rendererInfo.flags & SDL_RENDERER_PRESENTVSYNC) != 0)
-              << " requested=" << rendererMode << "\n";
+              << " requested=" << rendererMode << " refresh_hz=" << presentation_refresh_rate() << "\n";
     if(rendererInfo.flags&SDL_RENDERER_ACCELERATED)std::cerr<<"SHIRAZ_GPU device="<<deviceName<<" vendor="<<vendorName<<"\n";
     const bool gpuCanvas=(rendererInfo.flags&SDL_RENDERER_ACCELERATED)&&SDL_GL_GetCurrentContext()&&gpu_initialize(SDL_GL_GetProcAddress);
     struct GpuLifetime {~GpuLifetime(){gpu_shutdown();}} gpuLifetime;
@@ -360,11 +360,22 @@ void present(const Surface& initial, const std::string& title, int frames, const
     };
     auto ownWindow = [&](Uint32 id) { return id == 0 || id == SDL_GetWindowID(window.get()); };
     DisplayGeometry lastGeometry{0,0,0,0,0};
+    int unsettledGeometry=0;
     auto syncGeometry=[&](Uint32 timestamp=0) {
         if(!resize&&!displayChanged)return;
         int lw,lh,pw,ph;SDL_GetWindowSize(window.get(),&lw,&lh);
         checked(SDL_GetRendererOutputSize(renderer.get(),&pw,&ph));
         if(lw<=0||lh<=0||pw<=0||ph<=0)return; // minimized/suspended output
+        // Cocoa full-screen and zoom transitions can report the new window size
+        // before the drawable follows (seen: 360x640 points over a 5120-pixel
+        // drawable), so the per-axis scales disagree. Wait for them to settle;
+        // a mismatch that never settles still fails explicitly.
+        if(!DisplayGeometry::consistent(lw,lh,pw,ph)){
+            if(++unsettledGeometry==1)std::cerr<<"SHIRAZ_DISPLAY_UNSETTLED logical="<<lw<<"x"<<lh<<" pixels="<<pw<<"x"<<ph<<"\n";
+            if(unsettledGeometry>240)throw std::runtime_error("Host display geometry did not settle: "+std::to_string(lw)+"x"+std::to_string(lh)+" points, "+std::to_string(pw)+"x"+std::to_string(ph)+" pixels");
+            return;
+        }
+        unsettledGeometry=0;
         auto geometry=DisplayGeometry::from(lw,lh,pw,ph);
         if(geometry==lastGeometry)return;
         const int width=displayChanged?pw:lw,height=displayChanged?ph:lh;

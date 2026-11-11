@@ -33,6 +33,13 @@ int main() {
     auto center=shiraz::map_pointer({270,343.5},fractionalViewport,675,859);
     assert(edge&&edge->x==0&&edge->y==0&&center&&center->x==337.5&&center->y==429.5);
     assert(!shiraz::map_pointer({0,0},shiraz::input_viewport(675,859,540,687,false),675,859));
+    // Full-screen transition: window points already resized, drawable not yet.
+    assert(shiraz::DisplayGeometry::consistent(540,1076,1080,2152));
+    assert(shiraz::DisplayGeometry::consistent(800,600,1000,750));
+    assert(shiraz::DisplayGeometry::consistent(361,640,720,1280));
+    assert(!shiraz::DisplayGeometry::consistent(360,640,5120,1440));
+    assert(!shiraz::DisplayGeometry::consistent(1512,945,720,1280));
+    assert(!shiraz::DisplayGeometry::consistent(1,1,8192,8192));
     bool invalidScale=false;try{shiraz::DisplayGeometry::from(1,1,8192,8192);}catch(const std::invalid_argument&){invalidScale=true;}assert(invalidScale);
     auto startup=shiraz::prepare_presentation(32,48);
     assert(startup.pixelWidth==32&&startup.pixelHeight==48&&startup.densityDpi==160);
