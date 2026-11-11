@@ -73,6 +73,23 @@ check: test
 	python3 scripts/commit_guard.py
 hooks:
 	git config --local core.hooksPath .githooks
+.PHONY: init lint-tools lint lint-staged lint-ci lint-cpp
+init: lint-tools
+	$(MAKE) hooks
+lint-tools:
+	python3 scripts/init_lint.py
+lint:
+	python3 scripts/lint.py
+lint-staged:
+	python3 scripts/lint.py --staged
+lint-ci:
+	@test -n "$(BASE)" || { echo 'Usage: make lint-ci BASE=<comparison-commit>'; exit 1; }
+	python3 scripts/lint.py --base "$(BASE)"
+# Generate real compile_commands.json for the host build before running this.
+COMPILE_DB ?= build
+lint-cpp:
+	@test -f "$(COMPILE_DB)/compile_commands.json" || { echo 'Missing compile_commands.json'; exit 1; }
+	.local/lint/venv/bin/python .local/lint/venv/bin/run-clang-tidy.py -clang-tidy-binary "$(CURDIR)/.local/lint/venv/bin/clang-tidy" -p "$(COMPILE_DB)" '$(CURDIR)/(native|src|tests)/'
 version:
 	python3 -m shiraz --version
 inspect:

@@ -368,3 +368,32 @@ The fixture certificate and key are generated only under `build/`, expire after
 two days, and are regenerated when building the probe. Never commit those files
 or the resulting APK. Host JVM checks validate the assertions; ART checks and
 real-app UI acceptance are separate evidence.
+
+## Code quality setup
+
+Run `make init` after cloning. It installs pinned Ruff and Clang tools in
+`.local/lint/venv`, downloads checksum-verified PMD into `.local/lint`, and registers
+the existing `.githooks` through Git's local `core.hooksPath`. Python 3 with `venv`
+and pip (or uv), Java 17+, and Go are prerequisites. Downloads require network
+access. Repeating `make init` is supported; it does not build the runtime.
+
+The pre-commit hook retains the staged-content and version guards, then checks an
+isolated snapshot of staged Python, C/C++, Java and Go files. Partially staged
+files and configurations are read from the index. Checks never rewrite or stage
+files; missing tools fail with setup instructions. Run `make lint-staged` to
+repeat the check, `make lint` for all tracked source, or
+`make lint-ci BASE=<commit>` for files changed since a comparison commit.
+
+Configurations live in `.clang-format`, `.clang-tidy`, `ruff.toml` and
+`config/pmd.xml`; Python tool versions are pinned in `config/lint-requirements.txt`.
+Python formatting uses Ruff, C/C++ formatting uses Clang, Go formatting uses
+gofmt, and Java uses PMD correctness checks. Vendored dependencies and local
+build/data trees are excluded. Existing files are not reformatted en masse:
+changed files must pass, while `make lint` also reports legacy violations.
+
+The Code quality workflow checks changed files on pull requests and main pushes,
+runs Python unit tests, Go vet/tests (including the JS/WASM target), and Svelte
+checks. It also analyzes two dependency-free Linux native test targets with a
+real compilation database. For broader native analysis, capture your platform's
+build using Bear and run `make lint-cpp COMPILE_DB=<directory>`. Darwin-specific
+code requires a macOS compilation database and tools; Linux CI does not validate it.

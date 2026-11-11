@@ -1,0 +1,6 @@
+# Run against real, platform-specific compile_commands.json; no automatic fixes.
+Checks: '-*,clang-analyzer-*,bugprone-sizeof-expression,bugprone-suspicious-memset-usage,bugprone-use-after-move'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)(include/shiraz|src|native)/'
+SystemHeaders: false
+FormatStyle: none

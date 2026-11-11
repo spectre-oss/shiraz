@@ -1,0 +1,2 @@
+# Required by the existing pinned ARM instruction decoder regression tests.
+capstone==5.0.3

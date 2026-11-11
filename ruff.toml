@@ -1,0 +1,12 @@
+line-length = 100
+force-exclude = true
+extend-exclude = [".deps", ".local", "context", "third_party", "build", "dist", "data"]
+fix = false
+
+[lint]
+# Undefined names, unused imports/locals, malformed expressions/imports.
+select = ["E4", "E9", "F"]
+
+[format]
+quote-style = "preserve"
+indent-style = "space"
