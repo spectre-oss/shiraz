@@ -91,7 +91,7 @@ public final class ServiceSmoke {
    boolean file=shiraz.runtime.ExternalLauncher.open(new android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse("file:///etc/passwd")));
    boolean spaced=shiraz.runtime.ExternalLauncher.open(new android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse("https://a.b/x y")));
    boolean send=shiraz.runtime.ExternalLauncher.open(new android.content.Intent(android.content.Intent.ACTION_SEND,android.net.Uri.parse("https://a.b")));
-   if(!web||scoped||file||spaced||send||!ran.toString().equals("[xdg-open, https://osmand.net/a?x=1]"))throw new AssertionError("External launcher "+web+scoped+file+spaced+send+ran);}
+   if(!web||scoped||file||spaced||send||!ran.toString().equals("["+shiraz.runtime.ExternalLauncher.opener()+", https://osmand.net/a?x=1]"))throw new AssertionError("External launcher "+web+scoped+file+spaced+send+ran);}
    {java.io.File picked=java.io.File.createTempFile("shiraz-pick-",".png");picked.deleteOnExit();try(java.io.FileOutputStream out=new java.io.FileOutputStream(picked)){out.write(new byte[]{(byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A});}
     final String[] chosen={null};shiraz.runtime.HostContentPicker.setChooser(new shiraz.runtime.HostContentPicker.Chooser(){public String choose(String mime){return chosen[0];}});
     android.content.Intent get=new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).setType("image/*");

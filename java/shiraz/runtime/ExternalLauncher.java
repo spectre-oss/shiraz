@@ -12,7 +12,8 @@ public final class ExternalLauncher {
  private static Runner runner=new Runner(){public void run(List<String> command){
   try{
    ProcessBuilder builder=new ProcessBuilder(command);
-   Map<String,String> environment=builder.environment();environment.remove("LD_LIBRARY_PATH");environment.remove("LD_PRELOAD");
+   Map<String,String> environment=builder.environment();// The opener is a host program: drop loader overrides meant for the runtime.
+   for(String key:new ArrayList<String>(environment.keySet()))if(key.startsWith("LD_")||key.startsWith("DYLD_"))environment.remove(key);
    builder.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.to(new java.io.File("/dev/null")));
    builder.start();
   }catch(java.io.IOException failed){System.err.println("SHIRAZ_EXTERNAL_OPEN_FAILED "+failed.getMessage());}
@@ -31,10 +32,12 @@ public final class ExternalLauncher {
   for(int i=0;i<text.length();i++){char c=text.charAt(i);if(c<=' '||c==127)return null;}
   return text;
  }
+ /** LaunchServices on macOS (default browser, Mail, FaceTime for tel:), the XDG opener elsewhere. */
+ public static String opener(){return HostOs.darwin()?"/usr/bin/open":"xdg-open";}
  public static boolean open(Intent intent){
   String target=externalTarget(intent);
   if(target==null)return false;
-  ArrayList<String> command=new ArrayList<String>();command.add("xdg-open");command.add(target);
+  ArrayList<String> command=new ArrayList<String>();command.add(opener());command.add(target);
   runner.run(command);
   return true;
  }
