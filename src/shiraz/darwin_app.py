@@ -5,6 +5,8 @@ import hashlib
 import os
 import plistlib
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -14,11 +16,39 @@ from .apk import FormatError
 MAX_ICON = 4 * 1024 * 1024
 
 
-def prepare_app_bundle(work: Path, vm: Path, host: Path, package: str, icon: Optional[Path] = None) -> Path:
+def badged_icon(apk: Path, work: Path, icons: Path) -> Optional[Path]:
+    """The APK's launcher icon with the Shiraz badge as .icns, or None.
+
+    Uses build/icons/shiraz-badge (make macos-icons). The Dock icon is cosmetic:
+    an APK without a supported raster icon falls back to the plain ghost, with
+    the reason on stderr.
+    """
+    helper, mark = icons / "shiraz-badge", icons / "shiraz-mark.png"
+    if not helper.is_file() or not mark.is_file():
+        return None
+    target, source = work / "dock.icns", work / "icon"
+    if target.is_file() and target.stat().st_mtime >= max(helper.stat().st_mtime, apk.stat().st_mtime):
+        return target
+    from .app_icon import extract_icon
+    try:
+        if source.is_symlink() or target.is_symlink():
+            raise FormatError("icon work paths must not be symlinks")
+        extract_icon(apk, source)
+        subprocess.run([str(helper), str(source), str(mark), str(target)], check=True, timeout=30,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except (FormatError, OSError, subprocess.SubprocessError) as exc:
+        print(f"SHIRAZ_DOCK_ICON fallback=ghost reason={exc}", file=sys.stderr, flush=True)
+        return None
+    return target
+
+
+def prepare_app_bundle(work: Path, vm: Path, host: Path, package: str, icon: Optional[Path] = None,
+                       name: Optional[str] = None) -> Path:
     """Copy the unchanged ART executable into an app bundle; never patch or sign it.
 
-    `icon` is an optional .icns (the Shiraz ghost from macos/icons) shown in the
-    Dock and app switcher while the APK runs. A missing icon is not an error.
+    `icon` is an optional .icns (the APK icon with the Shiraz badge, or the plain
+    ghost) shown in the Dock and app switcher while the APK runs; `name` is the
+    app label shown there. A missing icon is not an error.
     """
     vm = vm.resolve(strict=True)
     if not vm.is_file() or vm.stat().st_size > 64 * 1024 * 1024:
@@ -32,11 +62,12 @@ def prepare_app_bundle(work: Path, vm: Path, host: Path, package: str, icon: Opt
         if directory.is_symlink():
             raise FormatError("Darwin app bundle directory must not be a symlink")
         directory.mkdir(parents=True, exist_ok=True)
+    display = name.strip() if name and name.strip() and "\0" not in name else "Shiraz"
     identity = hashlib.sha256(package.encode("utf-8")).hexdigest()[:24]
     info = {
         "CFBundleIdentifier": "org.shiraz.apk." + identity,
-        "CFBundleName": "Shiraz",
-        "CFBundleDisplayName": "Shiraz",
+        "CFBundleName": display[:64],
+        "CFBundleDisplayName": display[:64],
         "CFBundleExecutable": "ShirazHost",
         "CFBundlePackageType": "APPL",
         "CFBundleVersion": "1",

@@ -43,9 +43,11 @@ The launcher shows the runtime's own output in each app's Console tab.
   icon. Both run at import and once for apps imported earlier.
 - Favorites, last-played time and the chosen view and sort persist.
 - The Shiraz logo (the Spectre ghost from `landing/src/lib/spectre.svg`) is the
-  launcher's app icon and the Dock icon of running APKs. `make macos-icons`
-  (also run by `make launcher-app`) renders `build/icons/shiraz.icns`; the
-  runtime adds it to each APK's host bundle when present.
+  launcher's app icon. A running APK shows its own label and launcher icon in
+  the Dock, with the ghost in a corner badge. `make macos-icons` (also run by
+  `make launcher-app`) renders `build/icons/shiraz.icns` and builds
+  `build/icons/shiraz-badge`, which the runtime uses to compose each APK's
+  Dock icon. APKs without a supported raster icon get the plain ghost.
 
 ## Not implemented
 
@@ -62,7 +64,6 @@ report, performance stats, copying console output.
 Also missing:
 
 - Vector-drawable icons are not rendered; those apps get a monogram.
-- Running APKs show the Shiraz ghost in the Dock, not their own icon.
 - Embedded runtime. For now the launcher drives a source checkout through
   `python3 -m shiraz`. It finds the checkout from `SHIRAZ_ROOT`, from its own
   location, or from Settings.
