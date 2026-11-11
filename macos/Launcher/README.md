@@ -64,6 +64,12 @@ report, performance stats, copying console output.
 Also missing:
 
 - Vector-drawable icons are not rendered; those apps get a monogram.
+- The F-Droid catalog page. The runtime side exists:
+  `python3 -m shiraz fdroid sync --cache <dir>` downloads index-v1.jar, checks
+  the pinned f-droid.org certificate, the JAR signature (SHA-1, as f-droid.org
+  signs v1) and digests, and writes `catalog.json`;
+  `python3 -m shiraz fdroid fetch <package> --cache <dir> --output <dir>`
+  downloads one APK and checks its SHA-256 against the signed index.
 - Embedded runtime. For now the launcher drives a source checkout through
   `python3 -m shiraz`. It finds the checkout from `SHIRAZ_ROOT`, from its own
   location, or from Settings.

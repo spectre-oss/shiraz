@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 from .apk import FormatError, inspect_apk
 from .app_icon import extract_icon, resolve_label
+from . import fdroid
 from .runtime import run_activity
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,8 +32,26 @@ def main(argv=None):
             p.add_argument('--log-level', choices=['VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'ASSERT', 'SILENT'], default='INFO')
         if command == 'plan':
             p.add_argument('--output', type=Path, required=True)
+    repo = sub.add_parser('fdroid', help='F-Droid repository: signed index and verified APK downloads')
+    actions = repo.add_subparsers(dest='action', required=True)
+    sync = actions.add_parser('sync', help='Download and verify the index, write <cache>/catalog.json')
+    sync.add_argument('--cache', type=Path, required=True)
+    sync.add_argument('--max-age', type=int, default=0, help='Reuse a catalog younger than this many seconds')
+    fetch = actions.add_parser('fetch', help='Download one catalog APK, SHA-256 checked against the signed index')
+    fetch.add_argument('package')
+    fetch.add_argument('--cache', type=Path, required=True)
+    fetch.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == 'fdroid':
+            if args.action == 'sync':
+                catalog = fdroid.sync(args.cache, args.max_age)
+                apps = catalog['apps']
+                print(json.dumps({'catalog': str(args.cache / 'catalog.json'), 'apps': len(apps),
+                                  'compatible': sum(a['compatible'] for a in apps), 'timestamp': catalog['repo']['timestamp']}))
+            else:
+                print(json.dumps(fdroid.fetch(args.cache, args.package, args.output)))
+            return 0
         if args.command == 'label':
             print(json.dumps({'label': resolve_label(args.apk)}, ensure_ascii=False))
             return 0
