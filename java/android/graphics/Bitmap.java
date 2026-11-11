@@ -49,7 +49,7 @@ public final class Bitmap {
     private void releaseGpu(){if(gpuLease!=null){gpuLease.release();gpuLease=null;}}
 
 
-    private int capacity;
+    private long allocationBytes;
     private boolean mutable=true;
     private boolean hasAlpha=true;
     private void normalizeOpacity(){if(!hasAlpha&&config!=Config.ALPHA_8)for(int i=0;i<pixels.length;i++)pixels[i]|=0xff000000;}
@@ -110,8 +110,21 @@ public final class Bitmap {
         return result;
     }
     public static Bitmap createBitmap(int width, int height, Config config) {
-        if (config != Config.ARGB_8888 && config != Config.ALPHA_8) throw new UnsupportedOperationException("Only ARGB_8888 and ALPHA_8 are implemented");
-        Bitmap result=new Bitmap(width,height);result.config=config;return result;
+        Config storage=storageConfig(config);
+        if(storage==Config.HARDWARE)throw new IllegalArgumentException("can't create mutable bitmap with Config.HARDWARE");
+        Bitmap result=new Bitmap(width,height);result.config=storage;if(storage==Config.RGB_565)result.hasAlpha=false;return result;
+    }
+    /** Pixel storage stays int ARGB; RGB_565 is opaque and quantized on every logical read/write. */
+    private static Config storageConfig(Config config){
+        if(config==null)throw new NullPointerException("Bitmap config");
+        if(config==Config.RGBA_F16)throw new UnsupportedOperationException("RGBA_F16 bitmaps are not implemented");
+        // Android 4.4+ creates ARGB_8888 whenever ARGB_4444 is requested.
+        return config==Config.ARGB_4444?Config.ARGB_8888:config;
+    }
+    private static int bytesPerPixel(Config config){return config==Config.ALPHA_8?1:config==Config.RGB_565?2:4;}
+    private static int quantize565(int color){
+        int r=(color>>>19)&31,g=(color>>>10)&63,b=(color>>>3)&31;
+        return 0xff000000|(r<<3|r>>>2)<<16|(g<<2|g>>>4)<<8|(b<<3|b>>>2);
     }
     public static Bitmap createBitmap(int width,int height,Config config,boolean hasAlpha){return createBitmap(null,width,height,config,hasAlpha,ColorSpace.get(ColorSpace.Named.SRGB));}
     public static Bitmap createBitmap(int width,int height,Config config,boolean hasAlpha,ColorSpace colorSpace){return createBitmap(null,width,height,config,hasAlpha,colorSpace);}
@@ -124,7 +137,7 @@ public final class Bitmap {
     public ColorSpace getColorSpace(){requireLive();return config==Config.ALPHA_8?null:ColorSpace.get(ColorSpace.Named.SRGB);}
     public void prepareToDraw(){requireLive();}
     public boolean hasAlpha(){requireLive();return hasAlpha;}
-    public void setHasAlpha(boolean value){requireLive();if(value==hasAlpha)return;cpuWrite();hasAlpha=value;normalizeOpacity();}
+    public void setHasAlpha(boolean value){requireLive();if(config==Config.RGB_565||value==hasAlpha)return;cpuWrite();hasAlpha=value;normalizeOpacity();}
     static Bitmap fromPixels(int width,int height,int[] pixels) {
         if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || (long)width*height > 16*1024*1024 || pixels == null || (long)width*height != pixels.length) throw new IllegalArgumentException("Decoded bitmap dimensions");
         return new Bitmap(width,height,pixels);
@@ -135,13 +148,16 @@ public final class Bitmap {
     public boolean isMutable() { return mutable && !isRecycled(); }
     public void reconfigure(int newWidth,int newHeight,Config newConfig){
         requireMutable();
-        if(newConfig!=Config.ARGB_8888&&newConfig!=Config.ALPHA_8)throw new UnsupportedOperationException("Only ARGB_8888 and ALPHA_8 are implemented");
+        Config storage=storageConfig(newConfig);
+        if(storage==Config.HARDWARE)throw new IllegalArgumentException("Bitmap config");
         if(newWidth<=0||newHeight<=0||newWidth>8192||newHeight>8192||(long)newWidth*newHeight>MAX_RENDER_PIXELS)throw new IllegalArgumentException("Bitmap dimensions");
-        int allocated=capacity==0?pixels.length:capacity;
-        if((long)newWidth*newHeight>(long)allocated)throw new IllegalArgumentException("New bitmap size is larger than the allocation");
-        capacity=allocated;
+        long allocated=getAllocationByteCount();
+        if((long)newWidth*newHeight*bytesPerPixel(storage)>allocated)throw new IllegalArgumentException("New bitmap size is larger than the allocation");
+        allocationBytes=allocated;
         if(newWidth!=width||newHeight!=height)pixels=new int[newWidth*newHeight];
-        width=newWidth;height=newHeight;config=newConfig;
+        // Android keeps an opaque request across reconfigure, except that RGB_565 is always opaque.
+        if(storage==Config.RGB_565)hasAlpha=false;else if(config==Config.RGB_565)hasAlpha=true;
+        width=newWidth;height=newHeight;config=storage;normalizeOpacity();
     }
     public void setPremultiplied(boolean value){requireLive();if(!value)throw new UnsupportedOperationException("Unpremultiplied bitmap storage is not implemented");}
     public boolean sameAs(Bitmap other){
@@ -150,16 +166,48 @@ public final class Bitmap {
     }
     public void copyPixelsFromBuffer(java.nio.Buffer source){
         requireMutable();if(source==null)throw new NullPointerException("source");
-        if(config!=Config.ARGB_8888)throw new UnsupportedOperationException("Only ARGB_8888 pixel buffers are implemented");
-        int count=width*height;
-        if(source instanceof java.nio.IntBuffer){
-            java.nio.IntBuffer ints=(java.nio.IntBuffer)source;if(ints.remaining()<count)throw new RuntimeException("Buffer not large enough for pixels");
-            ints.get(pixels,0,count);return;
-        }
-        if(!(source instanceof java.nio.ByteBuffer))throw new UnsupportedOperationException("Only byte and int pixel buffers are implemented");
-        java.nio.ByteBuffer bytes=(java.nio.ByteBuffer)source;if(bytes.remaining()<(long)count*4)throw new RuntimeException("Buffer not large enough for pixels");
-        for(int i=0;i<count;i++){int r=bytes.get()&255,g=bytes.get()&255,b=bytes.get()&255,a=bytes.get()&255;pixels[i]=a<<24|r<<16|g<<8|b;}
+        byte[] memory=new byte[getByteCount()];
+        java.nio.ByteBuffer view=java.nio.ByteBuffer.wrap(memory).order(java.nio.ByteOrder.nativeOrder());
+        if(source instanceof java.nio.ByteBuffer){java.nio.ByteBuffer bytes=(java.nio.ByteBuffer)source;if(bytes.remaining()<memory.length)throw new RuntimeException("Buffer not large enough for pixels");bytes.get(memory);}
+        else if(source instanceof java.nio.IntBuffer){java.nio.IntBuffer ints=(java.nio.IntBuffer)source;if((long)ints.remaining()*4<memory.length)throw new RuntimeException("Buffer not large enough for pixels");int[] words=new int[(memory.length+3)/4];ints.get(words,0,memory.length/4);view.asIntBuffer().put(words,0,memory.length/4);}
+        else if(source instanceof java.nio.ShortBuffer){java.nio.ShortBuffer shorts=(java.nio.ShortBuffer)source;if((long)shorts.remaining()*2<memory.length)throw new RuntimeException("Buffer not large enough for pixels");short[] words=new short[memory.length/2];shorts.get(words);view.asShortBuffer().put(words);}
+        else throw new UnsupportedOperationException("Only byte, short and int pixel buffers are implemented");
+        decodeMemory(memory);
     }
+    // Android pixel memory: ALPHA_8 bytes, native-order RGB_565 halfwords, premultiplied R,G,B,A bytes.
+    private byte[] encodeMemory(){
+        byte[] memory=new byte[getByteCount()];int count=width*height;
+        if(config==Config.ALPHA_8){for(int i=0;i<count;i++)memory[i]=(byte)(pixels[i]>>>24);return memory;}
+        boolean little=java.nio.ByteOrder.nativeOrder()==java.nio.ByteOrder.LITTLE_ENDIAN;
+        for(int i=0;i<count;i++){
+            int color=logicalColor(pixels[i]);
+            if(config==Config.RGB_565){
+                int value=((color>>>19)&31)<<11|((color>>>10)&63)<<5|((color>>>3)&31);
+                memory[2*i+(little?0:1)]=(byte)value;memory[2*i+(little?1:0)]=(byte)(value>>>8);continue;
+            }
+            int a=color>>>24;
+            memory[4*i]=(byte)premultiply((color>>>16)&255,a);memory[4*i+1]=(byte)premultiply((color>>>8)&255,a);
+            memory[4*i+2]=(byte)premultiply(color&255,a);memory[4*i+3]=(byte)a;
+        }
+        return memory;
+    }
+    private void decodeMemory(byte[] memory){
+        int count=width*height;
+        if(config==Config.ALPHA_8){for(int i=0;i<count;i++)pixels[i]=(memory[i]&255)<<24;return;}
+        boolean little=java.nio.ByteOrder.nativeOrder()==java.nio.ByteOrder.LITTLE_ENDIAN;
+        for(int i=0;i<count;i++){
+            if(config==Config.RGB_565){
+                int value=(memory[2*i+(little?0:1)]&255)|(memory[2*i+(little?1:0)]&255)<<8;
+                int r=value>>>11,g=(value>>>5)&63,b=value&31;
+                pixels[i]=0xff000000|(r<<3|r>>>2)<<16|(g<<2|g>>>4)<<8|(b<<3|b>>>2);continue;
+            }
+            int a=memory[4*i+3]&255;
+            pixels[i]=logicalColor(a<<24|unpremultiply(memory[4*i]&255,a)<<16|unpremultiply(memory[4*i+1]&255,a)<<8|unpremultiply(memory[4*i+2]&255,a));
+        }
+    }
+    // Same rounding as the AndroidBitmap JNI provider (native/android_bitmap.cpp).
+    private static int premultiply(int value,int alpha){return (value*alpha+127)/255;}
+    private static int unpremultiply(int value,int alpha){return alpha==0?0:Math.min(255,(value*255+alpha/2)/alpha);}
     public boolean isPremultiplied(){requireLive();return true;}
     public int getDensity() { return density; }
     public void setDensity(int value) { if (value < 0) throw new IllegalArgumentException("bitmap density"); density=value; }
@@ -171,13 +219,14 @@ public final class Bitmap {
     public int getScaledWidth(Canvas target) { return getScaledWidth(target.getDensity()); }
     public int getScaledHeight(Canvas target) { return getScaledHeight(target.getDensity()); }
     public Bitmap copy(Config config,boolean mutable) {
-        requireLive();if(config!=Config.ARGB_8888&&config!=Config.ALPHA_8)throw new UnsupportedOperationException("Bitmap copy config");
+        requireLive();if(config==Config.HARDWARE)throw new UnsupportedOperationException("Hardware bitmap copies are not implemented");config=storageConfig(config);
         boolean onGpu=gpuDirty&&config==this.config&&config==Config.ARGB_8888;
         if(!onGpu)cpuRead();
         Bitmap copy=new Bitmap(width,height,onGpu?new int[pixels.length]:pixels.clone());
         if(onGpu)shiraz.runtime.NativeGpu.copyInto(gpu,copy.shirazGpuTarget());
-        copy.config=config;copy.hasAlpha=hasAlpha;
+        copy.config=config;copy.hasAlpha=config!=Config.RGB_565&&hasAlpha;
         if(this.config==Config.ALPHA_8||config==Config.ALPHA_8)for(int i=0;i<copy.pixels.length;i++)copy.pixels[i]&=0xff000000;
+        else if(this.config==Config.RGB_565||config==Config.RGB_565)for(int i=0;i<copy.pixels.length;i++)copy.pixels[i]=copy.logicalColor(logicalColor(copy.pixels[i]));
         copy.mutable=mutable;copy.density=density;copy.ninePatchChunk=getNinePatchChunk();return copy;
     }
     /** Internal surface-buffer transfer; no conversion or allocation. */
@@ -207,21 +256,21 @@ public final class Bitmap {
     public Config getConfig() { return config; }
     public boolean isRecycled() { return pixels == null; }
     public void recycle() { if(gpu!=0)releaseGpu();gpu=0;gpuDirty=false;pixels = null; }
-    public int getByteCount() { return width * height * (config==Config.ALPHA_8?1:4); }
-    public int getRowBytes(){return width*(config==Config.ALPHA_8?1:4);}
+    public int getByteCount() { return width * height * bytesPerPixel(config); }
+    public int getRowBytes(){return width*bytesPerPixel(config);}
     public void copyPixelsToBuffer(java.nio.Buffer buffer) {
         requireLive();
         cpuRead();
         if (buffer == null) throw new NullPointerException("buffer");
-        if (!(buffer instanceof java.nio.ByteBuffer)) throw new IllegalArgumentException("Pixel copy requires a byte buffer");
-        java.nio.ByteBuffer output = (java.nio.ByteBuffer) buffer;
-        int count = getByteCount();
-        if (output.remaining() < count) throw new RuntimeException("Buffer not large enough for pixels");
-        if (config == Config.ALPHA_8) { for (int color : pixels) output.put((byte)(color >>> 24)); return; }
-        for (int color : pixels) { output.put((byte)(color >>> 24)); output.put((byte)(color >>> 16)); output.put((byte)(color >>> 8)); output.put((byte) color); }
+        byte[] memory=encodeMemory();
+        java.nio.ByteBuffer view=java.nio.ByteBuffer.wrap(memory).order(java.nio.ByteOrder.nativeOrder());
+        if(buffer instanceof java.nio.ByteBuffer){java.nio.ByteBuffer output=(java.nio.ByteBuffer)buffer;if(output.remaining()<memory.length)throw new RuntimeException("Buffer not large enough for pixels");output.put(memory);}
+        else if(buffer instanceof java.nio.IntBuffer){java.nio.IntBuffer output=(java.nio.IntBuffer)buffer;if((long)output.remaining()*4<memory.length)throw new RuntimeException("Buffer not large enough for pixels");int[] words=new int[memory.length/4];view.asIntBuffer().get(words);output.put(words);}
+        else if(buffer instanceof java.nio.ShortBuffer){java.nio.ShortBuffer output=(java.nio.ShortBuffer)buffer;if((long)output.remaining()*2<memory.length)throw new RuntimeException("Buffer not large enough for pixels");short[] words=new short[memory.length/2];view.asShortBuffer().get(words);output.put(words);}
+        else throw new UnsupportedOperationException("Only byte, short and int pixel buffers are implemented");
     }
-    public int getAllocationByteCount(){return (capacity==0?width*height:capacity)*4;}
-    private int logicalColor(int color){return config==Config.ALPHA_8?color&0xff000000:hasAlpha?color:color|0xff000000;}
+    public int getAllocationByteCount(){return allocationBytes==0?getByteCount():(int)allocationBytes;}
+    private int logicalColor(int color){return config==Config.ALPHA_8?color&0xff000000:config==Config.RGB_565?quantize565(color):hasAlpha?color:color|0xff000000;}
     // Alpha-only bitmaps use bounded int backing; RGB is ignored, including native raster writes.
     int[] colorPixels(int color){requireLive();cpuRead();if(config!=Config.ALPHA_8)return pixels;int[] result=new int[pixels.length];for(int i=0;i<result.length;i++)result[i]=(pixels[i]&0xff000000)|(color&0xffffff);return result;}
     private int index(int x, int y) {
@@ -240,7 +289,7 @@ public final class Bitmap {
         if(x<0||y<0||w<0||h<0||(long)x+w>width||(long)y+h>height||stride<w||offset<0)throw new IllegalArgumentException("Bitmap copy bounds");
         if(w==0||h==0)return;
         if((long)offset+(long)(h-1)*stride+w>source.length)throw new ArrayIndexOutOfBoundsException("Source too small");
-        for(int row=0;row<h;row++){System.arraycopy(source,offset+row*stride,pixels,(y+row)*width+x,w);if(config==Config.ALPHA_8)for(int col=0;col<w;col++)pixels[(y+row)*width+x+col]&=0xff000000;}
+        for(int row=0;row<h;row++){System.arraycopy(source,offset+row*stride,pixels,(y+row)*width+x,w);if(config==Config.ALPHA_8||config==Config.RGB_565)for(int col=0;col<w;col++)pixels[(y+row)*width+x+col]=logicalColor(pixels[(y+row)*width+x+col]);}
     }
     public void getPixels(int[] target, int offset, int stride, int x, int y, int w, int h) {
         requireLive();
@@ -251,6 +300,6 @@ public final class Bitmap {
             throw new IllegalArgumentException("Bitmap copy bounds");
         if (w == 0 || h == 0) return;
         if ((long) offset + (long) (h - 1) * stride + w > target.length) throw new ArrayIndexOutOfBoundsException("Target too small");
-        for (int row = 0; row < h; ++row){System.arraycopy(pixels, (y + row) * width + x, target, offset + row * stride, w);if(config==Config.ALPHA_8)for(int col=0;col<w;col++)target[offset+row*stride+col]&=0xff000000;}
+        for (int row = 0; row < h; ++row){System.arraycopy(pixels, (y + row) * width + x, target, offset + row * stride, w);if(config==Config.ALPHA_8||config==Config.RGB_565)for(int col=0;col<w;col++)target[offset+row*stride+col]=logicalColor(target[offset+row*stride+col]);}
     }
 }

@@ -157,7 +157,7 @@ public final class BitmapSmoke {
     public static void main(String[] args) {
         Bitmap stored = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888); stored.eraseColor(0x11223344);
         java.nio.ByteBuffer encoded = java.nio.ByteBuffer.allocate(4); stored.copyPixelsToBuffer(encoded);
-        if (encoded.position() != 4 || encoded.get(0) != 0x11 || encoded.get(1) != 0x22 || encoded.get(2) != 0x33 || encoded.get(3) != 0x44) throw new AssertionError("ARGB pixel copy");
+        if (encoded.position() != 4 || encoded.get(0) != 0x02 || encoded.get(1) != 0x03 || encoded.get(2) != 0x05 || encoded.get(3) != 0x11) throw new AssertionError("Premultiplied RGBA pixel copy");
         try { stored.copyPixelsToBuffer(java.nio.ByteBuffer.allocate(3)); throw new AssertionError("short pixel buffer accepted"); } catch (RuntimeException expected) {}
         stored.recycle();
         transparentBlends();
