@@ -321,6 +321,25 @@ extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeBitmap_clear(JNIEnv*
     }
 }
 
+// Opaque surface formats: force alpha to 0xff, optionally quantizing RGB to
+// 5:6:5 and expanding back, as an RGB_565 buffer would store it.
+extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeBitmap_opaque(JNIEnv* env,jclass,jintArray pixels,jboolean rgb565) {
+    if(!pixels){error(env,"java/lang/NullPointerException","pixels");return;}
+    const jsize count=env->GetArrayLength(pixels);
+    if(count>32*1024*1024){error(env,"java/lang/IllegalArgumentException","Bitmap opaque exceeds render pixel budget");return;}
+    jint block[4096];
+    for(jsize at=0;at<count;at+=4096){
+        const jsize n=std::min<jsize>(4096,count-at);
+        env->GetIntArrayRegion(pixels,at,n,block);if(env->ExceptionCheck())return;
+        for(jsize i=0;i<n;++i){
+            uint32_t c=uint32_t(block[i]);
+            if(rgb565){uint32_t r=(c>>19)&31,g=(c>>10)&63,b=(c>>3)&31;c=((r<<3|r>>2)<<16)|((g<<2|g>>4)<<8)|(b<<3|b>>2);}
+            block[i]=jint(0xff000000u|c);
+        }
+        env->SetIntArrayRegion(pixels,at,n,block);if(env->ExceptionCheck())return;
+    }
+}
+
 extern "C" JNIEXPORT void JNICALL Java_shiraz_runtime_NativeBitmap_outlineShadow(JNIEnv* env,jclass,
     jintArray pixels,jint width,jint height,jint l,jint t,jint r,jint b,
     jfloat sx,jfloat sy,jfloat tx,jfloat ty,jint left,jint top,jint right,jint bottom,jfloat radius,jboolean oval,

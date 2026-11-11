@@ -101,7 +101,9 @@ public class Surface implements android.os.Parcelable {
   synchronized(this){if(canvas==null||canvas!=locked||producer!=Thread.currentThread())throw new IllegalArgumentException("Canvas lock ownership");
    canvas.setBitmap(null);
    try{if(valid&&lockedGeneration==generation){
-     if(format==PixelFormat.RGB_565||format==PixelFormat.RGBX_8888||format==PixelFormat.OPAQUE){int w=back.getWidth(),h=back.getHeight();int[] row=new int[w];for(int y=0;y<h;y++){back.getPixels(row,0,w,0,y,w,1);for(int x=0;x<w;x++){int c=row[x];if(format==PixelFormat.RGB_565){int r=(c>>>19)&31,g=(c>>>10)&63,b=(c>>>3)&31;c=((r<<3|r>>>2)<<16)|((g<<2|g>>>4)<<8)|(b<<3|b>>>2);}row[x]=0xff000000|c;}back.setPixels(row,0,w,0,y,w,1);}}
+     // Opaque formats keep no alpha. One native pass: the per-pixel Java loop
+     // this replaces cost ~55 ms per 720x1280 frame under the interpreter.
+     if(format==PixelFormat.RGB_565||format==PixelFormat.RGBX_8888||format==PixelFormat.OPAQUE)back.shirazOpaque(format==PixelFormat.RGB_565);
      spare=front;front=back;back=null;posts++;hasPostedFrame=true;if(nativeWindow!=0){int count=width*height;if(published==null||published.length!=count)published=new int[count];front.getPixels(published,0,width,0,0,width,height);if(!nativePostArgb(nativeWindow,published))throw new IllegalStateException("Native surface post failed");lastNativeRevision=nativeWindowRevision(nativeWindow);}
    }}finally{if(back!=null)back.recycle();back=null;locked=null;producer=null;notifyAll();}
   }

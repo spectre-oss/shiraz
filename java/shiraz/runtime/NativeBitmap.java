@@ -23,6 +23,8 @@ public final class NativeBitmap {
         int clipLeft,int clipTop,int clipRight,int clipBottom,int tint,int mode,float[] matrix);
     /** Replace every pixel, including transparent RGB; this is not source-over blending. */
     public static native void clear(int[] pixels,int color);
+    /** Force alpha to 0xff for opaque surface formats; rgb565 also quantizes RGB to 5:6:5. */
+    public static native void opaque(int[] pixels,boolean rgb565);
     public static native void outlineShadow(int[] pixels,int width,int height,int l,int t,int r,int b,
         float sx,float sy,float tx,float ty,int left,int top,int right,int bottom,float radius,boolean oval,
         float sigma,float offset,float opacity);

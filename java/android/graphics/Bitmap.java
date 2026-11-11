@@ -231,6 +231,8 @@ public final class Bitmap {
     }
     public int getPixel(int x, int y) { cpuRead(); return logicalColor(pixels[index(x, y)]); }
     public void setPixel(int x, int y, int color) { requireMutable(); pixels[index(x, y)] = logicalColor(color); }
+    /** Shiraz surface post: force opaque pixels (optionally RGB_565-quantized) in one native pass. */
+    public void shirazOpaque(boolean rgb565){requireLive();if(!mutable)throw new IllegalStateException("Bitmap is immutable");cpuWrite();shiraz.runtime.NativeBitmap.opaque(pixels,rgb565);}
     public void eraseColor(int color) { requireLive();if(!mutable)throw new IllegalStateException("Bitmap is immutable");if(gpuDirty&&gpuThread==Thread.currentThread()&&shiraz.runtime.NativeGpu.valid(gpu)){changed();shiraz.runtime.NativeGpu.clear(gpu,logicalColor(color));}else {cpuWrite();shiraz.runtime.NativeBitmap.clear(pixels,logicalColor(color));} }
     public void setPixels(int[] source,int offset,int stride,int x,int y,int w,int h) {
         requireMutable();if(source==null)throw new NullPointerException("source");
