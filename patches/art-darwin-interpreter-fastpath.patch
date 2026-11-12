@@ -1,0 +1,370 @@
+diff --git a/art/runtime/interpreter/interpreter_switch_impl-inl.h b/art/runtime/interpreter/interpreter_switch_impl-inl.h
+index 36cfee41..3b7c8a37 100644
+--- a/art/runtime/interpreter/interpreter_switch_impl-inl.h
++++ b/art/runtime/interpreter/interpreter_switch_impl-inl.h
+@@ -252,7 +252,9 @@ class InstructionHandler {
+       instrumentation->Branch(self, shadow_frame.GetMethod(), dex_pc, offset);
+     }
+     JValue result;
+-    if (jit::Jit::MaybeDoOnStackReplacement(self,
++    // Shiraz: without a JIT there is nothing to OSR into; skip the out-of-line call on every branch.
++    if (Runtime::Current()->GetJit() != nullptr &&
++        jit::Jit::MaybeDoOnStackReplacement(self,
+                                             shadow_frame.GetMethod(),
+                                             dex_pc,
+                                             offset,
+@@ -1439,45 +1441,124 @@ class InstructionHandler {
+     }
+   }
+ 
++  // Shiraz: thread-local InterpreterCache fast path for field access, with mterp's cache
++  // contract (instance: raw offset, static: ArtField*, non-volatile fields only). It is used
++  // only without access checks, transactions or field listeners. Returns 1 when the access
++  // is done, -1 when resolution threw (exception pending) and 0 to let the stock handler
++  // perform the access, which also does every null check. A miss resolves the field like
++  // DoFieldGet/DoFieldPut and caches it (static fields only once their class is initialized).
++  template <bool kRead>
++  ALWAYS_INLINE bool UseFieldFastPath() const REQUIRES_SHARED(Locks::mutator_lock_) {
++    return !do_access_check && !transaction_active &&
++        !(kRead ? instrumentation->HasFieldReadListeners()
++                : instrumentation->HasFieldWriteListeners());
++  }
++
++  template <typename PrimType, FindFieldType kAccessType>
++  ALWAYS_INLINE int CachedFieldAccess() REQUIRES_SHARED(Locks::mutator_lock_) {
++    constexpr bool kIsStatic = (kAccessType & FindFieldFlags::StaticBit) != 0;
++    constexpr bool kIsPrimitive = (kAccessType & FindFieldFlags::PrimitiveBit) != 0;
++    constexpr bool kIsRead = (kAccessType & FindFieldFlags::ReadBit) != 0;
++    InterpreterCache* tls_cache = self->GetInterpreterCache();
++    size_t tls_value;
++    if (UNLIKELY(!tls_cache->Get(inst, &tls_value))) {
++      uint32_t field_idx = kIsStatic ? inst->VRegB_21c() : inst->VRegC_22c();
++      ArtField* field = FindFieldFromCode<kAccessType, /* access_checks= */ false>(
++          field_idx, shadow_frame.GetMethod(), self, sizeof(PrimType));
++      if (UNLIKELY(field == nullptr)) {
++        DCHECK(self->IsExceptionPending());
++        return -1;
++      }
++      if (!field->IsVolatile() && (!kIsStatic || field->GetDeclaringClass()->IsInitialized())) {
++        tls_cache->Set(inst, kIsStatic ? reinterpret_cast<size_t>(field)
++                                       : field->GetOffset().SizeValue());
++      }
++      return 0;
++    }
++    ObjPtr<mirror::Object> obj = kIsStatic
++        ? ObjPtr<mirror::Object>(reinterpret_cast<ArtField*>(tls_value)->GetDeclaringClass())
++        : shadow_frame.GetVRegReference(inst->VRegB_22c(inst_data));
++    if (UNLIKELY(obj == nullptr)) {
++      return 0;
++    }
++    MemberOffset offset(kIsStatic ? reinterpret_cast<ArtField*>(tls_value)->GetOffset().SizeValue()
++                                  : tls_value);
++    uint16_t vregA = kIsStatic ? inst->VRegA_21c(inst_data) : inst->VRegA_22c(inst_data);
++    if (kIsPrimitive) {
++      if (kIsRead) {
++        PrimType value = obj->GetFieldPrimitive<PrimType, /*kIsVolatile=*/ false>(offset);
++        if (sizeof(PrimType) == sizeof(uint64_t)) {
++          shadow_frame.SetVRegLong(vregA, value);
++        } else {
++          shadow_frame.SetVReg(vregA, static_cast<int32_t>(value));  // Sign/zero extend.
++        }
++      } else {
++        uint64_t value = (sizeof(PrimType) == sizeof(uint64_t)) ? shadow_frame.GetVRegLong(vregA)
++                                                                : shadow_frame.GetVReg(vregA);
++        obj->SetFieldPrimitive<PrimType, /*kIsVolatile=*/ false>(offset, value);
++      }
++    } else if (kIsRead) {
++      shadow_frame.SetVRegReference(vregA, obj->GetFieldObject<mirror::Object>(offset));
++    } else {
++      obj->SetFieldObject</*kTransactionActive=*/ false>(offset,
++                                                          shadow_frame.GetVRegReference(vregA));
++    }
++    return 1;
++  }
++
+   ALWAYS_INLINE void IGET_BOOLEAN() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<InstancePrimitiveRead, Primitive::kPrimBoolean, do_access_check>(
+-        self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint8_t, InstancePrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<InstancePrimitiveRead, Primitive::kPrimBoolean, do_access_check>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IGET_BYTE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<InstancePrimitiveRead, Primitive::kPrimByte, do_access_check>(
+-        self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<int8_t, InstancePrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<InstancePrimitiveRead, Primitive::kPrimByte, do_access_check>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IGET_CHAR() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<InstancePrimitiveRead, Primitive::kPrimChar, do_access_check>(
+-        self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint16_t, InstancePrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<InstancePrimitiveRead, Primitive::kPrimChar, do_access_check>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IGET_SHORT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<InstancePrimitiveRead, Primitive::kPrimShort, do_access_check>(
+-        self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<int16_t, InstancePrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<InstancePrimitiveRead, Primitive::kPrimShort, do_access_check>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IGET() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<InstancePrimitiveRead, Primitive::kPrimInt, do_access_check>(
+-        self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint32_t, InstancePrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<InstancePrimitiveRead, Primitive::kPrimInt, do_access_check>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IGET_WIDE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<InstancePrimitiveRead, Primitive::kPrimLong, do_access_check>(
+-        self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint64_t, InstancePrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<InstancePrimitiveRead, Primitive::kPrimLong, do_access_check>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IGET_OBJECT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<InstanceObjectRead, Primitive::kPrimNot, do_access_check>(
+-        self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint32_t, InstanceObjectRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<InstanceObjectRead, Primitive::kPrimNot, do_access_check>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+@@ -1517,86 +1598,114 @@ class InstructionHandler {
+   }
+ 
+   ALWAYS_INLINE void SGET_BOOLEAN() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<StaticPrimitiveRead, Primitive::kPrimBoolean, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint8_t, StaticPrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<StaticPrimitiveRead, Primitive::kPrimBoolean, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SGET_BYTE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<StaticPrimitiveRead, Primitive::kPrimByte, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<int8_t, StaticPrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<StaticPrimitiveRead, Primitive::kPrimByte, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SGET_CHAR() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<StaticPrimitiveRead, Primitive::kPrimChar, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint16_t, StaticPrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<StaticPrimitiveRead, Primitive::kPrimChar, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SGET_SHORT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<StaticPrimitiveRead, Primitive::kPrimShort, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<int16_t, StaticPrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<StaticPrimitiveRead, Primitive::kPrimShort, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SGET() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<StaticPrimitiveRead, Primitive::kPrimInt, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint32_t, StaticPrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<StaticPrimitiveRead, Primitive::kPrimInt, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SGET_WIDE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<StaticPrimitiveRead, Primitive::kPrimLong, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint64_t, StaticPrimitiveRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<StaticPrimitiveRead, Primitive::kPrimLong, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SGET_OBJECT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldGet<StaticObjectRead, Primitive::kPrimNot, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<true>() ? CachedFieldAccess<uint32_t, StaticObjectRead>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldGet<StaticObjectRead, Primitive::kPrimNot, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IPUT_BOOLEAN() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimBoolean, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint8_t, InstancePrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimBoolean, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IPUT_BYTE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimByte, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<int8_t, InstancePrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimByte, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IPUT_CHAR() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimChar, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint16_t, InstancePrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimChar, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IPUT_SHORT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimShort, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<int16_t, InstancePrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimShort, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IPUT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimInt, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint32_t, InstancePrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimInt, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IPUT_WIDE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimLong, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint64_t, InstancePrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<InstancePrimitiveWrite, Primitive::kPrimLong, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void IPUT_OBJECT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<InstanceObjectWrite, Primitive::kPrimNot, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint32_t, InstanceObjectWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<InstanceObjectWrite, Primitive::kPrimNot, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+@@ -1643,44 +1752,58 @@ class InstructionHandler {
+   }
+ 
+   ALWAYS_INLINE void SPUT_BOOLEAN() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimBoolean, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint8_t, StaticPrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimBoolean, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SPUT_BYTE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimByte, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<int8_t, StaticPrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimByte, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SPUT_CHAR() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimChar, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint16_t, StaticPrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimChar, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SPUT_SHORT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimShort, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<int16_t, StaticPrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimShort, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SPUT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimInt, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint32_t, StaticPrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimInt, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SPUT_WIDE() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimLong, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint64_t, StaticPrimitiveWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<StaticPrimitiveWrite, Primitive::kPrimLong, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 
+   ALWAYS_INLINE void SPUT_OBJECT() REQUIRES_SHARED(Locks::mutator_lock_) {
+-    bool success = DoFieldPut<StaticObjectWrite, Primitive::kPrimNot, do_access_check,
+-        transaction_active>(self, shadow_frame, inst, inst_data);
++    const int fast = UseFieldFastPath<false>() ? CachedFieldAccess<uint32_t, StaticObjectWrite>() : 0;
++    bool success = fast != 0 ? fast > 0 :
++        DoFieldPut<StaticObjectWrite, Primitive::kPrimNot, do_access_check, transaction_active>(
++            self, shadow_frame, inst, inst_data);
+     POSSIBLY_HANDLE_PENDING_EXCEPTION(!success, Next_2xx);
+   }
+ 

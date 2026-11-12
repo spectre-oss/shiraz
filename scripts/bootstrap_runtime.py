@@ -429,6 +429,14 @@ PATCHES_DARWIN = {
                 'art/runtime/interpreter/mterp/darwin_symbol_aliases_arm64.S': '18131f5b5768a9437a73d8434e30417e3b6fb74db76f9d48bbe0db4a670bc851',
             },
         ),
+        # Switch interpreter: skip the OSR call without a JIT, and cache resolved non-volatile field
+        # offsets (statics once initialized) when no access checks, transactions or listeners apply.
+        (
+            'art-darwin-interpreter-fastpath.patch',
+            {
+                'art/runtime/interpreter/interpreter_switch_impl-inl.h': '67c1c2410df03d9651cbcaf2c0226d06f686f8c16f3efaabb936753037a0c558',
+            },
+        ),
         (
             'art-darwin-libcore.patch',
             {  # 63461 bytes
