@@ -15,6 +15,7 @@ Both have no lib/ directory and an uncompressed, 4-byte aligned classes.dex.
 The result is checked with shiraz.apk.inspect_apk before it is moved into
 place, so a malformed or native-code APK is never published.
 """
+
 import argparse
 import hashlib
 import json
@@ -38,17 +39,36 @@ ART = ROOT / 'context/art_standalone'
 def graphics_assets(directory):
     # Imported here so the minimal fixture build does not depend on it.
     import macos_graphics_images
+
     return macos_graphics_images.write(directory)
 
 
 # name: (source tree, default output, work directory, asset generator or None)
 FIXTURES = {
-    'minimal': (ROOT / 'tests/macos-apk', ROOT / 'build/macos-apk/minimal.apk', ROOT / 'build/macos-apk/work', None),
-    'graphics': (ROOT / 'tests/macos-apk-graphics', ROOT / 'build/macos-apk/graphics.apk',
-                 ROOT / 'build/macos-apk/graphics-work', graphics_assets),
-    'gles': (ROOT / 'tests/macos-apk-gles', ROOT / 'build/macos-apk/gles.apk', ROOT / 'build/macos-apk/gles-work', None),
-    'gles-anim': (ROOT / 'tests/macos-apk-gles-anim', ROOT / 'build/macos-apk/gles-anim.apk',
-                  ROOT / 'build/macos-apk/gles-anim-work', None),
+    'minimal': (
+        ROOT / 'tests/macos-apk',
+        ROOT / 'build/macos-apk/minimal.apk',
+        ROOT / 'build/macos-apk/work',
+        None,
+    ),
+    'graphics': (
+        ROOT / 'tests/macos-apk-graphics',
+        ROOT / 'build/macos-apk/graphics.apk',
+        ROOT / 'build/macos-apk/graphics-work',
+        graphics_assets,
+    ),
+    'gles': (
+        ROOT / 'tests/macos-apk-gles',
+        ROOT / 'build/macos-apk/gles.apk',
+        ROOT / 'build/macos-apk/gles-work',
+        None,
+    ),
+    'gles-anim': (
+        ROOT / 'tests/macos-apk-gles-anim',
+        ROOT / 'build/macos-apk/gles-anim.apk',
+        ROOT / 'build/macos-apk/gles-anim-work',
+        None,
+    ),
 }
 
 
@@ -58,7 +78,7 @@ def append_aligned_dex(apk, dex):
         entry = zipfile.ZipInfo('classes.dex', date_time=(1980, 1, 1, 0, 0, 0))
         entry.compress_type = zipfile.ZIP_STORED
         padding = (-(archive.fp.tell() + 30 + len(entry.filename) + 4)) % 4
-        entry.extra = struct.pack('<HH', 0xffff, padding) + b'\0' * padding
+        entry.extra = struct.pack('<HH', 0xFFFF, padding) + b'\0' * padding
         archive.writestr(entry, dex.read_bytes())
     with zipfile.ZipFile(apk) as archive:
         info = archive.getinfo('classes.dex')
@@ -87,20 +107,50 @@ def main():
     classes = work / 'classes'
     classes.mkdir(parents=True)
     android_jar = TOOLS / 'android.jar'
-    subprocess.run(['javac', '--release', '8', '-Xlint:-options', '-cp', str(android_jar), '-d', str(classes),
-                    *map(str, sorted(source.rglob('*.java')))], check=True, timeout=300)
+    subprocess.run(
+        [
+            'javac',
+            '--release',
+            '8',
+            '-Xlint:-options',
+            '-cp',
+            str(android_jar),
+            '-d',
+            str(classes),
+            *map(str, sorted(source.rglob('*.java'))),
+        ],
+        check=True,
+        timeout=300,
+    )
     dex = work / 'classes.dex'
     # dx is a JVM tool; keep its temporary files in the work tree.
     env = {**os.environ, 'TMPDIR': str(work)}
-    subprocess.run([str(dx), '--dex', '--min-sdk-version=27', '--output=' + str(dex), str(classes)],
-                   check=True, timeout=300, env=env)
+    subprocess.run(
+        [str(dx), '--dex', '--min-sdk-version=27', '--output=' + str(dex), str(classes)],
+        check=True,
+        timeout=300,
+        env=env,
+    )
     pending = work / (args.fixture + '.pending.apk')
     assets = []
     if generate_assets:
         asset_dir = work / 'assets'
         assets = [path.name for path in generate_assets(asset_dir)]
-    subprocess.run([str(TOOLS / 'aapt2'), 'link', '-o', str(pending), '--manifest', str(source / 'AndroidManifest.xml'),
-                    '-I', str(android_jar), *(['-A', str(asset_dir)] if assets else [])], check=True, timeout=120)
+    subprocess.run(
+        [
+            str(TOOLS / 'aapt2'),
+            'link',
+            '-o',
+            str(pending),
+            '--manifest',
+            str(source / 'AndroidManifest.xml'),
+            '-I',
+            str(android_jar),
+            *(['-A', str(asset_dir)] if assets else []),
+        ],
+        check=True,
+        timeout=120,
+    )
     dex_offset = append_aligned_dex(pending, dex)
     report = inspect_apk(pending)
     with zipfile.ZipFile(pending) as archive:
@@ -115,11 +165,23 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     pending.replace(args.output)
     data = args.output.read_bytes()
-    summary = {'apk': str(args.output.relative_to(ROOT)) if args.output.is_relative_to(ROOT) else str(args.output),
-               'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'entries': names,
-               'classes_dex_offset': dex_offset, 'aapt2_jar': aapt2_jar(), 'dx': str(dx.relative_to(ROOT)),
-               'package': report['manifest'].get('package'), 'dex': report['dex'], 'native_abis': report['native_abis']}
-    (args.output.parent / (args.output.stem + '.json')).write_text(json.dumps(summary, indent=2, sort_keys=True) + '\n')
+    summary = {
+        'apk': str(args.output.relative_to(ROOT))
+        if args.output.is_relative_to(ROOT)
+        else str(args.output),
+        'bytes': len(data),
+        'sha256': hashlib.sha256(data).hexdigest(),
+        'entries': names,
+        'classes_dex_offset': dex_offset,
+        'aapt2_jar': aapt2_jar(),
+        'dx': str(dx.relative_to(ROOT)),
+        'package': report['manifest'].get('package'),
+        'dex': report['dex'],
+        'native_abis': report['native_abis'],
+    }
+    (args.output.parent / (args.output.stem + '.json')).write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + '\n'
+    )
     print(json.dumps(summary, sort_keys=True))
 
 
