@@ -55,6 +55,9 @@ public final class InterpolatorSmoke {
    final int[] ended={0};morph.registerAnimationCallback(new android.graphics.drawable.Animatable2.AnimationCallback(){public void onAnimationEnd(android.graphics.drawable.Drawable d){ended[0]++;}});
    long now=android.os.SystemClock.uptimeMillis();morph.start();Choreographer.getInstance().shirazDoFrame(now*1000000,null);Choreographer.getInstance().shirazDoFrame((now+150)*1000000,null);if(morph.isRunning()||ended[0]!=1)throw new AssertionError("Morph natural completion callback");morph.stop();if(ended[0]!=1)throw new AssertionError("Duplicate end callback");
   }finally{morph.stop();shape.recycle();}
+  android.animation.ObjectAnimator timing=(android.animation.ObjectAnimator)android.animation.AnimatorInflater.loadAnimator(context,resources.getIdentifier("motion_timing","animator","org.shiraz.fixture"));
+  if(!"alpha".equals(timing.getPropertyName())||timing.getDuration()!=150||timing.getStartDelay()!=20||timing.getInterpolator()==null)throw new AssertionError("Timing-only animator XML");
+  timing.setTarget(new android.view.View(context));try{timing.setCurrentFraction(.5f);throw new AssertionError("Value-less ObjectAnimator applied");}catch(IllegalStateException expected){}
   try{new shiraz.runtime.PathData.Morph("M0 0 L1 1","M0 0 Q1 1 2 2");throw new AssertionError("Incompatible morph accepted");}catch(IllegalArgumentException expected){}
   android.view.animation.Interpolator trimStart=AnimationUtils.loadInterpolator(context,resources.getIdentifier("trim_start_interpolator","interpolator","android")),trimEnd=AnimationUtils.loadInterpolator(context,resources.getIdentifier("trim_end_interpolator","interpolator","android"));
   if(trimStart.getInterpolation(.25f)!=0||trimEnd.getInterpolation(.75f)!=1||trimStart.getInterpolation(.75f)<=0||trimEnd.getInterpolation(.25f)<=0)throw new AssertionError("Framework interpolator implicit origin");

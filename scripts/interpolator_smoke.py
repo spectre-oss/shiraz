@@ -9,7 +9,7 @@ import shutil
 import struct
 import subprocess
 import zipfile
-from art_smoke import environment, HOST, JARS
+from art_smoke import DARWIN, NATIVE, environment, HOST, JARS
 
 ROOT = Path(__file__).resolve().parents[1]
 work = ROOT / 'build/interpolator-smoke'
@@ -57,6 +57,7 @@ subprocess.run(
     ],
     check=True,
 )
+# macOS JNI libraries are Mach-O files with Android .so names, which OpenJDK cannot load.
 commands = [
     (
         'openjdk',
@@ -71,6 +72,8 @@ commands = [
         ],
     )
 ]
+if DARWIN:
+    commands = []
 dex = work / 'classes.dex'
 subprocess.run(
     [str(HOST / 'bin/dx'), '--dex', '--min-sdk-version=27', '--output=' + str(dex), str(classes)],
@@ -98,7 +101,7 @@ commands.append(
             '-Xnoimage-dex2oat',
             '-Xcompiler:' + str(HOST / 'bin/dex2oat'),
             '-Dshiraz.frameworkResources=' + str(ROOT / 'build/framework-res/framework-res.apk'),
-            '-Djava.library.path=' + str(ROOT / 'build'),
+            '-Djava.library.path=' + str(NATIVE),
             '-cp',
             str(ROOT / 'build/shiraz-framework.jar') + ':' + str(jar),
             'InterpolatorSmoke',
@@ -123,6 +126,9 @@ for runtime, command in commands:
         )
     print('INTERPOLATOR_OK ' + runtime)
 (work / 'result.json').write_text(
-    json.dumps({'runtimes': ['openjdk', 'art'], 'marker': marker, 'component_only': True}, indent=2)
+    json.dumps(
+        {'runtimes': [name for name, _ in commands], 'marker': marker, 'component_only': True},
+        indent=2,
+    )
     + '\n'
 )
