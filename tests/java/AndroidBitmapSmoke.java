@@ -5,12 +5,15 @@ public final class AndroidBitmapSmoke {
     private static native void exercise(Bitmap bitmap, int mode);
     public static void main(String[] args) {
         System.loadLibrary("shiraz-test-android-bitmap");
-        for (int mode = 0; mode < 4; mode++) {
-            Bitmap b = Bitmap.createBitmap(2, 1, mode == 1 ? Bitmap.Config.ALPHA_8 : Bitmap.Config.ARGB_8888);
+        for (int mode = 0; mode < 5; mode++) {
+            Bitmap b = Bitmap.createBitmap(2, 1, mode == 1 ? Bitmap.Config.ALPHA_8 : mode == 4 ? Bitmap.Config.RGB_565 : Bitmap.Config.ARGB_8888);
             b.setPixel(0, 0, 0x80ff4000); b.setPixel(1, 0, 0xff112233);
             exercise(b, mode);
             if (mode == 3) {
                 if (!b.isRecycled()) throw new AssertionError("recycled bitmap revived");
+            } else if (mode == 4) {
+                // The untouched pixel keeps its 565-quantized color; the written one is pure green.
+                if (b.getPixel(0, 0) != 0xffff4100 || b.getPixel(1, 0) != 0xff00ff00) throw new AssertionError("RGB_565 writeback");
             } else if (mode == 1) {
                 if (b.getPixel(0, 0) != 0x11000000 || b.getPixel(1, 0) != 0) throw new AssertionError("alpha writeback");
             } else {

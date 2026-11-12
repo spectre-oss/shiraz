@@ -2380,3 +2380,13 @@ macos-guest-mrs-accessor-code-check: $(MACOS_OUT)/m5/tpidr-thunk-probe $(MACOS_O
 	uv run --no-project python scripts/check_guest_mrs_accessor.py $(MACOS_OUT)/m5/tpidr-thunk-probe
 	uv run --no-project python scripts/check_guest_mrs_accessor.py $(MACOS_OUT)/libshiraz-guest.so
 macos-guest-check: macos-guest-mrs-accessor-code-check
+
+# NDK bitmap ABI smoke on darwin ART (Mach-O libraries keep Android .so names).
+$(MACOS_OUT)/libjnigraphics.so: native/android_bitmap.cpp include/shiraz/android_bitmap.h
+	@mkdir -p $(MACOS_OUT)
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/android_bitmap.cpp -o $@
+$(MACOS_OUT)/libshiraz-test-android-bitmap.so: tests/android_bitmap.cpp include/shiraz/android_bitmap.h $(MACOS_OUT)/libjnigraphics.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) tests/android_bitmap.cpp $(MACOS_OUT)/libjnigraphics.so $(MACOS_RPATH) -o $@
+.PHONY: macos-android-bitmap-smoke
+macos-android-bitmap-smoke: macos-framework $(MACOS_OUT)/libshiraz-test-android-bitmap.so
+	python3 scripts/android_bitmap_smoke.py
