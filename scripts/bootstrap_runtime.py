@@ -437,6 +437,17 @@ PATCHES_DARWIN = {
                 'art/runtime/interpreter/interpreter_switch_impl-inl.h': '67c1c2410df03d9651cbcaf2c0226d06f686f8c16f3efaabb936753037a0c558',
             },
         ),
+        # Switch interpreter: interpreter-to-interpreter invokes build the callee frame directly
+        # (upstream's mterp fast path, out of line) while use_mterp reports CanUseMterp's real
+        # conditions; mterp itself stays compiled out.
+        (
+            'art-darwin-interpreter-invoke.patch',
+            {
+                'art/runtime/interpreter/interpreter.cc': '778a583698bec54f1663f4eb5233a7054fcd6f20c42f6882edfccfdb3ee558d8',
+                'art/runtime/interpreter/interpreter_common.h': '6f3d634de7d3d2a6e18254d4daa30a67f67df3f79f2f0bbb67d3979b51ad52f8',
+                'art/runtime/interpreter/mterp/mterp.cc': 'a4cccadaa8326efa7e3de39143a81035cd0a42cb48c54e55e4565f890c630e41',
+            },
+        ),
         (
             'art-darwin-libcore.patch',
             {  # 63461 bytes

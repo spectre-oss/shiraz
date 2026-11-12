@@ -120,9 +120,13 @@ runtime-art:
 runtime-smoke:
 	python3 scripts/art_smoke.py
 
-.PHONY: interpreter-field-smoke
-interpreter-field-smoke:
-	python3 scripts/interpreter_field_smoke.py
+.PHONY: interpreter-smoke
+interpreter-smoke:
+	python3 scripts/interpreter_smoke.py
+
+.PHONY: interpreter-bench
+interpreter-bench:
+	python3 scripts/interpreter_bench.py --runs 5
 
 build/libshiraz-jni.so: include/shiraz/window_snapshot.hpp native/jni_surface.cpp native/presentation.cpp include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/native_window.h build/version.hpp build/libandroid.so $(SDL_LOCAL_LIBRARY)
 	@pkg-config --exists sdl2

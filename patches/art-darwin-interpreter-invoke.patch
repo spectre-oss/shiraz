@@ -1,0 +1,246 @@
+diff --git a/art/runtime/interpreter/interpreter.cc b/art/runtime/interpreter/interpreter.cc
+index d919835..44d7496 100644
+--- a/art/runtime/interpreter/interpreter.cc
++++ b/art/runtime/interpreter/interpreter.cc
+@@ -247,6 +247,10 @@ static constexpr InterpreterImplKind kInterpreterImplKind = kSwitchImplKind;
+ #else
+ static constexpr InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
+ #endif
++#if defined(__APPLE__)
++// Darwin's use_mterp flag only gates fast invokes; mterp itself must never be entered.
++static_assert(kInterpreterImplKind == kSwitchImplKind, "mterp cannot run on the Darwin heap");
++#endif
+ 
+ static inline JValue ExecuteImpl(
+     Thread* self,
+diff --git a/art/runtime/interpreter/interpreter_common.h b/art/runtime/interpreter/interpreter_common.h
+index 6366035..7105588 100644
+--- a/art/runtime/interpreter/interpreter_common.h
++++ b/art/runtime/interpreter/interpreter_common.h
+@@ -120,6 +120,13 @@ void RecordArrayElementsInTransaction(ObjPtr<mirror::Array> array, int32_t count
+ // Invokes the given method. This is part of the invocation support and is used by DoInvoke,
+ // DoFastInvoke and DoInvokeVirtualQuick functions.
+ // Returns true on success, otherwise throws an exception and returns false.
++#if defined(__APPLE__)
++// Darwin executes only the C++ switch interpreter (see CanUseMterp in mterp/mterp.cc).
++static constexpr bool kIsTargetDarwinSwitchInterpreter = true;
++#else
++static constexpr bool kIsTargetDarwinSwitchInterpreter = false;
++#endif
++
+ template<bool is_range, bool do_assignability_check>
+ bool DoCall(ArtMethod* called_method, Thread* self, ShadowFrame& shadow_frame,
+             const Instruction* inst, uint16_t inst_data, JValue* result);
+@@ -131,6 +138,91 @@ bool UseFastInterpreterToInterpreterInvoke(ArtMethod* method)
+ NO_INLINE bool CheckStackOverflow(Thread* self, size_t frame_size)
+     REQUIRES_SHARED(Locks::mutator_lock_);
+ 
++// Interpreter-to-interpreter call without the generic bridge: builds the callee's shadow frame
++// directly. Only valid when UseFastInterpreterToInterpreterInvoke(called_method) holds.
++template<InvokeType type, bool is_range>
++NO_INLINE static bool DoFastInvoke(Thread* self,
++                                   ShadowFrame& shadow_frame,
++                                   const Instruction* inst,
++                                   uint16_t inst_data,
++                                   JValue* result,
++                                   ArtMethod* called_method,
++                                   uint32_t vregC,
++                                   jit::Jit* jit)
++    REQUIRES_SHARED(Locks::mutator_lock_) {
++  DCHECK(Runtime::Current()->IsStarted());
++  DCHECK(!Runtime::Current()->IsActiveTransaction());
++  DCHECK(called_method->SkipAccessChecks());
++  DCHECK(!called_method->IsNative());
++  DCHECK(!called_method->IsProxyMethod());
++  DCHECK(!called_method->IsIntrinsic());
++  DCHECK(!(called_method->GetDeclaringClass()->IsStringClass() &&
++      called_method->IsConstructor()));
++  DCHECK(type != kStatic || called_method->GetDeclaringClass()->IsInitialized());
++
++  const uint16_t number_of_inputs =
++      (is_range) ? inst->VRegA_3rc(inst_data) : inst->VRegA_35c(inst_data);
++  CodeItemDataAccessor accessor(called_method->DexInstructionData());
++  uint32_t num_regs = accessor.RegistersSize();
++  DCHECK_EQ(number_of_inputs, accessor.InsSize());
++  DCHECK_GE(num_regs, number_of_inputs);
++  size_t first_dest_reg = num_regs - number_of_inputs;
++
++  if (UNLIKELY(!CheckStackOverflow(self, ShadowFrame::ComputeSize(num_regs)))) {
++    return false;
++  }
++
++  if (jit != nullptr) {
++    jit->AddSamples(self, called_method, 1, /* with_backedges */false);
++  }
++
++  // Create shadow frame on the stack.
++  const char* old_cause = self->StartAssertNoThreadSuspension("DoFastInvoke");
++  ShadowFrameAllocaUniquePtr shadow_frame_unique_ptr =
++      CREATE_SHADOW_FRAME(num_regs, &shadow_frame, called_method, /* dex pc */ 0);
++  ShadowFrame* new_shadow_frame = shadow_frame_unique_ptr.get();
++  if (is_range) {
++    size_t src = vregC;
++    for (size_t i = 0, dst = first_dest_reg; i < number_of_inputs; ++i, ++dst, ++src) {
++      *new_shadow_frame->GetVRegAddr(dst) = *shadow_frame.GetVRegAddr(src);
++      *new_shadow_frame->GetShadowRefAddr(dst) = *shadow_frame.GetShadowRefAddr(src);
++    }
++  } else {
++    uint32_t arg[Instruction::kMaxVarArgRegs];
++    inst->GetVarArgs(arg, inst_data);
++    for (size_t i = 0, dst = first_dest_reg; i < number_of_inputs; ++i, ++dst) {
++      *new_shadow_frame->GetVRegAddr(dst) = *shadow_frame.GetVRegAddr(arg[i]);
++      *new_shadow_frame->GetShadowRefAddr(dst) = *shadow_frame.GetShadowRefAddr(arg[i]);
++    }
++  }
++  self->PushShadowFrame(new_shadow_frame);
++  self->EndAssertNoThreadSuspension(old_cause);
++
++  DCheckStaticState(self, called_method);
++  while (true) {
++    // Mterp does not support all instrumentation/debugging.
++    if (kIsTargetDarwinSwitchInterpreter || !self->UseMterp()) {
++      *result =
++          ExecuteSwitchImpl<false, false>(self, accessor, *new_shadow_frame, *result, false);
++      break;
++    }
++#if !defined(__APPLE__)
++    if (ExecuteMterpImpl(self, accessor.Insns(), new_shadow_frame, result)) {
++      break;
++    } else {
++      // Mterp didn't like that instruction.  Single-step it with the reference interpreter.
++      *result = ExecuteSwitchImpl<false, false>(self, accessor, *new_shadow_frame, *result, true);
++      if (new_shadow_frame->GetDexPC() == dex::kDexNoIndex) {
++        break;  // Single-stepped a return or an exception not handled locally.
++      }
++    }
++#endif  // !__APPLE__
++  }
++  self->PopShadowFrame();
++
++  return !self->IsExceptionPending();
++}
++
+ // Handles all invoke-XXX/range instructions except for invoke-polymorphic[/range].
+ // Returns true on success, otherwise throws an exception and returns false.
+ template<InvokeType type, bool is_range, bool do_access_check, bool is_mterp, bool is_quick = false>
+@@ -219,7 +311,10 @@ static ALWAYS_INLINE bool DoInvoke(Thread* self,
+   // If the bit is not set, we explicitly recheck all the conditions.
+   // If any of the conditions get falsified, it is important to clear the bit.
+   bool use_fast_path = false;
+-  if (is_mterp && self->UseMterp()) {
++  // Darwin runs only the switch interpreter; use_mterp there means fast invokes are allowed
++  // (no instrumentation, debugger or non-standard exits; see CanUseMterp).
++  constexpr bool kSwitchFastInvoke = kIsTargetDarwinSwitchInterpreter && !do_access_check;
++  if ((is_mterp || kSwitchFastInvoke) && self->UseMterp()) {
+     use_fast_path = called_method->UseFastInterpreterToInterpreterInvoke();
+     if (!use_fast_path) {
+       use_fast_path = UseFastInterpreterToInterpreterInvoke(called_method);
+@@ -230,75 +325,10 @@ static ALWAYS_INLINE bool DoInvoke(Thread* self,
+   }
+ 
+   if (use_fast_path) {
+-    DCHECK(Runtime::Current()->IsStarted());
+-    DCHECK(!Runtime::Current()->IsActiveTransaction());
+-    DCHECK(called_method->SkipAccessChecks());
+-    DCHECK(!called_method->IsNative());
+-    DCHECK(!called_method->IsProxyMethod());
+-    DCHECK(!called_method->IsIntrinsic());
+-    DCHECK(!(called_method->GetDeclaringClass()->IsStringClass() &&
+-        called_method->IsConstructor()));
+-    DCHECK(type != kStatic || called_method->GetDeclaringClass()->IsInitialized());
+-
+-    const uint16_t number_of_inputs =
+-        (is_range) ? inst->VRegA_3rc(inst_data) : inst->VRegA_35c(inst_data);
+-    CodeItemDataAccessor accessor(called_method->DexInstructionData());
+-    uint32_t num_regs = accessor.RegistersSize();
+-    DCHECK_EQ(number_of_inputs, accessor.InsSize());
+-    DCHECK_GE(num_regs, number_of_inputs);
+-    size_t first_dest_reg = num_regs - number_of_inputs;
+-
+-    if (UNLIKELY(!CheckStackOverflow(self, ShadowFrame::ComputeSize(num_regs)))) {
+-      return false;
+-    }
+-
+-    if (jit != nullptr) {
+-      jit->AddSamples(self, called_method, 1, /* with_backedges */false);
+-    }
+-
+-    // Create shadow frame on the stack.
+-    const char* old_cause = self->StartAssertNoThreadSuspension("DoFastInvoke");
+-    ShadowFrameAllocaUniquePtr shadow_frame_unique_ptr =
+-        CREATE_SHADOW_FRAME(num_regs, &shadow_frame, called_method, /* dex pc */ 0);
+-    ShadowFrame* new_shadow_frame = shadow_frame_unique_ptr.get();
+-    if (is_range) {
+-      size_t src = vregC;
+-      for (size_t i = 0, dst = first_dest_reg; i < number_of_inputs; ++i, ++dst, ++src) {
+-        *new_shadow_frame->GetVRegAddr(dst) = *shadow_frame.GetVRegAddr(src);
+-        *new_shadow_frame->GetShadowRefAddr(dst) = *shadow_frame.GetShadowRefAddr(src);
+-      }
+-    } else {
+-      uint32_t arg[Instruction::kMaxVarArgRegs];
+-      inst->GetVarArgs(arg, inst_data);
+-      for (size_t i = 0, dst = first_dest_reg; i < number_of_inputs; ++i, ++dst) {
+-        *new_shadow_frame->GetVRegAddr(dst) = *shadow_frame.GetVRegAddr(arg[i]);
+-        *new_shadow_frame->GetShadowRefAddr(dst) = *shadow_frame.GetShadowRefAddr(arg[i]);
+-      }
+-    }
+-    self->PushShadowFrame(new_shadow_frame);
+-    self->EndAssertNoThreadSuspension(old_cause);
+-
+-    DCheckStaticState(self, called_method);
+-    while (true) {
+-      // Mterp does not support all instrumentation/debugging.
+-      if (!self->UseMterp()) {
+-        *result =
+-            ExecuteSwitchImpl<false, false>(self, accessor, *new_shadow_frame, *result, false);
+-        break;
+-      }
+-      if (ExecuteMterpImpl(self, accessor.Insns(), new_shadow_frame, result)) {
+-        break;
+-      } else {
+-        // Mterp didn't like that instruction.  Single-step it with the reference interpreter.
+-        *result = ExecuteSwitchImpl<false, false>(self, accessor, *new_shadow_frame, *result, true);
+-        if (new_shadow_frame->GetDexPC() == dex::kDexNoIndex) {
+-          break;  // Single-stepped a return or an exception not handled locally.
+-        }
+-      }
+-    }
+-    self->PopShadowFrame();
+-
+-    return !self->IsExceptionPending();
++    // Out of line: the callee's shadow frame is alloca'd, and the switch interpreter inlines
++    // DoInvoke into its dispatch loop, where the allocation would live until the caller returns.
++    return DoFastInvoke<type, is_range>(self, shadow_frame, inst, inst_data, result,
++                                        called_method, vregC, jit);
+   }
+ 
+   return DoCall<is_range, do_access_check>(called_method, self, shadow_frame, inst, inst_data,
+diff --git a/art/runtime/interpreter/mterp/mterp.cc b/art/runtime/interpreter/mterp/mterp.cc
+index 6d12317..1a02335 100644
+--- a/art/runtime/interpreter/mterp/mterp.cc
++++ b/art/runtime/interpreter/mterp/mterp.cc
+@@ -145,12 +145,12 @@ extern "C" ssize_t MterpDoPackedSwitch(const uint16_t* switchData, int32_t testV
+ 
+ bool CanUseMterp()
+     REQUIRES_SHARED(Locks::mutator_lock_) {
+-#if defined(__APPLE__)
+   // Darwin: mterp is assembled and linked but never executed. Its arm64 handlers use 32-bit
+   // vregs as absolute object addresses, which is wrong once the Java heap lives above 4 GiB.
+-  // The C++ switch interpreter (ART_USE_CXX_INTERPRETER) is used instead.
+-  return false;
+-#else
++  // The C++ switch interpreter (ART_USE_CXX_INTERPRETER) is used instead, and the mterp entry
++  // points are compiled out (interpreter.cc, interpreter_common.h). The thread's use_mterp flag
++  // still reports these conditions there: it gates the interpreter-to-interpreter fast invoke,
++  // which needs the same absence of instrumentation, debugging and non-standard exits.
+   const Runtime* const runtime = Runtime::Current();
+   return
+       runtime->IsStarted() &&
+@@ -165,7 +165,6 @@ bool CanUseMterp()
+       // infinite loop.
+       !runtime->AreAsyncExceptionsThrown() &&
+       (runtime->GetJit() == nullptr || !runtime->GetJit()->JitAtFirstUse());
+-#endif  // __APPLE__
+ }
+ 
+ 
