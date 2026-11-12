@@ -47,15 +47,27 @@ public final class HostContentPicker {
   if(!file.isFile()||!file.canRead()){System.err.println("SHIRAZ_PICK_UNREADABLE "+path);return null;}
   return Uri.fromFile(file.getAbsoluteFile());
  }
- private static String desktopChoose(String mimeType){
+ /** The host's native file dialog: AppKit through osascript on macOS, zenity elsewhere. */
+ public static ArrayList<String> command(String mimeType){
+  boolean images=mimeType!=null&&mimeType.startsWith("image/");
   ArrayList<String> command=new ArrayList<String>();
+  if(HostOs.darwin()){
+   command.add("/usr/bin/osascript");
+   command.add("-e");
+   command.add("POSIX path of (choose file with prompt \"Select file\""+(images?" of type {\"public.image\"}":"")+")");
+   return command;
+  }
   command.add("zenity");
   command.add("--file-selection");
   command.add("--title=Select file");
-  if(mimeType!=null&&mimeType.startsWith("image/"))command.add("--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif *.bmp");
+  if(images)command.add("--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif *.bmp");
+  return command;
+ }
+ private static String desktopChoose(String mimeType){
+  ArrayList<String> command=command(mimeType);
   try{
    ProcessBuilder builder=new ProcessBuilder(command);
-   Map<String,String> environment=builder.environment();environment.remove("LD_LIBRARY_PATH");environment.remove("LD_PRELOAD");
+   Map<String,String> environment=builder.environment();for(String key:new ArrayList<String>(environment.keySet()))if(key.startsWith("LD_")||key.startsWith("DYLD_"))environment.remove(key);
    builder.redirectError(ProcessBuilder.Redirect.to(new File("/dev/null")));
    Process process=builder.start();
    String line;

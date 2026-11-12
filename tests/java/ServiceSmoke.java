@@ -99,7 +99,9 @@ public final class ServiceSmoke {
     if(!shiraz.runtime.HostContentPicker.handles(get)||!shiraz.runtime.HostContentPicker.handles(chooser)||shiraz.runtime.HostContentPicker.handles(new android.content.Intent(android.content.Intent.ACTION_VIEW)))throw new AssertionError("content pick handles");
     chosen[0]=picked.getAbsolutePath();android.net.Uri uri=shiraz.runtime.HostContentPicker.pick(chooser);
     if(uri==null||!"file".equals(uri.getScheme())||!picked.getAbsolutePath().equals(uri.getPath()))throw new AssertionError("content pick path "+uri);
-    chosen[0]=null;if(shiraz.runtime.HostContentPicker.pick(get)!=null)throw new AssertionError("cancelled pick");}
+    chosen[0]=null;if(shiraz.runtime.HostContentPicker.pick(get)!=null)throw new AssertionError("cancelled pick");
+    java.util.List<String> dialog=shiraz.runtime.HostContentPicker.command("image/png");String program=dialog.get(0),filter=dialog.get(dialog.size()-1);
+    if(shiraz.runtime.HostOs.darwin()?!program.equals("/usr/bin/osascript")||!filter.contains("public.image"):!program.equals("zenity")||!filter.startsWith("--file-filter="))throw new AssertionError("host file dialog "+dialog);}
    check(notifications.shirazForegroundSummary().equals("Downloading map (60%)"),"progress update retains foreground ownership/title");
    update.extras.putCharSequence(Notification.EXTRA_TITLE,"mutated");check(notifications.shirazNotification(8).extras.getCharSequence(Notification.EXTRA_TITLE).equals("Downloading map"),"notification snapshot");
    Foreground.instance.stopForeground(Service.STOP_FOREGROUND_DETACH);check(notifications.shirazForegroundSummary().isEmpty()&&notifications.shirazNotification(8)!=null,"detach retains notification");
