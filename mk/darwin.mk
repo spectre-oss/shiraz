@@ -2238,6 +2238,10 @@ macos-view-alpha-overshoot-smoke: macos-framework macos-jvm-native
 macos-media-router-smoke: macos-framework
 	uv run --no-project python scripts/java_framework_smoke.py MediaRouterSmoke --marker MEDIA_ROUTER_LOCAL_OUTPUT_OK
 
+.PHONY: macos-property-values-holder-smoke
+macos-property-values-holder-smoke: macos-framework
+	uv run --no-project python scripts/property_values_holder_smoke.py
+
 .PHONY: macos-preferences-process-smoke
 macos-preferences-process-smoke: macos-framework
 	uv run --no-project python scripts/preferences_process_smoke.py

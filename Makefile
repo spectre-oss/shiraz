@@ -660,6 +660,10 @@ view-transition-smoke: build framework apk-fixture framework-resources
 object-animator-smoke: build framework
 	python3 scripts/object_animator_smoke.py
 
+.PHONY: property-values-holder-smoke
+property-values-holder-smoke: build framework
+	python3 scripts/property_values_holder_smoke.py
+
 .PHONY: layout-transition-smoke
 layout-transition-smoke: build framework
 	python3 scripts/layout_transition_smoke.py

@@ -35,10 +35,14 @@ public final class AnimatorInflater {
     result=ObjectAnimator.ofFloat(null,a.text("propertyXName"),a.text("propertyYName"),PathData.parse(a.text("pathData")));
    }else{
     if(a.has("propertyXName")||a.has("propertyYName"))throw new IllegalArgumentException("Path properties require pathData");
-    boolean from=a.has("valueFrom"),to=a.has("valueTo");if(!from&&!to)throw new UnsupportedOperationException("Animator XML without scalar values");
+    boolean from=a.has("valueFrom"),to=a.has("valueTo");
+    // Timing-only animators (Material MotionSpec) carry no values: AOSP inflates them and reads only timing.
+    // An ObjectAnimator left without values still fails explicitly when started.
+    if(!from&&!to){if(type==1)throw new UnsupportedOperationException("Integer animator XML without values");if(tag.equals("objectAnimator")){ObjectAnimator object=new ObjectAnimator();object.setPropertyName(a.text("propertyName"));result=object;}else result=new ValueAnimator();}else{
     String firstName=from?"valueFrom":"valueTo";for(String key:new String[]{"valueFrom","valueTo"}){BinaryXml.Value value=a.raw(key);if(type==4&&value!=null&&value.type>=28&&value.type<=31)throw new UnsupportedOperationException("Color animator evaluation is not implemented");}
     if(tag.equals("objectAnimator")){ObjectAnimator object=new ObjectAnimator();object.setPropertyName(a.text("propertyName"));result=object;}else result=new ValueAnimator();
     if(type==1){int first=integerValue(a,firstName);if(from&&to)result.setIntValues(first,integerValue(a,"valueTo"));else result.setIntValues(first);}else{float first=number(a,firstName);if(from&&to)result.setFloatValues(first,number(a,"valueTo"));else result.setFloatValues(first);}
+    }
    }
    result.setDuration(a.integer("duration",300));result.setStartDelay(a.integer("startOffset",a.integer("startDelay",0)));result.setRepeatCount(a.integer("repeatCount",0));result.setRepeatMode(a.integer("repeatMode",1));if(a.has("interpolator"))result.setInterpolator(AnimationUtils.loadInterpolator(context,a.reference("interpolator",0)));
    while(p.next()!=XmlPullParser.END_DOCUMENT){if(p.getEventType()==XmlPullParser.END_TAG&&p.getDepth()==start)break;if(p.getEventType()==XmlPullParser.START_TAG)throw new UnsupportedOperationException("Animator keyframes/propertyValuesHolder are not implemented");}return result;
