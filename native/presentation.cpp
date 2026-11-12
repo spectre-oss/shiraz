@@ -4,6 +4,7 @@
 #include <SDL.h>
 #include "shiraz/sdl_keyboard.hpp"
 #include <deque>
+#include <vector>
 #include <atomic>
 #include "shiraz/live_input.hpp"
 #include "shiraz/window_aspect.hpp"
@@ -79,6 +80,65 @@ std::vector<ReplayEvent> loadReplay() {
     return result;
 }
 std::mutex presentation_mutex;
+// Opt-in frame timing (SHIRAZ_FRAME_STATS=<path>): one "index frame tick_ms present_ms total_ms
+// presented end_ms" line per loop iteration, with end_ms relative to the first loop, and a
+// SHIRAZ_FRAME_STATS summary on stderr when the presentation ends normally.
+struct FrameStats {
+    std::ofstream file;
+    std::vector<double> ticks, totals, intervals;
+    double origin = 0, lastPresent = -1, firstPresent = -1;
+    uint64_t presented = 0;
+    bool enabled = false;
+    FrameStats() {
+        const char* path = std::getenv("SHIRAZ_FRAME_STATS");
+        if (!path || !*path)
+            return;
+        file.open(path, std::ios::trunc);
+        if (!file)
+            throw std::runtime_error("Cannot write SHIRAZ_FRAME_STATS");
+        enabled = true;
+        origin = now();
+    }
+    static double now() {
+        return 1000.0 * SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
+    }
+    void sample(int frame, double started, double ticked, double ended, bool shown) {
+        if (!enabled)
+            return;
+        file << totals.size() << ' ' << frame << ' ' << ticked - started << ' ' << ended - ticked
+             << ' ' << ended - started << ' ' << shown << ' ' << std::fixed << ended - origin
+             << std::defaultfloat << '\n';
+        ticks.push_back(ticked - started);
+        totals.push_back(ended - started);
+        if (shown) {
+            if (lastPresent >= 0)
+                intervals.push_back(ended - lastPresent);
+            else
+                firstPresent = ended;
+            lastPresent = ended;
+            ++presented;
+        }
+    }
+    static double percentile(std::vector<double> values, double q) {
+        if (values.empty())
+            return 0;
+        std::sort(values.begin(), values.end());
+        return values[std::min(values.size() - 1, size_t(q * (values.size() - 1) + 0.5))];
+    }
+    ~FrameStats() {
+        if (!enabled)
+            return;
+        const double span = presented > 1 ? lastPresent - firstPresent : 0;
+        std::cerr << "SHIRAZ_FRAME_STATS frames=" << totals.size() << " presented=" << presented
+                  << " present_fps=" << (span > 0 ? 1000.0 * (presented - 1) / span : 0)
+                  << " tick_p50_ms=" << percentile(ticks, .5)
+                  << " tick_p95_ms=" << percentile(ticks, .95)
+                  << " frame_p50_ms=" << percentile(totals, .5)
+                  << " frame_p95_ms=" << percentile(totals, .95)
+                  << " present_interval_p50_ms=" << percentile(intervals, .5)
+                  << " present_interval_p95_ms=" << percentile(intervals, .95) << "\n";
+    }
+};
 // Low bit is visibility; every request changes the serial so a user-dismissed
 // keyboard can be reopened by another showSoftInput request.
 std::atomic<unsigned> text_input_request{0};
@@ -697,6 +757,7 @@ void present(const Surface& initial, const std::string& title, int frames,
     SDL_GetWindowSize(window.get(), &lockedWidth, &lockedHeight);
     int scriptedWidth = -1, scriptedHeight = -1; // replay/live resizes request exact sizes
     bool running = true;
+    FrameStats frameStats;
     for (int frame = 0; running && (frames < 0 || frame < frames);) {
         textInput.sync();
         const Uint64 frameStarted = SDL_GetPerformanceCounter();
@@ -1007,6 +1068,7 @@ void present(const Surface& initial, const std::string& title, int frames,
         if (!running)
             break;
         syncGeometry();
+        const double tickStarted = frameStats.enabled ? FrameStats::now() : 0;
         gpu_prepare();
         if (tick) {
             if (!tick(image))
@@ -1019,6 +1081,8 @@ void present(const Surface& initial, const std::string& title, int frames,
             repaint = true;
             gpuRevision = gpu_revision();
         }
+        const double ticked = frameStats.enabled ? FrameStats::now() : 0;
+        const uint64_t presentsBefore = presents;
         int w, h;
         checked(SDL_GetRendererOutputSize(renderer.get(), &w, &h));
         if (w > 0 && h > 0 && (repaint || w != presentedWidth || h != presentedHeight)) {
@@ -1135,6 +1199,9 @@ void present(const Surface& initial, const std::string& title, int frames,
         } else {
             ++skippedPresents;
         }
+        if (frameStats.enabled)
+            frameStats.sample(frame, tickStarted, ticked, FrameStats::now(),
+                              presents != presentsBefore);
         if (frames > 0)
             ++frame;
         // Rendering and vsync already consume the frame budget. Sleeping a
