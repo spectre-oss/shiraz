@@ -542,6 +542,17 @@ macos-runtime-graphics-window-smoke: $(MACOS_RUNTIME_GRAPHICS_SMOKE_DEPS)
 macos-runtime-graphics-gles2-window-smoke: $(MACOS_RUNTIME_GRAPHICS_SMOKE_DEPS) $(addprefix $(MACOS_OUT)/,$(MACOS_GLES_LIBRARIES))
 	python3 scripts/macos_runtime_smoke.py --profile graphics --windowed --expect-renderer opengles2 --snapshot $(MACOS_OUT)/runtime-graphics-gles2-window-smoke/frame.ppm
 
+# Frame-rate fixture APK (tests/macos-apk-framerate): a Canvas View that redraws
+# every frame. macos-framerate-bench runs it in a window for 20 s and prints the
+# presenter's SHIRAZ_FRAME_STATS summary; it fails below 55 presents per second.
+.PHONY: macos-apk-framerate-fixture macos-framerate-bench
+MACOS_APK_FRAMERATE_SOURCES := tests/macos-apk-framerate/AndroidManifest.xml $(shell find tests/macos-apk-framerate -name '*.java')
+build/macos-apk/framerate.apk: $(MACOS_APK_FRAMERATE_SOURCES) scripts/build_macos_fixture.py scripts/build_apk_fixture.py src/shiraz/apk.py src/shiraz/host_layout.py $(MACOS_ART_HOST)/bin/dx
+	python3 scripts/build_macos_fixture.py --fixture framerate
+macos-apk-framerate-fixture: build/macos-apk/framerate.apk
+macos-framerate-bench: macos-runtime-libs macos-graphics-libs macos-framework macos-framework-resources macos-apk-framerate-fixture
+	python3 scripts/macos_framerate_bench.py --min-fps 55
+
 # GLES fixture APK (tests/macos-apk-gles): an ES 2 GLSurfaceView (shader
 # triangle, GLES30 vertex array object) and an ES 1 GLSurfaceView (GL10 and a
 # GLUtils texture) on their own GL threads, beside a coloured View and a

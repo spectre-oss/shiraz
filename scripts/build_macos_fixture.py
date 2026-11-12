@@ -11,7 +11,9 @@ scripts/macos_graphics_images.py, so no image binary is kept in git.
 ES 1 GLSurfaceViews beside a coloured View and a TextView; no assets.
 --fixture gles-anim (tests/macos-apk-gles-anim -> build/macos-apk/gles-anim.apk):
 M4b continuous ES 2 animation encoding the frame id in its colour; no assets.
-Both have no lib/ directory and an uncompressed, 4-byte aligned classes.dex.
+--fixture framerate (tests/macos-apk-framerate -> build/macos-apk/framerate.apk):
+an unpaced Canvas View that redraws every frame and logs SHIRAZ_FRAMERATE; no assets.
+Every fixture has no lib/ directory and an uncompressed, 4-byte aligned classes.dex.
 The result is checked with shiraz.apk.inspect_apk before it is moved into
 place, so a malformed or native-code APK is never published.
 """
@@ -67,6 +69,12 @@ FIXTURES = {
         ROOT / 'tests/macos-apk-gles-anim',
         ROOT / 'build/macos-apk/gles-anim.apk',
         ROOT / 'build/macos-apk/gles-anim-work',
+        None,
+    ),
+    'framerate': (
+        ROOT / 'tests/macos-apk-framerate',
+        ROOT / 'build/macos-apk/framerate.apk',
+        ROOT / 'build/macos-apk/framerate-work',
         None,
     ),
 }
