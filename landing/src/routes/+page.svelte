@@ -7,12 +7,15 @@
   import GitHubLink from '#lib/GitHubLink.svelte';
   import { initIcons } from '#lib/icons.js';
   import { initInteractions } from '#lib/interactions.js';
+  import media from '#lib/media.json';
   import '../styles.css';
   // The newest published tag when the build could ask GitHub; otherwise the
   // source version, linked to the release list because its tag may not exist.
   const releaseTag = __SHIRAZ_RELEASE_TAG__;
   const release = releaseTag ?? `v${__SHIRAZ_VERSION__}`;
   const releaseUrl = 'https://github.com/spectre-oss/shiraz/releases' + (releaseTag ? `/tag/${releaseTag}` : '');
+  // True only when the build holds the film and poster that media.json pins.
+  const film = __SHIRAZ_FILM__;
   let translatePoem = $state(false);
   let activeVerse = $state(-1);
   // Fifteen panes: three across in the tall window, five across in the desktop one.
@@ -99,6 +102,16 @@
     <section class="shiraz-web shiraz-mac" id="mac" aria-labelledby="mac-title">
       <div class="web-heading"><p class="eyebrow">Shiraz Launcher</p><h2 id="mac-title">A shelf for<br><span>your Mac.</span></h2></div>
       <div class="web-description"><p>Keep your APKs in one window on an Apple Silicon Mac. Drop a file in to add it; Shiraz reads its name and icon and leaves the original untouched.</p><p>Set screen size, orientation and logging for each app, then launch, stop or restart it. A running app shows its own icon in the Dock and its output in a console. Loading an app’s native libraries is a per-app switch, off by default.</p><a class="button secondary web-link" href="https://github.com/spectre-oss/shiraz/blob/main/macos/Launcher/README.md">Build the launcher <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a><small>Experimental · macOS 27 on Apple Silicon · Built from source with Xcode. An APK that imports can still fail to start.</small></div>
+      {#if film}
+      <!-- Nothing but the poster loads until the visitor presses play. -->
+      <figure class="mac-film">
+        <video controls playsinline preload="none" width={media.video.width} height={media.video.height} poster="{base}/media/{media.poster.file}" aria-label="Shiraz Launcher on a Mac, {media.video.seconds} second film with sound" aria-describedby="mac-film-note">
+          <source src="{base}/media/{media.video.file}" type="video/mp4" />
+          <track kind="captions" src="{base}/media/{media.captions}" srclang="en" label="English" />
+        </video>
+        <figcaption id="mac-film-note">{media.video.seconds} seconds, with sound and captions. Recorded from a development build on an Apple Silicon Mac. The F-Droid catalog lists apps you can download, not apps known to run.</figcaption>
+      </figure>
+      {/if}
     </section>
     <section class="architecture" id="approach" aria-labelledby="architecture-title">
       <header class="architecture-heading"><p class="eyebrow">Under the surface</p><h2 id="architecture-title">Android™ on the inside.<br><span>Linux or macOS underneath.</span></h2><p>Keep the app. Translate what it needs.<br>Scroll through the pieces that make it possible.</p></header>

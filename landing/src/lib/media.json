@@ -1,0 +1,17 @@
+{
+  "tag": "media-1",
+  "captions": "shiraz-launcher.en.vtt",
+  "video": {
+    "file": "shiraz-launcher.mp4",
+    "bytes": 4936109,
+    "sha256": "0832bd8420b990908547ecc768f43fc28477c94b20086394673fcfcfb2ed0c15",
+    "width": 1920,
+    "height": 1080,
+    "seconds": 37
+  },
+  "poster": {
+    "file": "shiraz-launcher.jpg",
+    "bytes": 55941,
+    "sha256": "96789557b6f2ba2fe4b176bcfe9f2ad806debad7f389c6846714b6d35217559a"
+  }
+}

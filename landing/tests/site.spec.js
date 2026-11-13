@@ -2,6 +2,8 @@
 import { test, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
 import catalog from '../src/lib/compatibility.json' with {type:'json'};
+import media from '../src/lib/media.json' with {type:'json'};
+import { existsSync } from 'node:fs';
 const require = createRequire(import.meta.url);
 
 // No test may depend on GitHub's live API or its current star count.
@@ -259,3 +261,29 @@ test('stack labels jump to their explanation and the last sheet lights its windo
   await expect(page.locator('.stack-diagram a:visible')).toHaveCount(1);
 });
 
+test('launcher film loads nothing before play and carries captions', async ({page}) => {
+  const built = [media.video.file, media.poster.file].every(file => existsSync(new URL(`../build/media/${file}`, import.meta.url)));
+  const requested = [];
+  page.on('request', request => { if (request.url().endsWith('.mp4')) requested.push(request.url()); });
+  await page.goto('/');
+  const video = page.locator('#mac video');
+  // A build without the pinned film must not show an empty player.
+  if (!built) { await expect(video).toHaveCount(0); return; }
+  await video.scrollIntoViewIfNeeded();
+  await expect(video).toHaveAttribute('preload', 'none');
+  await expect(video).toHaveJSProperty('controls', true);
+  await expect(video).toHaveJSProperty('autoplay', false);
+  await expect(video).toHaveJSProperty('paused', true);
+  await expect(video).toHaveAccessibleName(/Shiraz Launcher on a Mac/);
+  await expect(video.locator('track[kind="captions"][srclang="en"]')).toHaveCount(1);
+  expect(await page.evaluate(async src => (await (await fetch(src)).text()).startsWith('WEBVTT'), await video.locator('track').getAttribute('src'))).toBe(true);
+  expect(await video.evaluate(node => node.poster && new Promise(done => { const image = new Image(); image.onload = () => done(image.naturalWidth > 0); image.onerror = () => done(false); image.src = node.poster; }))).toBe(true);
+  expect(requested).toEqual([]);
+  for (const width of [320, 1280]) {
+    await page.setViewportSize({width, height: 800});
+    const box = await video.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(Math.abs(box.width / box.height - 16 / 9)).toBeLessThan(0.02);
+  }
+});

@@ -85,6 +85,8 @@ __pycache__/
 /landing/test-results/
 /landing/playwright-report/
 /landing/static/social-card.png
+/landing/static/media/*
+!/landing/static/media/*.vtt
 
 !/docs/others/
 /docs/others/*

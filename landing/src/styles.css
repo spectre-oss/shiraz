@@ -161,6 +161,10 @@ p { margin: 0; }
 .shiraz-mac { padding-top: 0; }
 .shiraz-mac .web-link .icon { width: 15px; height: 15px; }
 .web-description small { display: block; margin-top: 16px; font-size: 14px; color: var(--ink-faint); }
+/* The launcher film sits under the Mac copy, across both columns. */
+.mac-film { grid-column: 1 / -1; margin: clamp(12px, 3vw, 36px) 0 0; }
+.mac-film video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 14px; background: var(--wine-deep); }
+.mac-film figcaption { max-width: 72ch; margin-top: 14px; font-size: 14px; color: var(--ink-faint); }
 
 /* The stack: five sheets of glass, and the light that reaches the desktop. */
 .architecture { padding-block: clamp(56px, 8vw, 110px); scroll-margin-top: 80px; }

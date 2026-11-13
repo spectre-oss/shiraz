@@ -37,6 +37,36 @@ latest published release. Website deployment does not wait for native builds.
 Successful native releases trigger a website refresh. The downloadable offline builder ZIP retains
 the standalone Go demo, independently of the SvelteKit site.
 
+## Launcher film
+
+The Mac section plays a short film. The film and its poster are binaries, so they
+are not committed: they are assets of the `media-1` release, and
+`src/lib/media.json` records each file's size and SHA-256. `prepare-assets.mjs`
+downloads them into the ignored `static/media/` and stops the build if a file
+there has other bytes. When they are absent (offline, or not yet uploaded) the
+site builds without the player. The captions, `static/media/*.vtt`, are source.
+
+The `media-1` release is created once. It is a pre-release like the version
+releases, so it never becomes the repository's "Latest" release:
+
+```sh
+gh release create media-1 --prerelease --title "Website media" --notes "Film and poster for the website. Not a Shiraz version."
+```
+
+To publish a new cut (needs ffmpeg), check the captions against it, then upload:
+
+```sh
+node landing/scripts/make-media.mjs path/to/film.mp4
+gh release upload media-1 landing/static/media/shiraz-launcher.mp4 landing/static/media/shiraz-launcher.jpg --clobber
+```
+
+After an upload, move the two local files aside and build once: the build must
+print `MEDIA_READY` for each. A failed download only prints `MEDIA_MISSING`.
+
+Commit the changed `media.json` and captions only after the upload, or the site
+deploys without the film until it lands. `static/licenses/film-source.txt` lists
+what the film shows and where its sound comes from.
+
 Original code is GPL-3.0-only. Adapted Heroicons paths and animation retain MIT
 notices in `static/licenses/`. Bricolage Grotesque and Instrument Sans are
 OFL-1.1 fonts bundled at build time from their npm packages; see

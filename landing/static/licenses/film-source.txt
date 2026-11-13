@@ -1,0 +1,19 @@
+Shiraz Launcher film (media/shiraz-launcher.mp4, media/shiraz-launcher.jpg)
+
+The film and its poster are not in the source tree. The site build downloads
+them from the project release named in src/lib/media.json and checks each file
+against the size and SHA-256 recorded there.
+
+Picture: screen recordings of a Shiraz development build on an Apple Silicon Mac,
+with title cards made for the film.
+
+Sound: synthetic narration, with music and sound effects.
+
+Third-party apps: the recordings show Android apps and the F-Droid catalog. Apps
+shown running or listed in the launcher include 2048 Open Fun Game, SolitaireCG,
+Dodge, Editor, F-Droid, OsmAnd~ and Telegram. Their names, icons and interfaces
+belong to their own projects and keep their own licenses. They appear as
+recorded. They are not part of Shiraz and are not covered by its GPL-3.0-only
+license. An app listed in the launcher or the catalog is not thereby known to run.
+
+Android is a trademark of Google LLC.
