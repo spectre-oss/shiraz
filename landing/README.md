@@ -92,3 +92,13 @@ source or SDK. Evidence for runtime code links to the recorded public source
 baseline; reports and website instructions link to `main`. Use `--source-ref` to
 record an already published baseline when the measured build includes local
 changes. Publish only reviewed aggregate data, never raw result details.
+
+## Star count and release link
+
+`vite build` asks the public GitHub API for the repository's star count and its
+newest release tag and bakes both into the pages (`vite.config.js`). The header
+link refreshes the count once per browser session. If the build cannot reach the
+API, the count is hidden and the release pill shows `VERSION` and links to the
+release list, so offline builds still work. Set `SHIRAZ_OFFLINE=1` to skip the
+requests. `GH_TOKEN` or `GITHUB_TOKEN` is used when present, only to avoid the
+anonymous rate limit. Browser tests block `api.github.com`.

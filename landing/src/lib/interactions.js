@@ -2,31 +2,36 @@
 import {setHeroicon, animateHeroicon, stopHeroicons} from './icons.js';
 export function initInteractions() {
   const controller = new AbortController();
-  const copyButton = document.querySelector('.copy-button');
-  const copyStatus = document.querySelector('.copy-status');
-  let feedbackTimeout;
-  copyButton.addEventListener('click', async () => {
-    clearTimeout(feedbackTimeout);
-    try {
-      await navigator.clipboard.writeText('make build\nmake appimage APK=/path/to/app.apk');
-      setHeroicon(copyButton.querySelector('svg'), 'check');
-      animateHeroicon(copyButton.querySelector('svg'));
-      copyButton.setAttribute('aria-label', 'Build commands copied');
-      copyStatus.textContent = 'Copied. Your terminal is ready when you are.';
-    } catch {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(document.querySelector('#build-command'));
-      selection.removeAllRanges();
-      selection.addRange(range);
-      copyStatus.textContent = 'Clipboard unavailable. Select and copy the commands above.';
-    }
-    feedbackTimeout = setTimeout(() => {
-      setHeroicon(copyButton.querySelector('svg'), 'copy');
-      copyButton.setAttribute('aria-label', 'Copy build commands');
-      copyStatus.textContent = '';
-    }, 6000);
-  }, {signal: controller.signal});
+  // Each code block copies its own text and reports in its own status line.
+  const feedbackTimeouts = [];
+  document.querySelectorAll('.code-area').forEach((area, index) => {
+    const copyButton = area.querySelector('.copy-button');
+    const code = area.querySelector('pre');
+    const copyStatus = area.parentElement.querySelector('.copy-status');
+    const idleLabel = copyButton.getAttribute('aria-label');
+    copyButton.addEventListener('click', async () => {
+      clearTimeout(feedbackTimeouts[index]);
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+        setHeroicon(copyButton.querySelector('svg'), 'check');
+        animateHeroicon(copyButton.querySelector('svg'));
+        copyButton.setAttribute('aria-label', 'Commands copied');
+        copyStatus.textContent = 'Copied. Your terminal is ready when you are.';
+      } catch {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        copyStatus.textContent = 'Clipboard unavailable. Select and copy the commands above.';
+      }
+      feedbackTimeouts[index] = setTimeout(() => {
+        setHeroicon(copyButton.querySelector('svg'), 'copy');
+        copyButton.setAttribute('aria-label', idleLabel);
+        copyStatus.textContent = '';
+      }, 6000);
+    }, {signal: controller.signal});
+  });
 
   // Scroll only selects a layer and feeds two progress values; CSS draws the rest.
   const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -126,5 +131,5 @@ export function initInteractions() {
     }, { passive: true, signal: controller.signal });
   }
 
-  return () => { controller.abort(); clearTimeout(feedbackTimeout); cancelAnimationFrame(stackFrame); cancelAnimationFrame(sunFrame); cancelAnimationFrame(ghostFrame); clearScrollState(); document.documentElement.classList.remove("motion-enabled"); };
+  return () => { controller.abort(); feedbackTimeouts.forEach(clearTimeout); cancelAnimationFrame(stackFrame); cancelAnimationFrame(sunFrame); cancelAnimationFrame(ghostFrame); clearScrollState(); document.documentElement.classList.remove("motion-enabled"); };
 }

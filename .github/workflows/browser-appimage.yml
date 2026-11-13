@@ -231,6 +231,8 @@ jobs:
       - name: Build SvelteKit landing and integrated builder
         env:
           BASE_PATH: /shiraz
+          # Read-only: the build asks the public API for the star count and newest tag.
+          GH_TOKEN: ${{ github.token }}
           SHIRAZ_PREBUILT_WASM: '1'
         run: |
           npm ci --prefix landing

@@ -4,6 +4,48 @@ import { createRequire } from 'node:module';
 import catalog from '../src/lib/compatibility.json' with {type:'json'};
 const require = createRequire(import.meta.url);
 
+// No test may depend on GitHub's live API or its current star count.
+test.beforeEach(async ({page}) => {
+  await page.route('https://api.github.com/**', route => route.abort());
+});
+
+test('header links to GitHub with its mark and a star count that refreshes once per session', async ({page}) => {
+  let calls = 0;
+  await page.route('https://api.github.com/repos/spectre-oss/shiraz', route => { calls++; return route.fulfill({json:{stargazers_count:1234}}); });
+  for (const path of ['/', '/compatibility/']) {
+    await page.goto(path);
+    const link = page.getByRole('link', {name:'GitHub repository, 1234 stars'});
+    await expect(link).toHaveAttribute('href', 'https://github.com/spectre-oss/shiraz');
+    await expect(link.locator('.github-stars')).toHaveText('1.2k');
+    await expect(link.locator('.github-mark')).toBeVisible();
+  }
+  expect(calls).toBe(1);
+});
+
+test('GitHub link stays usable when the star count cannot be refreshed', async ({page}) => {
+  await page.goto('/');
+  const link = page.locator('.site-header .github-link');
+  await expect(link).toHaveAttribute('href', 'https://github.com/spectre-oss/shiraz');
+  await expect(link).toHaveAccessibleName(/^GitHub repository/);
+  await page.setViewportSize({width: 320, height: 700});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const box = await link.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.x + box.width).toBeLessThanOrEqual(320);
+});
+
+test('each command block copies its own commands', async ({page, context, browserName}) => {
+  test.skip(browserName !== 'chromium', 'clipboard permissions are Chromium-only in Playwright');
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await page.getByText('Get an app from F-Droid').click();
+  await page.getByRole('button', {name:'Copy F-Droid commands'}).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('python3 -m shiraz fdroid fetch');
+  await page.getByText('Build from source').click();
+  await page.getByRole('button', {name:'Copy build commands'}).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('make build\nmake appimage APK=/path/to/app.apk');
+});
+
 test('responsive site keeps table columns aligned and has no accessibility violations', async ({page}) => {
   for (const width of [2560, 1182, 390, 320]) {
     await page.setViewportSize({width, height: 881});

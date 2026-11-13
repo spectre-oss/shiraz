@@ -35,6 +35,8 @@ jobs:
       - name: Build the SvelteKit website and WASM builder
         env:
           BASE_PATH: /shiraz
+          # Read-only: the build asks the public API for the star count and newest tag.
+          GH_TOKEN: ${{ github.token }}
         run: |
           npm ci --prefix landing
           npm --prefix landing run check

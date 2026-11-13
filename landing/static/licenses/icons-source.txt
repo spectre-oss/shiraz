@@ -8,3 +8,15 @@ to the Web Animations API for the SvelteKit frontend. React/Motion wrappers are 
 vendored. Original licenses retained alongside this file.
 
 Selected icons: arrow-right, arrow-up-right, clipboard-document, check, pause, play, plus, arrow-down, arrow-turn-down-right.
+
+Heroicons (solid)
+https://github.com/tailwindlabs/heroicons
+MIT License, see heroicons.txt alongside this file.
+Selected icon: star (24/solid), used for the star count in src/lib/GitHubLink.svelte.
+
+Simple Icons
+https://github.com/simple-icons/simple-icons
+CC0 1.0 Universal: https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md
+Selected icon: GitHub mark path, used in src/lib/GitHubLink.svelte.
+GitHub and the GitHub mark are trademarks of GitHub, Inc. The mark is used only
+to link to this project's repository and does not imply endorsement.
