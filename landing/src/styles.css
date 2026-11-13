@@ -70,7 +70,7 @@ p { margin: 0; }
 .motion-enabled .brand img { animation: spectre-float 4s ease-in-out infinite; }
 @keyframes spectre-float { 0%, 100% { transform: translate(0, 1px) scaleX(-1) rotate(-3deg); } 50% { transform: translate(3px, -4px) scaleX(-1) rotate(3deg); } }
 .site-header { position: fixed; inset: 12px 0 auto; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; padding: 6px 10px 6px 16px; border: 1px solid transparent; border-radius: 999px; transition: background-color .3s ease, border-color .3s ease, backdrop-filter .3s ease; }
-.site-header.is-scrolled { background: color-mix(in srgb, var(--wine-deep) 82%, transparent); border-color: var(--line); backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3); }
+.site-header.is-scrolled { background: color-mix(in srgb, var(--wine-deep) 94%, transparent); border-color: var(--line); backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3); }
 .site-header nav, .compat-header nav { display: flex; align-items: center; gap: 4px; }
 .site-header nav a, .compat-header nav a { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding-inline: 14px; border-radius: 999px; font-size: 15px; font-weight: 500; color: var(--ink-soft); transition: color .2s ease, background-color .2s ease; }
 .site-header nav a:hover, .compat-header nav a:hover { color: var(--ink); background: #ffffff12; }
@@ -488,7 +488,7 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
 @media (max-width: 900px) {
   .hero-inner { grid-template-columns: 1fr; }
   .hero-art { justify-self: center; width: min(100%, 400px); margin-top: 16px; }
-  .hero h1 { font-size: clamp(2.9rem, 12.5vw, 6rem); }
+  .hero h1 { font-size: clamp(2rem, 10.6vw, 6rem); }
   .experimental-inner, .shiraz-web, .builder { grid-template-columns: 1fr; }
   .experimental-notice h2 { grid-row: auto; margin-bottom: 8px; }
   .builder-heading { position: static; }

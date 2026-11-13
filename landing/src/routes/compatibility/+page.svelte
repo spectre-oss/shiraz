@@ -7,8 +7,11 @@
   import { applications } from '#lib/compatibility.js';
   import '../../styles.css';
   let dialog;
+  let opener;
   let selectedApp = $state(null);
-  async function openLimitations(app) {
+  // Safari does not focus a button on click, so the dialog cannot restore focus by itself.
+  async function openLimitations(app, trigger) {
+    opener = trigger;
     selectedApp = app;
     await tick();
     if (!dialog.open) dialog.showModal();
@@ -67,7 +70,7 @@
     <div class="compat-table-scroll" role="region" aria-label="App compatibility results" aria-describedby="app-table-hint" tabindex="0">
       <table class="compat-table"><caption class="visually-hidden">Recorded app compatibility, sorted alphabetically</caption><thead><tr><th scope="col">App</th><th scope="col">Framework</th><th scope="col">Status</th><th scope="col">Observed behavior &amp; limitations</th><th scope="col">Evidence</th></tr></thead><tbody>
       {#each results as app (app.name)}
-        <tr><th scope="row">{app.name}</th><td>{app.framework}</td><td><span class="compat-badge" class:blocked={app.status === 'Blocked'} class:historical={app.status === 'Historical'}><span class="status-shape" aria-hidden="true"></span>{app.status}</span></td><td><p class="compat-observed">{app.observed}</p><button class="limitations-link" type="button" aria-haspopup="dialog" onclick={() => openLimitations(app)}>Known limitations</button></td><td><a class="compat-report" href={app.url} aria-label={`Read ${app.name} test report`}>Report <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a></td></tr>
+        <tr><th scope="row">{app.name}</th><td>{app.framework}</td><td><span class="compat-badge" class:blocked={app.status === 'Blocked'} class:historical={app.status === 'Historical'}><span class="status-shape" aria-hidden="true"></span>{app.status}</span></td><td><p class="compat-observed">{app.observed}</p><button class="limitations-link" type="button" aria-haspopup="dialog" onclick={(event) => openLimitations(app, event.currentTarget)}>Known limitations</button></td><td><a class="compat-report" href={app.url} aria-label={`Read ${app.name} test report`}>Report <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a></td></tr>
       {/each}
       </tbody></table>
     </div>
@@ -76,7 +79,7 @@
   <AndroidCoverage />
   <section class="compat-contribute"><h2>Your app isn’t listed?</h2><p>That means we have no result here, not that it works or fails.<br>Help us record a reproducible test. Each app is one entry in our <a href="https://github.com/spectre-oss/shiraz/blob/main/landing/src/lib/compatibility.json">shared JSON catalog</a>.</p><a class="button primary" href="https://github.com/spectre-oss/shiraz/blob/main/docs/AI_CONTRIBUTING.md">Contribute a test report <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a></section>
 </main>
-<dialog class="limitations-dialog" bind:this={dialog} aria-labelledby="limitations-title" aria-describedby="limitations-description">
+<dialog class="limitations-dialog" bind:this={dialog} onclose={() => opener?.focus()} aria-labelledby="limitations-title" aria-describedby="limitations-description">
   {#if selectedApp}
     <p class="dialog-app-name">{selectedApp.name}</p>
     <h2 id="limitations-title">Known limitations</h2>
