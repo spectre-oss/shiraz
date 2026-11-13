@@ -27,4 +27,10 @@ public enum RuntimeCommand {
         }
         return arguments
     }
+
+    /// Environment for `run`, merged over the runtime's own. Always set
+    /// explicitly so a value inherited by the launcher never applies.
+    public static func runEnvironment(settings: AppSettings) -> [String: String] {
+        ["SHIRAZ_GUEST_LOADER": settings.nativeCode ? "1" : "0"]
+    }
 }

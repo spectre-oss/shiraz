@@ -182,6 +182,15 @@ struct SettingsSection: View {
             if let problem = draft.validationError {
                 Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
             }
+            if app.compatibility == .arm64 {
+                Section {
+                    Toggle("Load Native Libraries (Experimental)", isOn: $draft.nativeCode)
+                } header: {
+                    Text("Native Code")
+                } footer: {
+                    Text("Runs the app's arm64-v8a libraries through Shiraz's guest loader, which is unfinished. Without it, features that need native code (such as OsmAnd's map) stay blank or fail.")
+                }
+            }
             Section("Input") {
                 LabeledContent("Keyboard Mapping") {
                     Button("Configure…") { model.attempt(.keyboardMapping) }

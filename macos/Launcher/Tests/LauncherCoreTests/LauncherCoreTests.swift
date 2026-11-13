@@ -69,6 +69,21 @@ private let sampleReport = Data("""
                               "--log-level", "DEBUG", "--timeout", "90"])
         #expect(!RuntimeCommand.run(apk: URL(fileURLWithPath: "/x.apk"), settings: AppSettings()).contains("--timeout"))
     }
+
+    @Test func nativeCodeMapsToGuestLoader() {
+        #expect(RuntimeCommand.runEnvironment(settings: AppSettings()) == ["SHIRAZ_GUEST_LOADER": "0"])
+        #expect(RuntimeCommand.runEnvironment(settings: AppSettings(nativeCode: true)) == ["SHIRAZ_GUEST_LOADER": "1"])
+        #expect(!RuntimeCommand.run(apk: URL(fileURLWithPath: "/x.apk"), settings: AppSettings(nativeCode: true))
+            .contains { $0.contains("GUEST") })
+    }
+
+    @Test func settingsWithoutNativeCodeStillDecode() throws {
+        let old = #"{"width":360,"height":640,"logLevel":"INFO"}"#
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))
+        #expect(settings == AppSettings())
+        let round = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(AppSettings(nativeCode: true)))
+        #expect(round.nativeCode)
+    }
 }
 
 @Suite struct LogBufferTests {

@@ -438,12 +438,14 @@ final class LauncherModel {
 
         let name = entry.displayName
         let arguments = runtime.arguments(RuntimeCommand.run(apk: store.apkURL(for: package), settings: entry.settings))
-        session.log.appendNotice("$ python3 \(arguments.joined(separator: " "))")
+        let runEnvironment = RuntimeCommand.runEnvironment(settings: entry.settings)
+        let assignments = runEnvironment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+        session.log.appendNotice("$ " + (assignments + ["python3"] + arguments).joined(separator: " "))
         do {
             let process = try ProcessRunner.spawn(
                 executable: runtime.python,
                 arguments: arguments,
-                environment: runtime.environment,
+                environment: runtime.environment.merging(runEnvironment) { _, new in new },
                 workingDirectory: runtime.root,
                 onOutput: { kind, data in
                     Task { @MainActor in session.log.append(data, stream: kind) }

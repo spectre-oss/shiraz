@@ -32,6 +32,10 @@ The launcher shows the runtime's own output in each app's Console tab.
   `SHIRAZ_LAUNCHER_LIBRARY` points the launcher at another library directory.
 - Per-app settings that map to `shiraz run` flags: device size presets or a
   custom size, orientation, log level, optional time limit.
+- Load Native Libraries (Experimental), shown for arm64-v8a apps and off by
+  default, launches with `SHIRAZ_GUEST_LOADER=1` so the app's native libraries
+  run through the guest ELF loader. Otherwise the launcher passes
+  `SHIRAZ_GUEST_LOADER=0` and native calls fail with UnsatisfiedLinkError.
 - Launch, Stop and Restart per app. The runtime runs in its own process group,
   so Stop also ends anything it spawned. Quitting the launcher stops running
   apps.
