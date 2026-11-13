@@ -2165,6 +2165,10 @@ macos-guest-telegram-api-check: $(MACOS_OUT)/m5/telegram-api-probe
 	$(MACOS_OUT)/m5/telegram-api-probe $(MACOS_OUT)/m5/telegram-api-work
 macos-guest-check: macos-guest-telegram-api-check
 
+.PHONY: macos-database-utils-smoke
+macos-database-utils-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py DatabaseUtilsSmoke --marker DATABASE_UTILS_OK
+
 .PHONY: macos-work-source-smoke
 macos-work-source-smoke: macos-framework
 	uv run --no-project python scripts/java_framework_smoke.py WorkSourceSmoke --marker WORK_SOURCE_OK

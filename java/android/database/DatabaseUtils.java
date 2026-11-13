@@ -1,8 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package android.database;
 
-/** SQL text helpers. Statement classification follows the API-27 prefix contract. */
+/** SQL text and scalar query helpers. Statement classification follows the API-27 prefix contract. */
 public class DatabaseUtils {
+    /** The first column of the first row as a long; SQLiteDoneException when the query has no rows. */
+    public static long longForQuery(android.database.sqlite.SQLiteDatabase db,String query,String[] selectionArgs){
+        try(android.database.sqlite.SQLiteStatement statement=db.compileStatement(query)){return longForQuery(statement,selectionArgs);}
+    }
+    public static long longForQuery(android.database.sqlite.SQLiteStatement statement,String[] selectionArgs){
+        statement.bindAllArgsAsStrings(selectionArgs);return statement.simpleQueryForLong();
+    }
+    public static String stringForQuery(android.database.sqlite.SQLiteDatabase db,String query,String[] selectionArgs){
+        try(android.database.sqlite.SQLiteStatement statement=db.compileStatement(query)){return stringForQuery(statement,selectionArgs);}
+    }
+    public static String stringForQuery(android.database.sqlite.SQLiteStatement statement,String[] selectionArgs){
+        statement.bindAllArgsAsStrings(selectionArgs);return statement.simpleQueryForString();
+    }
+    public static long queryNumEntries(android.database.sqlite.SQLiteDatabase db,String table){return queryNumEntries(db,table,null,null);}
+    public static long queryNumEntries(android.database.sqlite.SQLiteDatabase db,String table,String selection){return queryNumEntries(db,table,selection,null);}
+    /** Row count of {@code table}; like AOSP, table and selection are SQL text, not bound values. */
+    public static long queryNumEntries(android.database.sqlite.SQLiteDatabase db,String table,String selection,String[] selectionArgs){
+        String where=selection!=null&&!selection.isEmpty()?" where "+selection:"";
+        return longForQuery(db,"select count(*) from "+table+where,selectionArgs);
+    }
     public static void cursorFillWindow(Cursor cursor,int position,CursorWindow window){
         if(position<0||position>=cursor.getCount())return;
         if(cursor instanceof CrossProcessCursor&&((CrossProcessCursor)cursor).getWindow()==window)throw new IllegalArgumentException("Cannot fill the cursor's source window");

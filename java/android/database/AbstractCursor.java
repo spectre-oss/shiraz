@@ -6,7 +6,7 @@ import android.os.Bundle;
 /** Cursor positioning and observer lifecycle independent of the row storage backend. */
 public abstract class AbstractCursor implements CrossProcessCursor {
     protected int mPos=-1;protected boolean mClosed;
-    private final DataSetObservable data=new DataSetObservable();private Bundle extras=Bundle.EMPTY;
+    private final DataSetObservable data=new DataSetObservable();private final java.util.ArrayList<ContentObserver> content=new java.util.ArrayList<ContentObserver>();private Bundle extras=Bundle.EMPTY;
     protected void checkPosition(){if(mClosed)throw new IllegalStateException("Cursor is closed");if(mPos<0||mPos>=getCount())throw new CursorIndexOutOfBoundsException(mPos,getCount());}
     public abstract int getCount();public abstract String[] getColumnNames();
     public abstract String getString(int column);public abstract short getShort(int column);public abstract int getInt(int column);public abstract long getLong(int column);public abstract float getFloat(int column);public abstract double getDouble(int column);public abstract boolean isNull(int column);
@@ -31,8 +31,10 @@ public abstract class AbstractCursor implements CrossProcessCursor {
     protected void onDeactivateOrClose(){data.notifyInvalidated();}
     public void deactivate(){onDeactivateOrClose();}
     public boolean requery(){if(mClosed)return false;mPos=-1;data.notifyChanged();return true;}
-    public void close(){if(mClosed)return;mClosed=true;onDeactivateOrClose();}
+    public void close(){if(mClosed)return;mClosed=true;synchronized(content){content.clear();}onDeactivateOrClose();}
     public boolean isClosed(){return mClosed;}
+    public void registerContentObserver(ContentObserver observer){if(observer==null)throw new IllegalArgumentException("The observer is null.");synchronized(content){if(content.contains(observer))throw new IllegalStateException("Observer "+observer+" is already registered.");content.add(observer);}}
+    public void unregisterContentObserver(ContentObserver observer){if(observer==null)throw new IllegalArgumentException("The observer is null.");synchronized(content){if(!mClosed&&!content.remove(observer))throw new IllegalStateException("Observer "+observer+" was not registered.");}}
     public void registerDataSetObserver(DataSetObserver observer){data.registerObserver(observer);}public void unregisterDataSetObserver(DataSetObserver observer){data.unregisterObserver(observer);}
     public Bundle getExtras(){return extras;}public void setExtras(Bundle value){extras=value==null?Bundle.EMPTY:new Bundle(value);}public Bundle respond(Bundle value){return Bundle.EMPTY;}
     public boolean getWantsAllOnMoveCalls(){return false;}

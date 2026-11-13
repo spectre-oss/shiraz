@@ -14,5 +14,7 @@ public interface Cursor extends Closeable {
     void copyStringToBuffer(int column, CharArrayBuffer buffer);
     void deactivate(); boolean requery(); void close(); boolean isClosed();
     void registerDataSetObserver(DataSetObserver observer); void unregisterDataSetObserver(DataSetObserver observer);
+    /** Observers are kept until unregistered or close; Shiraz has no content-change source, so they are not notified. */
+    void registerContentObserver(ContentObserver observer); void unregisterContentObserver(ContentObserver observer);
     Bundle getExtras(); Bundle respond(Bundle extras);
 }

@@ -340,6 +340,10 @@ build: build/libshiraz-sqlite.so
 sqlite-smoke: build framework
 	python3 scripts/sqlite_smoke.py
 
+.PHONY: database-utils-smoke
+database-utils-smoke: build framework
+	python3 scripts/java_framework_smoke.py DatabaseUtilsSmoke --marker DATABASE_UTILS_OK
+
 .PHONY: sqlite-lifetime-smoke
 sqlite-lifetime-smoke: build framework
 	python3 scripts/sqlite_lifetime_smoke.py

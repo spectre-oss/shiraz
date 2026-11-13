@@ -10,6 +10,7 @@ public class MatrixCursor implements Cursor {
     private boolean closed;
     private Bundle extras = Bundle.EMPTY;
     private final Set<DataSetObserver> observers = new LinkedHashSet<DataSetObserver>();
+    private final Set<ContentObserver> contentObservers = new LinkedHashSet<ContentObserver>();
     public MatrixCursor(String[] columns) { this(columns, 16); }
     public MatrixCursor(String[] columns, int capacity) {
         if (columns == null) throw new NullPointerException("columns");
@@ -57,10 +58,12 @@ public class MatrixCursor implements Cursor {
     protected final void changed() { for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onChanged(); }
     public void deactivate() { live(); for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onInvalidated(); }
     public boolean requery() { live(); changed(); return true; }
-    public void close() { if (!closed) { closed = true; rows.clear(); try { for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onInvalidated(); } finally { observers.clear(); } } }
+    public void close() { if (!closed) { closed = true; rows.clear(); try { for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onInvalidated(); } finally { observers.clear(); contentObservers.clear(); } } }
     public boolean isClosed() { return closed; }
     public void registerDataSetObserver(DataSetObserver observer) { live(); if (!observers.add(Objects.requireNonNull(observer))) throw new IllegalStateException("Observer already registered"); }
     public void unregisterDataSetObserver(DataSetObserver observer) { if (!observers.remove(Objects.requireNonNull(observer))) throw new IllegalStateException("Observer is not registered"); }
+    public void registerContentObserver(ContentObserver observer) { if (observer == null) throw new IllegalArgumentException("The observer is null."); live(); if (!contentObservers.add(observer)) throw new IllegalStateException("Observer already registered"); }
+    public void unregisterContentObserver(ContentObserver observer) { if (observer == null) throw new IllegalArgumentException("The observer is null."); if (!closed && !contentObservers.remove(observer)) throw new IllegalStateException("Observer is not registered"); }
     public Bundle getExtras() { live(); return extras; }
     public void setExtras(Bundle value) { live(); extras = value == null ? Bundle.EMPTY : new Bundle(value); }
     public Bundle respond(Bundle value) { live(); return Bundle.EMPTY; }
