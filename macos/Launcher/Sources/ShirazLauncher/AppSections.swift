@@ -400,7 +400,9 @@ struct ConsoleSection: View {
                     Toggle("Follow", isOn: $follow).toggleStyle(.button)
                     Spacer()
                     Text("\(lines.count) lines").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Button("Copy", systemImage: "doc.on.doc") { model.attempt(.copyToClipboard) }
+                    Button("Copy", systemImage: "doc.on.doc") { model.copyLog(lines.map(\.text)) }
+                        .help(lines.count == session.log.lines.count ? "Copy output" : "Copy shown lines")
+                        .disabled(lines.isEmpty)
                     Button("Export…", systemImage: "square.and.arrow.up") { exporting = true }
                     Button("Clear", systemImage: "trash") { model.clearLog(app.packageName) }
                 }

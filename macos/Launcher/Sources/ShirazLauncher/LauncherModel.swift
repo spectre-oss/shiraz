@@ -199,6 +199,19 @@ final class LauncherModel {
         do { try feature.perform() } catch { present(error) }
     }
 
+    /// Console Copy: the lines on screen (filter applied), one per line.
+    func copyLog(_ lines: [String]) {
+        guard !lines.isEmpty else { return }
+        Task {
+            do {
+                try await Clipboard().copy(lines.joined(separator: "\n"))
+                inform(lines.count == 1 ? "Copied 1 line" : "Copied \(lines.count) lines")
+            } catch {
+                present(error)
+            }
+        }
+    }
+
     func dismissToast() {
         toastTask?.cancel()
         toast = nil

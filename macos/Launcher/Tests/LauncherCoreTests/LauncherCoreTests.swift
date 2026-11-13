@@ -771,3 +771,17 @@ private let sampleReport = Data("""
         #expect(store.hasCurrentMetadata(for: "org.example.app"))
     }
 }
+
+@Test func clipboardSendsUTF8TextToTheTool() async throws {
+    let out = FileManager.default.temporaryDirectory.appending(path: "clipboard-\(UUID().uuidString).txt")
+    defer { try? FileManager.default.removeItem(at: out) }
+    let text = "E/Host( 1): سلام\nok\tdone"
+    try await Clipboard(executable: URL(filePath: "/usr/bin/tee"), arguments: [out.path]).copy(text)
+    #expect(try String(contentsOf: out, encoding: .utf8) == text)
+}
+
+@Test func clipboardReportsToolFailure() async {
+    await #expect(throws: Clipboard.Failure(status: 1)) {
+        try await Clipboard(executable: URL(filePath: "/usr/bin/false")).copy("x")
+    }
+}

@@ -37,7 +37,6 @@ public enum Feature: String, CaseIterable, Sendable, Identifiable {
     case diagnosticsReport
     case performanceStats
     case keepAwake
-    case copyToClipboard
 
     public var id: String { rawValue }
 
@@ -68,7 +67,6 @@ public enum Feature: String, CaseIterable, Sendable, Identifiable {
         case .diagnosticsReport: "Diagnostics Report"
         case .performanceStats: "Performance"
         case .keepAwake: "Keep Awake"
-        case .copyToClipboard: "Copy"
         }
     }
 

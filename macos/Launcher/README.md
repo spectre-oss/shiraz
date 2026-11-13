@@ -100,7 +100,7 @@ duplicate, replace APK, app data (show, clear, cache, back up), permission
 and network controls,
 notifications, display scale, full screen, renderer choice, keyboard mapping,
 game controllers, app language, keep awake, runtime update, diagnostics
-report, performance stats, copying console output.
+report, performance stats.
 
 Also missing:
 
