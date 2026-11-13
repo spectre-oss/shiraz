@@ -34,6 +34,7 @@ class RegistryMetadata(unittest.TestCase):
         )
         text = properties_text(facts)
         self.assertIn('package=org.example.app\n', text)
+        self.assertIn('metadataVersion=2\n', text)
         self.assertNotIn(
             'installer=', properties_text(registry_metadata(Path('/a.apk'), report(), None))
         )

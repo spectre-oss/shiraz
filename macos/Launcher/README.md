@@ -72,16 +72,23 @@ The launcher shows the runtime's own output in each app's Console tab.
   through PackageManager) and a per-session request directory
   `SHIRAZ_LAUNCHER_INBOX` (`java/shiraz/runtime/LauncherInbox.java`,
   `Sources/LauncherCore/InstallInbox.swift`). The F-Droid app's
-  PackageInstaller session hands its APK there; the launcher imports it and
-  answers. Installs need REQUEST_INSTALL_PACKAGES and removals
+  PackageInstaller session hands its APK there; the launcher copies it,
+  asks the user (the window comes forward), imports it and answers. Installs
+  and updates need REQUEST_INSTALL_PACKAGES and removals
   REQUEST_DELETE_PACKAGES in the requesting app's manifest, checked by the
-  launcher. Open asks the launcher to start the app.
+  launcher. Open asks the launcher to start the app without a prompt. When
+  the app stops waiting, the prompt closes and nothing changes.
+- Updates, from the catalog page or from an app (`Sources/LauncherCore/UpdatePolicy.swift`):
+  the APK must be newer, its SHA-256 must be one the signed index lists for
+  that package (the catalog is downloaded again once when it is not), and the
+  installed copy's signing certificate (`shiraz signer`, read, not verified)
+  must be the index's `signer` for that release. The app must not be running,
+  and an app cannot update itself while it runs. Settings and app data stay.
 - Each library app has `package.properties` from `shiraz metadata`, so apps
-  see what else is installed.
-- Limits: apps cannot replace a package that is already in the library (no
-  signer-lineage check yet), so updates go through the catalog page. The
-  launcher shows no separate consent prompt for in-app installs: the
-  requesting app's own Install button is the user action, followed by a toast.
+  see what else is installed; `label` is the resolved application label.
+  Files from an older format (`metadataVersion`) are rewritten at startup,
+  keeping the recorded installer.
+- Limits: updates of apps that are not in the F-Droid catalog are refused.
 
 ## Not implemented
 

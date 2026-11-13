@@ -37,6 +37,12 @@ public struct RuntimeTools: Sendable {
         return try JSONDecoder().decode(Output.self, from: try await output(RuntimeCommand.label(apk: apk), what: "Label lookup")).label
     }
 
+    /// Signing certificate digests of an APK the caller already trusts.
+    public func signers(apk: URL) async throws -> [String] {
+        struct Output: Decodable { var certificates: [String] }
+        return try JSONDecoder().decode(Output.self, from: try await output(RuntimeCommand.signer(apk: apk), what: "Signer lookup")).certificates
+    }
+
     /// package.properties lets apps running in Shiraz see this one through
     /// PackageManager. A failure only hides the app from them.
     public func writeMetadata(for package: String, installer: String?, store: LibraryStore) async {
@@ -51,14 +57,17 @@ public struct RuntimeTools: Sendable {
 
     /// Add one APK to the library. `expected` rejects an APK whose manifest
     /// names another package; `replacing: false` rejects one already there.
+    /// `check` sees the inspected copy before it replaces anything and may throw.
     public func add(
-        apk: URL, to store: LibraryStore, expected: String? = nil, installer: String? = nil, replacing: Bool = true
+        apk: URL, to store: LibraryStore, expected: String? = nil, installer: String? = nil, replacing: Bool = true,
+        check: (@Sendable (InspectReport) async throws -> Void)? = nil
     ) async throws -> AppEntry {
         let entry = try await store.importAPK(from: apk, replacing: replacing) { staged in
             let report = try await inspect(apk: staged)
             if let expected, report.manifest.package != expected {
                 throw LibraryError.inspectFailed("The APK is \(report.manifest.package), not the requested \(expected).")
             }
+            try await check?(report)
             return report
         }
         await store.extractIcon(for: entry.packageName) { apk, output in

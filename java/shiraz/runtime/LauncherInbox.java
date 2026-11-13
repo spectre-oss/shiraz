@@ -55,10 +55,10 @@ final class LauncherInbox {
   Properties request=new Properties();request.setProperty("kind","launch");request.setProperty("package",pkg);request.setProperty("installer",installer);
   await(require(),UUID.randomUUID().toString(),request,15000);
  }
- /** Ask the launcher to remove an app. The caller already asked the user. */
+ /** Ask the launcher to remove an app. The launcher asks the user, so this can wait minutes. */
  static void remove(String pkg,String installer)throws IOException{
   Properties request=new Properties();request.setProperty("kind","remove");request.setProperty("package",pkg);request.setProperty("installer",installer);
-  await(require(),UUID.randomUUID().toString(),request,60000);
+  await(require(),UUID.randomUUID().toString(),request,10*60*1000L);
  }
 
  private static File require()throws IOException{

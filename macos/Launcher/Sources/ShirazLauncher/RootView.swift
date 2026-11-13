@@ -61,6 +61,20 @@ struct RootView: View {
         } message: {
             Text("The imported APK and its settings are deleted. The original file is not touched.")
         }
+        .alert(
+            model.consent?.title ?? "",
+            isPresented: Binding(get: { model.consent != nil }, set: { if !$0 { model.answerConsent(false) } }),
+            presenting: model.consent
+        ) { prompt in
+            Button(prompt.action, role: prompt.destructive ? .destructive : nil) { model.answerConsent(true) }
+            Button("Don't Allow", role: .cancel) { model.answerConsent(false) }
+        } message: { prompt in
+            Text(prompt.message)
+        }
+        .onChange(of: model.consent?.id) { _, id in
+            // An app is waiting on this answer: bring the launcher forward.
+            if id != nil { NSApplication.shared.activate() }
+        }
     }
 
     /// The selected place's own path, seen as routes.

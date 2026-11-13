@@ -185,6 +185,18 @@ class Catalog(unittest.TestCase):
         self.assertIn('x86_64', apps['org.example.x86']['reason'])
         self.assertIn('API 33', apps['org.example.new']['reason'])
 
+    def test_releases_list_signed_versions(self):
+        index = json.loads(INDEX)
+        for entry in index['packages']['org.example.app']:
+            entry['signer'] = 'd' * 64
+        apps = {
+            a['packageName']: a for a in fdroid.build_catalog(json.dumps(index).encode())['apps']
+        }
+        self.assertEqual(
+            [r['versionCode'] for r in apps['org.example.app']['releases']], [30, 20, 10]
+        )
+        self.assertEqual(apps['org.example.x86']['releases'], [])
+
     def test_details_are_plain_and_bounded(self):
         index = json.loads(INDEX)
         index['apps'][0].update(

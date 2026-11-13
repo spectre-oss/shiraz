@@ -339,6 +339,35 @@ def choose_package(app, packages):
     return (candidates[0] if candidates else None), reason
 
 
+HEX256 = re.compile(r'[0-9a-f]{64}')
+MAX_RELEASES = 16
+
+
+def releases(packages):
+    """Newest listed APKs with their SHA-256 and signer, for checking updates.
+
+    An APK whose hash is in this list is the repository's own build; its
+    `signer` is the SHA-256 of the signing certificate (as apk_signer reports).
+    """
+    result = []
+    for package in sorted(packages, key=lambda p: p.get('versionCode', 0), reverse=True):
+        code, digest, signer = (
+            package.get('versionCode'),
+            package.get('hash'),
+            package.get('signer'),
+        )
+        if package.get('hashType') != 'sha256' or not isinstance(code, int):
+            continue
+        if not isinstance(digest, str) or not HEX256.fullmatch(digest):
+            continue
+        if not isinstance(signer, str) or not HEX256.fullmatch(signer):
+            continue
+        result.append({'versionCode': code, 'sha256': digest, 'signer': signer})
+        if len(result) == MAX_RELEASES:
+            break
+    return result
+
+
 def build_catalog(index, address=REPO):
     data = json.loads(index)
     repo = data.get('repo') or {}
@@ -347,7 +376,8 @@ def build_catalog(index, address=REPO):
         name = app.get('packageName')
         if not isinstance(name, str) or not PACKAGE.fullmatch(name):
             continue
-        package, reason = choose_package(app, (data.get('packages') or {}).get(name) or [])
+        listed = (data.get('packages') or {}).get(name) or []
+        package, reason = choose_package(app, listed)
         if package is None:
             continue
         title = app.get('name') or _localized(app, 'name')[0] or name
@@ -393,6 +423,7 @@ def build_catalog(index, address=REPO):
                 'compatible': reason is None,
                 'reason': reason,
                 'webURL': f"{repo.get('webBaseUrl', 'https://f-droid.org/packages')}/{name}/",
+                'releases': releases(listed),
             }
         )
     apps.sort(key=lambda a: (a['name'].casefold(), a['packageName']))

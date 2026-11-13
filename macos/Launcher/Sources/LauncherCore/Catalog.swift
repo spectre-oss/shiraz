@@ -78,11 +78,13 @@ public struct CatalogApp: Decodable, Identifiable, Hashable, Sendable {
     public var compatible: Bool
     /// Why no APK fits, when `compatible` is false.
     public var reason: String?
+    /// Listed APKs, newest first, for checking updates against the signed index.
+    public var releases: [CatalogRelease]
 
     enum CodingKeys: String, CodingKey {
         case packageName, name, summary, description, license, authorName, categories, antiFeatures
         case iconURL, screenshots, webURL, sourceCode, lastUpdated, added, versionName, versionCode
-        case size, nativeCode = "nativecode", minSdk, compatible, reason
+        case size, nativeCode = "nativecode", minSdk, compatible, reason, releases
     }
 
     public init(from decoder: any Decoder) throws {
@@ -112,6 +114,7 @@ public struct CatalogApp: Decodable, Identifiable, Hashable, Sendable {
         minSdk = Self.integer(c, .minSdk)
         compatible = (try? c.decodeIfPresent(Bool.self, forKey: .compatible)) ?? false
         reason = (try? c.decodeIfPresent(String.self, forKey: .reason))
+        releases = ((try? c.decodeIfPresent([Lenient<CatalogRelease>].self, forKey: .releases)) ?? []).compactMap(\.value)
     }
 
     /// Remote images and links are shown only over HTTPS.
@@ -143,6 +146,34 @@ public struct CatalogApp: Decodable, Identifiable, Hashable, Sendable {
         guard !query.isEmpty else { return true }
         return [name, summary, packageName, authorName ?? ""].contains { $0.localizedCaseInsensitiveContains(query) }
     }
+}
+
+/// One APK the signed index lists: its SHA-256 and the SHA-256 of its
+/// signing certificate.
+public struct CatalogRelease: Decodable, Hashable, Sendable {
+    public var versionCode: Int
+    public var sha256: String
+    public var signer: String
+
+    public init(versionCode: Int, sha256: String, signer: String) {
+        self.versionCode = versionCode
+        self.sha256 = sha256
+        self.signer = signer
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        versionCode = try c.decode(Int.self, forKey: .versionCode)
+        sha256 = try c.decode(String.self, forKey: .sha256).lowercased()
+        signer = try c.decode(String.self, forKey: .signer).lowercased()
+        guard Self.isDigest(sha256), Self.isDigest(signer) else {
+            throw DecodingError.dataCorruptedError(forKey: .sha256, in: c, debugDescription: "Not a SHA-256 digest")
+        }
+    }
+
+    enum CodingKeys: String, CodingKey { case versionCode, sha256, signer }
+
+    static func isDigest(_ text: String) -> Bool { text.wholeMatch(of: /[0-9a-f]{64}/) != nil }
 }
 
 public enum CatalogStatus: Equatable, Sendable {

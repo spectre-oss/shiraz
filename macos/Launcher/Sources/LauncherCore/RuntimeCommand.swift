@@ -7,6 +7,11 @@ public enum RuntimeCommand {
         ["inspect", apk.path]
     }
 
+    /// SHA-256 digests of the APK's signing certificates (read, not verified).
+    public static func signer(apk: URL) -> [String] {
+        ["signer", apk.path]
+    }
+
     public static func label(apk: URL) -> [String] {
         ["label", apk.path]
     }

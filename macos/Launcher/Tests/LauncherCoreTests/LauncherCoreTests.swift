@@ -557,8 +557,10 @@ private let sampleReport = Data("""
         if case .refuse = InstallInbox.decide(request(.install, expected: "org.new.app", apk: apk), requester: plain, library: library) {} else {
             Issue.record("An app without REQUEST_INSTALL_PACKAGES installed something")
         }
-        if case .refuse = InstallInbox.decide(request(.install, expected: "org.example.game", apk: apk), requester: store, library: library) {} else {
-            Issue.record("An app replaced a library package")
+        #expect(InstallInbox.decide(request(.install, expected: "org.example.game", apk: apk), requester: store, library: library)
+            == .update(apk: apk, package: "org.example.game"))
+        if case .refuse = InstallInbox.decide(request(.install, expected: "org.fdroid.fdroid", apk: apk), requester: store, library: library) {} else {
+            Issue.record("An app replaced itself while running")
         }
         if case .refuse = InstallInbox.decide(request(.install, expected: "org.new.app"), requester: store, library: library) {} else {
             Issue.record("Install without an APK was accepted")
@@ -612,20 +614,45 @@ private let sampleReport = Data("""
         let added = try app("org.example.new")
         let apk = inbox.appending(path: "i1.apk")
         try Data("PK".utf8).write(to: apk)
+        for id in ["i1", "d1", "u1"] { try Data("kind=install\n".utf8).write(to: inbox.appending(path: id + ".request")) }
         var installed: [String] = []
+        var asked: [InboxConsent.Kind] = []
+        var allow = true
+        var removed: [String] = []
         let actions = InboxActions(
+            confirm: { consent in asked.append(consent.kind); return allow },
             install: { url, expected, installer in
                 installed.append("\(url.lastPathComponent) \(expected ?? "-") \(installer)")
                 return added
             },
+            update: { _, package, _ in installed.append("update \(package)"); return added },
             launch: { _ in false },
-            remove: { _ in true })
+            remove: { package in removed.append(package); return true })
 
         let install = InboxRequest(id: "i1", kind: .install, installer: "spoofed.name", package: nil, expected: "org.example.new", apk: apk)
         #expect(await InstallInbox.handle(install, requester: fdroid, library: [fdroid], inbox: inbox, actions: actions) == .installed(added))
         // The installer recorded is the session owner, not what the request claims.
         #expect(installed == ["i1.apk org.example.new org.fdroid.fdroid"])
         #expect(try result("i1", in: inbox) == ["status": "ok", "package": "org.example.new"])
+
+        // An existing package becomes an update, asked about like an install.
+        let update = InboxRequest(id: "u1", kind: .install, installer: nil, package: nil, expected: "org.example.new", apk: apk)
+        #expect(await InstallInbox.handle(update, requester: fdroid, library: [fdroid, added], inbox: inbox, actions: actions) == .updated(added))
+        #expect(installed.last == "update org.example.new")
+
+        // Declined: nothing happens and the app hears why.
+        allow = false
+        let declined = InboxRequest(id: "d1", kind: .install, installer: nil, package: nil, expected: "org.example.other", apk: apk)
+        #expect(await InstallInbox.handle(declined, requester: fdroid, library: [fdroid], inbox: inbox, actions: actions) == .declined)
+        #expect(installed.count == 2)
+        #expect(try result("d1", in: inbox)["status"] == "failed")
+
+        // The app stopped waiting (its request file is gone): even an allow does nothing.
+        allow = true
+        let gone = InboxRequest(id: "g1", kind: .remove, installer: nil, package: "org.example.new", expected: nil, apk: nil)
+        #expect(await InstallInbox.handle(gone, requester: fdroid, library: [fdroid, added], inbox: inbox, actions: actions) == .expired)
+        #expect(removed.isEmpty)
+        #expect(asked == [.install, .update, .install, .remove])
 
         let launch = InboxRequest(id: "l1", kind: .launch, installer: nil, package: "org.example.new", expected: nil, apk: nil)
         #expect(await InstallInbox.handle(launch, requester: fdroid, library: [fdroid, added], inbox: inbox, actions: actions)
@@ -675,9 +702,11 @@ private let sampleReport = Data("""
 
         var log: [String] = []
         let actions = InboxActions(
+            confirm: { consent in log.append("asked \(consent.kind)"); return true },
             install: { apk, expected, installer in
                 try await tools.add(apk: apk, to: store, expected: expected, installer: installer, replacing: false)
             },
+            update: { _, package, _ in throw LibraryError.inspectFailed("No updates in this test (\(package)).") },
             launch: { package in log.append("launch \(package)"); return true },
             remove: { package in (try? store.remove(package)) != nil })
         let deadline = Date(timeIntervalSinceNow: seconds)
@@ -692,5 +721,53 @@ private let sampleReport = Data("""
             try await Task.sleep(for: .milliseconds(300))
         }
         #expect(log.contains { $0.hasPrefix("install installed") }, "\(log)")
+    }
+}
+
+@Suite struct UpdatePolicyTests {
+    private func entry(_ code: String, sha: String = String(repeating: "a", count: 64)) throws -> AppEntry {
+        var report = try InspectReport.decode(sampleReport)
+        report.manifest.package = "org.example.app"
+        report.manifest.versionCode = code
+        report.apkSha256 = sha
+        return AppEntry(report: report)
+    }
+
+    private func catalog(releases: [CatalogRelease]) throws -> CatalogApp {
+        let list = releases.map { "{\"versionCode\":\($0.versionCode),\"sha256\":\"\($0.sha256)\",\"signer\":\"\($0.signer)\"}" }
+        let json = "{\"packageName\":\"org.example.app\",\"name\":\"Example\",\"releases\":[\(list.joined(separator: ","))]}"
+        return try JSONDecoder().decode(CatalogApp.self, from: Data(json.utf8))
+    }
+
+    @Test func updatesNeedAnIndexedNewerAPKFromTheSameSigner() throws {
+        let signer = String(repeating: "5", count: 64), other = String(repeating: "6", count: 64)
+        let newHash = String(repeating: "b", count: 64)
+        let installed = try entry("1")
+        let candidate = try entry("2", sha: newHash)
+        let listed = try catalog(releases: [CatalogRelease(versionCode: 2, sha256: newHash, signer: signer)])
+        #expect(UpdatePolicy.refusal(installed: installed, installedSigners: [signer], candidate: candidate, catalog: listed) == nil)
+        // Another signer, an APK the index does not list, an older APK, no catalog entry.
+        #expect(UpdatePolicy.refusal(installed: installed, installedSigners: [other], candidate: candidate, catalog: listed) != nil)
+        #expect(UpdatePolicy.refusal(installed: installed, installedSigners: [signer], candidate: try entry("2"), catalog: listed) != nil)
+        #expect(UpdatePolicy.refusal(installed: try entry("3"), installedSigners: [signer], candidate: candidate, catalog: listed) != nil)
+        #expect(UpdatePolicy.refusal(installed: installed, installedSigners: [signer], candidate: candidate, catalog: nil) != nil)
+    }
+
+    @Test func catalogDropsMalformedReleases() throws {
+        let json = #"{"packageName":"org.example.app","name":"E","releases":[{"versionCode":2,"sha256":"\#(String(repeating: "c", count: 64))","signer":"\#(String(repeating: "d", count: 64))"},{"versionCode":1,"sha256":"short","signer":"x"}]}"#
+        let app = try JSONDecoder().decode(CatalogApp.self, from: Data(json.utf8))
+        #expect(app.releases.map(\.versionCode) == [2])
+    }
+
+    @Test func metadataVersionMarksCurrentFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "meta-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LibraryStore(directory: root)
+        try FileManager.default.createDirectory(at: store.metadataURL(for: "org.example.app").deletingLastPathComponent(), withIntermediateDirectories: true)
+        try store.saveMetadata(Data("package=org.example.app\nlabel=@2131\ninstaller=org.fdroid.fdroid\n".utf8), for: "org.example.app")
+        #expect(!store.hasCurrentMetadata(for: "org.example.app"))
+        #expect(store.metadata(for: "org.example.app")?["installer"] == "org.fdroid.fdroid")
+        try store.saveMetadata(Data("package=org.example.app\nmetadataVersion=2\n".utf8), for: "org.example.app")
+        #expect(store.hasCurrentMetadata(for: "org.example.app"))
     }
 }

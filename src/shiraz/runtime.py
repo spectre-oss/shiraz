@@ -236,6 +236,9 @@ def properties_text(values):
     return ''.join(encode(key) + '=' + encode(value) + '\n' for key, value in sorted(values.items()) if value is not None)
 
 
+REGISTRY_METADATA_VERSION = '2'
+
+
 def registry_metadata(apk, report, installer=None):
     """Package facts for another app's view of an installed APK (PackageManager).
 
@@ -250,6 +253,17 @@ def registry_metadata(apk, report, installer=None):
         raise FormatError('Invalid package or launcher class name')
     facts = application_metadata(manifest, Path(apk).resolve(), ROOT / 'data/apps' / package)
     facts.update(launchActivity=activity, installer=installer, sha256=report['apk_sha256'])
+    # Other apps cannot read this APK's resources, so give them the resolved
+    # label (labelRes stays for completeness).
+    from .app_icon import resolve_label
+
+    try:
+        label = resolve_label(apk)
+    except (FormatError, OSError, zipfile.BadZipFile):
+        label = None
+    if label:
+        facts['label'] = label
+    facts['metadataVersion'] = REGISTRY_METADATA_VERSION
     return facts
 
 

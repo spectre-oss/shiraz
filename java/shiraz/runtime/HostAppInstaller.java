@@ -55,10 +55,14 @@ public final class HostAppInstaller {
   dialog.setMessage("The installed app will be removed. Saved app data is kept.");
   dialog.setButton(android.content.DialogInterface.BUTTON_NEGATIVE,"Cancel",new android.content.DialogInterface.OnClickListener(){public void onClick(android.content.DialogInterface d,int which){result.complete(false);}});
   dialog.setOnCancelListener(new android.content.DialogInterface.OnCancelListener(){public void onCancel(android.content.DialogInterface d){result.complete(false);}});
-  dialog.setButton(android.content.DialogInterface.BUTTON_POSITIVE,"Uninstall",new android.content.DialogInterface.OnClickListener(){public void onClick(android.content.DialogInterface d,int which){
+  final Runnable uninstall=new Runnable(){public void run(){
    final android.os.Handler main=new android.os.Handler(android.os.Looper.getMainLooper());
-   Thread worker=new Thread(new Runnable(){public void run(){boolean success=false;try{remove(activity,pkg);success=true;}catch(IOException error){System.err.println("SHIRAZ_UNINSTALL_FAILED "+error.getClass().getSimpleName());}final boolean removed=success;main.post(new Runnable(){public void run(){if(removed)activity.sendBroadcast(new Intent("android.intent.action.PACKAGE_REMOVED").setData(android.net.Uri.parse("package:"+pkg)).putExtra("android.intent.extra.REPLACING",false).putExtra("android.intent.extra.DATA_REMOVED",false));else{android.app.AlertDialog failure=new android.app.AlertDialog(activity);failure.setTitle("Uninstall failed");failure.setMessage("The app could not be removed. See the installation log for details.");failure.setButton(android.content.DialogInterface.BUTTON_POSITIVE,"OK",(android.content.DialogInterface.OnClickListener)null);failure.show();}result.complete(removed);}});}},"Shiraz uninstall");worker.setDaemon(true);worker.start();
-  }});dialog.show();
+   Thread worker=new Thread(new Runnable(){public void run(){boolean success=false;String why=null;try{remove(activity,pkg);success=true;}catch(IOException error){why=error.getMessage();System.err.println("SHIRAZ_UNINSTALL_FAILED "+error.getClass().getSimpleName());}final boolean removed=success;final String reason=why!=null&&!why.isEmpty()?why:"The app could not be removed. See the installation log for details.";main.post(new Runnable(){public void run(){if(removed)activity.sendBroadcast(new Intent("android.intent.action.PACKAGE_REMOVED").setData(android.net.Uri.parse("package:"+pkg)).putExtra("android.intent.extra.REPLACING",false).putExtra("android.intent.extra.DATA_REMOVED",false));else{android.app.AlertDialog failure=new android.app.AlertDialog(activity);failure.setTitle("Uninstall failed");failure.setMessage(reason);failure.setButton(android.content.DialogInterface.BUTTON_POSITIVE,"OK",(android.content.DialogInterface.OnClickListener)null);failure.show();}result.complete(removed);}});}},"Shiraz uninstall");worker.setDaemon(true);worker.start();
+  }};
+  // Under the macOS launcher the launcher itself asks the user; one question is enough.
+  if(LauncherInbox.active()){uninstall.run();return;}
+  dialog.setButton(android.content.DialogInterface.BUTTON_POSITIVE,"Uninstall",new android.content.DialogInterface.OnClickListener(){public void onClick(android.content.DialogInterface d,int which){uninstall.run();}});
+  dialog.show();
  }
  private static void remove(Context context,String pkg)throws IOException{
   if(LauncherInbox.active()){LauncherInbox.remove(pkg,context.getPackageName());return;}

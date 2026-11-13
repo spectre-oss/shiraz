@@ -24,6 +24,8 @@ public struct InboxRequest: Equatable, Sendable {
 
 public enum InboxDecision: Equatable, Sendable {
     case install(apk: URL, expected: String?)
+    /// Replace `package`, already in the library. The caller still applies UpdatePolicy.
+    case update(apk: URL, package: String)
     case launch(String)
     case remove(String)
     case refuse(String)
@@ -91,7 +93,10 @@ public enum InstallInbox {
             }
             guard let apk = request.apk else { return .refuse("The request has no APK.") }
             if let expected = request.expected, library.contains(where: { $0.packageName == expected }) {
-                return .refuse("\(expected) is already in the library. Updates from apps are not supported yet; use the F-Droid catalog in Shiraz.")
+                guard expected != requester.packageName else {
+                    return .refuse("\(name) cannot update itself while it runs. Update it from the F-Droid catalog in Shiraz.")
+                }
+                return .update(apk: apk, package: expected)
             }
             return .install(apk: apk, expected: request.expected)
         case .launch:
@@ -207,19 +212,39 @@ enum JavaProperties {
     }
 }
 
+/// What the user is asked before the launcher changes the library for an app.
+public struct InboxConsent: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable { case install, update, remove }
+    public var kind: Kind
+    /// The app whose session sent the request.
+    public var requester: AppEntry
+    /// The library app concerned, for updates and removals.
+    public var package: String?
+    /// The launcher's own copy of the APK, for installs and updates.
+    public var apk: URL?
+    /// The request file; the app deletes it when it stops waiting.
+    public var requestFile: URL
+}
+
 /// What the launcher does for an accepted request. Closures run in the
 /// caller's isolation (the launcher model's main actor).
 public struct InboxActions {
+    public var confirm: (_ consent: InboxConsent) async -> Bool
     public var install: (_ apk: URL, _ expected: String?, _ installer: String) async throws -> AppEntry
+    public var update: (_ apk: URL, _ package: String, _ installer: String) async throws -> AppEntry
     public var launch: (_ package: String) async -> Bool
     public var remove: (_ package: String) async -> Bool
 
     public init(
+        confirm: @escaping (InboxConsent) async -> Bool,
         install: @escaping (URL, String?, String) async throws -> AppEntry,
+        update: @escaping (URL, String, String) async throws -> AppEntry,
         launch: @escaping (String) async -> Bool,
         remove: @escaping (String) async -> Bool
     ) {
+        self.confirm = confirm
         self.install = install
+        self.update = update
         self.launch = launch
         self.remove = remove
     }
@@ -227,7 +252,12 @@ public struct InboxActions {
 
 public enum InboxOutcome: Equatable, Sendable {
     case refused(String)
+    /// The user said no.
+    case declined
+    /// The app stopped waiting before the user answered; nothing was done.
+    case expired
     case installed(AppEntry)
+    case updated(AppEntry)
     case installFailed(String)
     case launched(String, Bool)
     case removed(String, Bool)
@@ -239,24 +269,48 @@ extension InstallInbox {
         _ request: InboxRequest, requester: AppEntry, library: [AppEntry], inbox: URL, actions: InboxActions,
         isolation: isolated (any Actor)? = #isolation
     ) async -> InboxOutcome {
+        let decision = decide(request, requester: requester, library: library)
+        let file = inbox.appending(path: request.id + ".request")
+        let consent: InboxConsent? = switch decision {
+        case .install(let apk, _): InboxConsent(kind: .install, requester: requester, package: nil, apk: apk, requestFile: file)
+        case .update(let apk, let package): InboxConsent(kind: .update, requester: requester, package: package, apk: apk, requestFile: file)
+        case .remove(let package): InboxConsent(kind: .remove, requester: requester, package: package, apk: nil, requestFile: file)
+        case .launch, .refuse: nil
+        }
+        let allowed = if let consent { await actions.confirm(consent) } else { true }
         let outcome: InboxOutcome
-        switch decide(request, requester: requester, library: library) {
-        case .refuse(let reason):
-            outcome = .refused(reason)
-        case .install(let apk, let expected):
-            do {
-                outcome = .installed(try await actions.install(apk, expected, requester.packageName))
-            } catch {
-                outcome = .installFailed(error.localizedDescription)
+        if consent != nil, !FileManager.default.fileExists(atPath: file.path) {
+            // The app gave up waiting and deleted its request: do nothing.
+            outcome = .expired
+        } else if !allowed {
+            outcome = .declined
+        } else {
+            switch decision {
+            case .refuse(let reason):
+                outcome = .refused(reason)
+            case .install(let apk, let expected):
+                do {
+                    outcome = .installed(try await actions.install(apk, expected, requester.packageName))
+                } catch {
+                    outcome = .installFailed(error.localizedDescription)
+                }
+            case .update(let apk, let package):
+                do {
+                    outcome = .updated(try await actions.update(apk, package, requester.packageName))
+                } catch {
+                    outcome = .installFailed(error.localizedDescription)
+                }
+            case .launch(let package):
+                outcome = .launched(package, await actions.launch(package))
+            case .remove(let package):
+                outcome = .removed(package, await actions.remove(package))
             }
-        case .launch(let package):
-            outcome = .launched(package, await actions.launch(package))
-        case .remove(let package):
-            outcome = .removed(package, await actions.remove(package))
         }
         let (ok, package, message): (Bool, String?, String?) = switch outcome {
         case .refused(let reason): (false, nil, reason)
-        case .installed(let entry): (true, entry.packageName, nil)
+        case .declined: (false, nil, "Declined in the Shiraz launcher.")
+        case .expired: (false, nil, "The request expired before it was answered.")
+        case .installed(let entry), .updated(let entry): (true, entry.packageName, nil)
         case .installFailed(let reason): (false, nil, reason)
         case .launched(let package, let started): (started, package, started ? nil : "\(package) did not start.")
         case .removed(let package, let gone): (gone, package, gone ? nil : "\(package) could not be removed.")

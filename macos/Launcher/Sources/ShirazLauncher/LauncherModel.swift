@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import CoreGraphics
+import CryptoKit
 import Foundation
 import LauncherCore
 import Observation
@@ -139,6 +140,8 @@ final class LauncherModel {
     }
     var showImporter = false
     var pendingRemoval: String?
+    /// A running app's request waiting for the user's answer.
+    private(set) var consent: ConsentPrompt?
 
     /// Optional user override of the Shiraz checkout, set in Settings.
     var runtimeRootOverride: String {
@@ -308,7 +311,8 @@ final class LauncherModel {
     /// itself; callers word the result. `expectedPackage` rejects an APK
     /// whose manifest names another package.
     func addAPKs(
-        _ apks: [URL], expectedPackage: String? = nil, installer: String? = nil, replacing: Bool = true
+        _ apks: [URL], expectedPackage: String? = nil, installer: String? = nil, replacing: Bool = true,
+        check: (@Sendable (InspectReport) async throws -> Void)? = nil
     ) async -> (added: [AppEntry], failures: [String]) {
         guard let runtime = runtimeStatus.location else {
             if case .unavailable(let reason) = runtimeStatus { return ([], ["Runtime unavailable: \(reason)"]) }
@@ -321,7 +325,8 @@ final class LauncherModel {
         var added: [AppEntry] = []
         for url in apks {
             do {
-                added.append(try await tools.add(apk: url, to: store, expected: expectedPackage, installer: installer, replacing: replacing))
+                added.append(try await tools.add(
+                    apk: url, to: store, expected: expectedPackage, installer: installer, replacing: replacing, check: check))
             } catch {
                 failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -331,14 +336,16 @@ final class LauncherModel {
         return (added, failures)
     }
 
-    /// Entries imported before package metadata existed get it in the background.
+    /// Entries without current package metadata (imported earlier, or by an
+    /// older format) get it in the background; the recorded installer is kept.
     private func writeMissingMetadata() {
-        let pending = apps.map(\.packageName).filter { !store.hasMetadata(for: $0) }
+        let pending = apps.map(\.packageName).filter { !store.hasCurrentMetadata(for: $0) }
         guard !pending.isEmpty, let runtime = runtimeStatus.location else { return }
         let store = store
         Task {
             for package in pending {
-                await RuntimeTools(runtime: runtime).writeMetadata(for: package, installer: nil, store: store)
+                let installer = store.metadata(for: package)?["installer"].flatMap { LibraryStore.isValidPackageName($0) ? $0 : nil }
+                await RuntimeTools(runtime: runtime).writeMetadata(for: package, installer: installer, store: store)
             }
         }
     }
@@ -514,14 +521,34 @@ final class LauncherModel {
             try? InstallInbox.answer(id: request.id, in: inbox, ok: false, package: nil, message: "The requesting app left the library.")
             return
         }
+        // Work on the launcher's own copy: the app can still write to its inbox.
+        var request = request
+        var scratch: URL?
+        defer { if let scratch { try? FileManager.default.removeItem(at: scratch) } }
+        if let apk = request.apk {
+            do {
+                let directory = try store.makeDownloadDirectory()
+                scratch = directory
+                let copy = directory.appending(path: "request.apk")
+                try FileManager.default.copyItem(at: apk, to: copy)
+                request.apk = copy
+            } catch {
+                try? InstallInbox.answer(id: request.id, in: inbox, ok: false, package: nil, message: "The APK could not be read.")
+                return
+            }
+        }
         let name = requester.displayName
         let actions = InboxActions(
+            confirm: { [unowned self] consent in await ask(consent) },
             install: { [unowned self] apk, expected, installer in
                 session.log.appendNotice("[\(name) asked to install \(expected ?? "an APK")]")
                 let (added, failures) = await addAPKs([apk], expectedPackage: expected, installer: installer, replacing: false)
                 if let entry = added.first { return entry }
-                throw LibraryError.inspectFailed(
-                    failures.joined(separator: "\n").replacingOccurrences(of: apk.lastPathComponent + ": ", with: ""))
+                throw LibraryError.inspectFailed(Self.reason(failures, apk))
+            },
+            update: { [unowned self] apk, package, installer in
+                session.log.appendNotice("[\(name) asked to update \(package)]")
+                return try await update(package, with: apk, installer: installer)
             },
             launch: { [unowned self] package in
                 launch(package)
@@ -535,13 +562,135 @@ final class LauncherModel {
         case .refused(let reason):
             session.log.appendNotice("[Refused \(request.kind.rawValue) request: \(reason)]")
             present(failure: "\(name) could not \(request.kind.rawValue) an app", reason)
+        case .declined:
+            session.log.appendNotice("[Declined \(request.kind.rawValue) request]")
+        case .expired:
+            session.log.appendNotice("[\(request.kind.rawValue) request expired before it was answered]")
+            present(failure: "\(name) stopped waiting", "Nothing was changed. Try again from \(name).")
         case .installed(let added):
             inform("\(name) added \(added.displayName)", "It is now in your library.")
+        case .updated(let updated):
+            inform("\(name) updated \(updated.displayName)", "Version \(updated.versionName ?? updated.versionCode ?? "?"), checked against the signed F-Droid index.")
         case .installFailed(let reason):
             present(failure: "\(name) could not add an app", reason)
         case .launched, .removed:
             break
         }
+    }
+
+    private static func reason(_ failures: [String], _ apk: URL) -> String {
+        failures.joined(separator: "\n").replacingOccurrences(of: apk.lastPathComponent + ": ", with: "")
+    }
+
+    // MARK: Updates
+
+    /// Replace a library app with `apk` when UpdatePolicy allows it. The
+    /// catalog is refreshed once when the APK is newer than the cached index.
+    func update(_ package: String, with apk: URL, installer: String?) async throws -> AppEntry {
+        guard let installed = entry(package) else { throw LibraryError.inspectFailed("\(package) is not in the library.") }
+        guard sessions[package]?.isRunning != true else {
+            throw LibraryError.inspectFailed("\(installed.displayName) is running. Close it, then try again.")
+        }
+        guard let runtime = runtimeStatus.location else { throw LibraryError.inspectFailed("Runtime unavailable.") }
+        let tools = RuntimeTools(runtime: runtime)
+        let digest = try await Self.sha256(of: apk)
+        var listing = await loadCatalogApp(package)
+        if listing?.releases.contains(where: { $0.sha256 == digest }) != true {
+            _ = try? await tools.output(RuntimeCommand.fdroidSync(cache: store.catalogDirectory), what: "Catalog update", timeout: 300)
+            listing = await loadCatalogApp(package)
+        }
+        let signers = try await tools.signers(apk: store.apkURL(for: package))
+        let catalogApp = listing
+        let (added, failures) = await addAPKs([apk], expectedPackage: package, installer: installer, replacing: true) { report in
+            if let refusal = UpdatePolicy.refusal(
+                installed: installed, installedSigners: signers, candidate: AppEntry(report: report), catalog: catalogApp) {
+                throw LibraryError.inspectFailed(refusal)
+            }
+        }
+        if let entry = added.first { return entry }
+        throw LibraryError.inspectFailed(Self.reason(failures, apk))
+    }
+
+    /// Signing certificates of a library app, for UpdatePolicy.
+    func installedSigners(_ package: String) async throws -> [String] {
+        guard let runtime = runtimeStatus.location else { throw LibraryError.inspectFailed("Runtime unavailable.") }
+        return try await RuntimeTools(runtime: runtime).signers(apk: store.apkURL(for: package))
+    }
+
+    private func loadCatalogApp(_ package: String) async -> CatalogApp? {
+        let url = store.catalogURL
+        return await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+            return (try? Catalog.decode(data))?.apps.first { $0.packageName == package }
+        }.value
+    }
+
+    private nonisolated static func sha256(of url: URL) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            var hasher = SHA256()
+            while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        }.value
+    }
+
+    // MARK: Consent
+
+    /// Ask the user about a request; the window comes to the front.
+    private func ask(_ request: InboxConsent) async -> Bool {
+        let requester = request.requester.displayName
+        var title: String
+        var message: String
+        let action: String
+        switch request.kind {
+        case .install:
+            let facts = await describe(request.apk)
+            title = "Allow \(requester) to add \(facts?.name ?? "an app")?"
+            message = facts.map { "\($0.package), version \($0.version). Apps from \(requester) are not tested in Shiraz." }
+                ?? "The APK could not be inspected; adding it will fail."
+            action = "Add"
+        case .update:
+            let installed = request.package.flatMap(entry)
+            let facts = await describe(request.apk)
+            title = "Allow \(requester) to update \(installed?.displayName ?? request.package ?? "an app")?"
+            message = "Version \(installed?.versionName ?? installed?.versionCode ?? "?") to \(facts?.version ?? "?"). "
+                + "The APK is checked against the signed F-Droid index and the installed signer first. App data is kept."
+            action = "Update"
+        case .remove:
+            let installed = request.package.flatMap(entry)
+            title = "Allow \(requester) to remove \(installed?.displayName ?? request.package ?? "an app")?"
+            message = "The imported APK and its settings are deleted from the library."
+            action = "Remove"
+        }
+        if let pending = consent { pending.resume(false) }
+        return await withCheckedContinuation { continuation in
+            let prompt = ConsentPrompt(title: title, message: message, action: action,
+                                       destructive: request.kind == .remove) { [weak self] allowed in
+                self?.consent = nil
+                continuation.resume(returning: allowed)
+            }
+            consent = prompt
+            // Close the question when the app stops waiting for it.
+            let file = request.requestFile
+            Task { [weak self] in
+                while self?.consent?.id == prompt.id {
+                    if !FileManager.default.fileExists(atPath: file.path) { prompt.resume(false); break }
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
+        }
+    }
+
+    func answerConsent(_ allowed: Bool) { consent?.resume(allowed) }
+
+    private func describe(_ apk: URL?) async -> (name: String, package: String, version: String)? {
+        guard let apk, let runtime = runtimeStatus.location else { return nil }
+        let tools = RuntimeTools(runtime: runtime)
+        guard let report = try? await tools.inspect(apk: apk) else { return nil }
+        let label = try? await tools.label(apk: apk)
+        let manifest = report.manifest
+        return (label ?? manifest.package, manifest.package, manifest.versionName ?? manifest.versionCode ?? "?")
     }
 
     func stop(_ package: String) {
@@ -578,4 +727,32 @@ extension Session.State {
         case .failed(let text): text.isEmpty ? "Failed" : text
         }
     }
+}
+
+/// One question for the user about a running app's request.
+struct ConsentPrompt: Identifiable {
+    let id = UUID()
+    var title: String
+    var message: String
+    var action: String
+    var destructive: Bool
+    private let answer: (Bool) -> Void
+    private let answered = Answered()
+
+    init(title: String, message: String, action: String, destructive: Bool, answer: @escaping (Bool) -> Void) {
+        self.title = title
+        self.message = message
+        self.action = action
+        self.destructive = destructive
+        self.answer = answer
+    }
+
+    /// Only the first answer counts.
+    func resume(_ allowed: Bool) {
+        guard !answered.value else { return }
+        answered.value = true
+        answer(allowed)
+    }
+
+    private final class Answered { var value = false }
 }

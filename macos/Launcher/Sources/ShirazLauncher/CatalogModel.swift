@@ -181,7 +181,17 @@ final class CatalogModel {
                     throw LibraryError.inspectFailed("The runtime reported an unexpected download.")
                 }
                 installing[package] = .adding
-                let (added, failures) = await launcher.addAPKs([apk], expectedPackage: package)
+                var check: (@Sendable (InspectReport) async throws -> Void)?
+                if wasInLibrary, let installed = launcher.entry(package) {
+                    let signers = try await launcher.installedSigners(package)
+                    check = { report in
+                        if let refusal = UpdatePolicy.refusal(
+                            installed: installed, installedSigners: signers, candidate: AppEntry(report: report), catalog: app) {
+                            throw LibraryError.inspectFailed(refusal)
+                        }
+                    }
+                }
+                let (added, failures) = await launcher.addAPKs([apk], expectedPackage: package, check: check)
                 if let entry = added.first {
                     launcher.inform(wasInLibrary ? "Updated \(entry.displayName)" : "Added \(entry.displayName)",
                                     "From F-Droid, SHA-256 checked against the signed index.")

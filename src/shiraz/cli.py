@@ -5,6 +5,7 @@ import sys
 import zipfile
 from pathlib import Path
 from .apk import FormatError, inspect_apk
+from .apk_signer import certificate_digests
 from .app_icon import extract_icon, resolve_label
 from . import fdroid
 from .runtime import properties_text, registry_metadata, run_activity
@@ -16,7 +17,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog='shiraz', description='Shiraz APK-to-Linux toolchain (experimental)')
     parser.add_argument('--version', action='version', version='Shiraz ' + (ROOT / 'VERSION').read_text().strip())
     sub = parser.add_subparsers(dest='command', required=True)
-    for command in ('inspect', 'plan', 'run', 'icon', 'label', 'metadata'):
+    for command in ('inspect', 'plan', 'run', 'icon', 'label', 'metadata', 'signer'):
         p = sub.add_parser(command)
         p.add_argument('apk', type=Path)
         if command == 'icon':
@@ -56,6 +57,9 @@ def main(argv=None):
             return 0
         if args.command == 'label':
             print(json.dumps({'label': resolve_label(args.apk)}, ensure_ascii=False))
+            return 0
+        if args.command == 'signer':
+            print(json.dumps({'certificates': certificate_digests(args.apk)}))
             return 0
         if args.command == 'icon':
             print(json.dumps(extract_icon(args.apk, args.output_dir), indent=2, sort_keys=True))

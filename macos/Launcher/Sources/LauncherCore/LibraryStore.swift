@@ -65,8 +65,20 @@ public struct LibraryStore: Sendable {
         appsDirectory.appending(path: package, directoryHint: .isDirectory).appending(path: "package.properties")
     }
 
-    public func hasMetadata(for package: String) -> Bool {
-        FileManager.default.fileExists(atPath: metadataURL(for: package).path)
+    /// Version of package.properties this launcher writes (`shiraz metadata`).
+    public static let metadataVersion = "2"
+
+    /// The stored package facts, or nil when missing or unreadable.
+    public func metadata(for package: String) -> [String: String]? {
+        let url = metadataURL(for: package)
+        guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= 4 * 1024 * 1024,
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return JavaProperties.parse(text)
+    }
+
+    /// Present and written by the current `shiraz metadata` format.
+    public func hasCurrentMetadata(for package: String) -> Bool {
+        metadata(for: package)?["metadataVersion"] == Self.metadataVersion
     }
 
     public func saveMetadata(_ data: Data, for package: String) throws {
