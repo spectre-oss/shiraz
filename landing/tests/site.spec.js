@@ -40,10 +40,32 @@ test('downloaded runtime with a bad checksum is rejected', async ({page}) => {
   await expect(page.locator('#assemble')).toBeEnabled();
 });
 
-test('reduced motion leaves the decorative shapes static', async ({page}) => {
+test('reduced motion leaves the drawing static and the stack fully readable', async ({page}) => {
   await page.emulateMedia({reducedMotion:'reduce'});
   await page.goto('/');
-  expect(await page.locator('.tonal-shape').evaluateAll(shapes => shapes.every(shape => shape.getAnimations().length === 0))).toBe(true);
+  const art = page.locator('.hero-art *, .hero h1 .line > span, .stack-diagram .slab');
+  expect(await art.count()).toBeGreaterThan(30);
+  expect(await art.evaluateAll(parts => parts.every(part => part.getAnimations().length === 0))).toBe(true);
+  // The whole stack stays readable and unselected; nothing waits on scroll.
+  await page.locator('.stack-diagram').scrollIntoViewIfNeeded();
+  await expect(page.locator('.stack-diagram li.is-active')).toHaveCount(0);
+  for (const name of ['Your APK', 'ART', 'Native bridges']) await expect(page.locator('.stack-diagram').getByText(name, {exact: false}).first()).toBeVisible();
+});
+
+test('hero drawing arrives once and the stack follows the reading position', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 800});
+  await page.goto('/');
+  await expect(page.locator('.glass-pane')).toHaveCount(15);
+  await expect(page.locator('.light-patch')).toHaveCount(15);
+  await expect.poll(() => page.locator('.landing-window').evaluate(node => getComputedStyle(node).opacity)).toBe('1');
+  await expect(page.locator('.site-header')).not.toHaveClass(/is-scrolled/);
+  await page.locator('[data-step="3"]').evaluate(step => step.scrollIntoView({block: 'center', behavior: 'instant'}));
+  await expect(page.locator('[data-layer="3"]')).toHaveClass(/is-active/);
+  await expect(page.locator('.stack-diagram li.is-active')).toHaveCount(1);
+  await expect(page.locator('.site-header')).toHaveClass(/is-scrolled/);
+  const progress = await page.locator('.stack-diagram').evaluate(node => Number(node.style.getPropertyValue('--stack-progress')));
+  expect(progress).toBeGreaterThan(.6);
+  expect(progress).toBeLessThan(.9);
 });
 
 test('architecture cards support radio keyboard selection and refresh the runtime', async ({page}) => {

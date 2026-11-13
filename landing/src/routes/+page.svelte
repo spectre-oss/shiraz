@@ -10,6 +10,10 @@
   const version = __SHIRAZ_VERSION__;
   let translatePoem = $state(false);
   let activeVerse = $state(-1);
+  // Fifteen panes: three across in the tall window, five across in the desktop one.
+  const paneRows = [['rose','saffron','rose'],['teal','lapis','teal'],['saffron','rose','saffron'],['lapis','emerald','lapis'],['teal','saffron','teal']];
+  const tallPanes = paneRows.flat();
+  const widePanes = [0,1,2].flatMap(column => paneRows.map(row => row[column]));
   const verses = [
     {fa: 'بس بگردید و بگردد روزگار', en: 'Many have passed, and time will turn;'},
     {fa: 'دل به دنیا در نبندد هوشیار', en: 'The wise do not bind their hearts to this world.'},
@@ -64,13 +68,20 @@
   </header>
   <main id="main">
     <section class="hero" aria-labelledby="title">
-      <div class="hero-atmosphere" aria-hidden="true"><span class="tonal-shape shape-orbit"></span><span class="tonal-shape shape-petal"></span><span class="tonal-shape shape-disc"></span></div>
-      <div class="hero-content">
-      <h1 id="title">Your Android<sup class="trademark">™</sup> apps.<br><span>A little more at home.</span></h1>
-      <p class="intro">Bring supported Android™ apps to your Linux or macOS desktop.<br class="desktop-break"> No virtual machine. No full Android™ system.</p>
-      <div class="actions"><a class="button primary" href="#builder">Open the builder <svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a><a class="button secondary" href="https://github.com/spectre-oss/shiraz">Explore the source <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></div>
-      <a class="hero-release" href={`https://github.com/spectre-oss/shiraz/releases/tag/v${version}`}><span class="release-dot" aria-hidden="true"></span>Latest release <strong>v{version}</strong><span class="release-status">Preview</span><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a>
-      <p class="local-note">Package your APK locally. Your files stay with you.</p>
+      <div class="hero-inner">
+        <div class="hero-content">
+          <h1 id="title"><span class="line"><span>Your Android<sup class="trademark">™</sup> apps.</span></span> <span class="line"><span>A little more at home.</span></span></h1>
+          <p class="intro">Bring supported Android™ apps to your Linux or macOS desktop.<br class="desktop-break"> No virtual machine. No full Android™ system.</p>
+          <div class="actions"><a class="button primary" href="#builder">Open the builder <svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a><a class="button secondary" href="https://github.com/spectre-oss/shiraz">Explore the source <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a></div>
+          <a class="hero-release" href={`https://github.com/spectre-oss/shiraz/releases/tag/v${version}`}><span class="release-dot" aria-hidden="true"></span>Latest release <strong>v{version}</strong><span class="release-status">Preview</span><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></a>
+          <p class="local-note">Package your APK locally. Your files stay with you.</p>
+        </div>
+        <!-- Decorative: light from a tall window lands, rearranged, in a wide one. -->
+        <div class="hero-art" aria-hidden="true">
+          <div class="light-beam"></div>
+          <div class="orsi">{#each tallPanes as pane, index}<span class="glass-pane" style="--c:var(--glass-{pane});--i:{index}"></span>{/each}</div>
+          <div class="landing-window"><div class="window-bar"><i></i><i></i><i></i></div><div class="window-panes">{#each widePanes as pane, index}<span class="light-patch" style="--c:var(--glass-{pane});--i:{index}"></span>{/each}</div></div>
+        </div>
       </div>
     </section>
     <section class="experimental-notice" aria-labelledby="experimental-title">
@@ -86,11 +97,11 @@
         <figure class="stack-figure" aria-labelledby="stack-caption">
           <figcaption id="stack-caption">The Shiraz stack, simplified.</figcaption>
           <ol class="stack-diagram">
-            <li data-layer="0"><span class="layer-number">01</span><span>Your APK<small>App code · resources · native libraries</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
-            <li data-layer="1"><span class="layer-number">02</span><span>ART<small>Android™ Runtime</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
-            <li data-layer="2"><span class="layer-number">03</span><span>Android™ API layer<small>Framework · resources · services</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
-            <li data-layer="3"><span class="layer-number">04</span><span>Native bridges<small>JNI · Bionic compatibility · SDL · EGL/GLES</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 13.5 12 21m0 0-7.5-7.5"/><path d="M12 21V3"/></svg></span></li>
-            <li data-layer="4"><span class="layer-number">05</span><span>Your Linux or macOS desktop<small>Windows · graphics · input · files</small></span><span class="layer-marker" aria-hidden="true"><svg class="icon" data-icon="turn" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m16.49 12 3.75 3.75m0 0-3.75 3.75m3.75-3.75H3.74V4.499"/></svg></span></li>
+            <li data-layer="0"><span class="slab" aria-hidden="true"></span><span class="layer-text"><span class="layer-number">01</span><span class="layer-name">Your APK<small>App code · resources · native libraries</small></span></span></li>
+            <li data-layer="1"><span class="slab" aria-hidden="true"></span><span class="layer-text"><span class="layer-number">02</span><span class="layer-name">ART<small>Android™ Runtime</small></span></span></li>
+            <li data-layer="2"><span class="slab" aria-hidden="true"></span><span class="layer-text"><span class="layer-number">03</span><span class="layer-name">Android™ API layer<small>Framework · resources · services</small></span></span></li>
+            <li data-layer="3"><span class="slab" aria-hidden="true"></span><span class="layer-text"><span class="layer-number">04</span><span class="layer-name">Native bridges<small>JNI · Bionic compatibility · SDL · EGL/GLES</small></span></span></li>
+            <li data-layer="4"><span class="slab" aria-hidden="true"></span><span class="layer-text"><span class="layer-number">05</span><span class="layer-name">Your Linux or macOS desktop<small>Windows · graphics · input · files</small></span></span></li>
           </ol>
         </figure>
         <div class="stack-explanations">
@@ -119,7 +130,7 @@
       </div>
       <p class="comparison-note">Architecture comparison, not a performance ranking. Compatibility depends on the app, device, and configuration. Project names link to their own documentation.</p>
     </section>
-      <section class="packaging-path" aria-label="APK plus Shiraz runtime produces an AppImage"><p>APK <span aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span> Shiraz runtime <span aria-hidden="true"><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></span> AppImage</p></section>
+    <section class="packaging-path" aria-label="APK plus Shiraz runtime produces an AppImage"><p><b class="term-apk">APK</b> <span aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span> <b class="term-runtime">Shiraz runtime</b> <span aria-hidden="true"><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></span> <b class="term-out">AppImage</b></p></section>
     <Builder />
     <section class="project-info" aria-label="About Shiraz">
       <div class="principles"><span>Linux &amp; macOS</span><span>GTK-free</span><span>Open source · GPLv3</span></div>

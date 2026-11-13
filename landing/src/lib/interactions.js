@@ -28,36 +28,73 @@ export function initInteractions() {
     }, 6000);
   }, {signal: controller.signal});
 
-  // Keep the drawing subordinate to the explanation: scroll only selects a layer.
+  // Scroll only selects a layer and feeds two progress values; CSS draws the rest.
   const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const header = document.querySelector('.site-header');
+  const diagram = document.querySelector('.stack-diagram');
+  const equation = document.querySelector('.packaging-path');
   const layers = [...document.querySelectorAll('[data-layer]')];
   const steps = [...document.querySelectorAll('[data-step]')];
+  const clamp = value => Math.max(0, Math.min(1, value));
   let framePending = false;
   let stackFrame = 0;
   function updateStack() {
     framePending = false;
     if (controller.signal.aborted) return;
+    header?.classList.toggle('is-scrolled', scrollY > 24);
     if (motionPreference.matches) return;
-    const readingLine = innerWidth <= 700 ? innerHeight * .72 : innerHeight * .5;
+    const readingLine = innerWidth <= 760 ? innerHeight * .72 : innerHeight * .5;
+    const centers = steps.map(step => { const rect = step.getBoundingClientRect(); return rect.top + rect.height / 2; });
     let active = 0;
-    let closest = Infinity;
-    steps.forEach((step, index) => {
-      const rect = step.getBoundingClientRect();
-      const distance = Math.abs(rect.top + rect.height / 2 - readingLine);
-      if (distance < closest) { closest = distance; active = index; }
-    });
+    centers.forEach((center, index) => { if (Math.abs(center - readingLine) < Math.abs(centers[active] - readingLine)) active = index; });
     layers.forEach((layer, index) => layer.classList.toggle('is-active', index === active));
+    const span = centers[centers.length - 1] - centers[0];
+    if (diagram && span > 0) diagram.style.setProperty('--stack-progress', clamp((readingLine - centers[0]) / span).toFixed(3));
+    if (equation) {
+      const rect = equation.getBoundingClientRect();
+      equation.style.setProperty('--p', clamp((innerHeight - rect.top) / ((innerHeight + rect.height) / 2)).toFixed(3));
+    }
   }
   function scheduleStack() {
     if (!framePending) { framePending = true; stackFrame = requestAnimationFrame(updateStack); }
   }
+  function clearScrollState() {
+    layers.forEach(layer => layer.classList.remove('is-active'));
+    diagram?.style.removeProperty('--stack-progress');
+    equation?.style.removeProperty('--p');
+    art?.style.removeProperty('--sun');
+  }
   function applyMotion() {
     const enabled = !motionPreference.matches;
     document.documentElement.classList.toggle('motion-enabled', enabled);
-    if (!enabled) stopHeroicons();
-    if (!enabled) layers.forEach(layer => layer.classList.remove('is-active'));
+    if (!enabled) { stopHeroicons(); clearScrollState(); }
     scheduleStack();
   }
+
+  // The beam leans a little toward the pointer, easing instead of snapping.
+  const hero = document.querySelector('.hero');
+  const art = document.querySelector('.hero-art');
+  let sun = 0;
+  let sunTarget = 0;
+  let sunFrame = 0;
+  function easeSun() {
+    sunFrame = 0;
+    if (controller.signal.aborted || motionPreference.matches || !art) return;
+    sun += (sunTarget - sun) * .09;
+    if (Math.abs(sunTarget - sun) < .002) sun = sunTarget;
+    art.style.setProperty('--sun', sun.toFixed(3));
+    if (sun !== sunTarget) sunFrame = requestAnimationFrame(easeSun);
+  }
+  hero?.addEventListener('pointermove', (event) => {
+    if (event.pointerType !== 'mouse' || motionPreference.matches) return;
+    sunTarget = Math.max(-1, Math.min(1, (event.clientX / innerWidth - .5) * 2));
+    if (!sunFrame) sunFrame = requestAnimationFrame(easeSun);
+  }, {passive: true, signal: controller.signal});
+  hero?.addEventListener('pointerleave', () => {
+    sunTarget = 0;
+    if (!sunFrame && !motionPreference.matches) sunFrame = requestAnimationFrame(easeSun);
+  }, {signal: controller.signal});
+
   motionPreference.addEventListener('change', applyMotion, {signal: controller.signal});
   window.addEventListener('scroll', scheduleStack, {passive: true, signal: controller.signal});
   window.addEventListener('resize', scheduleStack, {passive: true, signal: controller.signal});
@@ -89,5 +126,5 @@ export function initInteractions() {
     }, { passive: true, signal: controller.signal });
   }
 
-  return () => { controller.abort(); clearTimeout(feedbackTimeout); cancelAnimationFrame(stackFrame); cancelAnimationFrame(ghostFrame); document.documentElement.classList.remove("motion-enabled"); };
+  return () => { controller.abort(); clearTimeout(feedbackTimeout); cancelAnimationFrame(stackFrame); cancelAnimationFrame(sunFrame); cancelAnimationFrame(ghostFrame); clearScrollState(); document.documentElement.classList.remove("motion-enabled"); };
 }

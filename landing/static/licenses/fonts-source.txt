@@ -1,0 +1,11 @@
+Bricolage Grotesque by the Bricolage Grotesque Project Authors
+https://github.com/ateliertriay/bricolage
+SIL Open Font License 1.1: https://github.com/ateliertriay/bricolage/blob/main/OFL.txt Variable WOFF2 (width and weight axes) bundled at
+build time from the npm package @fontsource-variable/bricolage-grotesque, which
+carries the full license text. The font binary is not kept in this repository.
+
+Instrument Sans by the Instrument Sans Project Authors
+https://github.com/Instrument/instrument-sans
+SIL Open Font License 1.1: https://github.com/Instrument/instrument-sans/blob/main/OFL.txt Variable WOFF2 (weight axis) bundled at build time
+from the npm package @fontsource-variable/instrument-sans, which carries the
+full license text. The font binary is not kept in this repository.

@@ -38,7 +38,9 @@ Successful native releases trigger a website refresh. The downloadable offline b
 the standalone Go demo, independently of the SvelteKit site.
 
 Original code is GPL-3.0-only. Adapted Heroicons paths and animation retain MIT
-notices in `static/licenses/`. The Spectre SVG is the existing project brand asset.
+notices in `static/licenses/`. Bricolage Grotesque and Instrument Sans are
+OFL-1.1 fonts bundled at build time from their npm packages; see
+`static/licenses/fonts-source.txt`. No font binaries are committed. The Spectre SVG is the existing project brand asset.
 
 ## Contribute compatibility results
 
