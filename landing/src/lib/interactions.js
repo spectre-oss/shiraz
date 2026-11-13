@@ -53,8 +53,8 @@ export function initInteractions() {
     let active = 0;
     centers.forEach((center, index) => { if (Math.abs(center - readingLine) < Math.abs(centers[active] - readingLine)) active = index; });
     layers.forEach((layer, index) => layer.classList.toggle('is-active', index === active));
-    const span = centers[centers.length - 1] - centers[0];
-    if (diagram && span > 0) diagram.style.setProperty('--stack-progress', clamp((readingLine - centers[0]) / span).toFixed(3));
+    // The ray stops on the sheet being read; CSS eases it there.
+    if (diagram && steps.length > 1) diagram.style.setProperty('--stack-progress', (active / (steps.length - 1)).toFixed(3));
     if (equation) {
       const rect = equation.getBoundingClientRect();
       equation.style.setProperty('--p', clamp((innerHeight - rect.top) / ((innerHeight + rect.height) / 2)).toFixed(3));

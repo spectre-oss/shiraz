@@ -167,45 +167,48 @@ p { margin: 0; }
 .stack-story { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(40px, 7vw, 120px); align-items: start; }
 .stack-figure { position: sticky; top: max(96px, calc(50vh - 260px)); margin: 0; }
 .stack-figure figcaption { margin-bottom: 26px; font-size: 14px; color: var(--ink-faint); }
-.stack-diagram { --stack-progress: 1; --gap: 12px; position: relative; display: grid; margin: 0; padding: 0; list-style: none; }
-/* The beam: a soft column that takes each sheet's colour on the way down, and a bright core. */
-.stack-diagram::before, .stack-diagram::after { content: ""; position: absolute; z-index: 6; left: 120px; top: 42px; bottom: 42px; pointer-events: none; transform-origin: top; transform: translateX(-50%) scaleY(max(.03, var(--stack-progress))); }
-.stack-diagram::before { width: 54px; border-radius: 27px; background: linear-gradient(var(--glass-rose), var(--glass-saffron) 27%, var(--glass-teal) 52%, var(--glass-lapis) 76%, var(--ink)); opacity: .34; filter: blur(14px); mix-blend-mode: screen; }
-.stack-diagram::after { width: 3px; border-radius: 3px; background: linear-gradient(var(--ink), var(--saffron)); box-shadow: 0 0 18px var(--saffron); }
-.stack-diagram li { --c: var(--glass-rose); position: relative; display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: center; gap: 28px; height: 86px; transition: transform .6s var(--ease-out); }
+/* --pitch is the distance between sheets, --col the drawing column, --sheet one sheet's side. */
+.stack-diagram { --stack-progress: 1; --pitch: 86px; --col: 240px; --sheet: 146px; --lead: 30px; --hide: calc(var(--sheet) * .3536 + 6px); position: relative; display: grid; margin: 0; padding: 0; list-style: none; }
+/* The ray enters above the first sheet and stops on the sheet being read. Below each
+   sheet's centre it is hidden until it clears that sheet's near edge, so it reads as
+   passing through the glass, not standing on it. Colours are fixed in space. */
+.stack-diagram::before, .stack-diagram::after { --cut: repeating-linear-gradient(to bottom, transparent 0 var(--hide), #000 var(--hide) var(--pitch)) 0 var(--lead) / 100% var(--pitch); content: ""; position: absolute; z-index: 6; left: calc(var(--col) / 2); top: calc(var(--pitch) / 2 - var(--lead)); height: calc(var(--lead) + var(--pitch) * 4 * var(--stack-progress)); pointer-events: none; transform: translateX(-50%); transition: height .7s var(--ease-out); }
+/* The glow around the ray: sheet colours down its length, fading out to each side. */
+.stack-diagram::before { width: 30px; opacity: .7; background: linear-gradient(to bottom, transparent, var(--glass-rose) var(--lead), var(--glass-saffron) calc(var(--lead) + var(--pitch)), var(--glass-teal) calc(var(--lead) + var(--pitch) * 2), var(--glass-lapis) calc(var(--lead) + var(--pitch) * 3), var(--ink) calc(var(--lead) + var(--pitch) * 4)) top / 100% calc(var(--lead) + var(--pitch) * 4) no-repeat; -webkit-mask: var(--cut), linear-gradient(90deg, transparent, #000 50%, transparent); -webkit-mask-composite: source-in; mask: var(--cut), linear-gradient(90deg, transparent, #000 50%, transparent); mask-composite: intersect; }
+.stack-diagram::after { width: 2px; border-radius: 2px; background: linear-gradient(to bottom, transparent, var(--ink) var(--lead)); -webkit-mask: var(--cut); mask: var(--cut); }
+.stack-diagram li { --c: var(--glass-rose); position: relative; display: grid; grid-template-columns: var(--col) minmax(0, 1fr); align-items: center; gap: 28px; height: var(--pitch); }
 .stack-diagram li:nth-child(1) { z-index: 5; }
 .stack-diagram li:nth-child(2) { z-index: 4; --c: var(--glass-saffron); }
 .stack-diagram li:nth-child(3) { z-index: 3; --c: var(--glass-teal); }
 .stack-diagram li:nth-child(4) { z-index: 2; --c: var(--glass-lapis); }
 .stack-diagram li:nth-child(5) { z-index: 1; --c: var(--ink); }
-/* The sheet in view lifts clear of its neighbours, so the stack opens around it. */
-.stack-diagram li:has(~ li.is-active) { transform: translateY(calc(var(--gap) * -1)); }
-.stack-diagram li.is-active ~ li { transform: translateY(var(--gap)); }
-/* One sheet of glass. In its own plane, a shadow toward (+x, +y) reads as thickness on screen. */
-.slab { --tint: 24%; --face: color-mix(in srgb, var(--c) var(--tint), var(--wine)); --mark: color-mix(in srgb, var(--c) 62%, var(--wine)); position: relative; justify-self: center; width: 146px; height: 146px; border: 1.5px solid color-mix(in srgb, var(--c) 80%, transparent); border-radius: 16px; background: var(--face); box-shadow: 5px 5px 0 color-mix(in srgb, var(--c) 34%, var(--wine-deep)); transform: rotateX(60deg) rotateZ(45deg); transition: transform .6s var(--ease-out), background-color .4s ease, box-shadow .4s ease; }
-.stack-diagram li:has(~ li.is-active) .slab { --tint: 46%; --mark: color-mix(in srgb, var(--c) 86%, var(--ink)); }
-.stack-diagram li.is-active .slab { --tint: 78%; --mark: color-mix(in srgb, var(--c) 30%, var(--ink)); box-shadow: 5px 5px 0 color-mix(in srgb, var(--c) 52%, var(--wine-deep)), 0 0 70px color-mix(in srgb, var(--c) 65%, transparent); transform: translateY(-7px) rotateX(60deg) rotateZ(45deg) scale(1.07); }
+/* One sheet of glass. In its own plane, a shadow toward (+x, +y) reads as thickness on screen.
+   Sheets stay where they are: only light changes, so labels never move. --spot is where the ray lands. */
+.slab { --tint: 22%; --spot: 0; --face: color-mix(in srgb, var(--c) var(--tint), var(--wine)); --mark: color-mix(in srgb, var(--c) 58%, var(--wine)); position: relative; justify-self: center; width: var(--sheet); height: var(--sheet); border: 1.5px solid color-mix(in srgb, var(--c) 80%, transparent); border-radius: 11%; background: radial-gradient(circle, rgb(255 244 222 / var(--spot)) 0, transparent 34%), var(--face); box-shadow: 5px 5px 0 color-mix(in srgb, var(--c) 34%, var(--wine-deep)); transform: rotateX(60deg) rotateZ(45deg); transition: background-color .5s ease, border-color .5s ease, box-shadow .5s ease; }
+.stack-diagram li:has(~ li.is-active) .slab { --tint: 44%; --spot: .35; --mark: color-mix(in srgb, var(--c) 86%, var(--ink)); }
+.stack-diagram li.is-active .slab { --tint: 76%; --spot: .7; --mark: color-mix(in srgb, var(--c) 30%, var(--ink)); box-shadow: 5px 5px 0 color-mix(in srgb, var(--c) 52%, var(--wine-deep)), 0 0 46px color-mix(in srgb, var(--c) 55%, transparent); }
 /* What each sheet carries, drawn on its face. */
 .slab::before { content: ""; position: absolute; inset: 13%; border-radius: 8%; transition: opacity .4s ease; }
 /* 01 the package: a grid of files */
-li:nth-child(1) > .slab::before { background: repeating-linear-gradient(0deg, transparent 0 26%, var(--face) 26% 37%), repeating-linear-gradient(90deg, transparent 0 26%, var(--face) 26% 37%), var(--mark); background-size: 100% 100%; }
+li:nth-child(1) > .slab::before { background: linear-gradient(to bottom, transparent 70%, var(--face) 70%) 0 0 / 100% 37%, linear-gradient(to right, transparent 70%, var(--face) 70%) 0 0 / 37% 100%, var(--mark); }
 /* 02 the runtime: lines of bytecode */
-li:nth-child(2) > .slab::before { background: linear-gradient(90deg, transparent 62%, var(--face) 62%) 0 22% / 100% 11% no-repeat, linear-gradient(90deg, transparent 84%, var(--face) 84%) 0 66% / 100% 11% no-repeat, repeating-linear-gradient(0deg, var(--mark) 0 11%, transparent 11% 22%); }
+li:nth-child(2) > .slab::before { background: linear-gradient(90deg, transparent 62%, var(--face) 62%) 0 24.7% / 100% 11% no-repeat, linear-gradient(90deg, transparent 84%, var(--face) 84%) 0 74.2% / 100% 11% no-repeat, linear-gradient(to bottom, var(--mark) 50%, transparent 50%) 0 0 / 100% 22%; }
 /* 03 the API layer: a screen laid out in views */
 li:nth-child(3) > .slab::before { border: 2px solid var(--mark); background: linear-gradient(var(--mark) 0 0) 50% 12% / 80% 14% no-repeat, linear-gradient(var(--mark) 0 0) 10% 62% / 36% 46% no-repeat, linear-gradient(var(--mark) 0 0) 88% 44% / 36% 16% no-repeat, linear-gradient(var(--mark) 0 0) 88% 80% / 36% 16% no-repeat; }
 /* 04 the bridges: contact points between two worlds */
 li:nth-child(4) > .slab::before { background: radial-gradient(circle, var(--mark) 0 26%, transparent 30%) 0 0 / 25% 25%; }
 /* 05 the desktop: a window, where the light lands as panes */
 li:nth-child(5) > .slab::before { inset: 9%; border: 2px solid var(--mark); background: linear-gradient(var(--mark) 0 0) 0 0 / 100% 16% no-repeat; }
-li:nth-child(5) > .slab::after { content: ""; position: absolute; inset: 30% 15% 15%; border-radius: 4%; opacity: 0; background: repeating-linear-gradient(90deg, transparent 0 30%, var(--face) 30% 35%), linear-gradient(90deg, var(--glass-rose) 0 35%, var(--glass-saffron) 35% 70%, var(--glass-teal) 70%) 0 0 / 100% 47% no-repeat, linear-gradient(90deg, var(--glass-lapis) 0 35%, var(--glass-emerald) 35% 70%, var(--glass-saffron) 70%) 0 100% / 100% 47% no-repeat; transition: opacity .6s ease .15s; }
+li:nth-child(5) > .slab::after { content: ""; position: absolute; inset: 30% 15% 15%; border-radius: 4%; opacity: 0; background: linear-gradient(to right, transparent 86%, var(--face) 86%) 0 0 / 35% 100%, linear-gradient(90deg, var(--glass-rose) 0 35%, var(--glass-saffron) 35% 70%, var(--glass-teal) 70%) 0 0 / 100% 47% no-repeat, linear-gradient(90deg, var(--glass-lapis) 0 35%, var(--glass-emerald) 35% 70%, var(--glass-saffron) 70%) 0 100% / 100% 47% no-repeat; transition: opacity .6s ease .15s; }
 li:nth-child(5).is-active > .slab { --tint: 14%; --mark: var(--ink); }
 li:nth-child(5).is-active > .slab::after { opacity: 1; }
-.layer-text { display: flex; align-items: baseline; gap: 14px; min-height: 44px; padding-block: 4px; border-radius: 10px; color: var(--ink-soft); transition: color .3s ease, transform .45s var(--ease-out); }
+.layer-text { display: flex; align-items: baseline; gap: 14px; min-height: 44px; padding-block: 4px; border-radius: 10px; color: var(--ink-soft); transition: color .4s ease; }
 .layer-text:hover { color: var(--ink); }
-.layer-number { font: 500 13px/1 var(--mono); color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.layer-number { font: 500 13px/1 var(--mono); color: var(--ink-faint); font-variant-numeric: tabular-nums; transition: color .4s ease; }
 .layer-name { font-size: 19px; font-weight: 600; line-height: 1.3; }
 .layer-name small { display: block; margin-top: 2px; font-size: 14px; font-weight: 400; color: var(--ink-faint); }
-.stack-diagram li.is-active .layer-text { color: var(--ink); transform: translateX(8px); }
+.stack-diagram li.is-active .layer-text { color: var(--ink); }
+.stack-diagram li.is-active .layer-number { color: var(--saffron); }
 .stack-step { min-height: 62vh; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding-block: 48px; scroll-margin-top: 25vh; }
 .step-index { font: 500 13px/1.5 var(--mono); color: var(--ink-faint); }
 .stack-step h3 { margin: 16px 0 16px; font-size: clamp(2rem, 3.4vw, 3.4rem); }
@@ -481,9 +484,7 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
 /* Wide displays. */
 @media (min-width: 1700px) {
   :root { --page: 1500px; }
-  .stack-diagram li { grid-template-columns: 290px minmax(0, 1fr); height: 104px; }
-  .stack-diagram::before, .stack-diagram::after { left: 145px; top: 52px; bottom: 52px; }
-  .slab { width: 176px; height: 176px; }
+  .stack-diagram { --col: 290px; --pitch: 104px; --sheet: 176px; --lead: 44px; }
   .layer-name { font-size: 23px; }
   .layer-name small { font-size: 16px; }
   .stack-step p, .web-description p, .experimental-notice p { font-size: 19px; }
@@ -508,9 +509,7 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
   .stack-step p, .web-description p, .experimental-notice p, .experimental-notice p.experimental-macos, .experimental-notice p.experimental-security { font-size: 22px; }
   .stack-step h3 { font-size: 4.2rem; }
   .stack-step a, .guide-link { font-size: 18px; }
-  .stack-diagram li { grid-template-columns: 360px minmax(0, 1fr); height: 128px; }
-  .stack-diagram::before, .stack-diagram::after { left: 180px; top: 64px; bottom: 64px; }
-  .slab { width: 218px; height: 218px; border-radius: 22px; }
+  .stack-diagram { --col: 360px; --pitch: 128px; --sheet: 218px; --lead: 56px; }
   .layer-name { font-size: 27px; }
   .layer-name small { font-size: 18px; }
   .layer-number, .step-index { font-size: 16px; }
@@ -548,12 +547,10 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
   .stack-figure { top: 0; z-index: 5; margin: 0 calc(var(--gutter) * -1); padding: 80px var(--gutter) 14px; background: var(--wine); border-bottom: 1px solid var(--line); }
   .stack-figure figcaption { margin-bottom: 10px; }
   .stack-diagram::before, .stack-diagram::after, .slab::before, .slab::after { display: none; }
-  .stack-diagram li, .stack-diagram li:has(~ li.is-active), .stack-diagram li.is-active ~ li { transform: none; transition: none; }
   .layer-text { min-height: 0; padding-block: 0; }
   .stack-diagram li { grid-template-columns: 14px minmax(0, 1fr); gap: 12px; height: auto; padding-block: 6px; }
-  .slab, .stack-diagram li.is-active .slab { width: 14px; height: 14px; border-radius: 4px; transform: none; box-shadow: none; }
+  .slab, .stack-diagram li.is-active .slab { width: 14px; height: 14px; border-radius: 4px; background: var(--face); transform: none; box-shadow: none; }
   .layer-name small { display: none; }
-  .stack-diagram li.is-active .layer-text { transform: none; }
   /* With motion on, the sticky stack collapses to a five-part progress bar. */
   .motion-enabled .stack-figure figcaption { display: none; }
   .motion-enabled .stack-diagram { grid-template-columns: repeat(5, 1fr); gap: 6px; padding-bottom: 30px; }
@@ -588,7 +585,7 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
   .brand { gap: 4px; font-size: 21px; }
   .brand img { width: 32px; height: 32px; }
 }
-@media (max-height: 700px) and (min-width: 761px), (max-width: 1100px) and (min-width: 761px) { .stack-figure { top: 84px; } .stack-figure figcaption { margin-bottom: 12px; } .stack-diagram li { grid-template-columns: 170px minmax(0, 1fr); gap: 18px; height: 62px; } .stack-diagram::before, .stack-diagram::after { left: 85px; top: 30px; bottom: 30px; } .slab { width: 104px; height: 104px; } .layer-name { font-size: 16px; } .layer-name small { display: none; } }
+@media (max-height: 700px) and (min-width: 761px), (max-width: 1100px) and (min-width: 761px) { .stack-figure { top: 84px; } .stack-figure figcaption { margin-bottom: 12px; } .stack-diagram { --col: 170px; --pitch: 62px; --sheet: 104px; --lead: 24px; } .stack-diagram li { gap: 18px; } .layer-name { font-size: 16px; } .layer-name small { display: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   :root { scroll-behavior: auto; }
