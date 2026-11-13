@@ -236,6 +236,23 @@ def properties_text(values):
     return ''.join(encode(key) + '=' + encode(value) + '\n' for key, value in sorted(values.items()) if value is not None)
 
 
+def registry_metadata(apk, report, installer=None):
+    """Package facts for another app's view of an installed APK (PackageManager).
+
+    The macOS launcher stores these as package.properties next to each library
+    APK; sourceDir and dataDir match what run_activity uses for that package.
+    """
+    manifest = report['manifest']
+    package = manifest['package']
+    launchers = manifest.get('launcher_activities') or []
+    activity = launchers[0].get('target') if launchers else None
+    if not NAME.fullmatch(package or '') or (activity and not NAME.fullmatch(activity)):
+        raise FormatError('Invalid package or launcher class name')
+    facts = application_metadata(manifest, Path(apk).resolve(), ROOT / 'data/apps' / package)
+    facts.update(launchActivity=activity, installer=installer, sha256=report['apk_sha256'])
+    return facts
+
+
 def emit_filters(values, base, filters):
     if len(filters) > 128:
         raise FormatError('Activity filter limit')

@@ -12,7 +12,8 @@ The launcher shows the runtime's own output in each app's Console tab.
 ## Layout
 
 - Sidebar: Library scopes (All Apps, Running, Recently Played, Favorites) with
-  counts, search, and the runtime status badge (opens Settings).
+  counts, the F-Droid catalog, search, and the runtime status badge (opens
+  Settings).
 - Library: icon grid or sortable list (name, recently played, recently added,
   size). Running apps glow and sit in a Now Running strip. Hover a tile for a
   Launch/Stop button; double-click launches, click opens the app page.
@@ -53,11 +54,40 @@ The launcher shows the runtime's own output in each app's Console tab.
   `build/icons/shiraz-badge`, which the runtime uses to compose each APK's
   Dock icon. APKs without a supported raster icon get the plain ghost.
 
+## F-Droid
+
+- F-Droid Catalog (sidebar, or Browse F-Droid on the welcome screen) runs
+  `python3 -m shiraz fdroid sync --cache <library>/fdroid`, which downloads
+  index-v1.jar and trusts it only after checking the pinned f-droid.org
+  certificate, the JAR signature (SHA-1, as f-droid.org signs v1) and digests.
+  A catalog younger than six hours is reused; Refresh downloads it again.
+- Filters: Fits This Mac (an APK with arm64-v8a or no native code and
+  minSdk <= 27; this is not a claim that the app works), All, In Library;
+  category and sort. The sidebar search field searches the catalog.
+- Get / Update runs `shiraz fdroid fetch`, which keeps the APK only when its
+  SHA-256 matches the signed index, then imports it like a dropped APK.
+  Update compares versionCode with the library copy.
+- Apps running in Shiraz can install into the library. Each launch gets
+  `SHIRAZ_LAUNCHER_APPS` (the library's apps/ directory, which apps read
+  through PackageManager) and a per-session request directory
+  `SHIRAZ_LAUNCHER_INBOX` (`java/shiraz/runtime/LauncherInbox.java`,
+  `Sources/LauncherCore/InstallInbox.swift`). The F-Droid app's
+  PackageInstaller session hands its APK there; the launcher imports it and
+  answers. Installs need REQUEST_INSTALL_PACKAGES and removals
+  REQUEST_DELETE_PACKAGES in the requesting app's manifest, checked by the
+  launcher. Open asks the launcher to start the app.
+- Each library app has `package.properties` from `shiraz metadata`, so apps
+  see what else is installed.
+- Limits: apps cannot replace a package that is already in the library (no
+  signer-lineage check yet), so updates go through the catalog page. The
+  launcher shows no separate consent prompt for in-app installs: the
+  requesting app's own Install button is the user action, followed by a toast.
+
 ## Not implemented
 
 Controls for planned features are present but throw `NotImplementedError`
 (`Sources/LauncherCore/Feature.swift`); the launcher shows a toast and
-changes nothing. That list is the backlog: F-Droid catalog, updates,
+changes nothing. That list is the backlog: updates,
 automatic updates, collections, Add to Applications, Export as Mac App,
 duplicate, replace APK, app data (show, clear, cache, back up), permission
 and network controls,
@@ -68,12 +98,6 @@ report, performance stats, copying console output.
 Also missing:
 
 - Vector-drawable icons are not rendered; those apps get a monogram.
-- The F-Droid catalog page. The runtime side exists:
-  `python3 -m shiraz fdroid sync --cache <dir>` downloads index-v1.jar, checks
-  the pinned f-droid.org certificate, the JAR signature (SHA-1, as f-droid.org
-  signs v1) and digests, and writes `catalog.json`;
-  `python3 -m shiraz fdroid fetch <package> --cache <dir> --output <dir>`
-  downloads one APK and checks its SHA-256 against the signed index.
 - Embedded runtime. For now the launcher drives a source checkout through
   `python3 -m shiraz`. It finds the checkout from `SHIRAZ_ROOT`, from its own
   location, or from Settings.

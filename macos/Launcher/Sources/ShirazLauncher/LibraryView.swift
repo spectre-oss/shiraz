@@ -107,7 +107,7 @@ struct WelcomeView: View {
                 Button("Choose APK…", systemImage: "plus") { model.showImporter = true }
                     .buttonStyle(.glassProminent)
                     .controlSize(.extraLarge)
-                Button("Browse F-Droid", systemImage: "sparkles") { model.attempt(.catalog) }
+                Button("Browse F-Droid", systemImage: "sparkles") { model.sidebar = .catalog }
                     .buttonStyle(.glass)
                     .controlSize(.extraLarge)
             }

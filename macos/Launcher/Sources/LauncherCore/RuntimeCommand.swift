@@ -15,6 +15,23 @@ public enum RuntimeCommand {
         ["icon", apk.path, "--output-dir", outputDirectory.path]
     }
 
+    /// Download and verify the f-droid.org index into `<cache>/catalog.json`.
+    /// A catalog younger than `maxAge` seconds is reused without a download.
+    public static func fdroidSync(cache: URL, maxAge: Int = 0) -> [String] {
+        ["fdroid", "sync", "--cache", cache.path, "--max-age", String(max(0, maxAge))]
+    }
+
+    /// Download one catalog APK into `output`; the runtime checks its SHA-256
+    /// against the signed index before keeping it.
+    public static func fdroidFetch(package: String, cache: URL, output: URL) -> [String] {
+        ["fdroid", "fetch", package, "--cache", cache.path, "--output", output.path]
+    }
+
+    /// PackageManager facts for the library's package.properties.
+    public static func metadata(apk: URL, installer: String?) -> [String] {
+        ["metadata", apk.path] + (installer.map { ["--installer", $0] } ?? [])
+    }
+
     public static func run(apk: URL, settings: AppSettings) -> [String] {
         var arguments = [
             "run", apk.path,
@@ -32,5 +49,10 @@ public enum RuntimeCommand {
     /// explicitly so a value inherited by the launcher never applies.
     public static func runEnvironment(settings: AppSettings) -> [String: String] {
         ["SHIRAZ_GUEST_LOADER": settings.nativeCode ? "1" : "0"]
+    }
+
+    /// Library and request directories for one session (LauncherInbox.java).
+    public static func libraryEnvironment(apps: URL, inbox: URL) -> [String: String] {
+        ["SHIRAZ_LAUNCHER_APPS": apps.path, "SHIRAZ_LAUNCHER_INBOX": inbox.path]
     }
 }

@@ -284,6 +284,35 @@ def _localized(app, key):
     return None, None
 
 
+def plain_text(value, limit=4000):
+    """Catalog descriptions are HTML fragments; keep readable text only."""
+    if not isinstance(value, str):
+        return ''
+    text = re.sub(r'(?is)<(script|style)\b.{0,65536}?</\1\s*>', '', value)
+    text = re.sub(r'(?i)<br\s*/?>|</p>|</li>', '\n', text)
+    text = re.sub(r'(?i)<li[^>]*>', '\n• ', text)
+    text = re.sub(r'<[^>]{0,512}>', '', text)
+    for entity, char in (
+        ('&lt;', '<'),
+        ('&gt;', '>'),
+        ('&quot;', '"'),
+        ('&#39;', "'"),
+        ('&nbsp;', ' '),
+        ('&amp;', '&'),
+    ):
+        text = text.replace(entity, char)
+    text = re.sub(r'\n[ \t]*\n[\s]*', '\n\n', text).strip()
+    return text[:limit].rstrip() + ('…' if len(text) > limit else '')
+
+
+def https_url(value):
+    return (
+        value
+        if isinstance(value, str) and value.startswith('https://') and len(value) <= 2048
+        else None
+    )
+
+
 def choose_package(app, packages):
     """Best APK for this host: suggested or newer-compatible version, else a reason."""
     suggested = app.get('suggestedVersionCode')
@@ -330,16 +359,42 @@ def build_catalog(index, address=REPO):
             icon_url = f"{address}/icons-640/{app['icon']}"
         else:
             icon_url = None
-        apps.append({
-            'packageName': name, 'name': title, 'summary': summary,
-            'license': app.get('license'), 'categories': app.get('categories') or [],
-            'iconURL': icon_url, 'lastUpdated': app.get('lastUpdated'), 'added': app.get('added'),
-            'versionName': package.get('versionName'), 'versionCode': package.get('versionCode'),
-            'apkName': package.get('apkName'), 'sha256': package.get('hash'), 'size': package.get('size'),
-            'nativecode': package.get('nativecode') or [], 'minSdk': package.get('minSdkVersion'),
-            'compatible': reason is None, 'reason': reason,
-            'webURL': f"{repo.get('webBaseUrl', 'https://f-droid.org/packages')}/{name}/",
-        })
+        description, _ = _localized(app, 'description')
+        shots, shot_locale = _localized(app, 'phoneScreenshots')
+        screenshots = [
+            f'{address}/{name}/{shot_locale}/phoneScreenshots/{shot}'
+            for shot in (shots or [])[:6]
+            if isinstance(shot, str) and '/' not in shot and not shot.startswith('.')
+        ]
+        apps.append(
+            {
+                'packageName': name,
+                'name': title,
+                'summary': summary,
+                'description': plain_text(description or app.get('description')),
+                'authorName': app.get('authorName')
+                if isinstance(app.get('authorName'), str)
+                else None,
+                'sourceCode': https_url(app.get('sourceCode')),
+                'antiFeatures': [a for a in app.get('antiFeatures') or [] if isinstance(a, str)],
+                'screenshots': screenshots,
+                'license': app.get('license'),
+                'categories': app.get('categories') or [],
+                'iconURL': icon_url,
+                'lastUpdated': app.get('lastUpdated'),
+                'added': app.get('added'),
+                'versionName': package.get('versionName'),
+                'versionCode': package.get('versionCode'),
+                'apkName': package.get('apkName'),
+                'sha256': package.get('hash'),
+                'size': package.get('size'),
+                'nativecode': package.get('nativecode') or [],
+                'minSdk': package.get('minSdkVersion'),
+                'compatible': reason is None,
+                'reason': reason,
+                'webURL': f"{repo.get('webBaseUrl', 'https://f-droid.org/packages')}/{name}/",
+            }
+        )
     apps.sort(key=lambda a: (a['name'].casefold(), a['packageName']))
     return {'repo': {'name': repo.get('name'), 'address': address, 'timestamp': repo.get('timestamp'),
                      'fingerprint': REPO_FINGERPRINT}, 'apps': apps}

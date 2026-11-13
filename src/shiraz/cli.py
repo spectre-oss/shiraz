@@ -7,7 +7,7 @@ from pathlib import Path
 from .apk import FormatError, inspect_apk
 from .app_icon import extract_icon, resolve_label
 from . import fdroid
-from .runtime import run_activity
+from .runtime import properties_text, registry_metadata, run_activity
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,7 +16,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog='shiraz', description='Shiraz APK-to-Linux toolchain (experimental)')
     parser.add_argument('--version', action='version', version='Shiraz ' + (ROOT / 'VERSION').read_text().strip())
     sub = parser.add_subparsers(dest='command', required=True)
-    for command in ('inspect', 'plan', 'run', 'icon', 'label'):
+    for command in ('inspect', 'plan', 'run', 'icon', 'label', 'metadata'):
         p = sub.add_parser(command)
         p.add_argument('apk', type=Path)
         if command == 'icon':
@@ -32,6 +32,8 @@ def main(argv=None):
             p.add_argument('--log-level', choices=['VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'ASSERT', 'SILENT'], default='INFO')
         if command == 'plan':
             p.add_argument('--output', type=Path, required=True)
+        if command == 'metadata':
+            p.add_argument('--installer', help='Package name of the app that requested the installation')
     repo = sub.add_parser('fdroid', help='F-Droid repository: signed index and verified APK downloads')
     actions = repo.add_subparsers(dest='action', required=True)
     sync = actions.add_parser('sync', help='Download and verify the index, write <cache>/catalog.json')
@@ -59,6 +61,11 @@ def main(argv=None):
             print(json.dumps(extract_icon(args.apk, args.output_dir), indent=2, sort_keys=True))
             return 0
         report = inspect_apk(args.apk)
+        if args.command == 'metadata':
+            if args.installer is not None and not fdroid.PACKAGE.fullmatch(args.installer):
+                raise FormatError('Invalid installer package name')
+            sys.stdout.write(properties_text(registry_metadata(args.apk, report, args.installer)))
+            return 0
         if args.command == 'run':
             return run_activity(args.apk, report, width=args.width, height=args.height, frames=args.frames, snapshot=args.snapshot, timeout=args.timeout, log_level=args.log_level, device_profile=args.device_profile, native_split=args.native_split)
         if args.command == 'plan':

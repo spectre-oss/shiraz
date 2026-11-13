@@ -185,6 +185,32 @@ class Catalog(unittest.TestCase):
         self.assertIn('x86_64', apps['org.example.x86']['reason'])
         self.assertIn('API 33', apps['org.example.new']['reason'])
 
+    def test_details_are_plain_and_bounded(self):
+        index = json.loads(INDEX)
+        index['apps'][0].update(
+            authorName='Ada', sourceCode='https://example.org/src', antiFeatures=['Ads', 3]
+        )
+        index['apps'][0]['localized']['en-US'].update(
+            description='<p>One &amp; two</p><ul><li>A</li></ul><script>x</script>',
+            phoneScreenshots=['1.png', '../escape.png', '.hidden.png'],
+        )
+        index['apps'][1]['sourceCode'] = 'http://insecure.example/src'
+        apps = {
+            a['packageName']: a for a in fdroid.build_catalog(json.dumps(index).encode())['apps']
+        }
+        app = apps['org.example.app']
+        self.assertEqual(app['description'], 'One & two\n\n• A')
+        self.assertEqual(
+            (app['authorName'], app['sourceCode'], app['antiFeatures']),
+            ('Ada', 'https://example.org/src', ['Ads']),
+        )
+        self.assertEqual(
+            app['screenshots'],
+            ['https://f-droid.org/repo/org.example.app/en-US/phoneScreenshots/1.png'],
+        )
+        self.assertIsNone(apps['org.example.x86']['sourceCode'])
+        self.assertTrue(fdroid.plain_text('x' * 5000).endswith('…'))
+
 
 class Fetch(unittest.TestCase):
     def setUp(self):

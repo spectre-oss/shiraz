@@ -4,7 +4,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import android.content.*;
-/** Host AppImage installation boundary and XDG installed-package registry. */
+/** Host AppImage installation boundary and XDG installed-package registry; on macOS, the launcher library (LauncherInbox). */
 public final class HostAppInstaller {
  private HostAppInstaller(){}
  public static File base(String name,String fallback){
@@ -16,12 +16,12 @@ public final class HostAppInstaller {
  private static File registry(){return new File(base("XDG_DATA_HOME",".local/share"),"shiraz/installed");}
  private static boolean valid(String pkg){return pkg!=null&&pkg.length()<=1024&&pkg.matches("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)*");}
  public static Properties metadata(String pkg){
-  if(!valid(pkg))return null;File dir=new File(registry(),pkg),file=new File(dir,"package.properties");
+  if(!valid(pkg))return null;if(LauncherInbox.active())return LauncherInbox.metadata(pkg);File dir=new File(registry(),pkg),file=new File(dir,"package.properties");
   if(!file.isFile()||file.length()>4*1024*1024||!new File(dir,"application.AppImage").isFile())return null;
   try{Properties facts=new Properties();try(Reader in=new InputStreamReader(new FileInputStream(file),"UTF-8")){facts.load(in);}if(!pkg.equals(facts.getProperty("package")))return null;return facts;}
   catch(IOException e){throw new IllegalStateException("Installed package metadata",e);}
  }
- public static List<String> packages(){ArrayList<String> result=new ArrayList<>();String[] files=registry().list();if(files!=null){if(files.length>4096)throw new IllegalStateException("Installed package registry limit");for(String pkg:files)if(metadata(pkg)!=null)result.add(pkg);}return result;}
+ public static List<String> packages(){ArrayList<String> result=new ArrayList<>();String[] files=LauncherInbox.active()?LauncherInbox.packages():registry().list();if(files!=null){if(files.length>4096)throw new IllegalStateException("Installed package registry limit");for(String pkg:files)if(metadata(pkg)!=null)result.add(pkg);}return result;}
  public static Intent launchIntent(String pkg){Properties facts=metadata(pkg);if(facts==null)return null;String activity=facts.getProperty("launchActivity");return activity==null?null:new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(new ComponentName(pkg,activity)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
  private static void cleanEnvironment(Map<String,String> env){
   for(String key:new ArrayList<String>(env.keySet()))if(key.startsWith("SHIRAZ_LIVE_")||key.equals("SHIRAZ_PRESENT_SNAPSHOT")||key.equals("SHIRAZ_INPUT_SCRIPT")||key.startsWith("APPIMAGE")||key.equals("APPDIR")||key.equals("OWD")||key.equals("LD_LIBRARY_PATH")||key.equals("LD_PRELOAD")||key.equals("PYTHONPATH")||key.equals("PYTHONHOME"))env.remove(key);
@@ -31,6 +31,7 @@ public final class HostAppInstaller {
   ComponentName component=intent.getComponent();if(component==null||component.getPackageName().equals(ownPackage))return false;
   Properties facts=metadata(component.getPackageName());if(facts==null)return false;
   if(!component.getClassName().equals(facts.getProperty("launchActivity")))throw new android.content.ActivityNotFoundException("Only installed launch activities are supported");
+  if(LauncherInbox.active()){try{LauncherInbox.launch(component.getPackageName(),ownPackage);return true;}catch(IOException e){throw new android.content.ActivityNotFoundException("Cannot open "+component.getPackageName()+": "+e.getMessage());}}
   File file=new File(new File(registry(),component.getPackageName()),"application.AppImage");
   try{File state=new File(base("XDG_STATE_HOME",".local/state"),"shiraz");state.mkdirs();
    ProcessBuilder builder=new ProcessBuilder(file.getAbsolutePath());cleanEnvironment(builder.environment());builder.environment().put("APPIMAGE_EXTRACT_AND_RUN","1");
@@ -60,6 +61,7 @@ public final class HostAppInstaller {
   }});dialog.show();
  }
  private static void remove(Context context,String pkg)throws IOException{
+  if(LauncherInbox.active()){LauncherInbox.remove(pkg,context.getPackageName());return;}
   String root=System.getenv("SHIRAZ_APPDIR");if(root==null)throw new IOException("Uninstall requires packaged runtime");
   File template=new File(root),tools=new File(template,"usr/share/shiraz/installer"),state=new File(base("XDG_STATE_HOME",".local/state"),"shiraz");state.mkdirs();
   String loader=System.getProperty("os.arch","").contains("aarch64")?"ld-linux-aarch64.so.1":"ld-linux-x86-64.so.2";
@@ -68,6 +70,12 @@ public final class HostAppInstaller {
   try{Process process=builder.start();if(!process.waitFor(60,java.util.concurrent.TimeUnit.SECONDS)){process.destroyForcibly();throw new IOException("Uninstall timed out");}if(process.exitValue()!=0)throw new IOException("Uninstall failed");}catch(InterruptedException error){Thread.currentThread().interrupt();throw new IOException(error);}
  }
  public static String install(Context context,File apk,String expected)throws IOException {
+  if(HostOs.darwin()){
+   if(!LauncherInbox.active())throw new IOException("Installing apps needs the Shiraz launcher");
+   String pkg=LauncherInbox.install(apk,expected,context.getPackageName(),15*60*1000L);
+   if(metadata(pkg)==null)throw new IOException("The launcher did not add "+pkg+" to the library");
+   context.sendBroadcast(new Intent("android.intent.action.PACKAGE_ADDED").setData(android.net.Uri.parse("package:"+pkg)).putExtra("android.intent.extra.REPLACING",false));return pkg;
+  }
   String root=System.getenv("SHIRAZ_APPDIR");if(root==null)throw new IOException("Install from the packaged Shiraz AppImage");
   File template=new File(root),tools=new File(template,"usr/share/shiraz/installer"),result=File.createTempFile("install-result-",".properties",context.getCacheDir());
   File state=new File(base("XDG_STATE_HOME",".local/state"),"shiraz");if(!state.isDirectory()&&!state.mkdirs())throw new IOException("Cannot create install history directory");

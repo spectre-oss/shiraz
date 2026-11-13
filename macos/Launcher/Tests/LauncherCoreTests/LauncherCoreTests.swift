@@ -409,3 +409,288 @@ private let sampleReport = Data("""
     #expect(log.lines.map(\.text) == ["E/Host( 1): bad", "ok\tdone"])
     #expect(log.lines.first?.level == .error)
 }
+
+@Suite struct CatalogTests {
+    private let sample = Data("""
+    {"repo": {"name": "F-Droid", "address": "https://f-droid.org/repo", "timestamp": 1794404913394},
+     "apps": [
+      {"packageName": "org.example.app", "name": "Example", "summary": "Does things", "description": "Long",
+       "license": "GPL-3.0-only", "categories": ["Games", "Science"], "iconURL": "https://f-droid.org/repo/i.png",
+       "screenshots": ["https://f-droid.org/s.png", "http://insecure.example/s.png"], "lastUpdated": 1700000000000,
+       "versionName": "2.0", "versionCode": 20, "size": 4096, "nativecode": [], "minSdk": "21",
+       "compatible": true, "reason": null, "webURL": "https://f-droid.org/packages/org.example.app/",
+       "sourceCode": "javascript:alert(1)", "antiFeatures": ["Ads"]},
+      {"packageName": "org.example.x86", "name": "", "categories": ["Games"], "versionCode": 5, "nativecode": ["x86_64"],
+       "compatible": false, "reason": "Native code only for x86_64", "minSdk": 24},
+      {"packageName": "../evil", "name": "Evil", "compatible": true},
+      {"name": "No package"}
+     ]}
+    """.utf8)
+
+    @Test func decodesLenientlyAndDropsBadApps() throws {
+        let catalog = try Catalog.decode(sample)
+        #expect(catalog.apps.map(\.packageName) == ["org.example.app", "org.example.x86"])
+        #expect(catalog.repo.timestamp == Date(timeIntervalSince1970: 1_794_404_913.394))
+        let app = catalog.apps[0]
+        #expect(app.minSdk == 21)
+        #expect(app.screenshots == [URL(string: "https://f-droid.org/s.png")!])
+        #expect(app.sourceCode == nil)
+        #expect(app.iconURL?.host == "f-droid.org")
+        #expect(catalog.apps[1].name == "org.example.x86")
+        #expect(catalog.apps[1].minSdk == 24)
+        #expect(catalog.categories == ["Games", "Science"])
+    }
+
+    @Test func statusComparesVersionCodes() throws {
+        let app = try Catalog.decode(sample).apps[0]
+        var report = try InspectReport.decode(sampleReport)
+        report.manifest.package = "org.example.app"
+        var entry = AppEntry(report: report)
+        #expect(app.status(in: []) == .notInLibrary)
+        entry.versionCode = "7"
+        #expect(app.status(in: [entry]) == .updateAvailable(from: "1.2"))
+        entry.versionCode = "20"
+        #expect(app.status(in: [entry]) == .inLibrary)
+        entry.versionCode = nil
+        #expect(app.status(in: [entry]) == .inLibrary)
+    }
+
+    @Test func searchMatchesNameSummaryAndPackage() throws {
+        let app = try Catalog.decode(sample).apps[0]
+        #expect(app.matches(""))
+        #expect(app.matches("does"))
+        #expect(app.matches("ORG.EXAMPLE"))
+        #expect(!app.matches("telegram"))
+    }
+
+    /// A real `shiraz fdroid sync` output, when SHIRAZ_TEST_CATALOG points at one.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["SHIRAZ_TEST_CATALOG"] != nil))
+    func decodesRealCatalog() throws {
+        let path = try #require(ProcessInfo.processInfo.environment["SHIRAZ_TEST_CATALOG"])
+        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        let raw = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let count = (raw["apps"] as? [Any])?.count ?? 0
+        let catalog = try Catalog.decode(data)
+        #expect(count > 1000)
+        #expect(catalog.apps.count == count)
+        #expect(catalog.apps.contains { $0.compatible && $0.iconURL != nil && $0.versionCode != nil && $0.size != nil })
+    }
+
+    @Test func fdroidCommands() {
+        let cache = URL(fileURLWithPath: "/lib/fdroid")
+        #expect(RuntimeCommand.fdroidSync(cache: cache, maxAge: -5) == ["fdroid", "sync", "--cache", "/lib/fdroid", "--max-age", "0"])
+        #expect(RuntimeCommand.fdroidFetch(package: "org.a.b", cache: cache, output: URL(fileURLWithPath: "/tmp/d"))
+            == ["fdroid", "fetch", "org.a.b", "--cache", "/lib/fdroid", "--output", "/tmp/d"])
+    }
+
+    @Test func downloadDirectoriesAreFreshAndInsideTheCatalog() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "catalog-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LibraryStore(directory: root)
+        let a = try store.makeDownloadDirectory(), b = try store.makeDownloadDirectory()
+        #expect(a != b)
+        #expect(a.path.hasPrefix(store.catalogDirectory.path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: a.path).isEmpty)
+    }
+}
+
+@Suite struct InstallInboxTests {
+    private func directory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appending(path: "inbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func app(_ package: String, permissions: [String] = [], abis: [String] = []) throws -> AppEntry {
+        var report = try InspectReport.decode(sampleReport)
+        report.manifest.package = package
+        report.manifest.permissions = permissions
+        report.nativeAbis = abis
+        return AppEntry(report: report)
+    }
+
+    @Test func javaPropertiesRoundTrip() {
+        // As java.util.Properties.store(Writer) writes it, with the date comment.
+        let stored = "#Thu Nov 13 12:00:00 IRST 2026\nkind=install\ninstaller=org.fdroid.fdroid\nexpected=org.example.app\nmessage=a\\:b\\=c\\\n  continued \\u00e9\n"
+        let parsed = JavaProperties.parse(stored)
+        #expect(parsed["kind"] == "install")
+        #expect(parsed["expected"] == "org.example.app")
+        #expect(parsed["message"] == "a:b=ccontinued é")
+        let values = ["message": " leading, ünïcode\nline=2: #x", "package": "org.a.b", "status": "failed"]
+        #expect(JavaProperties.parse(JavaProperties.format(values)) == values)
+    }
+
+    @Test func readsCompleteRequestsAndAnswersMalformedOnes() throws {
+        let inbox = try directory()
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        try Data("PK\u{3}\u{4}".utf8).write(to: inbox.appending(path: "a1.apk"))
+        try "kind=install\ninstaller=org.fdroid.fdroid\nexpected=org.example.app\n".write(to: inbox.appending(path: "a1.request"), atomically: true, encoding: .utf8)
+        try "kind=launch\npackage=../escape\n".write(to: inbox.appending(path: "b2.request"), atomically: true, encoding: .utf8)
+        try "kind=install\n".write(to: inbox.appending(path: "c3.request.part"), atomically: true, encoding: .utf8)
+        try "kind=install\n".write(to: inbox.appending(path: "bad id.request"), atomically: true, encoding: .utf8)
+        let requests = InstallInbox.pending(in: inbox)
+        #expect(requests.map(\.id) == ["a1"])
+        #expect(requests[0].kind == .install && requests[0].expected == "org.example.app")
+        #expect(requests[0].apk?.lastPathComponent == "a1.apk")
+        let answer = try String(contentsOf: inbox.appending(path: "b2.result"), encoding: .utf8)
+        #expect(JavaProperties.parse(answer)["status"] == "failed")
+        #expect(!FileManager.default.fileExists(atPath: inbox.appending(path: "b2.request").path))
+
+        try InstallInbox.answer(id: "a1", in: inbox, ok: true, package: "org.example.app", message: nil)
+        #expect(JavaProperties.parse(try String(contentsOf: inbox.appending(path: "a1.result"), encoding: .utf8))
+            == ["status": "ok", "package": "org.example.app"])
+        #expect(!FileManager.default.fileExists(atPath: inbox.appending(path: "a1.apk").path))
+        #expect(InstallInbox.pending(in: inbox).isEmpty)
+    }
+
+    @Test func policyChecksPermissionsAndLibrary() throws {
+        let apk = URL(fileURLWithPath: "/inbox/x.apk")
+        let store = try app("org.fdroid.fdroid", permissions: [InstallInbox.installPermission, InstallInbox.deletePermission])
+        let plain = try app("org.example.game")
+        let x86 = try app("org.example.x86", abis: ["x86_64"])
+        let library = [store, plain, x86]
+        func request(_ kind: InboxRequest.Kind, package: String? = nil, expected: String? = nil, apk: URL? = nil) -> InboxRequest {
+            InboxRequest(id: "r", kind: kind, installer: "org.fdroid.fdroid", package: package, expected: expected, apk: apk)
+        }
+        #expect(InstallInbox.decide(request(.install, expected: "org.new.app", apk: apk), requester: store, library: library)
+            == .install(apk: apk, expected: "org.new.app"))
+        if case .refuse = InstallInbox.decide(request(.install, expected: "org.new.app", apk: apk), requester: plain, library: library) {} else {
+            Issue.record("An app without REQUEST_INSTALL_PACKAGES installed something")
+        }
+        if case .refuse = InstallInbox.decide(request(.install, expected: "org.example.game", apk: apk), requester: store, library: library) {} else {
+            Issue.record("An app replaced a library package")
+        }
+        if case .refuse = InstallInbox.decide(request(.install, expected: "org.new.app"), requester: store, library: library) {} else {
+            Issue.record("Install without an APK was accepted")
+        }
+        #expect(InstallInbox.decide(request(.launch, package: "org.example.game"), requester: plain, library: library) == .launch("org.example.game"))
+        if case .refuse = InstallInbox.decide(request(.launch, package: "org.example.x86"), requester: plain, library: library) {} else {
+            Issue.record("Launched an unsupported app")
+        }
+        #expect(InstallInbox.decide(request(.remove, package: "org.example.game"), requester: store, library: library) == .remove("org.example.game"))
+        if case .refuse = InstallInbox.decide(request(.remove, package: "org.example.game"), requester: plain, library: library) {} else {
+            Issue.record("An app without REQUEST_DELETE_PACKAGES removed something")
+        }
+        if case .refuse = InstallInbox.decide(request(.remove, package: "org.fdroid.fdroid"), requester: store, library: library) {} else {
+            Issue.record("An app removed itself")
+        }
+    }
+
+    @Test func importCanRefuseReplacing() async throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LibraryStore(directory: root)
+        let apk = root.appending(path: "in.apk")
+        try Data([0x50, 0x4b, 0x03, 0x04] + [UInt8](repeating: 0, count: 64)).write(to: apk)
+        let report = try InspectReport.decode(sampleReport)
+        _ = try await store.importAPK(from: apk) { _ in report }
+        await #expect(throws: LibraryError.alreadyInLibrary("net.example.app")) {
+            _ = try await store.importAPK(from: apk, replacing: false) { _ in report }
+        }
+        #expect(RuntimeCommand.metadata(apk: apk, installer: "org.fdroid.fdroid").suffix(2) == ["--installer", "org.fdroid.fdroid"])
+        #expect(RuntimeCommand.libraryEnvironment(apps: store.appsDirectory, inbox: root)["SHIRAZ_LAUNCHER_APPS"] == store.appsDirectory.path)
+    }
+}
+
+@Suite struct InboxHandlerTests {
+    private func app(_ package: String, permissions: [String] = []) throws -> AppEntry {
+        var report = try InspectReport.decode(sampleReport)
+        report.manifest.package = package
+        report.manifest.permissions = permissions
+        return AppEntry(report: report)
+    }
+
+    private func result(_ id: String, in inbox: URL) throws -> [String: String] {
+        JavaProperties.parse(try String(contentsOf: inbox.appending(path: id + ".result"), encoding: .utf8))
+    }
+
+    @Test func handleActsAndAnswers() async throws {
+        let inbox = FileManager.default.temporaryDirectory.appending(path: "handle-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let fdroid = try app("org.fdroid.fdroid", permissions: [InstallInbox.installPermission, InstallInbox.deletePermission])
+        let added = try app("org.example.new")
+        let apk = inbox.appending(path: "i1.apk")
+        try Data("PK".utf8).write(to: apk)
+        var installed: [String] = []
+        let actions = InboxActions(
+            install: { url, expected, installer in
+                installed.append("\(url.lastPathComponent) \(expected ?? "-") \(installer)")
+                return added
+            },
+            launch: { _ in false },
+            remove: { _ in true })
+
+        let install = InboxRequest(id: "i1", kind: .install, installer: "spoofed.name", package: nil, expected: "org.example.new", apk: apk)
+        #expect(await InstallInbox.handle(install, requester: fdroid, library: [fdroid], inbox: inbox, actions: actions) == .installed(added))
+        // The installer recorded is the session owner, not what the request claims.
+        #expect(installed == ["i1.apk org.example.new org.fdroid.fdroid"])
+        #expect(try result("i1", in: inbox) == ["status": "ok", "package": "org.example.new"])
+
+        let launch = InboxRequest(id: "l1", kind: .launch, installer: nil, package: "org.example.new", expected: nil, apk: nil)
+        #expect(await InstallInbox.handle(launch, requester: fdroid, library: [fdroid, added], inbox: inbox, actions: actions)
+            == .launched("org.example.new", false))
+        #expect(try result("l1", in: inbox)["status"] == "failed")
+
+        let other = try app("org.example.plain")
+        let refused = InboxRequest(id: "r1", kind: .remove, installer: nil, package: "org.example.new", expected: nil, apk: nil)
+        guard case .refused = await InstallInbox.handle(refused, requester: other, library: [other, added], inbox: inbox, actions: actions) else {
+            Issue.record("A remove without REQUEST_DELETE_PACKAGES was not refused"); return
+        }
+        #expect(try result("r1", in: inbox)["status"] == "failed")
+    }
+
+    @Test func removesOnlyStaleSessionDirectories() throws {
+        let sessions = FileManager.default.temporaryDirectory.appending(path: "sessions-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: sessions) }
+        let old = sessions.appending(path: "old"), live = sessions.appending(path: "live")
+        for url in [old, live] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86_400)], ofItemAtPath: old.path)
+        InstallInbox.removeStale(in: sessions)
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: live.path))
+    }
+
+    /// Serves a real inbox with the real runtime, for an app run by hand with
+    /// SHIRAZ_LAUNCHER_APPS=<library>/apps SHIRAZ_LAUNCHER_INBOX=<inbox>.
+    /// SHIRAZ_TEST_INBOX_REQUESTER is the installer APK; it is added to the
+    /// library first, then SHIRAZ_TEST_INBOX_SEED (APK paths separated by ':').
+    /// Stops after a remove request or SHIRAZ_TEST_INBOX_SECONDS.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["SHIRAZ_TEST_INBOX"] != nil))
+    func servesRealInbox() async throws {
+        let env = ProcessInfo.processInfo.environment
+        let inbox = URL(fileURLWithPath: try #require(env["SHIRAZ_TEST_INBOX"]))
+        let store = LibraryStore(directory: URL(fileURLWithPath: try #require(env["SHIRAZ_TEST_LIBRARY"])))
+        let requesterAPK = URL(fileURLWithPath: try #require(env["SHIRAZ_TEST_INBOX_REQUESTER"]))
+        let seconds = env["SHIRAZ_TEST_INBOX_SECONDS"].flatMap(Double.init) ?? 900
+        let root = try #require(RuntimeLocation.detectRoot(
+            executable: nil, currentDirectory: URL(filePath: #filePath).deletingLastPathComponent()))
+        let tools = RuntimeTools(runtime: RuntimeLocation(root: root, python: try #require(RuntimeLocation.detectPython())))
+        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let requester = try await tools.add(apk: requesterAPK, to: store)
+        for path in (env["SHIRAZ_TEST_INBOX_SEED"] ?? "").split(separator: ":") {
+            _ = try await tools.add(apk: URL(fileURLWithPath: String(path)), to: store)
+        }
+        print("inbox ready: \(requester.packageName) in \(store.appsDirectory.path)")
+
+        var log: [String] = []
+        let actions = InboxActions(
+            install: { apk, expected, installer in
+                try await tools.add(apk: apk, to: store, expected: expected, installer: installer, replacing: false)
+            },
+            launch: { package in log.append("launch \(package)"); return true },
+            remove: { package in (try? store.remove(package)) != nil })
+        let deadline = Date(timeIntervalSinceNow: seconds)
+        var done = false
+        while !done, Date() < deadline {
+            for request in InstallInbox.pending(in: inbox) {
+                let outcome = await InstallInbox.handle(request, requester: requester, library: store.load(), inbox: inbox, actions: actions)
+                print("inbox \(request.id) \(request.kind.rawValue): \(outcome)")
+                log.append("\(request.kind.rawValue) \(outcome)")
+                if request.kind == .remove { done = true }
+            }
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        #expect(log.contains { $0.hasPrefix("install installed") }, "\(log)")
+    }
+}

@@ -6,6 +6,7 @@ public enum LibraryError: Error, LocalizedError, Sendable, Equatable {
     case tooLarge(Int64)
     case invalidPackageName(String)
     case inspectFailed(String)
+    case alreadyInLibrary(String)
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +14,7 @@ public enum LibraryError: Error, LocalizedError, Sendable, Equatable {
         case .tooLarge(let bytes): "APK is \(bytes / 1_048_576) MiB, over the \(LibraryStore.maxAPKBytes / 1_048_576) MiB limit."
         case .invalidPackageName(let name): "Invalid package name: \(name)"
         case .inspectFailed(let message): message
+        case .alreadyInLibrary(let package): "\(package) is already in the library."
         }
     }
 }
@@ -38,7 +40,39 @@ public struct LibraryStore: Sendable {
         return URL.applicationSupportDirectory.appending(path: "Shiraz Launcher", directoryHint: .isDirectory)
     }
 
-    private var appsDirectory: URL { directory.appending(path: "apps", directoryHint: .isDirectory) }
+    /// The verified F-Droid catalog and its download scratch space.
+    public var catalogDirectory: URL { directory.appending(path: "fdroid", directoryHint: .isDirectory) }
+
+    public var catalogURL: URL { catalogDirectory.appending(path: "catalog.json") }
+
+    /// A fresh, empty directory for one catalog download. The caller removes it.
+    public func makeDownloadDirectory() throws -> URL {
+        let url = catalogDirectory.appending(path: "downloads", directoryHint: .isDirectory)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// One directory per imported package. Apps running in Shiraz read it
+    /// (package.properties, app.apk) to see what else is installed.
+    public var appsDirectory: URL { directory.appending(path: "apps", directoryHint: .isDirectory) }
+
+    /// Per-session request directories (see InstallInbox).
+    public var sessionsDirectory: URL { directory.appending(path: "sessions", directoryHint: .isDirectory) }
+
+    /// Package facts from `shiraz metadata`, the PackageManager view other apps get.
+    public func metadataURL(for package: String) -> URL {
+        appsDirectory.appending(path: package, directoryHint: .isDirectory).appending(path: "package.properties")
+    }
+
+    public func hasMetadata(for package: String) -> Bool {
+        FileManager.default.fileExists(atPath: metadataURL(for: package).path)
+    }
+
+    public func saveMetadata(_ data: Data, for package: String) throws {
+        guard Self.isValidPackageName(package) else { throw LibraryError.invalidPackageName(package) }
+        try data.write(to: metadataURL(for: package), options: .atomic)
+    }
 
     /// Package names become directory names, so reject anything that could
     /// escape the library or collide with staging files.
@@ -151,8 +185,10 @@ public struct LibraryStore: Sendable {
 
     /// Copy `source` into the library. `inspect` parses the staged copy, so
     /// the original file is never modified and never executed.
+    /// `replacing: false` refuses a package that is already in the library.
     public func importAPK(
         from source: URL,
+        replacing: Bool = true,
         inspect: @Sendable (URL) async throws -> InspectReport
     ) async throws -> AppEntry {
         let source = source.resolvingSymlinksInPath()
@@ -179,6 +215,7 @@ public struct LibraryStore: Sendable {
         // Re-importing the same package keeps the user's settings.
         var entry = AppEntry(report: report)
         if let existing = load().first(where: { $0.packageName == entry.packageName }) {
+            guard replacing else { throw LibraryError.alreadyInLibrary(entry.packageName) }
             entry.settings = existing.settings
         }
         let target = apkURL(for: entry.packageName)

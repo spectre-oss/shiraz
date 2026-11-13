@@ -18,14 +18,26 @@ struct RootView: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
         } detail: {
-            NavigationStack(path: $model.path) {
-                LibraryView(scope: scope)
-                    .navigationDestination(for: String.self) { package in
-                        AppPage(package: package)
+            // One stack for every sidebar place: SwiftUI keeps navigation state
+            // per split-view column, and swapping in a stack whose path has
+            // another element type traps when a page is pushed.
+            NavigationStack(path: $model.routes) {
+                Group {
+                    if model.sidebar == .catalog {
+                        CatalogView()
+                    } else {
+                        LibraryView(scope: scope)
                     }
+                }
+                .navigationDestination(for: DetailRoute.self) { route in
+                    switch route {
+                    case .app(let package): AppPage(package: package)
+                    case .catalog(let app): CatalogAppPage(app: app)
+                    }
+                }
             }
         }
-        .searchable(text: $model.search, placement: .sidebar, prompt: "Search Apps")
+        .searchable(text: $model.search, placement: .sidebar, prompt: model.sidebar == .catalog ? "Search F-Droid" : "Search Apps")
         .dropDestination(for: URL.self) { urls, _ in
             model.importAPKs(urls)
             return !urls.isEmpty
@@ -51,6 +63,7 @@ struct RootView: View {
         }
     }
 
+    /// The selected place's own path, seen as routes.
     private var scope: LibraryScope {
         if case .library(let scope) = model.sidebar { return scope }
         return .all

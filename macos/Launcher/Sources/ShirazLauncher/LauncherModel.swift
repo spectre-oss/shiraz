@@ -22,6 +22,9 @@ final class Session: Identifiable {
     fileprivate var process: RunningProcess?
     fileprivate var stopRequested = false
     fileprivate var relaunchAfterExit = false
+    /// Requests from this app to the launcher (InstallInbox).
+    fileprivate var inbox: URL?
+    fileprivate var inboxWatcher: Task<Void, Never>?
 
     init(package: String, state: State) {
         self.package = package
@@ -34,6 +37,12 @@ final class Session: Identifiable {
         default: false
         }
     }
+}
+
+/// A page pushed in the detail column.
+enum DetailRoute: Hashable {
+    case app(String)
+    case catalog(CatalogApp)
 }
 
 /// A short message over the window. A new one replaces the old one.
@@ -79,9 +88,10 @@ enum LibrarySort: String, CaseIterable, Identifiable {
     }
 }
 
-/// Sidebar destinations: library scopes plus places that are not built yet.
+/// Sidebar destinations: library scopes, the F-Droid catalog, and places that are not built yet.
 enum SidebarItem: Hashable {
     case library(LibraryScope)
+    case catalog
     case feature(Feature)
 }
 
@@ -89,14 +99,37 @@ enum SidebarItem: Hashable {
 final class LauncherModel {
     private(set) var apps: [AppEntry] = []
     private(set) var sessions: [String: Session] = [:]
-    private(set) var isImporting = false
+    /// Imports in flight (drops, catalog installs, in-app installs).
+    private var importCount = 0
+    var isImporting: Bool { importCount > 0 }
     /// Rendered APK icons and their tint colours by package.
     private(set) var icons: [String: CGImage] = [:]
     private(set) var accents: [String: CGColor] = [:]
     private(set) var toast: Toast?
 
-    var sidebar: SidebarItem? = .library(.all)
-    var path: [String] = []
+    /// Changing place resets the detail stack.
+    /// Not-built features bounce back (SidebarView) and leave the stack alone.
+    var sidebar: SidebarItem? = .library(.all) {
+        didSet {
+            guard sidebar != oldValue else { return }
+            if case .feature = sidebar { return }
+            if case .feature = oldValue { return }
+            routes = []
+        }
+    }
+    /// The detail column's one navigation stack, shared by every sidebar place:
+    /// SwiftUI keeps navigation state per split-view column, and swapping in a
+    /// stack whose path has another element type traps when a page is pushed.
+    var routes: [DetailRoute] = []
+    /// Library pages on the stack.
+    var path: [String] {
+        get { routes.compactMap { if case .app(let package) = $0 { package } else { nil } } }
+        set { routes = newValue.map(DetailRoute.app) }
+    }
+
+    /// Push one app's library page, from anywhere in the window. Back returns
+    /// to where the user was (a catalog page, for example).
+    func show(_ package: String) { routes.append(.app(package)) }
     var search = ""
     var sort: LibrarySort {
         didSet { UserDefaults.standard.set(sort.rawValue, forKey: "librarySort") }
@@ -112,7 +145,7 @@ final class LauncherModel {
         didSet { UserDefaults.standard.set(runtimeRootOverride, forKey: "runtimeRoot") }
     }
 
-    private let store: LibraryStore
+    let store: LibraryStore
     private var toastTask: Task<Void, Never>?
     /// Packages whose label lookup already failed this session.
     private var labelAttempted: Set<String> = []
@@ -126,6 +159,8 @@ final class LauncherModel {
         reloadIcons()
         extractMissingIcons()
         resolveMissingLabels()
+        writeMissingMetadata()
+        InstallInbox.removeStale(in: store.sessionsDirectory)
         // Runtimes live in their own process groups, so quitting the launcher
         // must stop them. The notification is observed by name to avoid AppKit.
         NotificationCenter.default.addObserver(
@@ -256,33 +291,8 @@ final class LauncherModel {
             if !urls.isEmpty { present(failure: "Only APK files can be added") }
             return
         }
-        guard let runtime = runtimeStatus.location else {
-            if case .unavailable(let reason) = runtimeStatus { present(failure: "Runtime unavailable", reason) }
-            return
-        }
-        isImporting = true
         Task {
-            var failures: [String] = []
-            var added: [AppEntry] = []
-            for url in apks {
-                do {
-                    let entry = try await store.importAPK(from: url) { staged in
-                        try await Self.inspect(apk: staged, runtime: runtime)
-                    }
-                    await store.extractIcon(for: entry.packageName) { apk, output in
-                        try await Self.extractIcon(apk: apk, output: output, runtime: runtime)
-                    }
-                    var labelled = entry
-                    labelled.label = try? await Self.label(apk: store.apkURL(for: entry.packageName), runtime: runtime)
-                    try? store.save(labelled)
-                    added.append(labelled)
-                } catch {
-                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
-                }
-            }
-            apps = store.load()
-            reloadIcons()
-            isImporting = false
+            let (added, failures) = await addAPKs(apks)
             if !failures.isEmpty {
                 present(failure: failures.count == 1 ? "Could not add APK" : "Could not add \(failures.count) APKs",
                         failures.joined(separator: "\n"))
@@ -294,40 +304,43 @@ final class LauncherModel {
         }
     }
 
-    private nonisolated static func inspect(apk: URL, runtime: RuntimeLocation) async throws -> InspectReport {
-        let output = try await ProcessRunner.run(
-            executable: runtime.python,
-            arguments: runtime.arguments(RuntimeCommand.inspect(apk: apk)),
-            environment: runtime.environment,
-            workingDirectory: runtime.root)
-        guard output.status.succeeded else {
-            let message = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw LibraryError.inspectFailed(message.isEmpty ? "Inspection \(output.status)." : message)
+    /// Copy, inspect, label and extract icons for each APK. Reports nothing
+    /// itself; callers word the result. `expectedPackage` rejects an APK
+    /// whose manifest names another package.
+    func addAPKs(
+        _ apks: [URL], expectedPackage: String? = nil, installer: String? = nil, replacing: Bool = true
+    ) async -> (added: [AppEntry], failures: [String]) {
+        guard let runtime = runtimeStatus.location else {
+            if case .unavailable(let reason) = runtimeStatus { return ([], ["Runtime unavailable: \(reason)"]) }
+            return ([], ["Runtime unavailable"])
         }
-        return try InspectReport.decode(output.stdout)
+        importCount += 1
+        defer { importCount -= 1 }
+        let tools = RuntimeTools(runtime: runtime)
+        var failures: [String] = []
+        var added: [AppEntry] = []
+        for url in apks {
+            do {
+                added.append(try await tools.add(apk: url, to: store, expected: expectedPackage, installer: installer, replacing: replacing))
+            } catch {
+                failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        apps = store.load()
+        reloadIcons()
+        return (added, failures)
     }
 
-    private nonisolated static func extractIcon(apk: URL, output: URL, runtime: RuntimeLocation) async throws {
-        let result = try await ProcessRunner.run(
-            executable: runtime.python,
-            arguments: runtime.arguments(RuntimeCommand.icon(apk: apk, outputDirectory: output)),
-            environment: runtime.environment,
-            workingDirectory: runtime.root)
-        guard result.status.succeeded else {
-            let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw LibraryError.inspectFailed(message.isEmpty ? "Icon extraction \(result.status)." : message)
+    /// Entries imported before package metadata existed get it in the background.
+    private func writeMissingMetadata() {
+        let pending = apps.map(\.packageName).filter { !store.hasMetadata(for: $0) }
+        guard !pending.isEmpty, let runtime = runtimeStatus.location else { return }
+        let store = store
+        Task {
+            for package in pending {
+                await RuntimeTools(runtime: runtime).writeMetadata(for: package, installer: nil, store: store)
+            }
         }
-    }
-
-    private nonisolated static func label(apk: URL, runtime: RuntimeLocation) async throws -> String {
-        struct Output: Decodable { var label: String }
-        let result = try await ProcessRunner.run(
-            executable: runtime.python,
-            arguments: runtime.arguments(RuntimeCommand.label(apk: apk)),
-            environment: runtime.environment,
-            workingDirectory: runtime.root)
-        guard result.status.succeeded else { throw LibraryError.inspectFailed("Label lookup \(result.status).") }
-        return try JSONDecoder().decode(Output.self, from: result.stdout).label
     }
 
     /// Entries imported before labels were read get theirs in the background.
@@ -338,7 +351,7 @@ final class LauncherModel {
         let store = store
         Task {
             for package in pending {
-                guard let label = try? await Self.label(apk: store.apkURL(for: package), runtime: runtime),
+                guard let label = try? await RuntimeTools(runtime: runtime).label(apk: store.apkURL(for: package)),
                       var entry = entry(package) else { continue }
                 entry.label = label
                 save(entry)
@@ -370,7 +383,7 @@ final class LauncherModel {
         Task {
             for package in pending {
                 await store.extractIcon(for: package) { apk, output in
-                    try await Self.extractIcon(apk: apk, output: output, runtime: runtime)
+                    try await RuntimeTools(runtime: runtime).extractIcon(apk: apk, output: output)
                 }
             }
             reloadIcons()
@@ -388,7 +401,7 @@ final class LauncherModel {
             icons[package] = nil
             accents[package] = nil
             apps = store.load()
-            path.removeAll { $0 == package }
+            routes.removeAll { $0 == .app(package) }
             inform("Removed \(name)")
         } catch {
             present(error)
@@ -438,6 +451,9 @@ final class LauncherModel {
 
         let name = entry.displayName
         let arguments = runtime.arguments(RuntimeCommand.run(apk: store.apkURL(for: package), settings: entry.settings))
+        let inbox = store.sessionsDirectory.appending(path: session.id.uuidString, directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        session.inbox = inbox
         let runEnvironment = RuntimeCommand.runEnvironment(settings: entry.settings)
         let assignments = runEnvironment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
         session.log.appendNotice("$ " + (assignments + ["python3"] + arguments).joined(separator: " "))
@@ -445,7 +461,9 @@ final class LauncherModel {
             let process = try ProcessRunner.spawn(
                 executable: runtime.python,
                 arguments: arguments,
-                environment: runtime.environment.merging(runEnvironment) { _, new in new },
+                environment: runtime.environment
+                    .merging(runEnvironment) { _, new in new }
+                    .merging(RuntimeCommand.libraryEnvironment(apps: store.appsDirectory, inbox: inbox)) { _, new in new },
                 workingDirectory: runtime.root,
                 onOutput: { kind, data in
                     Task { @MainActor in session.log.append(data, stream: kind) }
@@ -454,6 +472,8 @@ final class LauncherModel {
                     Task { @MainActor in
                         session.log.flush()
                         session.process = nil
+                        session.inboxWatcher?.cancel()
+                        if let inbox = session.inbox { try? FileManager.default.removeItem(at: inbox) }
                         if session.stopRequested {
                             session.state = .finished("Stopped")
                         } else if status.succeeded {
@@ -468,10 +488,59 @@ final class LauncherModel {
                 })
             session.process = process
             session.state = .running(pid: process.pid)
+            session.inboxWatcher = Task { [weak self] in await self?.watchInbox(session) }
         } catch {
             session.state = .failed(error.localizedDescription)
             session.log.appendNotice(error.localizedDescription)
             present(error)
+        }
+    }
+
+    // MARK: Requests from running apps
+
+    /// Answer the session's install, launch and remove requests until it ends.
+    private func watchInbox(_ session: Session) async {
+        guard let inbox = session.inbox else { return }
+        while !Task.isCancelled, session.isRunning {
+            for request in InstallInbox.pending(in: inbox) {
+                await handle(request, from: session, inbox: inbox)
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+    }
+
+    private func handle(_ request: InboxRequest, from session: Session, inbox: URL) async {
+        guard let requester = entry(session.package) else {
+            try? InstallInbox.answer(id: request.id, in: inbox, ok: false, package: nil, message: "The requesting app left the library.")
+            return
+        }
+        let name = requester.displayName
+        let actions = InboxActions(
+            install: { [unowned self] apk, expected, installer in
+                session.log.appendNotice("[\(name) asked to install \(expected ?? "an APK")]")
+                let (added, failures) = await addAPKs([apk], expectedPackage: expected, installer: installer, replacing: false)
+                if let entry = added.first { return entry }
+                throw LibraryError.inspectFailed(
+                    failures.joined(separator: "\n").replacingOccurrences(of: apk.lastPathComponent + ": ", with: ""))
+            },
+            launch: { [unowned self] package in
+                launch(package)
+                return sessions[package]?.isRunning == true
+            },
+            remove: { [unowned self] package in
+                remove(package)
+                return entry(package) == nil
+            })
+        switch await InstallInbox.handle(request, requester: requester, library: apps, inbox: inbox, actions: actions) {
+        case .refused(let reason):
+            session.log.appendNotice("[Refused \(request.kind.rawValue) request: \(reason)]")
+            present(failure: "\(name) could not \(request.kind.rawValue) an app", reason)
+        case .installed(let added):
+            inform("\(name) added \(added.displayName)", "It is now in your library.")
+        case .installFailed(let reason):
+            present(failure: "\(name) could not add an app", reason)
+        case .launched, .removed:
+            break
         }
     }
 

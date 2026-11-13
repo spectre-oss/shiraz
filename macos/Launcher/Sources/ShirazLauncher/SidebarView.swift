@@ -16,7 +16,7 @@ struct SidebarView: View {
                 }
             }
             Section("Discover") {
-                Label("F-Droid Catalog", systemImage: "sparkles").tag(SidebarItem.feature(.catalog))
+                Label("F-Droid Catalog", systemImage: "sparkles").tag(SidebarItem.catalog)
                 Label("Updates", systemImage: "arrow.down.circle").tag(SidebarItem.feature(.updates))
             }
             Section("Collections") {
@@ -29,8 +29,6 @@ struct SidebarView: View {
             if case .feature(let feature) = new {
                 model.sidebar = old
                 model.attempt(feature)
-            } else {
-                model.path = []
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { RuntimeBadge() }

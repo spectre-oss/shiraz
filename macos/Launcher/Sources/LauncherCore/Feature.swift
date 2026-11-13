@@ -8,7 +8,6 @@ import Foundation
 public enum Feature: String, CaseIterable, Sendable, Identifiable {
     // Library
     case collections
-    case catalog
     case updates
     case autoUpdates
     // Per-app actions (docs/macos_final_goal.md: desktop integration, bundle builder)
@@ -45,7 +44,6 @@ public enum Feature: String, CaseIterable, Sendable, Identifiable {
     public var title: String {
         switch self {
         case .collections: "Collections"
-        case .catalog: "F-Droid Catalog"
         case .updates: "Updates"
         case .autoUpdates: "Automatic Updates"
         case .addToApplications: "Add to Applications"

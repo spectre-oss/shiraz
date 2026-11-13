@@ -4,12 +4,20 @@ import SwiftUI
 
 @main
 struct LauncherApp: App {
-    @State private var model = LauncherModel()
+    @State private var model: LauncherModel
+    @State private var catalog: CatalogModel
+
+    init() {
+        let model = LauncherModel()
+        _model = State(initialValue: model)
+        _catalog = State(initialValue: CatalogModel(launcher: model))
+    }
 
     var body: some Scene {
         Window("Shiraz", id: "library") {
             RootView()
                 .environment(model)
+                .environment(catalog)
                 .frame(minWidth: 820, minHeight: 540)
         }
         .defaultSize(width: 1120, height: 720)
