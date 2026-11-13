@@ -55,6 +55,27 @@ jobs:
           sudo apt-get install -y --no-install-recommends bear clang
           mkdir -p build
           bear --output build/compile_commands.json -- make -B build/test-compositor build/test-pointer CXX=clang++
+          # bear also records clang's internal -cc1 job for each file; clang-tidy
+          # cannot replay that as a driver command, so keep the driver entries only.
+          python3 - build/compile_commands.json <<'PY'
+          import json
+          import shlex
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as handle:
+              entries = json.load(handle)
+          kept = [
+              entry
+              for entry in entries
+              if '-cc1' not in (entry.get('arguments') or shlex.split(entry.get('command', '')))
+          ]
+          if not kept:
+              raise SystemExit('No compiler driver entries in compile_commands.json')
+          with open(path, 'w', encoding='utf-8') as handle:
+              json.dump(kept, handle, indent=2)
+          print(f'Kept {len(kept)} of {len(entries)} compile database entries')
+          PY
           make lint-cpp
 
   go:
