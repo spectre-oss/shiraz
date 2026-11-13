@@ -243,3 +243,19 @@ test('unknown addresses get the site error page with a way back', async ({ page 
   await page.getByRole('link',{name:'Go to the home page'}).click();
   await expect(page.getByRole('heading',{level:1})).toContainText('Your Android');
 });
+
+test('stack labels jump to their explanation and the last sheet lights its window', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 860});
+  await page.goto('/');
+  await page.locator('.stack-diagram').getByRole('link', {name:/Native bridges/}).click();
+  await expect(page).toHaveURL(/#step-4$/);
+  await expect(page.locator('[data-layer="3"]')).toHaveClass(/is-active/);
+  await page.locator('.stack-diagram').getByRole('link', {name:/desktop/}).click();
+  await expect(page.locator('[data-layer="4"]')).toHaveClass(/is-active/);
+  await expect.poll(() => page.locator('[data-layer="4"] .slab').evaluate(node => getComputedStyle(node, '::after').opacity)).toBe('1');
+  // On phones the collapsed bar exposes only the current label to the keyboard.
+  await page.setViewportSize({width: 390, height: 800});
+  await page.locator('#step-2').scrollIntoViewIfNeeded();
+  await expect(page.locator('.stack-diagram a:visible')).toHaveCount(1);
+});
+
