@@ -190,3 +190,14 @@ test('Android tracker separates class inventory, subsystem support and historica
   await expect(coverage.getByRole('list',{name:'Recorded probe status totals'})).toContainText('NOT RUN');
   await expect(coverage.getByRole('region',{name:'Historical probe results'})).toContainText('Network');
 });
+
+test('unknown addresses get the site error page with a way back', async ({ page }) => {
+  const response = await page.goto('/no-such-page/');
+  expect(response.status()).toBe(404);
+  await expect(page.getByRole('heading',{level:1,name:'This page is not here.'})).toBeVisible();
+  await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});
+  const violations = await page.evaluate(async()=> (await window.axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations);
+  expect(violations).toEqual([]);
+  await page.getByRole('link',{name:'Go to the home page'}).click();
+  await expect(page.getByRole('heading',{level:1})).toContainText('Your Android');
+});

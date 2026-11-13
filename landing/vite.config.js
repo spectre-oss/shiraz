@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 export default defineConfig({
   define: { __SHIRAZ_VERSION__: JSON.stringify(readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim()) },
   plugins: [sveltekit({
-    adapter: adapter(),
+    adapter: adapter({ fallback: '404.html' }),
     paths: { base: process.env.BASE_PATH || '' }
   })]
 });

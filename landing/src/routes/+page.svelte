@@ -130,7 +130,7 @@
       </div>
       <p class="comparison-note">Architecture comparison, not a performance ranking. Compatibility depends on the app, device, and configuration. Project names link to their own documentation.</p>
     </section>
-    <section class="packaging-path" aria-label="APK plus Shiraz runtime produces an AppImage"><p><b class="term-apk">APK</b> <span aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span> <b class="term-runtime">Shiraz runtime</b> <span aria-hidden="true"><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></span> <b class="term-out">AppImage</b></p></section>
+    <section class="packaging-path" aria-label="APK plus Shiraz runtime produces an AppImage"><p><b class="term-apk">APK</b> <span aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span> <b class="term-runtime">Shiraz runtime</b> <span class="result"><span aria-hidden="true"><svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></span> <b class="term-out">AppImage</b></span></p></section>
     <Builder />
     <section class="project-info" aria-label="About Shiraz">
       <div class="principles"><span>Linux &amp; macOS</span><span>GTK-free</span><span>Open source · GPLv3</span></div>
