@@ -1,43 +1,94 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Reject local artifacts and obvious credentials in the staged snapshot."""
+
 import re
 import subprocess
 from pathlib import PurePosixPath
 
-FORBIDDEN_DIRS = {'context', '.deps', '.local', 'build', 'dist', 'data', 'runs', 'docs', 'doc', 'secrets', 'credentials', '__pycache__'}
-PUBLIC_DOCS = {'docs/README.md', 'docs/DEVELOPMENT.md', 'docs/BUILDER.md',
-               'docs/WEB.md', 'docs/AI_CONTRIBUTING.md',
-               'docs/tested.md', 'docs/others/droidloom.md',
-               'docs/macos_final_goal.md',
-               'docs/experiments/README.md',
-               'docs/experiments/flutter/README.md',
-               'docs/experiments/flutter/OBTAINIUM.md',
-               'docs/experiments/flutter/EMBER_QUEST.md',
-               'docs/experiments/react-native/README.md',
-               'docs/experiments/react-native/JOPLIN.md',
-               'docs/experiments/react-native/SEN_214_CALCULATOR.md',
-               'docs/experiments/unity/README.md',
-               'docs/experiments/unity/2048.md',
-               'docs/experiments/unity/LUCAS_DOGGIEHOOD.md',
-               'docs/experiments/libgdx/README.md',
-               'docs/experiments/libgdx/UNCIV.md',
-               'docs/experiments/godot/README.md',
-               'docs/experiments/godot/ABRA_CA_BUBBLE.md',
-               'docs/experiments/godot/TINY_CRATE.md',
-               'docs/experiments/arc/README.md',
-               'docs/experiments/arc/MINDUSTRY.md',
-               'docs/experiments/sdl/README.md',
-               'docs/experiments/sdl/SUPERTUX.md'}
-FORBIDDEN_SUFFIXES = {'.apk', '.apks', '.aab', '.dex', '.jar', '.class', '.so', '.a', '.o', '.elf', '.appimage', '.exe', '.bin', '.zip', '.gz', '.xz', '.log', '.sqlite', '.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.pyc'}
-SECRET = re.compile(rb'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9_-]{32,}|(?i:(?:api[_-]?key|access[_-]?token|password|client[_-]?secret)\s*[=:]\s*["\x27]?)[A-Za-z0-9_+/=-]{16,}')
+FORBIDDEN_DIRS = {
+    'context',
+    '.deps',
+    '.local',
+    'build',
+    'dist',
+    'data',
+    'runs',
+    'docs',
+    'doc',
+    'secrets',
+    'credentials',
+    '__pycache__',
+}
+PUBLIC_DOCS = {
+    'docs/README.md',
+    'docs/DEVELOPMENT.md',
+    'docs/BUILDER.md',
+    'docs/WEB.md',
+    'docs/AI_CONTRIBUTING.md',
+    'docs/tested.md',
+    'docs/others/droidloom.md',
+    'docs/macos_final_goal.md',
+    'docs/MISSING_ANDROID_LIBRARIES.md',
+    'docs/experiments/README.md',
+    'docs/experiments/flutter/README.md',
+    'docs/experiments/flutter/OBTAINIUM.md',
+    'docs/experiments/flutter/EMBER_QUEST.md',
+    'docs/experiments/react-native/README.md',
+    'docs/experiments/react-native/JOPLIN.md',
+    'docs/experiments/react-native/SEN_214_CALCULATOR.md',
+    'docs/experiments/unity/README.md',
+    'docs/experiments/unity/2048.md',
+    'docs/experiments/unity/LUCAS_DOGGIEHOOD.md',
+    'docs/experiments/libgdx/README.md',
+    'docs/experiments/libgdx/UNCIV.md',
+    'docs/experiments/godot/README.md',
+    'docs/experiments/godot/ABRA_CA_BUBBLE.md',
+    'docs/experiments/godot/TINY_CRATE.md',
+    'docs/experiments/arc/README.md',
+    'docs/experiments/arc/MINDUSTRY.md',
+    'docs/experiments/sdl/README.md',
+    'docs/experiments/sdl/SUPERTUX.md',
+}
+FORBIDDEN_SUFFIXES = {
+    '.apk',
+    '.apks',
+    '.aab',
+    '.dex',
+    '.jar',
+    '.class',
+    '.so',
+    '.a',
+    '.o',
+    '.elf',
+    '.appimage',
+    '.exe',
+    '.bin',
+    '.zip',
+    '.gz',
+    '.xz',
+    '.log',
+    '.sqlite',
+    '.pem',
+    '.key',
+    '.p12',
+    '.pfx',
+    '.jks',
+    '.keystore',
+    '.pyc',
+}
+SECRET = re.compile(
+    rb'-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9_-]{32,}|(?i:(?:api[_-]?key|access[_-]?token|password|client[_-]?secret)\s*[=:]\s*["\x27]?)[A-Za-z0-9_+/=-]{16,}'
+)
 
 
 def unsafe(path, data, mode='100644'):
     p = PurePosixPath(path)
     if mode not in ('100644', '100755'):
         return 'symlink/submodule or non-regular entry'
-    if (path not in PUBLIC_DOCS and any(part.lower() in FORBIDDEN_DIRS for part in p.parts)) or p.name.startswith('.env'):
+    if (
+        path not in PUBLIC_DOCS and any(part.lower() in FORBIDDEN_DIRS for part in p.parts)
+    ) or p.name.startswith('.env'):
         return 'private/local-only path'
     if p.suffix.lower() in FORBIDDEN_SUFFIXES or '.so.' in p.name:
         return 'binary, credential, or generated artifact extension'
@@ -60,10 +111,15 @@ def main():
         if stage != '0':
             errors.append((path, 'unresolved conflict'))
             continue
-        if mode != '160000' and int(subprocess.check_output(['git', 'cat-file', '-s', oid])) > 1024 * 1024:
+        if (
+            mode != '160000'
+            and int(subprocess.check_output(['git', 'cat-file', '-s', oid])) > 1024 * 1024
+        ):
             errors.append((path, 'oversized file'))
             continue
-        data = subprocess.check_output(['git', 'cat-file', 'blob', oid]) if mode != '160000' else b''
+        data = (
+            subprocess.check_output(['git', 'cat-file', 'blob', oid]) if mode != '160000' else b''
+        )
         reason = unsafe(path, data, mode)
         if reason:
             errors.append((path, reason))

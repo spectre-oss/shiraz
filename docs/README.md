@@ -1,6 +1,7 @@
 # Shiraz documentation
 
 - [Tested applications](tested.md): observed compatibility and known limits.
+- [Missing Android libraries](MISSING_ANDROID_LIBRARIES.md): framework classes and NDK libraries not yet provided.
 - [Droidloom comparison and game targets](others/droidloom.md): architecture, translator lessons, and pending acceptance work.
 - [Framework experiments](experiments/README.md): per-platform and per-app investigations.
 - [Development](DEVELOPMENT.md): project structure, environment setup, builds, tests, and contributions.
