@@ -13,15 +13,12 @@ import subprocess
 import tarfile
 import urllib.request
 from pathlib import Path
+from script_common import sha256_file as digest
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".deps/capstone"
 REVISION = "5cca00533dadfe53181f1de3525f859769f69b65"
 SHA256 = "ca0ef4998ec8a682b519a65d75e83e0fff5b0797c6e28942059976379fad5bc4"
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main():

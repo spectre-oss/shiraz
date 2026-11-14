@@ -9,7 +9,6 @@ under ignored .deps. This is a development tool, never an app runtime dependency
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import platform
@@ -17,18 +16,11 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from script_common import sha256_file as sha256
 
 ROOT = Path(__file__).resolve().parents[1]
 DESTINATION = ROOT / ".deps/guest-toolchain"
 LLVM_REVISION = "52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04"
-
-
-def sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while block := stream.read(1024 * 1024):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def stage():

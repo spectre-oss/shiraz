@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 
 import bootstrap_darwin as baseline
+from script_common import run, sha256_file as digest
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".deps/guest-icu-static"
@@ -26,14 +27,6 @@ SOURCE = OUT / "src/icu"
 BUILD = OUT / "build"
 INSTALL = OUT / "install"
 ARCHIVES = ("lib/libicuuc.a", "lib/libicudata.a")
-
-
-def digest(path):
-    value = hashlib.sha256()
-    with path.open("rb") as stream:
-        while block := stream.read(1024 * 1024):
-            value.update(block)
-    return value.hexdigest()
 
 
 def archive_source():
@@ -122,10 +115,6 @@ def installed_hashes(prefix):
         if path.is_file():
             hashes[path.relative_to(prefix).as_posix()] = digest(path)
     return hashes
-
-
-def run(arguments, cwd, environment):
-    subprocess.run([str(item) for item in arguments], cwd=cwd, env=environment, check=True)
 
 
 def main():

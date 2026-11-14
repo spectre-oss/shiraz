@@ -14,13 +14,10 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from script_common import sha256_file as digest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / "build/macos/m5/cxx-exception"
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def checked(command, env, log=None):

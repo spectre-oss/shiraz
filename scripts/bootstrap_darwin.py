@@ -24,6 +24,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+from script_common import run
 
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = ROOT / '.local'
@@ -82,10 +83,6 @@ _LEAKY_ENV = (
     'DYLD_FALLBACK_LIBRARY_PATH',
     'DYLD_INSERT_LIBRARIES',
 )
-
-
-def run(argv, cwd=ROOT, env=None):
-    subprocess.run([str(x) for x in argv], cwd=cwd, env=env, check=True)
 
 
 def tool(name):

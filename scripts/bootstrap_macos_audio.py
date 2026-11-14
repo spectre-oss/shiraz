@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import urllib.request
 from pathlib import Path
+from script_common import sha256_file as digest
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".deps/stb-audio"
@@ -17,10 +18,6 @@ FILES = {
     "stb_vorbis.c": "4c7cb2ff1f7011e9d67950446b7eb9ca044f2e464d76bfbb0b84dd2e23e65636",
     "LICENSE": "bebfe904b14301657e4e5d655c811d51fd31b97c455b9cc2d8600d6bac6cff63",
 }
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main():

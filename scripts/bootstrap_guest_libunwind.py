@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import urllib.request
 from pathlib import Path
+from script_common import sha256_file as digest
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".deps/guest-libunwind"
@@ -72,10 +73,6 @@ SOURCES = (
     "UnwindRegistersRestore.S",
     "UnwindRegistersSave.S",
 )
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def safe_path(path):
