@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Fixture resource SDK is bounded and independent of its Java/API-probe SDK."""
+
 import json
 import stat
 import sys
@@ -32,14 +33,21 @@ class FixtureResourceSdkTests(unittest.TestCase):
             with patch.object(fixture, 'TOOLS', tools), patch.object(fixture, 'fetch') as fetch:
                 self.assertEqual(fixture.fixture_resource_jar().read_bytes(), b'resource SDK34')
                 self.assertEqual(fixture.fixture_resource_jar(), target)
-                fetch.assert_called_with(archive, fixture.FIXTURE_RESOURCE_SDK[1],
-                                         fixture.FIXTURE_RESOURCE_SDK[2], 128 * 1024 * 1024)
+                fetch.assert_called_with(
+                    archive,
+                    fixture.FIXTURE_RESOURCE_SDK[1],
+                    fixture.FIXTURE_RESOURCE_SDK[2],
+                    128 * 1024 * 1024,
+                )
             self.assertEqual(java.read_bytes(), b'Java SDK35')
             self.assertFalse(list(tools.glob('*.pending')))
 
     def test_unexpected_or_duplicate_jar_layout_does_not_publish(self):
-        cases = [[], [('android-33/android.jar', b'wrong SDK')],
-                 [('android-34/android.jar', b'first'), ('extra/android.jar', b'second')]]
+        cases = [
+            [],
+            [('android-33/android.jar', b'wrong SDK')],
+            [('android-34/android.jar', b'first'), ('extra/android.jar', b'second')],
+        ]
         for entries in cases:
             with self.subTest(entries=entries), tempfile.TemporaryDirectory() as directory:
                 tools = Path(directory)
@@ -54,8 +62,11 @@ class FixtureResourceSdkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tools = Path(directory)
             self.archive(tools, [('android-34/android.jar', b'123456789')])
-            with patch.object(fixture, 'TOOLS', tools), patch.object(fixture, 'fetch'), \
-                    patch.object(fixture, 'FIXTURE_RESOURCE_JAR_LIMIT', 8):
+            with (
+                patch.object(fixture, 'TOOLS', tools),
+                patch.object(fixture, 'fetch'),
+                patch.object(fixture, 'FIXTURE_RESOURCE_JAR_LIMIT', 8),
+            ):
                 with self.assertRaisesRegex(ValueError, 'bounded regular file'):
                     fixture.fixture_resource_jar()
             info = zipfile.ZipInfo('android-34/android.jar')
@@ -72,11 +83,16 @@ class FixtureResourceSdkTests(unittest.TestCase):
             tools = Path(directory)
             with zipfile.ZipFile(tools / 'platform-35_r02.zip', 'w') as archive:
                 archive.writestr('android-35/android.jar', b'Java SDK35')
-            with patch.object(fixture, 'TOOLS', tools), patch.object(fixture, 'fetch') as fetch, \
-                    patch.object(fixture, 'install_aapt2'):
+            with (
+                patch.object(fixture, 'TOOLS', tools),
+                patch.object(fixture, 'fetch') as fetch,
+                patch.object(fixture, 'install_aapt2'),
+            ):
                 fixture.tools()
             self.assertEqual((tools / 'android.jar').read_bytes(), b'Java SDK35')
-            self.assertEqual([call.args[0].name for call in fetch.call_args_list], ['platform-35_r02.zip'])
+            self.assertEqual(
+                [call.args[0].name for call in fetch.call_args_list], ['platform-35_r02.zip']
+            )
             self.assertNotIn(fixture.FIXTURE_RESOURCE_SDK[0], fixture.DOWNLOADS)
 
     def test_fixture_links_resources34_but_compiles_java_against35(self):
@@ -99,12 +115,23 @@ class FixtureResourceSdkTests(unittest.TestCase):
                     with zipfile.ZipFile(arguments[arguments.index('-o') + 1], 'w'):
                         pass
                 if '--dex' in arguments:
-                    Path(next(value.split('=', 1)[1] for value in arguments if value.startswith('--output='))).write_bytes(b'dex fixture')
+                    Path(
+                        next(
+                            value.split('=', 1)[1]
+                            for value in arguments
+                            if value.startswith('--output=')
+                        )
+                    ).write_bytes(b'dex fixture')
 
-            with patch.object(fixture, 'ROOT', root), patch.object(fixture, 'TOOLS', tools), \
-                    patch.object(fixture, 'tools'), patch.object(fixture, 'fixture_resource_jar', return_value=resource), \
-                    patch.object(fixture, 'prepare'), patch.object(fixture, 'host_out_dir', return_value=root / 'host'), \
-                    patch.object(fixture.subprocess, 'run', side_effect=command) as run:
+            with (
+                patch.object(fixture, 'ROOT', root),
+                patch.object(fixture, 'TOOLS', tools),
+                patch.object(fixture, 'tools'),
+                patch.object(fixture, 'fixture_resource_jar', return_value=resource),
+                patch.object(fixture, 'prepare'),
+                patch.object(fixture, 'host_out_dir', return_value=root / 'host'),
+                patch.object(fixture.subprocess, 'run', side_effect=command) as run,
+            ):
                 fixture.main()
             link = next(call.args[0] for call in run.call_args_list if 'link' in call.args[0])
             javac = next(call.args[0] for call in run.call_args_list if call.args[0][0] == 'javac')

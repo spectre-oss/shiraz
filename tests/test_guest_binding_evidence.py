@@ -40,9 +40,16 @@ class GuestBindingEvidenceTests(unittest.TestCase):
 
     def test_only_undefined_weak_symbols_can_have_no_provider(self):
         fixture = BindingElfFixture()
-        binding = {"relocation": 0x1500, "relocation_type": 1026, "addend": 0,
-                   "symbol": "local_function", "version": "", "provider": "",
-                   "target": None, "abi": "unresolved-weak-null"}
+        binding = {
+            "relocation": 0x1500,
+            "relocation_type": 1026,
+            "addend": 0,
+            "symbol": "local_function",
+            "version": "",
+            "provider": "",
+            "target": None,
+            "abi": "unresolved-weak-null",
+        }
         for info, section, accepted in ((0x22, 0, True), (0x12, 0, False), (0x22, 1, False)):
             struct.pack_into("<IBBHQQ", fixture.data, 0x1218, 1, info, 0, section, 0x200, 8)
             if accepted:
@@ -54,15 +61,27 @@ class GuestBindingEvidenceTests(unittest.TestCase):
     def test_inventory_requires_every_real_relocation_and_exact_metadata(self):
         fixture = BindingElfFixture()
         metadata = fixture.metadata()
-        binding = {"relocation": 0x1500, "relocation_type": 1026, "addend": 0,
-                   "symbol": "local_function", "version": "", "provider": "libfixture.so",
-                   "target": 0x200, "abi": "guest-AAPCS64"}
+        binding = {
+            "relocation": 0x1500,
+            "relocation_type": 1026,
+            "addend": 0,
+            "symbol": "local_function",
+            "version": "",
+            "provider": "libfixture.so",
+            "target": 0x200,
+            "abi": "guest-AAPCS64",
+        }
         self.assertEqual(verify_relocation_inventory(metadata, [binding]), 1)
         for rows in ([], [binding, binding], [{**binding, "relocation": 0x1508}]):
             with self.assertRaisesRegex(ValueError, "inventory"):
                 verify_relocation_inventory(metadata, rows)
-        for field, value in (("symbol", "other"), ("version", "OTHER"),
-                             ("relocation_type", 1025), ("addend", 1), ("addend", False)):
+        for field, value in (
+            ("symbol", "other"),
+            ("version", "OTHER"),
+            ("relocation_type", 1025),
+            ("addend", 1),
+            ("addend", False),
+        ):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "metadata"):
                 verify_relocation_inventory(metadata, [{**binding, field: value}])
         for field, value in (("abi", "unrecorded"), ("provider", "")):
@@ -102,9 +121,7 @@ class GuestBindingEvidenceTests(unittest.TestCase):
         source = self.root / "raw.json"
         output = self.root / "bindings.json"
         source.write_text(json.dumps(self.report))
-        augment_binding_report(
-            source, output, self.hashes, self.root, self.hashes, **identity
-        )
+        augment_binding_report(source, output, self.hashes, self.root, self.hashes, **identity)
         return json.loads(output.read_text())
 
     def terminal_binding(self):
@@ -146,19 +163,25 @@ class GuestBindingEvidenceTests(unittest.TestCase):
         self.assertIsNone(binding["target"])
         self.assertIsNone(binding["provider_elf_sha256"])
         self.binding["addend"] = 4
-        with self.assertRaisesRegex(ValueError, "managed malloc contract requires exact native binding"):
+        with self.assertRaisesRegex(
+            ValueError, "managed malloc contract requires exact native binding"
+        ):
             self.augment(**identity)
 
     def test_byte_memory_contract_requires_bridge_and_exact_row(self):
         identity = self.terminal_binding()
         self.binding.clear()
-        self.binding.update(malloc_binding(), symbol="memcpy", abi="memory/byte-copy-v1", relocation=32)
+        self.binding.update(
+            malloc_binding(), symbol="memcpy", abi="memory/byte-copy-v1", relocation=32
+        )
         with self.assertRaisesRegex(ValueError, "byte memory contract requires bridge identity"):
             self.augment()
         report = self.augment(**identity)
         self.assertEqual(report["modules"][0]["bindings"][0]["abi"], "memory/byte-copy-v1")
         self.binding["addend"] = 4
-        with self.assertRaisesRegex(ValueError, "byte memory contract requires exact native binding"):
+        with self.assertRaisesRegex(
+            ValueError, "byte memory contract requires exact native binding"
+        ):
             self.augment(**identity)
 
     def test_terminal_contract_cannot_label_interior_entry_or_object(self):
@@ -182,8 +205,10 @@ class GuestBindingEvidenceTests(unittest.TestCase):
         report = self.augment(**identity)
         target = report["modules"][0]["bindings"][0]["native_target"]
         self.assertEqual(target["image"], "/usr/lib/system/libsystem_pthread.dylib")
-        self.assertEqual(target["mapped_prefix_sha256"], hashlib.sha256(
-            bytes.fromhex(self.binding["native_target"]["prefix_hex"])).hexdigest())
+        self.assertEqual(
+            target["mapped_prefix_sha256"],
+            hashlib.sha256(bytes.fromhex(self.binding["native_target"]["prefix_hex"])).hexdigest(),
+        )
         self.assertIs(target["execution_claim"], False)
         self.assertIs(target["semantic_effects_verified"], False)
         self.binding["native_target"] = target
@@ -202,9 +227,7 @@ class GuestBindingEvidenceTests(unittest.TestCase):
         binding = report["modules"][0]["bindings"][0]
         self.assertEqual(binding["provider"], "libprovider.so")
         self.assertEqual(binding["provider_elf_sha256"], self.hashes["libprovider.so"])
-        self.assertNotEqual(
-            binding["provider_elf_sha256"], report["modules"][0]["elf_sha256"]
-        )
+        self.assertNotEqual(binding["provider_elf_sha256"], report["modules"][0]["elf_sha256"])
 
     def test_native_binding_cannot_be_relabelled_as_guest_target(self):
         self.binding.update(provider="libc.so", abi="host-explicit-adapter")

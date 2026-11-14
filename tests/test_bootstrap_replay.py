@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Pinned-source replay is independent of mutable dependency working files."""
+
 import hashlib
 import subprocess
 import sys
@@ -27,8 +28,17 @@ class BootstrapReplayTests(unittest.TestCase):
         self.file = self.repo / 'source'
         self.file.write_bytes(b'original\n')
         self.git('add', '.')
-        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
-                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture')
+        self.git(
+            '-c',
+            'user.name=Fixture',
+            '-c',
+            'user.email=fixture@example.invalid',
+            '-c',
+            'commit.gpgsign=false',
+            'commit',
+            '-qm',
+            'fixture',
+        )
         self.revision = self.git('rev-parse', 'HEAD').decode().strip()
         self.file.write_bytes(b'legacy\n')
         (self.patches / 'forward.patch').write_bytes(self.git('diff'))

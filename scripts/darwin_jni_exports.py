@@ -20,6 +20,7 @@ that other Shiraz dylibs link against).
   darwin_jni_exports.py --c-source SRC [--extra FILE] [JAVA...]   the same,
       with C entry points defined in SRC and the symbols listed in FILE
 """
+
 import argparse
 import re
 import sys
@@ -32,10 +33,16 @@ NATIVE = re.compile(r'\bnative\b[^;{}()=]*?\b([A-Za-z_$][\w$]*)\s*\(')
 # A nested class would need its outer class in the JNI name; none is supported.
 NESTED = re.compile(r'\b(?:class|interface|enum)\s+\w+')
 # A definition, not a declaration: the parameter list is followed by a body.
-C_DEFINITION = re.compile(r'\bextern\s+"C"\s+(?:JNIEXPORT\s+)?[^;{}()#]*?\b([A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{')
+C_DEFINITION = re.compile(
+    r'\bextern\s+"C"\s+(?:JNIEXPORT\s+)?[^;{}()#]*?\b([A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{'
+)
 C_FORWARD = re.compile(r'^\s*FORWARD\(\s*([A-Za-z_]\w*)\s*,', re.M)
-APPLE_IF = re.compile(r'#\s*(?:if\s+defined\s*\(\s*__APPLE__\s*\)|if\s+defined\s+__APPLE__|ifdef\s+__APPLE__)\s*$')
-APPLE_IFNOT = re.compile(r'#\s*(?:if\s+!\s*defined\s*\(\s*__APPLE__\s*\)|if\s+!\s*defined\s+__APPLE__|ifndef\s+__APPLE__)\s*$')
+APPLE_IF = re.compile(
+    r'#\s*(?:if\s+defined\s*\(\s*__APPLE__\s*\)|if\s+defined\s+__APPLE__|ifdef\s+__APPLE__)\s*$'
+)
+APPLE_IFNOT = re.compile(
+    r'#\s*(?:if\s+!\s*defined\s*\(\s*__APPLE__\s*\)|if\s+!\s*defined\s+__APPLE__|ifndef\s+__APPLE__)\s*$'
+)
 
 
 def mangle(name):
@@ -63,7 +70,9 @@ def symbols(path):
         raise SystemExit(f'{path}: declares no native methods')
     duplicates = sorted({name for name in names if names.count(name) > 1})
     if duplicates:
-        raise SystemExit(f'{path}: overloaded native methods need JNI long names: {", ".join(duplicates)}')
+        raise SystemExit(
+            f'{path}: overloaded native methods need JNI long names: {", ".join(duplicates)}'
+        )
     return [f'_Java_{owner}_{mangle(name)}' for name in names]
 
 
@@ -88,7 +97,9 @@ def darwin_lines(path, source):
                 raise SystemExit(f'{path}:{number}: {stripped} without #if')
             if stack[-1][0]:
                 if directive.startswith(('#elif', '# elif')):
-                    raise SystemExit(f'{path}:{number}: #elif after an __APPLE__ conditional is not supported')
+                    raise SystemExit(
+                        f'{path}:{number}: #elif after an __APPLE__ conditional is not supported'
+                    )
                 stack[-1][1] = not stack[-1][1]
         elif re.match(r'# ?endif\b', directive):
             if not stack:
@@ -113,12 +124,17 @@ def c_symbols(path):
 
 
 def listed_symbols(path):
-    return [line.strip() for line in Path(path).read_text(encoding='utf-8').splitlines()
-            if line.strip() and not line.lstrip().startswith('#')]
+    return [
+        line.strip()
+        for line in Path(path).read_text(encoding='utf-8').splitlines()
+        if line.strip() and not line.lstrip().startswith('#')
+    ]
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('java', nargs='*')
     parser.add_argument('--jni-onload', action='store_true')
     parser.add_argument('--c-source', action='append', default=[], metavar='SRC')
@@ -128,24 +144,33 @@ def main():
     args = parser.parse_args()
     if not (args.java or args.c_source or args.extra):
         parser.error('name at least one JAVA source, --c-source or --extra')
-    expected = sorted({symbol for path in args.java for symbol in symbols(path)}
-                      | {symbol for path in args.c_source for symbol in c_symbols(path)}
-                      | {symbol for path in args.extra for symbol in listed_symbols(path)}
-                      | ({'_JNI_OnLoad'} if args.jni_onload else set()))
+    expected = sorted(
+        {symbol for path in args.java for symbol in symbols(path)}
+        | {symbol for path in args.c_source for symbol in c_symbols(path)}
+        | {symbol for path in args.extra for symbol in listed_symbols(path)}
+        | ({'_JNI_OnLoad'} if args.jni_onload else set())
+    )
     if not args.check:
         print('\n'.join(expected))
         return 0
     listed = sorted(listed_symbols(args.check))
     failures = []
     if listed != expected:
-        failures.append(f'{args.check} differs from the Java native declarations and C entry points:'
-                        f' missing {sorted(set(expected) - set(listed))}, extra {sorted(set(listed) - set(expected))}')
+        failures.append(
+            f'{args.check} differs from the Java native declarations and C entry points:'
+            f' missing {sorted(set(expected) - set(listed))}, extra {sorted(set(listed) - set(expected))}'
+        )
     if args.symbols:
-        exported = sorted(line.split()[-1] for line in Path(args.symbols).read_text(encoding='utf-8').splitlines()
-                          if line.strip())
+        exported = sorted(
+            line.split()[-1]
+            for line in Path(args.symbols).read_text(encoding='utf-8').splitlines()
+            if line.strip()
+        )
         if exported != expected:
-            failures.append(f'{args.symbols} (nm -gU) differs from the exports list:'
-                            f' missing {sorted(set(expected) - set(exported))}, extra {sorted(set(exported) - set(expected))}')
+            failures.append(
+                f'{args.symbols} (nm -gU) differs from the exports list:'
+                f' missing {sorted(set(expected) - set(exported))}, extra {sorted(set(exported) - set(expected))}'
+            )
     for failure in failures:
         print(failure, file=sys.stderr)
     return 1 if failures else 0

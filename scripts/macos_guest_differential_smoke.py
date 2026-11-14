@@ -86,9 +86,7 @@ def corpus(env):
     for source, expected in emutls.FILES.items():
         path = emutls.OUT / Path(source).name
         if digest(path) != expected:
-            raise ValueError(
-                "compiler-rt emutls input is not the pinned unchanged source"
-            )
+            raise ValueError("compiler-rt emutls input is not the pinned unchanged source")
         expected_emutls[source] = expected
     original = ROOT / "build/macos/m5/deps/libm5-differential.so"
     fixture = WORK / "libm5-differential.so"
@@ -177,9 +175,7 @@ def corpus(env):
                 check=True,
                 timeout=30,
             ).stdout.strip(),
-            "linker_provenance_sha256": digest(
-                ROOT / ".deps/guest-toolchain/provenance.json"
-            ),
+            "linker_provenance_sha256": digest(ROOT / ".deps/guest-toolchain/provenance.json"),
         },
         "emutls_revision": emutls.REVISION,
         "emutls_source_sha256": expected_emutls,
@@ -204,14 +200,10 @@ def reference_plan(manifest, directory):
     if (
         not stage.is_absolute()
         or ".." in stage.parts
-        or re.fullmatch(
-            r"/data/local/tmp/shiraz-m5-[A-Za-z0-9][A-Za-z0-9._-]{0,95}", str(stage)
-        )
+        or re.fullmatch(r"/data/local/tmp/shiraz-m5-[A-Za-z0-9][A-Za-z0-9._-]{0,95}", str(stage))
         is None
     ):
-        raise ValueError(
-            "reference directory must be an owned /data/local/tmp/shiraz-m5-* path"
-        )
+        raise ValueError("reference directory must be an owned /data/local/tmp/shiraz-m5-* path")
     library, jar = stage / "libm5-differential.so", stage / "fixture.jar"
     collector = stage / "libm5-reference-child.so"
     base = [
@@ -278,9 +270,7 @@ def validate_report(report, manifest, reference=False):
         or report.get("fixture_sha256") != manifest["fixture_sha256"]
         or report.get("jar_sha256") != manifest["jar_sha256"]
     ):
-        raise ValueError(
-            "differential report does not match exact current ELF/DEX corpus"
-        )
+        raise ValueError("differential report does not match exact current ELF/DEX corpus")
     native = report.get("native", {})
     if (
         native.get("schema") != 1
@@ -288,9 +278,7 @@ def validate_report(report, manifest, reference=False):
         or json.dumps(native.get("contracts"), sort_keys=True)
         != json.dumps(CONTRACTS, sort_keys=True)
     ):
-        raise ValueError(
-            "differential report did not prove all current native contracts"
-        )
+        raise ValueError("differential report did not prove all current native contracts")
     if reference:
         platform = report.get("platform", {})
         if (
@@ -299,9 +287,7 @@ def validate_report(report, manifest, reference=False):
             or not isinstance(platform.get("android_sdk"), int)
             or platform["android_sdk"] < 27
         ):
-            raise ValueError(
-                "reference report is not from actual API27+ Android ART/bionic"
-            )
+            raise ValueError("reference report is not from actual API27+ Android ART/bionic")
 
 
 def child(command, env, log):
@@ -343,26 +329,14 @@ def classify_darwin_stack_failure(result, text, fixture_sha256):
     if result.get("timed_out", False):
         raise ValueError("stack-corruption child timed out")
     lines = text.splitlines()
-    ready = [
-        (index, line)
-        for index, line in enumerate(lines)
-        if line.startswith(STACK_MARKER)
-    ]
+    ready = [(index, line) for index, line in enumerate(lines) if line.startswith(STACK_MARKER)]
     if len(ready) != 1 or ready[0][1] != STACK_MARKER + fixture_sha256:
         raise ValueError("stack-corruption child lacks exact current corpus readiness")
     guard_marker = "SHIRAZ_GUEST_FATAL stack guard check failed"
-    guards = [
-        (index, line)
-        for index, line in enumerate(lines)
-        if "SHIRAZ_GUEST_FATAL" in line
-    ]
+    guards = [(index, line) for index, line in enumerate(lines) if "SHIRAZ_GUEST_FATAL" in line]
     if len(guards) != 1 or guards[0][1] != guard_marker or ready[0][0] >= guards[0][0]:
-        raise ValueError(
-            "stack-corruption child lacks ordered actual stack-check failure"
-        )
-    fatals = [
-        (index, line) for index, line in enumerate(lines) if "Fatal signal" in line
-    ]
+        raise ValueError("stack-corruption child lacks ordered actual stack-check failure")
+    fatals = [(index, line) for index, line in enumerate(lines) if "Fatal signal" in line]
     if len(fatals) > 1:
         raise ValueError("stack-corruption child has ambiguous fatal signals")
     fatal_tags = re.findall(r"\bSHIRAZ_[A-Z_]*FATAL\b", text)
@@ -407,18 +381,13 @@ def darwin(manifest, mode, identity, env):
             raise ValueError(
                 "strict hardened differential ART needs a public signing identity with a real TeamIdentifier"
             )
-        sign_closure(
-            closure, identity, ROOT / "tests/darwin/guest/jit.entitlements", env
-        )
+        sign_closure(closure, identity, ROOT / "tests/darwin/guest/jit.entitlements", env)
         runtime, bridge = Path(closure["tree"]), Path(closure["bridge"])
         env["ANDROID_ROOT"] = str(runtime)
-        env["BOOTCLASSPATH"] = ":".join(
-            str(runtime / "framework" / name) for name in JARS
-        )
+        env["BOOTCLASSPATH"] = ":".join(str(runtime / "framework" / name) for name in JARS)
     base = [
         runtime / "bin/dalvikvm",
-        "-Xbootclasspath:"
-        + ":".join(str(runtime / "framework" / name) for name in JARS),
+        "-Xbootclasspath:" + ":".join(str(runtime / "framework" / name) for name in JARS),
         "-Xcheck:jni",
         "-Xusejit:false",
         "-Xint",
@@ -434,27 +403,20 @@ def darwin(manifest, mode, identity, env):
     entry_identity = entry_binary_identity(runtime, bridge)
     run, text = child([*base, "run"], env, WORK / (mode + ".log"))
     reports = [
-        line[len(RESULT_MARKER) :]
-        for line in text.splitlines()
-        if line.startswith(RESULT_MARKER)
+        line[len(RESULT_MARKER) :] for line in text.splitlines() if line.startswith(RESULT_MARKER)
     ]
     if run["returncode"] != 0 or len(reports) != 1:
-        raise ValueError(
-            "Darwin differential corpus failed; see " + str(WORK / (mode + ".log"))
-        )
+        raise ValueError("Darwin differential corpus failed; see " + str(WORK / (mode + ".log")))
     report = json.loads(reports[0])
     validate_report(report, manifest)
     if not any(
-        int(value) > 0
-        for value in re.findall(r"SHIRAZ_GUEST_TPIDR_REWRITTEN sites=(\d+)", text)
+        int(value) > 0 for value in re.findall(r"SHIRAZ_GUEST_TPIDR_REWRITTEN sites=(\d+)", text)
     ):
         raise ValueError("Darwin corpus did not prove actual MRS rewriting")
     failed, failure_text = child(
         [*base, "stack-failure"], env, WORK / (mode + "-stack-failure.log")
     )
-    termination = classify_darwin_stack_failure(
-        failed, failure_text, manifest["fixture_sha256"]
-    )
+    termination = classify_darwin_stack_failure(failed, failure_text, manifest["fixture_sha256"])
     if entry_binary_identity(runtime, bridge) != entry_identity:
         raise ValueError("runtime entry binaries changed during differential execution")
     collected = {
@@ -467,9 +429,7 @@ def darwin(manifest, mode, identity, env):
             **termination,
             "ready_fixture_sha256": manifest["fixture_sha256"],
         },
-        "native_closure": str(Path(closure["tree"]) / "closure.json")
-        if closure
-        else None,
+        "native_closure": str(Path(closure["tree"]) / "closure.json") if closure else None,
     }
     write_json(WORK / (mode + ".result.json"), collected)
     if closure:
@@ -490,9 +450,7 @@ def validate_collector_signature(signature, entitlements):
 
 def verify_native_collector(path):
     path = path.resolve(strict=True)
-    subprocess.run(
-        ["codesign", "--verify", "--strict", str(path)], check=True, timeout=30
-    )
+    subprocess.run(["codesign", "--verify", "--strict", str(path)], check=True, timeout=30)
     display = subprocess.run(
         ["codesign", "--display", "--verbose=4", str(path)],
         capture_output=True,
@@ -540,9 +498,7 @@ def reference_result(path, manifest):
         or value.get("collection_method") != "native-waitpid"
         or value.get("collector_sha256") != expected_collector
     ):
-        raise ValueError(
-            "reference report lacks current native waitpid collector identity"
-        )
+        raise ValueError("reference report lacks current native waitpid collector identity")
     run = value.get("run", {})
     if not isinstance(run, dict):
         raise TypeError("reference run must be an object")
@@ -565,9 +521,7 @@ def reference_result(path, manifest):
         or not os.WIFSIGNALED(raw_failure)
         or os.WTERMSIG(raw_failure) != int(signal.SIGABRT)
     ):
-        raise ValueError(
-            "reference deliberate-corruption child lacks actual SIGABRT wait status"
-        )
+        raise ValueError("reference deliberate-corruption child lacks actual SIGABRT wait status")
     if (
         failed.get("returncode") != -int(signal.SIGABRT)
         or failed.get("timed_out", False)
@@ -580,13 +534,9 @@ def reference_result(path, manifest):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("adhoc", "hardened"), default="adhoc")
-    parser.add_argument(
-        "--identity", default=os.environ.get("SHIRAZ_CODESIGN_IDENTITY")
-    )
+    parser.add_argument("--identity", default=os.environ.get("SHIRAZ_CODESIGN_IDENTITY"))
     parser.add_argument("--reference-result", type=Path)
-    parser.add_argument(
-        "--reference-directory", default="/data/local/tmp/shiraz-m5-differential"
-    )
+    parser.add_argument("--reference-directory", default="/data/local/tmp/shiraz-m5-differential")
     parser.add_argument("--emit-reference-only", action="store_true")
     parser.add_argument("--verify-native-collector", type=Path)
     args = parser.parse_args()
@@ -621,9 +571,7 @@ def main():
         comparison.update(
             reference_performed=True,
             comparison="contracts-pass",
-            reference=reference_result(
-                args.reference_result.resolve(strict=True), manifest
-            ),
+            reference=reference_result(args.reference_result.resolve(strict=True), manifest),
         )
         # Hardware observations deliberately differ; only semantic contracts
         # are compared, never raw HWCAP bits or host-specific page sizes.

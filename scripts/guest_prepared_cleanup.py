@@ -21,18 +21,68 @@ UINT64_END = 1 << 64
 # LC_FUNCTION_STARTS and the next text symbol bound the observed function to
 # 216 bytes. Zero placeholders are only the five relocatable ADRP/ADD pairs.
 _WORDS = (
-    0x52800008, 0xD53BD069, 0xF2400C1F, 0x54000621, 0xB4000600, 0xB40005E9,
-    0xD2800008, 0, 0, 0, 0, 0x14000004,
-    0x91002108, 0xF140211F, 0x540004A0, 0x8B08016C, 0xF8BFC18C, 0xF100099F,
-    0x54FFFF43, 0xF868694D, 0xEB0901BF, 0x54FFFEE1, 0, 0,
-    0xF86869AD, 0, 0, 0xF86869CE, 0xEB0E001F, 0xFA4D3000,
-    0xFA4E21A2, 0x54000282, 0, 0, 0x8B0801AE, 0xF8BFC1CE,
-    0xF10005DF, 0x540001C1, 0x8B08016B, 0xF8BFC16B, 0xEB0C017F, 0x54000141,
-    0x8B08014A, 0xF8BFC14A, 0xEB09015F, 0x540000C1, 0x8B0801A8, 0xF8BFC108,
-    0xF100051F, 0x1A9F17E0, 0xD65F03C0, 0x52800008, 0xAA0803E0, 0xD65F03C0,
+    0x52800008,
+    0xD53BD069,
+    0xF2400C1F,
+    0x54000621,
+    0xB4000600,
+    0xB40005E9,
+    0xD2800008,
+    0,
+    0,
+    0,
+    0,
+    0x14000004,
+    0x91002108,
+    0xF140211F,
+    0x540004A0,
+    0x8B08016C,
+    0xF8BFC18C,
+    0xF100099F,
+    0x54FFFF43,
+    0xF868694D,
+    0xEB0901BF,
+    0x54FFFEE1,
+    0,
+    0,
+    0xF86869AD,
+    0,
+    0,
+    0xF86869CE,
+    0xEB0E001F,
+    0xFA4D3000,
+    0xFA4E21A2,
+    0x54000282,
+    0,
+    0,
+    0x8B0801AE,
+    0xF8BFC1CE,
+    0xF10005DF,
+    0x540001C1,
+    0x8B08016B,
+    0xF8BFC16B,
+    0xEB0C017F,
+    0x54000141,
+    0x8B08014A,
+    0xF8BFC14A,
+    0xEB09015F,
+    0x540000C1,
+    0x8B0801A8,
+    0xF8BFC108,
+    0xF100051F,
+    0x1A9F17E0,
+    0xD65F03C0,
+    0x52800008,
+    0xAA0803E0,
+    0xD65F03C0,
 )
-_TABLE_PAIRS = ((7, 11, "owners"), (9, 10, "keys"), (22, 13, "low"),
-                (25, 14, "high"), (32, 13, "admission"))
+_TABLE_PAIRS = (
+    (7, 11, "owners"),
+    (9, 10, "keys"),
+    (22, 13, "low"),
+    (25, 14, "high"),
+    (32, 13, "admission"),
+)
 _ACQUIRES = ((16, 12, 12), (35, 14, 14), (39, 11, 11), (43, 10, 10), (47, 8, 8))
 _DYNAMIC = frozenset(index + delta for index, _, _ in _TABLE_PAIRS for delta in (0, 1))
 _ACQUIRE_INDICES = frozenset(index for index, _, _ in _ACQUIRES)
@@ -97,17 +147,19 @@ def recognize_prepared_cleanup(read_word, entry, owned_readable_data):
     words = tuple(read_word(entry + index * 4) for index in range(BODY_WORDS))
     if any(type(word) is not int or not 0 <= word < 1 << 32 for word in words):
         return None
-    if any(word != _WORDS[index] for index, word in enumerate(words)
-           if index not in _DYNAMIC and index not in _ACQUIRE_INDICES):
+    if any(
+        word != _WORDS[index]
+        for index, word in enumerate(words)
+        if index not in _DYNAMIC and index not in _ACQUIRE_INDICES
+    ):
         return None
     for index, base, target in _ACQUIRES:
-        if words[index] not in (0xF8BFC000 | base << 5 | target,
-                                0xC8DFFC00 | base << 5 | target):
+        if words[index] not in (0xF8BFC000 | base << 5 | target, 0xC8DFFC00 | base << 5 | target):
             return None
     tables = []
     spans = [(entry, entry + BODY_BYTES)]
     for index, register, role in _TABLE_PAIRS:
-        adrp, add = words[index:index + 2]
+        adrp, add = words[index : index + 2]
         if adrp & 0x9F00001F != 0x90000000 | register:
             return None
         if add & 0xFFC003FF != 0x91000000 | register << 5 | register:
@@ -126,7 +178,9 @@ def recognize_prepared_cleanup(read_word, entry, owned_readable_data):
         spans.append((address, end))
         tables.append(PreparedCleanupTable(role, address))
     return PreparedCleanupEffects(
-        entry, BODY_BYTES,
+        entry,
+        BODY_BYTES,
         hashlib.sha256(b"".join(word.to_bytes(4, "little") for word in words)).hexdigest(),
-        tuple(tables), (entry + 200, entry + 212),
+        tuple(tables),
+        (entry + 200, entry + 212),
     )

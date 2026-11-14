@@ -12,6 +12,7 @@ bionic's NOTICE file and a provenance record. Gitiles archives are not
 byte-stable, so each archive is pinned by a hash of its validated file names and
 contents, as scripts/bootstrap_framework_resources.py does.
 """
+
 import hashlib
 import json
 from pathlib import Path
@@ -31,9 +32,14 @@ BASE = 'https://android.googlesource.com/platform/bionic/+archive/' + COMMIT + '
 ARCHIVES = {
     'libc/include': ('a3abb82d366e72342ef42f54410f872a3ea68feb7d3dc5ee7ebfc567232dfdf7', 225),
     'libc/kernel/uapi': ('bd0456fbebb131757795ff55c84cfca97527a9577748d63a4bf273d15b3b0dcc', 1091),
-    'libc/kernel/android/uapi': ('83f670e2784fb673c144d79b2866be6b6c6dde6e7739dbe9a729339120815b7a', 2),
+    'libc/kernel/android/uapi': (
+        '83f670e2784fb673c144d79b2866be6b6c6dde6e7739dbe9a729339120815b7a',
+        2,
+    ),
 }
-NOTICE_URL = 'https://android.googlesource.com/platform/bionic/+/' + COMMIT + '/libc/NOTICE?format=TEXT'
+NOTICE_URL = (
+    'https://android.googlesource.com/platform/bionic/+/' + COMMIT + '/libc/NOTICE?format=TEXT'
+)
 NOTICE_SHA256 = '67128fa0d11c374f0627a7166d8e0945351c101db1e72922acb161677c6764ed'
 DEPS = ROOT / '.deps/bionic-headers'
 SYSROOT = DEPS / 'sysroot/include'
@@ -54,11 +60,13 @@ def verifier(path):
             raise ValueError(f'not a valid header archive: {error}') from error
         if len(files) != count or source_content_sha256(files) != checksum:
             raise ValueError(f'{path}: content checksum mismatch')
+
     return verify
 
 
 def verify_notice(path):
     import base64
+
     data = base64.b64decode(path.read_bytes(), validate=True)
     if hashlib.sha256(data).hexdigest() != NOTICE_SHA256:
         raise ValueError('bionic NOTICE checksum mismatch')
@@ -83,10 +91,17 @@ def main():
     download = DEPS / 'download'
     download.mkdir(parents=True, exist_ok=True)
     for path in ARCHIVES:
-        fetch(download / archive_name(path), BASE + path + '.tar.gz', None, 16 * 1024 * 1024, verify=verifier(path))
+        fetch(
+            download / archive_name(path),
+            BASE + path + '.tar.gz',
+            None,
+            16 * 1024 * 1024,
+            verify=verifier(path),
+        )
     notice = download / 'NOTICE.b64'
     fetch(notice, NOTICE_URL, None, 1024 * 1024, verify=verify_notice)
     import base64
+
     staging = DEPS / 'sysroot.pending'
     if staging.exists():
         shutil.rmtree(staging)
@@ -100,18 +115,31 @@ def main():
         if top == 'asm-arm64':
             return rest
         return None if top.startswith('asm-') and top != 'asm-generic' else name
+
     write_tree(source_files(download / archive_name('libc/kernel/uapi')), include, uapi)
     write_tree(source_files(download / archive_name('libc/kernel/android/uapi')), include)
     (staging / 'NOTICE').write_bytes(base64.b64decode(notice.read_bytes()))
     if (DEPS / 'sysroot').exists():
         shutil.rmtree(DEPS / 'sysroot')
     staging.replace(DEPS / 'sysroot')
-    STAMP.write_text(json.dumps({
-        'source': 'https://android.googlesource.com/platform/bionic', 'tag': TAG, 'commit': COMMIT,
-        'archives': {path: {'content_sha256': checksum, 'files': count} for path, (checksum, count) in ARCHIVES.items()},
-        'notice_sha256': NOTICE_SHA256,
-        'license': 'bionic libc/NOTICE (BSD-style and Apache-2.0 notices); kept beside the headers, not committed',
-    }, indent=2, sort_keys=True) + '\n')
+    STAMP.write_text(
+        json.dumps(
+            {
+                'source': 'https://android.googlesource.com/platform/bionic',
+                'tag': TAG,
+                'commit': COMMIT,
+                'archives': {
+                    path: {'content_sha256': checksum, 'files': count}
+                    for path, (checksum, count) in ARCHIVES.items()
+                },
+                'notice_sha256': NOTICE_SHA256,
+                'license': 'bionic libc/NOTICE (BSD-style and Apache-2.0 notices); kept beside the headers, not committed',
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + '\n'
+    )
     print(f'bionic headers {TAG} ({COMMIT[:12]}) in {SYSROOT.relative_to(ROOT)}')
 
 

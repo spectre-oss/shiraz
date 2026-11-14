@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Provide a native patchelf for packaging without installing system packages."""
+
 import fcntl
 import hashlib
 from pathlib import Path
@@ -27,7 +28,9 @@ def main():
         archive = deps / f'patchelf-{VERSION}.tar.bz2'
         if not archive.exists():
             urllib.request.urlretrieve(
-                f'https://github.com/NixOS/patchelf/releases/download/{VERSION}/{archive.name}', archive)
+                f'https://github.com/NixOS/patchelf/releases/download/{VERSION}/{archive.name}',
+                archive,
+            )
         if hashlib.sha256(archive.read_bytes()).hexdigest() != SHA256:
             raise SystemExit('patchelf source checksum mismatch')
         source = deps / f'patchelf-{VERSION}'
@@ -36,7 +39,9 @@ def main():
                 tar.extractall(deps, filter='data')
         build = ROOT / 'build/patchelf'
         build.mkdir(parents=True, exist_ok=True)
-        subprocess.run([str(source / 'configure'), '--prefix=' + str(prefix)], cwd=build, check=True)
+        subprocess.run(
+            [str(source / 'configure'), '--prefix=' + str(prefix)], cwd=build, check=True
+        )
         subprocess.run(['make', '-j2'], cwd=build, check=True)
         subprocess.run(['make', 'install'], cwd=build, check=True)
 

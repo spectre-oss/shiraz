@@ -31,15 +31,15 @@ WORK = ROOT / "build/macos/m5/osmand-jni"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
-    parser.add_argument("--bridge", type=Path, help="existing alternate bridge; local adhoc runner only")
+    parser.add_argument(
+        "--bridge", type=Path, help="existing alternate bridge; local adhoc runner only"
+    )
     parser.add_argument(
         "--core",
         action="store_true",
         help="load all seven libraries and exercise real Core JNI",
     )
-    parser.add_argument(
-        "--mode", choices=("adhoc", "staged-adhoc", "hardened"), default="adhoc"
-    )
+    parser.add_argument("--mode", choices=("adhoc", "staged-adhoc", "hardened"), default="adhoc")
     parser.add_argument(
         "--identity",
         default=os.environ.get("SHIRAZ_CODESIGN_IDENTITY"),
@@ -81,10 +81,7 @@ def main():
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                     sha.update(chunk)
             digest = sha.hexdigest()
-            if (
-                hashlib.sha256((library.parent / name).read_bytes()).hexdigest()
-                != digest
-            ):
+            if hashlib.sha256((library.parent / name).read_bytes()).hexdigest() != digest:
                 raise SystemExit("library does not match the unchanged APK: " + name)
             native_digests[name] = digest
     digest = native_digests["libosmand.so"]
@@ -115,7 +112,9 @@ def main():
     }
     runtime = HOST
     vm = HOST / "bin/dalvikvm"
-    bridge = args.bridge.resolve(strict=True) if args.bridge else ROOT / "build/macos/libshiraz-guest.so"
+    bridge = (
+        args.bridge.resolve(strict=True) if args.bridge else ROOT / "build/macos/libshiraz-guest.so"
+    )
     observer = ROOT / "build/macos/m5/osmand-host-observer.so"
     native_paths = [ROOT / "build/macos", HOST / "lib64", library.parent]
     closure = None
@@ -138,9 +137,7 @@ def main():
         observer = Path(copied[str(observer)])
         native_paths = [runtime / "lib64", library.parent]
         env["ANDROID_ROOT"] = str(runtime)
-        env["BOOTCLASSPATH"] = ":".join(
-            str(runtime / "framework" / name) for name in JARS
-        )
+        env["BOOTCLASSPATH"] = ":".join(str(runtime / "framework" / name) for name in JARS)
         env["SHIRAZ_GUEST_EGL_SHIM"] = copied[str(ROOT / "build/macos/libEGL_shim.so")]
         env["SHIRAZ_EGL_LIBRARY"] = copied[str(ROOT / "build/macos/libEGL.dylib")]
         closure.update(
@@ -154,9 +151,7 @@ def main():
             observer=str(observer),
             guest_elf_directory=str(library.parent),
             **{"java.library.path": ":".join(map(str, native_paths))},
-            **{
-                key: env[key] for key in ("SHIRAZ_GUEST_EGL_SHIM", "SHIRAZ_EGL_LIBRARY")
-            },
+            **{key: env[key] for key in ("SHIRAZ_GUEST_EGL_SHIM", "SHIRAZ_EGL_LIBRARY")},
         )
         write_manifest(closure)
         label = (
@@ -165,10 +160,7 @@ def main():
             else "M5_OSMAND_CORE_STAGED_ADHOC_PREPARED"
         )
         print(
-            label
-            + " manifest="
-            + str(runtime / "closure.json")
-            + " signed=0 execution_verified=0",
+            label + " manifest=" + str(runtime / "closure.json") + " signed=0 execution_verified=0",
             flush=True,
         )
         if args.prepare_only:
@@ -186,9 +178,7 @@ def main():
                 env,
             )
         else:
-            sign_staged_adhoc_closure(
-                closure, ROOT / "tests/darwin/guest/jit.entitlements", env
-            )
+            sign_staged_adhoc_closure(closure, ROOT / "tests/darwin/guest/jit.entitlements", env)
     elif args.core:
         env["SHIRAZ_GUEST_EGL_SHIM"] = str(ROOT / "build/macos/libEGL_shim.so")
         env["SHIRAZ_EGL_LIBRARY"] = str(ROOT / "build/macos/libEGL.dylib")
@@ -225,8 +215,7 @@ def main():
         archive.writestr(entry, (work / "classes.dex").read_bytes())
     command = [
         vm,
-        "-Xbootclasspath:"
-        + ":".join(str(runtime / "framework" / name) for name in JARS),
+        "-Xbootclasspath:" + ":".join(str(runtime / "framework" / name) for name in JARS),
         "-Xcheck:jni",
         "-Xusejit:false",
         "-Xint",
@@ -256,9 +245,7 @@ def main():
     with (
         (work / "stdout.log").open("wb") as output,
         (work / "stderr.log").open("wb") as error,
-        subprocess.Popen(
-            actual_command, cwd=work, env=env, stdout=output, stderr=error
-        ) as process,
+        subprocess.Popen(actual_command, cwd=work, env=env, stdout=output, stderr=error) as process,
     ):
         try:
             returncode = process.wait(timeout=60)
@@ -307,9 +294,7 @@ def main():
             )
         elif line.startswith("SHIRAZ_GUEST_PHASE "):
             malformed_evidence = True
-        match = re.fullmatch(
-            r"SHIRAZ_GUEST_JNI_ONLOAD module=(\S+) version=0x([0-9a-fA-F]+)", line
-        )
+        match = re.fullmatch(r"SHIRAZ_GUEST_JNI_ONLOAD module=(\S+) version=0x([0-9a-fA-F]+)", line)
         if match:
             version = int(match[2], 16)
             malformed_evidence |= version not in (
@@ -321,17 +306,13 @@ def main():
             onloads[match[1]] = version
         elif line.startswith("SHIRAZ_GUEST_JNI_ONLOAD "):
             malformed_evidence = True
-    expected_modules = (
-        set(native_digests) if args.core else {"libosmand.so", "libc++_shared.so"}
-    )
+    expected_modules = set(native_digests) if args.core else {"libosmand.so", "libc++_shared.so"}
     expected_onloads = (
         {"libosmand.so", "libQt5Core.so", "libandroidx.graphics.path.so"}
         if args.core
         else {"libosmand.so"}
     )
-    malformed_evidence |= (
-        set(phases) != expected_modules or set(onloads) != expected_onloads
-    )
+    malformed_evidence |= set(phases) != expected_modules or set(onloads) != expected_onloads
     binding_evidence = None
     binding_error = None
     try:
@@ -354,10 +335,17 @@ def main():
     if closure:
         try:
             inventory = validate_native_inventory(
-                result.stdout, closure, [vm, bridge, observer, *(
-                    Path(closure["extra_images"][str(ROOT / "build/macos" / name)])
-                    for name in ("libandroid.so", "libshiraz-resources.so")
-                )]
+                result.stdout,
+                closure,
+                [
+                    vm,
+                    bridge,
+                    observer,
+                    *(
+                        Path(closure["extra_images"][str(ROOT / "build/macos" / name)])
+                        for name in ("libandroid.so", "libshiraz-resources.so")
+                    ),
+                ],
             )
             (work / "native-closure.log").write_text(inventory["raw_report"])
         except (OSError, ValueError, KeyError, TypeError) as error:
@@ -412,19 +400,12 @@ def main():
         or (args.core and "M5_OSMAND_ALL_LIBRARIES_PASS " not in result.stdout)
         or (args.core and "M5_ANDROIDX_PATH_JNI_PASS " not in result.stdout)
     ):
-        raise SystemExit(
-            "unchanged OsmAnd native load failed; inspect " + str(work / "run.log")
-        )
+        raise SystemExit("unchanged OsmAnd native load failed; inspect " + str(work / "run.log"))
     if closure:
         validate_closure(closure, env)
         for item in closure["images"]:
-            if (
-                hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest()
-                != item["signed_sha256"]
-            ):
-                raise SystemExit(
-                    "copied native image changed during Core JNI execution"
-                )
+            if hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest() != item["signed_sha256"]:
+                raise SystemExit("copied native image changed during Core JNI execution")
         closure.update(
             execution_verified=True,
             core_jni_verified=True,
@@ -437,11 +418,7 @@ def main():
         evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
     marker = "M5_OSMAND_CORE_MODE_PASS" if args.core else "M5_OSMAND_NATIVE_MODE_PASS"
     print(
-        marker
-        + " mode="
-        + args.mode
-        + " hardened_verified="
-        + str(int(args.mode == "hardened")),
+        marker + " mode=" + args.mode + " hardened_verified=" + str(int(args.mode == "hardened")),
         flush=True,
     )
 

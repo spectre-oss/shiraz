@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Byte-exact conditional outlined frame tests, not app/TLS acceptance."""
+
 import sys
 import unittest
 from pathlib import Path
@@ -78,6 +79,7 @@ class FrameEffectsTests(unittest.TestCase):
 
     def test_helper_instruction_and_stack_slot_limits_are_enforced(self):
         from unittest.mock import patch
+
         for name, limit in (("MAX_CALLER_PRELUDE", 10), ("MAX_STACK_SLOTS", 9)):
             with patch.object(a, name, limit), self.assertRaises(a.MetadataUnavailable):
                 a.caller_prologue(self.decoder(), 0, 16)
@@ -93,10 +95,14 @@ class FrameEffectsTests(unittest.TestCase):
 
     def test_namespace_rebases_helper_evidence_only(self):
         from guest_namespace import STRIDE, NamespaceDecoder
+
         state = a.State(sp=-96)
-        evidence = {"entry": "0x10", "outlined_helpers": [
-            {"call": "0x18", "entry": "0x100", "body_size": 28,
-             "body_sha256": "unchanged"}]}
+        evidence = {
+            "entry": "0x10",
+            "outlined_helpers": [
+                {"call": "0x18", "entry": "0x100", "body_size": 28, "body_sha256": "unchanged"}
+            ],
+        }
 
         class Decoder:
             def caller_frame(self, pc):

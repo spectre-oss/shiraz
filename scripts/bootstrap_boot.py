@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Desugar pinned ART boot classes while retaining their resources and notices."""
+
 import hashlib
 import json
 import os
@@ -27,7 +28,10 @@ def compiler(root):
         with tempfile.NamedTemporaryFile(dir=directory, delete=False) as stream:
             temporary = Path(stream.name)
         try:
-            with urllib.request.urlopen(R8_URL, timeout=60) as source, temporary.open('wb') as output:
+            with (
+                urllib.request.urlopen(R8_URL, timeout=60) as source,
+                temporary.open('wb') as output,
+            ):
                 while block := source.read(1024 * 1024):
                     output.write(block)
             if hashlib.sha256(temporary.read_bytes()).hexdigest() != R8_SHA256:
@@ -67,7 +71,7 @@ def boot_archive(classes, dex_archive, destination):
             entry = zipfile.ZipInfo('classes.dex')
             entry.external_attr = 0o100644 << 16
             padding = (-(output.fp.tell() + 30 + len(entry.filename) + 4)) % 4
-            entry.extra = struct.pack('<HH', 0xffff, padding) + b'\0' * padding
+            entry.extra = struct.pack('<HH', 0xFFFF, padding) + b'\0' * padding
             output.writestr(entry, dex)
 
 
@@ -83,23 +87,47 @@ def desugar_boot(root=ROOT, modules=MODULES, host=None, host_tag='linux-x86', wo
     tool = compiler(root)
     work = Path(work) if work is not None else root / 'build/runtime-boot'
     work.mkdir(parents=True, exist_ok=True)
-    manifest = {'compiler': R8_VERSION, 'compiler_sha256': R8_SHA256, 'min_api': 26, 'classpath_sha256': hashlib.sha256(all_classes.read_bytes()).hexdigest(), 'modules': {}}
+    manifest = {
+        'compiler': R8_VERSION,
+        'compiler_sha256': R8_SHA256,
+        'min_api': 26,
+        'classpath_sha256': hashlib.sha256(all_classes.read_bytes()).hexdigest(),
+        'modules': {},
+    }
     # Prepare both archives before replacing either installed module. A failed
     # compiler cannot publish a partially generated archive.
     with tempfile.TemporaryDirectory(dir=work) as temporary:
         staged = Path(temporary)
         for module, classes in inputs.items():
             dex = staged / (module + '-dex.jar')
-            subprocess.run(['java', '-Xmx1024m', '-cp', str(tool), 'com.android.tools.r8.D8',
-                            '--min-api', '26', '--classpath', str(all_classes),
-                            '--output', str(dex), str(classes)], check=True)
+            subprocess.run(
+                [
+                    'java',
+                    '-Xmx1024m',
+                    '-cp',
+                    str(tool),
+                    'com.android.tools.r8.D8',
+                    '--min-api',
+                    '26',
+                    '--classpath',
+                    str(all_classes),
+                    '--output',
+                    str(dex),
+                    str(classes),
+                ],
+                check=True,
+            )
             output = staged / (module + '.jar')
             boot_archive(classes, dex, output)
-            manifest['modules'][module] = {'input_sha256': hashlib.sha256(classes.read_bytes()).hexdigest(),
-                                            'output_sha256': hashlib.sha256(output.read_bytes()).hexdigest()}
+            manifest['modules'][module] = {
+                'input_sha256': hashlib.sha256(classes.read_bytes()).hexdigest(),
+                'output_sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
+            }
         for module in inputs:
             output = staged / (module + '.jar')
             destination = host / host_tag / 'framework' / output.name
             if not destination.exists() or destination.read_bytes() != output.read_bytes():
                 os.replace(output, destination)
-    (work / ('result.json' if modules == MODULES else 'network-result.json')).write_text(json.dumps(manifest, indent=2) + '\n')
+    (work / ('result.json' if modules == MODULES else 'network-result.json')).write_text(
+        json.dumps(manifest, indent=2) + '\n'
+    )

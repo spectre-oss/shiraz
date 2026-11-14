@@ -11,12 +11,21 @@ import hashlib
 SELF_ABI = "native/pthread-self-noargs"
 SELF_IMAGE = "/usr/lib/system/libsystem_pthread.dylib"
 FIELDS = {
-    "profile", "verification", "image", "image_uuid", "symbol", "entry_offset",
-    "prefix_hex", "execution_claim", "semantic_effects_verified",
+    "profile",
+    "verification",
+    "image",
+    "image_uuid",
+    "symbol",
+    "entry_offset",
+    "prefix_hex",
+    "execution_claim",
+    "semantic_effects_verified",
 }
 WINDOW_FIELDS = {"role", "symbol", "entry_offset", "byte_count", "prefix_hex"}
 WINDOW_PROFILE_FIELDS = FIELDS | {
-    "cold_call_offset", "complete_control_flow_verified", "code_windows",
+    "cold_call_offset",
+    "complete_control_flow_verified",
+    "code_windows",
 }
 
 
@@ -30,7 +39,8 @@ def lower_hex(value, length):
 
 def validate_code_window(window, role, symbol, size):
     if not isinstance(window, dict) or set(window) not in (
-        WINDOW_FIELDS, WINDOW_FIELDS | {"mapped_window_sha256"}
+        WINDOW_FIELDS,
+        WINDOW_FIELDS | {"mapped_window_sha256"},
     ):
         raise ValueError("native target code window schema")
     if (
@@ -79,9 +89,9 @@ def validate_native_target(binding):
     if set(record) not in (fields, fields | {"mapped_prefix_sha256"}):
         raise ValueError("native target identity schema")
     if (
-        record["verification"] != (
-            "resolved-system-image-prefix" if profile == 1
-            else "resolved-system-image-code-windows"
+        record["verification"]
+        != (
+            "resolved-system-image-prefix" if profile == 1 else "resolved-system-image-code-windows"
         )
         or record["image"] != SELF_IMAGE
         or record["symbol"] != "pthread_self"
@@ -109,11 +119,17 @@ def validate_native_target(binding):
         ):
             raise ValueError("native target code windows or unsupported claim")
         entry = validate_code_window(record["code_windows"][0], "entry", "pthread_self", 256)
-        cold = validate_code_window(record["code_windows"][1], "cold-error", "pthread_self.cold.1", 128)
-        if (entry["entry_offset"] != record["entry_offset"]
-                or entry["prefix_hex"][:128] != record["prefix_hex"]
-                or not (entry["entry_offset"] + 256 <= cold["entry_offset"]
-                        or cold["entry_offset"] + 128 <= entry["entry_offset"])):
+        cold = validate_code_window(
+            record["code_windows"][1], "cold-error", "pthread_self.cold.1", 128
+        )
+        if (
+            entry["entry_offset"] != record["entry_offset"]
+            or entry["prefix_hex"][:128] != record["prefix_hex"]
+            or not (
+                entry["entry_offset"] + 256 <= cold["entry_offset"]
+                or cold["entry_offset"] + 128 <= entry["entry_offset"]
+            )
+        ):
             raise ValueError("native target code window linkage or overlap")
         # Check only the recorded direct edge, not the windows' complete CFG.
         # In particular, the cold window's calls, memory reads and traps grant
@@ -123,8 +139,11 @@ def validate_native_target(binding):
         if immediate & (1 << 25):
             immediate -= 1 << 26
         target = entry["entry_offset"] + 72 + immediate * 4
-        if (word & 0xFC000000 != 0x94000000 or not 0 <= target <= (1 << 64) - 128
-                or target != cold["entry_offset"]):
+        if (
+            word & 0xFC000000 != 0x94000000
+            or not 0 <= target <= (1 << 64) - 128
+            or target != cold["entry_offset"]
+        ):
             raise ValueError("native target code window direct edge")
         result["code_windows"] = [entry, cold]
     return result

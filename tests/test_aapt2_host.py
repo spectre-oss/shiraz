@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Native tool selection must reject the x86 Maven compiler on Linux ARM64."""
+
 import os
 import sys
 import tempfile
@@ -16,18 +17,24 @@ class NativeAaptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             tool = Path(directory) / 'aapt2'
             for stream in ('stdout', 'stderr'):
-                tool.write_text('#!' + sys.executable + '\nimport sys\n'
-                                'assert sys.argv[1:] == ["version"]\n'
-                                'print("Android Asset Packaging Tool (aapt) 2.19", file=sys.' + stream + ')\n')
+                tool.write_text(
+                    '#!' + sys.executable + '\nimport sys\n'
+                    'assert sys.argv[1:] == ["version"]\n'
+                    'print("Android Asset Packaging Tool (aapt) 2.19", file=sys.' + stream + ')\n'
+                )
                 tool.chmod(0o755)
-                self.assertEqual(fixture.aapt2_version(tool),
-                                 'Android Asset Packaging Tool (aapt) 2.19')
+                self.assertEqual(
+                    fixture.aapt2_version(tool), 'Android Asset Packaging Tool (aapt) 2.19'
+                )
 
     def test_arm_without_override_refuses_download(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True), \
-                patch.object(fixture.platform, 'system', return_value='Linux'), \
-                patch.object(fixture.platform, 'machine', return_value='aarch64'), \
-                patch.object(fixture, 'fetch') as fetch:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(fixture.platform, 'system', return_value='Linux'),
+            patch.object(fixture.platform, 'machine', return_value='aarch64'),
+            patch.object(fixture, 'fetch') as fetch,
+        ):
             with self.assertRaisesRegex(ValueError, 'x86_64-only'):
                 fixture.install_aapt2(Path(directory))
             fetch.assert_not_called()
@@ -42,10 +49,12 @@ class NativeAaptTests(unittest.TestCase):
             source.write_bytes(header)
             cache = root / 'cache'
             cache.mkdir()
-            with patch.dict(os.environ, {'SHIRAZ_AAPT2': str(source)}), \
-                    patch.object(fixture.platform, 'system', return_value='Linux'), \
-                    patch.object(fixture.platform, 'machine', return_value='aarch64'), \
-                    patch.object(fixture.subprocess, 'run') as run:
+            with (
+                patch.dict(os.environ, {'SHIRAZ_AAPT2': str(source)}),
+                patch.object(fixture.platform, 'system', return_value='Linux'),
+                patch.object(fixture.platform, 'machine', return_value='aarch64'),
+                patch.object(fixture.subprocess, 'run') as run,
+            ):
                 run.return_value.stdout = 'Android Asset Packaging Tool (aapt) 2.19-debian\n'
                 target, provenance = fixture.install_aapt2(cache)
                 self.assertEqual(target.read_bytes(), source.read_bytes())

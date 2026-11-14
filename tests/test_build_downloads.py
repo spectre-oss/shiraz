@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """scripts/build_apk_fixture.fetch: per-candidate fallback and cache recovery."""
+
 import hashlib
 import http.server
 from pathlib import Path
@@ -30,16 +31,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         Handler.requests.append(self.path)
         mode = self.path.split('/')[2]
         if self.path.startswith('/mirror/') or mode == 'good':
-            self.send_response(200); self.send_header('Content-Length', str(len(BODY))); self.end_headers()
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(BODY)))
+            self.end_headers()
             self.wfile.write(BODY)
         elif mode == 'truncated':
-            self.send_response(200); self.send_header('Content-Length', str(len(BODY))); self.end_headers()
-            self.wfile.write(BODY[:100]); self.wfile.flush(); self.connection.shutdown(socket.SHUT_RDWR)
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(BODY)))
+            self.end_headers()
+            self.wfile.write(BODY[:100])
+            self.wfile.flush()
+            self.connection.shutdown(socket.SHUT_RDWR)
         elif mode == 'wrong':
-            self.send_response(200); self.send_header('Content-Length', '5'); self.end_headers()
+            self.send_response(200)
+            self.send_header('Content-Length', '5')
+            self.end_headers()
             self.wfile.write(b'hello')
         elif mode == 'oversized':
-            self.send_response(200); self.end_headers(); self.wfile.write(b'y' * 20000)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'y' * 20000)
         else:
             self.send_error(404)
 
@@ -61,7 +72,9 @@ class FetchTests(unittest.TestCase):
         Handler.requests = []
 
     def fetch(self, mode, target, checksum=SHA256, verify=None):
-        build_apk_fixture.fetch(target, self.primary + mode + '/f', checksum, 10000, timeout=5, verify=verify)
+        build_apk_fixture.fetch(
+            target, self.primary + mode + '/f', checksum, 10000, timeout=5, verify=verify
+        )
 
     def test_rejected_primary_bodies_fall_back_to_the_mirror(self):
         for mode in ('missing', 'truncated', 'wrong', 'oversized'):
@@ -77,8 +90,13 @@ class FetchTests(unittest.TestCase):
         target = self.folder / 'f'
         with self.assertRaisesRegex(SystemExit, r'truncated body: 100 of 5000 bytes'):
             # Not under GOOGLE_PRIMARY, so there is no mirror candidate.
-            build_apk_fixture.fetch(target, 'http://127.0.0.1:%d/other/truncated/f' % self.server.server_port,
-                                    SHA256, 10000, timeout=5)
+            build_apk_fixture.fetch(
+                target,
+                'http://127.0.0.1:%d/other/truncated/f' % self.server.server_port,
+                SHA256,
+                10000,
+                timeout=5,
+            )
         self.assertEqual(Handler.requests, ['/other/truncated/f'])
         self.assertEqual(list(self.folder.iterdir()), [])
 
@@ -93,6 +111,7 @@ class FetchTests(unittest.TestCase):
             rejected.append(path.name)
             if path.read_bytes() != BODY:
                 raise ValueError('content mismatch')
+
         target.write_bytes(b'portal')
         self.fetch('good', target, checksum=None, verify=verify)
         self.assertEqual(target.read_bytes(), BODY)

@@ -25,14 +25,11 @@ def digest(path):
 
 def checked(command, env, log=None):
     command = list(map(str, command))
-    result = subprocess.run(
-        command, env=env, capture_output=True, check=False, timeout=120
-    )
+    result = subprocess.run(command, env=env, capture_output=True, check=False, timeout=120)
     if log is not None:
         log.write_bytes(result.stdout + result.stderr)
         log.with_suffix(".json").write_text(
-            json.dumps({"command": command, "returncode": result.returncode}, indent=2)
-            + "\n"
+            json.dumps({"command": command, "returncode": result.returncode}, indent=2) + "\n"
         )
     if result.returncode:
         print((result.stdout + result.stderr).decode(errors="replace"), file=sys.stderr)
@@ -55,9 +52,7 @@ def main():
     fixture_object = args.object.resolve(strict=True)
     original_probe = args.probe.resolve(strict=True)
     linker = args.linker.resolve(strict=True)
-    unwind_archive = (
-        args.unwind_archive.resolve(strict=True) if args.unwind_archive else None
-    )
+    unwind_archive = args.unwind_archive.resolve(strict=True) if args.unwind_archive else None
     link_providers = [path.resolve(strict=True) for path in args.link_provider]
     work = WORK / args.coverage
     work.mkdir(parents=True, exist_ok=True)
@@ -77,11 +72,7 @@ def main():
     if digest(pending) != sha.hexdigest():
         raise SystemExit("APK libc++ extraction hash mismatch")
     pending.replace(library)
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith(("LD_", "DYLD_"))
-    }
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("LD_", "DYLD_"))}
     fixture = work / "libcxx-exception-fixture.so"
     fixture_pending = fixture.with_suffix(".pending")
     link_command = [
@@ -130,16 +121,12 @@ def main():
                 env,
             )
             checked(["codesign", "--verify", "--strict", probe], env)
-        signature = checked(
-            ["codesign", "--display", "--verbose=2", probe], env
-        ).stderr.decode()
+        signature = checked(["codesign", "--display", "--verbose=2", probe], env).stderr.decode()
         entitlements = {}
         if mode == "hardened":
             flags = re.search(r"flags=0x([0-9a-fA-F]+)", signature)
             if flags is None or not int(flags[1], 16) & 0x10000:
-                raise SystemExit(
-                    "hardened exception gate requires runtime signing flag"
-                )
+                raise SystemExit("hardened exception gate requires runtime signing flag")
             entitlements = plistlib.loads(
                 checked(
                     ["codesign", "--display", "--entitlements", "-", "--xml", probe],
@@ -153,9 +140,7 @@ def main():
             command.append("basic")
         timed_out = False
         try:
-            result = subprocess.run(
-                command, env=env, capture_output=True, check=False, timeout=60
-            )
+            result = subprocess.run(command, env=env, capture_output=True, check=False, timeout=60)
             stdout, stderr, returncode = result.stdout, result.stderr, result.returncode
         except subprocess.TimeoutExpired as failure:
             # subprocess.run kills and reaps its owned child on timeout.
@@ -221,9 +206,7 @@ def main():
                 "required_signal": "SIGABRT",
                 "passed": escape_passed,
             }
-            (work / f"{mode}-escape.json").write_text(
-                json.dumps(escape_evidence, indent=2) + "\n"
-            )
+            (work / f"{mode}-escape.json").write_text(json.dumps(escape_evidence, indent=2) + "\n")
             print(escape_output.decode(errors="replace"), end="")
             passed &= escape_passed
         evidence = {
@@ -244,9 +227,7 @@ def main():
             "fixture_object_sha256": digest(fixture_object),
             "unwind_archive": str(unwind_archive) if unwind_archive else None,
             "unwind_archive_sha256": digest(unwind_archive) if unwind_archive else None,
-            "link_only_provider_hashes": {
-                str(path): digest(path) for path in link_providers
-            },
+            "link_only_provider_hashes": {str(path): digest(path) for path in link_providers},
             "fixture_sha256": digest(fixture),
             "probe_sha256": digest(probe),
             "app_execution": False,

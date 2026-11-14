@@ -11,6 +11,7 @@ uncompressed, so it is not used yet.
 APKs are trusted only when their SHA-256 equals the hash in that index.
 Everything is bounded: archive entries, decompressed sizes and downloads.
 """
+
 import base64
 import hashlib
 import io
@@ -40,7 +41,11 @@ USER_AGENT = 'Shiraz-FDroid/1'
 PACKAGE = re.compile(r'[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+')
 DIGESTS = {  # digest OID -> (hashlib name, PKCS#1 DigestInfo prefix, JAR attribute prefix)
     '1.3.14.3.2.26': ('sha1', bytes.fromhex('3021300906052b0e03021a05000414'), 'SHA1'),
-    '2.16.840.1.101.3.4.2.1': ('sha256', bytes.fromhex('3031300d060960864801650304020105000420'), 'SHA-256'),
+    '2.16.840.1.101.3.4.2.1': (
+        'sha256',
+        bytes.fromhex('3031300d060960864801650304020105000420'),
+        'SHA-256',
+    ),
 }
 OID_SIGNED_DATA = '1.2.840.113549.1.7.2'
 OID_MESSAGE_DIGEST = '1.2.840.113549.1.9.4'
@@ -55,14 +60,14 @@ class Der:
         if start + 2 > len(data):
             raise FormatError('Truncated DER element')
         self.data, self.start, self.tag = data, start, data[start]
-        if self.tag & 0x1f == 0x1f:
+        if self.tag & 0x1F == 0x1F:
             raise FormatError('Unsupported DER high tag number')
         length, at = data[start + 1], start + 2
         if length & 0x80:
-            count = length & 0x7f
+            count = length & 0x7F
             if count == 0 or count > 4 or at + count > len(data):
                 raise FormatError('Unsupported DER length')
-            length = int.from_bytes(data[at:at + count], 'big')
+            length = int.from_bytes(data[at : at + count], 'big')
             at += count
         self.content, self.end = at, at + length
         if self.end > len(data):
@@ -70,11 +75,11 @@ class Der:
 
     @property
     def raw(self):
-        return self.data[self.start:self.end]
+        return self.data[self.start : self.end]
 
     @property
     def value(self):
-        return self.data[self.content:self.end]
+        return self.data[self.content : self.end]
 
     def children(self):
         if not self.tag & 0x20:
@@ -107,7 +112,7 @@ def oid(element):
         raise FormatError('Empty object identifier')
     parts, value = [], 0
     for byte in raw:
-        value = value << 7 | byte & 0x7f
+        value = value << 7 | byte & 0x7F
         if not byte & 0x80:
             parts.append(value)
             value = 0
@@ -122,7 +127,7 @@ def integer(element):
 def rsa_public_key(certificate):
     """Modulus and exponent from an X.509 certificate's SubjectPublicKeyInfo."""
     tbs = certificate.expect(0x30).children()[0].expect(0x30).children()
-    if tbs and tbs[0].tag == 0xa0:
+    if tbs and tbs[0].tag == 0xA0:
         tbs = tbs[1:]
     if len(tbs) < 6:
         raise FormatError('Malformed certificate')
@@ -158,8 +163,8 @@ def verify_pkcs7(block, signed, fingerprint=REPO_FINGERPRINT):
     content = der(block).expect(0x30).children()
     if len(content) != 2 or oid(content[0]) != OID_SIGNED_DATA:
         raise FormatError('Signature block is not PKCS#7 SignedData')
-    fields = content[1].expect(0xa0).children()[0].expect(0x30).children()
-    certificates = next((f for f in fields if f.tag == 0xa0), None)
+    fields = content[1].expect(0xA0).children()[0].expect(0x30).children()
+    certificates = next((f for f in fields if f.tag == 0xA0), None)
     signers = fields[-1].expect(0x31).children()
     if certificates is None or len(signers) != 1:
         raise FormatError('Signature block needs one certificate set and one signer')
@@ -177,7 +182,7 @@ def verify_pkcs7(block, signed, fingerprint=REPO_FINGERPRINT):
     name, prefix, _ = DIGESTS[digest_oid]
     at = 3
     attributes = None
-    if signer[at].tag == 0xa0:
+    if signer[at].tag == 0xA0:
         attributes = signer[at]
         at += 1
     algorithm = oid(signer[at].expect(0x30).children()[0])
@@ -250,7 +255,11 @@ def verify_index_jar(data, fingerprint=REPO_FINGERPRINT):
             raise FormatError('Unexpected repository index archive layout')
         names = {i.filename: i for i in infos}
         signature_files = [n for n in names if re.fullmatch(r'META-INF/[A-Za-z0-9_-]+\.SF', n)]
-        if len(signature_files) != 1 or INDEX_NAME not in names or 'META-INF/MANIFEST.MF' not in names:
+        if (
+            len(signature_files) != 1
+            or INDEX_NAME not in names
+            or 'META-INF/MANIFEST.MF' not in names
+        ):
             raise FormatError('Repository index archive lacks one signature, manifest or index')
         base = signature_files[0][:-3]
         block_name = base + '.RSA'
@@ -263,10 +272,15 @@ def verify_index_jar(data, fingerprint=REPO_FINGERPRINT):
         sf = manifest_sections(signed.decode('utf-8'))
         main = sf[0] if sf else {}
         # Strongest digest the signature file offers.
-        name, label = next(((n, l) for n, _, l in reversed(DIGESTS.values()) if l + '-Digest-Manifest' in main), (None, None))
+        name, label = next(
+            ((n, l) for n, _, l in reversed(DIGESTS.values()) if l + '-Digest-Manifest' in main),
+            (None, None),
+        )
         if name is None or main[label + '-Digest-Manifest'] != b64(name, manifest):
             raise FormatError('Signature file does not match the JAR manifest')
-        entry = [s for s in manifest_sections(manifest.decode('utf-8')) if s.get('Name') == INDEX_NAME]
+        entry = [
+            s for s in manifest_sections(manifest.decode('utf-8')) if s.get('Name') == INDEX_NAME
+        ]
         if len(entry) != 1 or label + '-Digest' not in entry[0]:
             raise FormatError('JAR manifest lacks the index digest')
         index = read_bounded(archive, names[INDEX_NAME], MAX_INDEX_JSON)
@@ -332,7 +346,9 @@ def choose_package(app, packages):
         if int(package.get('minSdkVersion', 1) or 1) > API_LEVEL:
             reason = f"Requires Android API {package.get('minSdkVersion')}"
             continue
-        if package.get('hashType') != 'sha256' or not re.fullmatch(r'[0-9a-f]{64}', package.get('hash', '')):
+        if package.get('hashType') != 'sha256' or not re.fullmatch(
+            r'[0-9a-f]{64}', package.get('hash', '')
+        ):
             reason = 'APK has no SHA-256 hash'
             continue
         return package, None
@@ -427,8 +443,15 @@ def build_catalog(index, address=REPO):
             }
         )
     apps.sort(key=lambda a: (a['name'].casefold(), a['packageName']))
-    return {'repo': {'name': repo.get('name'), 'address': address, 'timestamp': repo.get('timestamp'),
-                     'fingerprint': REPO_FINGERPRINT}, 'apps': apps}
+    return {
+        'repo': {
+            'name': repo.get('name'),
+            'address': address,
+            'timestamp': repo.get('timestamp'),
+            'fingerprint': REPO_FINGERPRINT,
+        },
+        'apps': apps,
+    }
 
 
 def download(url, limit, destination=None, expected_size=None):
@@ -489,7 +512,14 @@ def fetch(cache, package_name, output):
     catalog_file = cache / 'catalog.json'
     if not catalog_file.is_file():
         raise FormatError('No F-Droid catalog; run shiraz fdroid sync first')
-    entry = next((a for a in json.loads(catalog_file.read_text())['apps'] if a['packageName'] == package_name), None)
+    entry = next(
+        (
+            a
+            for a in json.loads(catalog_file.read_text())['apps']
+            if a['packageName'] == package_name
+        ),
+        None,
+    )
     if entry is None:
         raise FormatError(f'{package_name} is not in the F-Droid catalog')
     if not entry['compatible']:
@@ -506,5 +536,10 @@ def fetch(cache, package_name, output):
         Path(temporary).unlink(missing_ok=True)
         raise FormatError(f'{apk} SHA-256 {digest} does not match the signed index')
     os.replace(temporary, destination)
-    return {'packageName': package_name, 'path': str(destination), 'sha256': digest, 'size': size,
-            'versionName': entry.get('versionName')}
+    return {
+        'packageName': package_name,
+        'path': str(destination),
+        'sha256': digest,
+        'size': size,
+        'versionName': entry.get('versionName'),
+    }

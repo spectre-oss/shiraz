@@ -40,13 +40,8 @@ def main():
                 url = f"https://raw.githubusercontent.com/llvm/llvm-project/{REVISION}/compiler-rt/{source}"
                 with urllib.request.urlopen(url, timeout=30) as response:
                     data = response.read(2 * 1024 * 1024 + 1)
-            if (
-                len(data) > 2 * 1024 * 1024
-                or hashlib.sha256(data).hexdigest() != expected
-            ):
-                raise ValueError(
-                    f"modified/unexpected pinned compiler-rt file: {source}"
-                )
+            if len(data) > 2 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != expected:
+                raise ValueError(f"modified/unexpected pinned compiler-rt file: {source}")
             if not target.exists():
                 with tempfile.NamedTemporaryFile(dir=OUT, delete=False) as pending:
                     pending.write(data)
@@ -69,9 +64,7 @@ def main():
             )
             + "\n"
         )
-    print(
-        f"Guest emutls fixture: six unchanged compiler-rt files verified at {REVISION}"
-    )
+    print(f"Guest emutls fixture: six unchanged compiler-rt files verified at {REVISION}")
 
 
 if __name__ == "__main__":

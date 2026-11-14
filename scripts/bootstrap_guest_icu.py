@@ -106,9 +106,7 @@ def extract_verified(archive):
         if path.is_symlink() or (
             path.is_file() and path.relative_to(SOURCE).as_posix() not in hashes
         ):
-            raise ValueError(
-                f"unexpected private ICU source file: {path.relative_to(SOURCE)}"
-            )
+            raise ValueError(f"unexpected private ICU source file: {path.relative_to(SOURCE)}")
     return hashes
 
 
@@ -127,9 +125,7 @@ def installed_hashes(prefix):
 
 
 def run(arguments, cwd, environment):
-    subprocess.run(
-        [str(item) for item in arguments], cwd=cwd, env=environment, check=True
-    )
+    subprocess.run([str(item) for item in arguments], cwd=cwd, env=environment, check=True)
 
 
 def main():
@@ -139,9 +135,7 @@ def main():
     if args.jobs < 1 or args.jobs > 32:
         parser.error("jobs must be between 1 and 32")
     if baseline.ICU_VERSION != "78.3":
-        raise ValueError(
-            "review the private-static ICU recipe when the shared pin changes"
-        )
+        raise ValueError("review the private-static ICU recipe when the shared pin changes")
     OUT.mkdir(parents=True, exist_ok=True)
     with (OUT.parent / "guest-icu-static.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -225,15 +219,11 @@ def main():
                 shutil.rmtree(BUILD, ignore_errors=True)
                 BUILD.mkdir()
                 run(configure, BUILD, environment)
-                configured.write_text(
-                    json.dumps(signature, indent=2, sort_keys=True) + "\n"
-                )
+                configured.write_text(json.dumps(signature, indent=2, sort_keys=True) + "\n")
             run(["/usr/bin/make", f"-j{args.jobs}"], BUILD, environment)
             # Stage only UC/data archives plus their headers/licenses. Do not
             # install tools, i18n, or anything into the existing .local prefix.
-            with tempfile.TemporaryDirectory(
-                dir=OUT, prefix="install-stage-"
-            ) as temporary:
+            with tempfile.TemporaryDirectory(dir=OUT, prefix="install-stage-") as temporary:
                 stage = Path(temporary)
                 for directory in ("data", "common"):
                     run(
@@ -250,14 +240,10 @@ def main():
                     "Unmodified upstream source; private static UC/data build by bootstrap_guest_icu.py.\n"
                 )
                 if not installed_hashes(staged):
-                    raise ValueError(
-                        "private ICU static archives/headers were not installed"
-                    )
+                    raise ValueError("private ICU static archives/headers were not installed")
                 retired = OUT / "retired-install"
                 if retired.is_symlink():
-                    raise ValueError(
-                        "private ICU retired install must not be a symlink"
-                    )
+                    raise ValueError("private ICU retired install must not be a symlink")
                 shutil.rmtree(retired, ignore_errors=True)
                 if INSTALL.exists():
                     INSTALL.rename(retired)
@@ -271,9 +257,7 @@ def main():
                 )
                 + "\n"
             )
-    print(
-        f"Private static ICU {baseline.ICU_VERSION} verified: UC/data; original LICENSE retained"
-    )
+    print(f"Private static ICU {baseline.ICU_VERSION} verified: UC/data; original LICENSE retained")
 
 
 if __name__ == "__main__":

@@ -96,14 +96,17 @@ def recognize_cached_self(read_word, entry, owned_readable_data):
     if any(words[index] != word for index, word in fixed.items()):
         return None
     for index, target in ((16, 0), (29, 15), (33, 15)):
-        if words[index] not in (0xF8BFC000 | 15 << 5 | target,
-                                0xC8DFFC00 | 15 << 5 | target):
+        if words[index] not in (0xF8BFC000 | 15 << 5 | target, 0xC8DFFC00 | 15 << 5 | target):
             return None
     tables = []
     spans = [(entry, entry + BODY_BYTES)]
-    for index, register, role in ((3, 11, "owners"), (5, 12, "keys"),
-                                  (7, 13, "low"), (9, 14, "high")):
-        adrp, add = words[index:index + 2]
+    for index, register, role in (
+        (3, 11, "owners"),
+        (5, 12, "keys"),
+        (7, 13, "low"),
+        (9, 14, "high"),
+    ):
+        adrp, add = words[index : index + 2]
         # Reject ADR, shifted ADD, W operands, flags, different source/registers.
         if adrp & 0x9F00001F != 0x90000000 | register:
             return None
@@ -123,7 +126,10 @@ def recognize_cached_self(read_word, entry, owned_readable_data):
         spans.append((address, end))
         tables.append(CachedSelfTable(role, address))
     return CachedSelfEffects(
-        entry, BODY_BYTES,
+        entry,
+        BODY_BYTES,
         hashlib.sha256(b"".join(word.to_bytes(4, "little") for word in words)).hexdigest(),
-        tuple(tables), entry + 144, entry + 148,
+        tuple(tables),
+        entry + 144,
+        entry + 148,
     )

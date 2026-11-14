@@ -48,9 +48,7 @@ class MrsWindowRecordTests(unittest.TestCase):
         ]
         for key, value in invalid:
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                validate_mrs_window_record(
-                    self.metadata, {**window_record(), key: value}
-                )
+                validate_mrs_window_record(self.metadata, {**window_record(), key: value})
         for record in (None, {}, {**window_record(), "extra": 1}):
             with self.assertRaises(ValueError):
                 validate_mrs_window_record(self.metadata, record)
@@ -68,9 +66,7 @@ class MrsWindowRecordTests(unittest.TestCase):
             [0x200] * 131073,
         ):
             with self.subTest(sites=str(sites)[:40]), self.assertRaises(ValueError):
-                validate_mrs_window_record(
-                    self.metadata, {**window_record(), "sites": sites}
-                )
+                validate_mrs_window_record(self.metadata, {**window_record(), "sites": sites})
         for word in (
             0xD53BD052,
             0xD53BD05F,
@@ -89,9 +85,7 @@ class MrsWindowRecordTests(unittest.TestCase):
         legacy = window_record()
         del legacy["image_stack_exclusion_profile"]
         self.assertIsNone(
-            validate_mrs_window_record(
-                self.metadata, legacy
-            ).image_stack_exclusion_profile
+            validate_mrs_window_record(self.metadata, legacy).image_stack_exclusion_profile
         )
         self.assertEqual(
             validate_mrs_window_record(self.metadata, window_record()).sites,
@@ -113,9 +107,7 @@ class MrsWindowRecordTests(unittest.TestCase):
             metadata = self.fixture.metadata(proof, bridge)
             decoder = object.__new__(audit.ElfDecoder)
             decoder.bindings = metadata
-            self.assertEqual(
-                decoder.mrs_stack_window(0x200)["image_stack_exclusion_profile"], 1
-            )
+            self.assertEqual(decoder.mrs_stack_window(0x200)["image_stack_exclusion_profile"], 1)
             self.assertIsNone(decoder.mrs_stack_window(0x204))
             namespace = object.__new__(NamespaceDecoder)
             namespace.names = ["root", "libfixture.so"]
@@ -127,9 +119,7 @@ class MrsWindowRecordTests(unittest.TestCase):
             self.assertIsNone(namespace.mrs_stack_window(0x200))
             self.assertIsNone(namespace.mrs_stack_window(2 * STRIDE + 0x200))
             legacy = copy.deepcopy(proof)
-            del legacy["modules"][0]["mrs_stack_window"][
-                "image_stack_exclusion_profile"
-            ]
+            del legacy["modules"][0]["mrs_stack_window"]["image_stack_exclusion_profile"]
             decoder.bindings = self.fixture.metadata(legacy, bridge)
             self.assertIsNone(decoder.mrs_stack_window(0x200))
             for change in ("bridge", "elf", "bindings"):
@@ -211,17 +201,13 @@ class MrsWindowReadTests(unittest.TestCase):
 
             def caller_frame(self, pc):
                 returns = (
-                    {}
-                    if extra_return is None
-                    else {entry_sp + extra_return: frozenset({1234})}
+                    {} if extra_return is None else {entry_sp + extra_return: frozenset({1234})}
                 )
                 return audit.State(sp=entry_sp, stack_returns=returns), {
                     "status": "synthetic-entry-context"
                 }
 
-        return audit.Audit(Decoder()).site(
-            0, entry_context=bool(entry_sp or extra_return)
-        )
+        return audit.Audit(Decoder()).site(0, entry_context=bool(entry_sp or extra_return))
 
     def test_only_trusted_complete_owned_read_span_can_waive_alias(self):
         accepted = self.run_graph()
@@ -251,9 +237,7 @@ class MrsWindowReadTests(unittest.TestCase):
 
     def test_first_anchor_and_all_protected_facts_must_fit(self):
         for offset in (-4096, 248):
-            self.assertTrue(
-                self.run_graph(spill=offset)["conditional_image_stack_separation"]
-            )
+            self.assertTrue(self.run_graph(spill=offset)["conditional_image_stack_separation"])
         for options in (
             {"spill": -4104},
             {"spill": 256},
@@ -316,9 +300,7 @@ class MrsWindowReadTests(unittest.TestCase):
 
         report = audit.Audit(Decoder()).site(0)
         reasons = {item["reason"] for item in report["reasons"]}
-        self.assertNotIn(
-            "atomic-flag-load-may-alias-thread-pointer-stack-spill", reasons
-        )
+        self.assertNotIn("atomic-flag-load-may-alias-thread-pointer-stack-spill", reasons)
         self.assertIn("unmodelled-load-may-alias-thread-pointer-stack-spill", reasons)
         self.assertEqual(report["classification"], "unknown")
 

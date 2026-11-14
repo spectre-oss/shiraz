@@ -50,9 +50,7 @@ def _symbol(metadata, index):
         or not 0 <= index < metadata.symbol_count
     ):
         raise ValueError("cross-binding symbol count/index bound")
-    return struct.unpack(
-        "<IBBHQQ", metadata.read(metadata.tags[6] + index * 24, 24)
-    )
+    return struct.unpack("<IBBHQQ", metadata.read(metadata.tags[6] + index * 24, 24))
 
 
 def _version_index(metadata, index):
@@ -142,9 +140,7 @@ def verify_guest_target(importer_metadata, slot, provider_metadata):
     ):
         raise ValueError("cross-binding symbol count/index bound")
     for ordinal in range(provider_metadata.symbol_count):
-        name, symbol_info, other, symbol_section, value, _ = _symbol(
-            provider_metadata, ordinal
-        )
+        name, symbol_info, other, symbol_section, value, _ = _symbol(provider_metadata, ordinal)
         if (
             symbol_info & 15 != 2
             or symbol_info >> 4 not in {1, 2}

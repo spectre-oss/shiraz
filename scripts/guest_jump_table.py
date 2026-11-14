@@ -95,8 +95,11 @@ def _extract_table(read_word, entry, readonly_bytes):
     if page & 0x9F000000 != 0x90000000:
         return None
     table = page & 31
-    if (add_table & 0xFFC00000 != 0x91000000 or add_table & 31 != table or
-            (add_table >> 5) & 31 != table):
+    if (
+        add_table & 0xFFC00000 != 0x91000000
+        or add_table & 31 != table
+        or (add_table >> 5) & 31 != table
+    ):
         return None
     table_address = _adr(page, entry + 4, True) + ((add_table >> 10) & 0xFFF)
     if not _address(table_address) or table_address + limit + 1 > U64_LIMIT:
@@ -107,18 +110,27 @@ def _extract_table(read_word, entry, readonly_bytes):
     branch_base = _adr(adr, entry + 16, False)
     if not _address(branch_base) or branch_base & 3:
         return None
-    if (load & 0xFFE0FC00 != 0x38606800 or
-            (load >> 16) & 31 != index or (load >> 5) & 31 != table):
+    if load & 0xFFE0FC00 != 0x38606800 or (load >> 16) & 31 != index or (load >> 5) & 31 != table:
         return None
     offset = load & 31
     roles = {index, table, offset, destination}
     mask = and32_immediate(mask_word)
-    if (len(roles) != 4 or any(register > 28 for register in roles) or mask is None or
-            int(mask[0][1:]) in roles or int(mask[1][1:]) in roles):
+    if (
+        len(roles) != 4
+        or any(register > 28 for register in roles)
+        or mask is None
+        or int(mask[0][1:]) in roles
+        or int(mask[1][1:]) in roles
+    ):
         return None
-    if (add_branch & 0xFFE0FC00 != 0x8B000800 or add_branch & 31 != destination or
-            (add_branch >> 5) & 31 != destination or (add_branch >> 16) & 31 != offset or
-            branch & 0xFFFFFC1F != 0xD61F0000 or (branch >> 5) & 31 != destination):
+    if (
+        add_branch & 0xFFE0FC00 != 0x8B000800
+        or add_branch & 31 != destination
+        or (add_branch >> 5) & 31 != destination
+        or (add_branch >> 16) & 31 != offset
+        or branch & 0xFFFFFC1F != 0xD61F0000
+        or (branch >> 5) & 31 != destination
+    ):
         return None
     data = readonly_bytes(table_address, limit + 1)
     if type(data) is not bytes or len(data) != limit + 1:
@@ -128,11 +140,24 @@ def _extract_table(read_word, entry, readonly_bytes):
         return None
     body = b"".join(word.to_bytes(4, "little") for word in words)
     return ByteJumpTableEffects(
-        entry, len(body), hashlib.sha256(body).hexdigest(), words, None,
-        table_address, branch_base, limit, f"w{source}", f"x{index}",
-        f"x{table}", f"w{offset}", f"x{destination}", tuple(data),
-        hashlib.sha256(data).hexdigest(), targets,
-        index_extract=(lsb, end - lsb + 1), interleaved_and=mask,
+        entry,
+        len(body),
+        hashlib.sha256(body).hexdigest(),
+        words,
+        None,
+        table_address,
+        branch_base,
+        limit,
+        f"w{source}",
+        f"x{index}",
+        f"x{table}",
+        f"w{offset}",
+        f"x{destination}",
+        tuple(data),
+        hashlib.sha256(data).hexdigest(),
+        targets,
+        index_extract=(lsb, end - lsb + 1),
+        interleaved_and=mask,
     )
 
 
@@ -198,8 +223,11 @@ def recognize_byte_jump_table(read_word, entry, readonly_bytes):
     if page & 0x9F000000 != 0x90000000:
         return None
     table = page & 31
-    if (add_table & 0xFFC00000 != 0x91000000
-            or add_table & 31 != table or (add_table >> 5) & 31 != table):
+    if (
+        add_table & 0xFFC00000 != 0x91000000
+        or add_table & 31 != table
+        or (add_table >> 5) & 31 != table
+    ):
         return None
     table_address = _adr(page, entry + 12, True) + ((add_table >> 10) & 0xFFF)
     if not _address(table_address) or table_address + limit + 1 > U64_LIMIT:
@@ -211,21 +239,26 @@ def recognize_byte_jump_table(read_word, entry, readonly_bytes):
     if not _address(branch_base) or branch_base & 3:
         return None
     # LDRB Woffset, [Xtable, Xindex], UXTX, unscaled, no writeback.
-    if (load & 0xFFE0FC00 != 0x38606800
-            or (load >> 16) & 31 != index or (load >> 5) & 31 != table):
+    if load & 0xFFE0FC00 != 0x38606800 or (load >> 16) & 31 != index or (load >> 5) & 31 != table:
         return None
     offset = load & 31
     roles = {index, table, offset, destination}
-    if (len(roles) != 4 or any(register > 28 for register in roles)
-            or not requires_zero_extended_index and source in roles):
+    if (
+        len(roles) != 4
+        or any(register > 28 for register in roles)
+        or not requires_zero_extended_index
+        and source in roles
+    ):
         return None
     # ADD Xbranch, Xbranch, Xoffset, LSL #2; BR Xbranch.
-    if (add_branch & 0xFFE0FC00 != 0x8B000800
-            or add_branch & 31 != destination
-            or (add_branch >> 5) & 31 != destination
-            or (add_branch >> 16) & 31 != offset
-            or branch & 0xFFFFFC1F != 0xD61F0000
-            or (branch >> 5) & 31 != destination):
+    if (
+        add_branch & 0xFFE0FC00 != 0x8B000800
+        or add_branch & 31 != destination
+        or (add_branch >> 5) & 31 != destination
+        or (add_branch >> 16) & 31 != offset
+        or branch & 0xFFFFFC1F != 0xD61F0000
+        or (branch >> 5) & 31 != destination
+    ):
         return None
     data = readonly_bytes(table_address, limit + 1)
     if type(data) is not bytes or len(data) != limit + 1:
@@ -235,9 +268,22 @@ def recognize_byte_jump_table(read_word, entry, readonly_bytes):
         return None
     body = b"".join(word.to_bytes(4, "little") for word in words)
     return ByteJumpTableEffects(
-        entry, BODY_WORDS * 4, hashlib.sha256(body).hexdigest(), words,
-        default, table_address, branch_base, limit, f"w{source}", f"x{index}",
-        f"x{table}", f"w{offset}", f"x{destination}", tuple(data),
-        hashlib.sha256(data).hexdigest(), targets,
-        prebranch_move, requires_zero_extended_index,
+        entry,
+        BODY_WORDS * 4,
+        hashlib.sha256(body).hexdigest(),
+        words,
+        default,
+        table_address,
+        branch_base,
+        limit,
+        f"w{source}",
+        f"x{index}",
+        f"x{table}",
+        f"w{offset}",
+        f"x{destination}",
+        tuple(data),
+        hashlib.sha256(data).hexdigest(),
+        targets,
+        prebranch_move,
+        requires_zero_extended_index,
     )

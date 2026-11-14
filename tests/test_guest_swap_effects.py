@@ -25,8 +25,19 @@ def fixture(order="acquire", entry=0x1000, flag=0x51548):
     adrp = 0x90000010 | (encoded & 3) << 29 | (encoded >> 2) << 5
     load = 0x39400210 | (flag & 4095) << 10
     lse, exclusive_load, exclusive_store = ORDERS[order]
-    return [0xD503245F, adrp, load, 0x34000070, lse, 0xD65F03C0,
-            0xAA0003F0, exclusive_load, exclusive_store, 0x35FFFFD1, 0xD65F03C0]
+    return [
+        0xD503245F,
+        adrp,
+        load,
+        0x34000070,
+        lse,
+        0xD65F03C0,
+        0xAA0003F0,
+        exclusive_load,
+        exclusive_store,
+        0x35FFFFD1,
+        0xD65F03C0,
+    ]
 
 
 class SwapEffectsTests(unittest.TestCase):
@@ -40,38 +51,61 @@ class SwapEffectsTests(unittest.TestCase):
     def test_each_complete_observed_order_has_exact_frozen_effects(self):
         for order in ORDERS:
             with self.subTest(order=order):
-                words = fixture(order);result = self.recognize(words)
+                words = fixture(order)
+                result = self.recognize(words)
                 self.assertEqual(result.memory_order, order)
                 self.assertEqual(result.body_size, 44)
-                self.assertEqual(result.body_sha256, hashlib.sha256(
-                    b"".join(word.to_bytes(4, "little") for word in words)).hexdigest())
+                self.assertEqual(
+                    result.body_sha256,
+                    hashlib.sha256(
+                        b"".join(word.to_bytes(4, "little") for word in words)
+                    ).hexdigest(),
+                )
                 self.assertEqual(result.flag_address, 0x51548)
-                self.assertEqual((result.memory_base, result.memory_payload, result.memory_result,
-                                  result.rmw_width, result.flag_width), ("x1", "x0", "x0", 8, 1))
+                self.assertEqual(
+                    (
+                        result.memory_base,
+                        result.memory_payload,
+                        result.memory_result,
+                        result.rmw_width,
+                        result.flag_width,
+                    ),
+                    ("x1", "x0", "x0", 8, 1),
+                )
                 self.assertEqual(result.operation, "atomic-swap64")
-                self.assertEqual([(p.name, p.ret_pc, p.clobbers) for p in result.paths],
-                                 [("lse", 0x1014, ("x0", "x16")),
-                                  ("llsc", 0x1028, ("x0", "x16", "x17"))])
+                self.assertEqual(
+                    [(p.name, p.ret_pc, p.clobbers) for p in result.paths],
+                    [("lse", 0x1014, ("x0", "x16")), ("llsc", 0x1028, ("x0", "x16", "x17"))],
+                )
                 self.assertTrue(all(p.may_write_memory and p.preserves_nzcv for p in result.paths))
-                self.assertTrue(result.preserves_sp and result.preserves_lr and
-                                result.preserves_vectors and result.preserves_nzcv)
-                with self.assertRaises(FrozenInstanceError):result.rmw_width = 4
-                with self.assertRaises(FrozenInstanceError):result.paths[0].ret_pc = 0
+                self.assertTrue(
+                    result.preserves_sp
+                    and result.preserves_lr
+                    and result.preserves_vectors
+                    and result.preserves_nzcv
+                )
+                with self.assertRaises(FrozenInstanceError):
+                    result.rmw_width = 4
+                with self.assertRaises(FrozenInstanceError):
+                    result.paths[0].ret_pc = 0
 
     def test_every_single_bit_mutation_refuses_with_exact_flag_ownership(self):
         for order in ORDERS:
             words = fixture(order)
             for index in range(len(words)):
                 for bit in range(32):
-                    changed = words.copy();changed[index] ^= 1 << bit
+                    changed = words.copy()
+                    changed[index] ^= 1 << bit
                     with self.subTest(order=order, index=index, bit=bit):
                         self.assertIsNone(self.recognize(changed))
 
     def test_mixed_orders_and_unobserved_release_only_are_not_inferred(self):
         lse_words = (0xF8208020, 0xF8A08020, 0xF8608020, 0xF8E08020)
-        for selected in itertools.product(lse_words, (0xC85F7C20, 0xC85FFC20),
-                                          (0xC8117C30, 0xC811FC30)):
-            words = fixture();words[4], words[7], words[8] = selected
+        for selected in itertools.product(
+            lse_words, (0xC85F7C20, 0xC85FFC20), (0xC8117C30, 0xC811FC30)
+        ):
+            words = fixture()
+            words[4], words[7], words[8] = selected
             result = self.recognize(words)
             if selected in ORDERS.values():
                 self.assertIsNotNone(result)
@@ -83,19 +117,28 @@ class SwapEffectsTests(unittest.TestCase):
         for index in range(len(words)):
             self.assertIsNone(self.recognize(words[:index]))
             for invalid in (None, True, -1, 1 << 32, "word", 1.5):
-                changed = words.copy();changed[index] = invalid
+                changed = words.copy()
+                changed[index] = invalid
                 with self.subTest(index=index, invalid=invalid):
                     self.assertIsNone(self.recognize(changed))
-        for index, replacement in ((0, 0xD503201F), (4, 0xB8A08020),
-                                   (5, 0xD65F0020), (6, 0xAA0103F0),
-                                   (7, 0xC85FFC40), (8, 0xC8107C30),
-                                   (9, 0x35FFFFB1), (10, 0xD65F0020)):
-            changed = words.copy();changed[index] = replacement
+        for index, replacement in (
+            (0, 0xD503201F),
+            (4, 0xB8A08020),
+            (5, 0xD65F0020),
+            (6, 0xAA0103F0),
+            (7, 0xC85FFC40),
+            (8, 0xC8107C30),
+            (9, 0x35FFFFB1),
+            (10, 0xD65F0020),
+        ):
+            changed = words.copy()
+            changed[index] = replacement
             self.assertIsNone(self.recognize(changed))
 
     def test_invalid_entry_is_rejected_before_reading(self):
         def forbidden(_):
             self.fail("invalid entry read executable memory")
+
         for entry in (None, True, -4, 1, 1 << 64, (1 << 64) - BODY_BYTES + 4):
             with self.subTest(entry=entry):
                 self.assertIsNone(recognize_swap64(forbidden, entry, lambda *_: True))
@@ -112,9 +155,13 @@ class SwapEffectsTests(unittest.TestCase):
         self.assertIsNone(self.recognize(flag=0x102B, owned=lambda *_: True))
 
     def test_relocation_signed_page_and_pc_crossing_without_address_allowlist(self):
-        for entry, flag in ((0x1FFC, 0x51548), (0x80000000, 0x80050548),
-                            (0x50000, 0x1000), (0x1000, 0),
-                            ((1 << 64) - BODY_BYTES, (1 << 64) - 0x1040)):
+        for entry, flag in (
+            (0x1FFC, 0x51548),
+            (0x80000000, 0x80050548),
+            (0x50000, 0x1000),
+            (0x1000, 0),
+            ((1 << 64) - BODY_BYTES, (1 << 64) - 0x1040),
+        ):
             with self.subTest(entry=entry, flag=flag):
                 result = self.recognize(entry=entry, flag=flag)
                 self.assertIsNotNone(result)
@@ -128,10 +175,18 @@ class SwapEffectsTests(unittest.TestCase):
         entry = (1 << 64) - BODY_BYTES
         words = fixture(entry=entry, flag=entry - 4096)
         words[1] = 0xB0000010  # ADRP x16,+4096 wraps the top page.
-        self.assertIsNone(self.recognize(words, entry=entry, flag=entry - 4096, owned=lambda *_: True))
-        for index, replacement in ((1, 0x90000291), (1, 0x10000290),
-                                   (2, 0x39552211), (2, 0x39552230), (2, 0xB9452210)):
-            words = fixture();words[index] = replacement
+        self.assertIsNone(
+            self.recognize(words, entry=entry, flag=entry - 4096, owned=lambda *_: True)
+        )
+        for index, replacement in (
+            (1, 0x90000291),
+            (1, 0x10000290),
+            (2, 0x39552211),
+            (2, 0x39552230),
+            (2, 0xB9452210),
+        ):
+            words = fixture()
+            words[index] = replacement
             self.assertIsNone(self.recognize(words))
 
 

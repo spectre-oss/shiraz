@@ -84,9 +84,7 @@ def main():
         closure = stage_closure(ROOT, HOST, WORK, env)
         label = "M5_ART_HARDENED_PREPARED"
         if args.mode == "staged-adhoc":
-            closure.update(
-                mode="staged-adhoc", hardened_verified=False, route_check_only=True
-            )
+            closure.update(mode="staged-adhoc", hardened_verified=False, route_check_only=True)
             write_manifest(closure)
             label = "M5_ART_STAGED_ADHOC_PREPARED"
         print(
@@ -151,9 +149,7 @@ def main():
             closure = stage_closure(ROOT, HOST, WORK, env)
             manifest = Path(closure["tree"]) / "closure.json"
             label = (
-                "M5_ART_HARDENED_PREPARED"
-                if mode == "hardened"
-                else "M5_ART_STAGED_ADHOC_PREPARED"
+                "M5_ART_HARDENED_PREPARED" if mode == "hardened" else "M5_ART_STAGED_ADHOC_PREPARED"
             )
             print(
                 label + " manifest=" + str(manifest) + " signed=0 execution_verified=0",
@@ -163,8 +159,7 @@ def main():
                 if not args.identity:
                     raise SystemExit(
                         "strict hardened ART needs a public --identity or SHIRAZ_CODESIGN_IDENTITY "
-                        "with a real TeamIdentifier; unsigned closure is ready at "
-                        + str(manifest)
+                        "with a real TeamIdentifier; unsigned closure is ready at " + str(manifest)
                     )
                 sign_closure(
                     closure,
@@ -197,23 +192,18 @@ def main():
         if mode == "hardened":
             flags = re.search(r"flags=0x([0-9a-fA-F]+)", signature)
             if flags is None or not int(flags[1], 16) & 0x10000:
-                raise SystemExit(
-                    "hardened gate requires the actual runtime signing flag"
-                )
+                raise SystemExit("hardened gate requires the actual runtime signing flag")
             entitlements = subprocess.run(
                 ["codesign", "--display", "--entitlements", "-", "--xml", str(vm)],
                 env=env,
                 capture_output=True,
                 check=True,
             ).stdout
-            if plistlib.loads(entitlements) != {
-                "com.apple.security.cs.allow-jit": True
-            }:
+            if plistlib.loads(entitlements) != {"com.apple.security.cs.allow-jit": True}:
                 raise SystemExit("hardened gate permits only allow-jit")
         command = [
             vm,
-            "-Xbootclasspath:"
-            + ":".join(str(runtime_host / "framework" / name) for name in JARS),
+            "-Xbootclasspath:" + ":".join(str(runtime_host / "framework" / name) for name in JARS),
             "-Xcheck:jni",
             "-Xusejit:false",
             "-Xint",
@@ -252,9 +242,7 @@ def main():
                 inventory = validate_native_inventory(
                     result.stdout, closure, [vm, bridge, host_fixture]
                 )
-                (WORK / (run_name + ".native-closure.log")).write_text(
-                    inventory["raw_report"]
-                )
+                (WORK / (run_name + ".native-closure.log")).write_text(inventory["raw_report"])
             except (OSError, ValueError, KeyError, TypeError) as error:
                 inventory_error = str(error)
             closure.update(
@@ -283,15 +271,11 @@ def main():
             "native_image_inventory_error": inventory_error,
             "route_check_only": mode == "staged-adhoc",
             "returncode": result.returncode,
-            "native_closure": str(Path(closure["tree"]) / "closure.json")
-            if closure
-            else None,
+            "native_closure": str(Path(closure["tree"]) / "closure.json") if closure else None,
             "team_identifier": closure["team_identifier"] if closure else None,
             "signature": signature,
             "sha256": {
-                str(path.relative_to(ROOT)): hashlib.sha256(
-                    path.read_bytes()
-                ).hexdigest()
+                str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in (
                     vm,
                     jar,
@@ -301,21 +285,19 @@ def main():
                 )
             },
         }
-        (WORK / (run_name + ".result.json")).write_text(
-            json.dumps(evidence, indent=2) + "\n"
-        )
+        (WORK / (run_name + ".result.json")).write_text(json.dumps(evidence, indent=2) + "\n")
         print(result.stdout, end="")
         print(result.stderr, end="")
         if args.signal_chain_check and not signal_verified:
             raise SystemExit("ART NativeBridge special signal registration/delivery gate failed")
         if args.expect_late_tls_refusal:
-            reason = "SHIRAZ_GUEST_FATAL unsupported guest entry during unowned native thread teardown"
+            reason = (
+                "SHIRAZ_GUEST_FATAL unsupported guest entry during unowned native thread teardown"
+            )
             # Darwin teardown can turn abort into SIGTRAP, and ART's fatal
             # handler can exit1. Record the actual terminal result rather than
             # claiming a raw SIGABRT wait status in that case.
-            fatal_signal = re.search(
-                r"^Fatal signal (5|6) ", result.stderr, re.MULTILINE
-            )
+            fatal_signal = re.search(r"^Fatal signal (5|6) ", result.stderr, re.MULTILINE)
             terminal = result.returncode in (-signal.SIGABRT, -signal.SIGTRAP) or (
                 result.returncode == 1 and fatal_signal is not None
             )
@@ -337,9 +319,7 @@ def main():
                 refusal_terminal_returncode=result.returncode,
                 art_fatal_signal=int(fatal_signal[1]) if fatal_signal else None,
             )
-            (WORK / (run_name + ".result.json")).write_text(
-                json.dumps(evidence, indent=2) + "\n"
-            )
+            (WORK / (run_name + ".result.json")).write_text(json.dumps(evidence, indent=2) + "\n")
             print(
                 f"M5_ART_TLS_LATE_REFUSAL_PASS mode={mode} returncode={result.returncode} "
                 "cleanup_supported=0 full_execution_verified=0 hardened_execution_verified=0"
@@ -354,10 +334,7 @@ def main():
             raise SystemExit(
                 f"{mode} guest ART JNI failed (exit {result.returncode}); see {WORK / (run_name + '.log')}"
             )
-        if (
-            "M5_ART_BITMAP_PASS shadow_env=1 rgba=1 nested=1 writeback=1"
-            not in result.stdout
-        ):
+        if "M5_ART_BITMAP_PASS shadow_env=1 rgba=1 nested=1 writeback=1" not in result.stdout:
             raise SystemExit("guest libjnigraphics JNI/pixel gate failed")
         if (
             "M5_ART_TLS_PERSISTENCE_PASS entries=8 emutls=1 key_dtors=1 cxx_dtors=1"
@@ -366,9 +343,7 @@ def main():
             raise SystemExit("guest TLS persistence/termination gate failed")
         if args.late_tls and "M5_ART_TLS_LATE_ENTRY_PASS " not in result.stdout:
             raise SystemExit("guest final-native-round JNI TLS cleanup gate failed")
-        rewritten = re.search(
-            r"SHIRAZ_GUEST_TPIDR_REWRITTEN sites=(\d+)", result.stderr
-        )
+        rewritten = re.search(r"SHIRAZ_GUEST_TPIDR_REWRITTEN sites=(\d+)", result.stderr)
         if rewritten is None or int(rewritten[1]) == 0:
             raise SystemExit(
                 "JNI gate requires genuine stack-protected guest instruction rewriting"
@@ -391,12 +366,8 @@ def main():
             hardened_verified=mode == "hardened",
             signal_chain_verified=signal_verified,
         )
-        (WORK / (run_name + ".result.json")).write_text(
-            json.dumps(evidence, indent=2) + "\n"
-        )
-        suffix = (
-            " hardened_verified=0 route_check_only=1" if mode == "staged-adhoc" else ""
-        )
+        (WORK / (run_name + ".result.json")).write_text(json.dumps(evidence, indent=2) + "\n")
+        suffix = " hardened_verified=0 route_check_only=1" if mode == "staged-adhoc" else ""
         print(f"M5_ART_JNI_MODE_PASS {mode}" + suffix)
 
 

@@ -27,23 +27,37 @@ def badged_icon(apk: Path, work: Path, icons: Path) -> Optional[Path]:
     if not helper.is_file() or not mark.is_file():
         return None
     target, source = work / "dock.icns", work / "icon"
-    if target.is_file() and target.stat().st_mtime >= max(helper.stat().st_mtime, apk.stat().st_mtime):
+    if target.is_file() and target.stat().st_mtime >= max(
+        helper.stat().st_mtime, apk.stat().st_mtime
+    ):
         return target
     from .app_icon import extract_icon
+
     try:
         if source.is_symlink() or target.is_symlink():
             raise FormatError("icon work paths must not be symlinks")
         extract_icon(apk, source)
-        subprocess.run([str(helper), str(source), str(mark), str(target)], check=True, timeout=30,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        subprocess.run(
+            [str(helper), str(source), str(mark), str(target)],
+            check=True,
+            timeout=30,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
     except (FormatError, OSError, subprocess.SubprocessError) as exc:
         print(f"SHIRAZ_DOCK_ICON fallback=ghost reason={exc}", file=sys.stderr, flush=True)
         return None
     return target
 
 
-def prepare_app_bundle(work: Path, vm: Path, host: Path, package: str, icon: Optional[Path] = None,
-                       name: Optional[str] = None) -> Path:
+def prepare_app_bundle(
+    work: Path,
+    vm: Path,
+    host: Path,
+    package: str,
+    icon: Optional[Path] = None,
+    name: Optional[str] = None,
+) -> Path:
     """Copy the unchanged ART executable into an app bundle; never patch or sign it.
 
     `icon` is an optional .icns (the APK icon with the Shiraz badge, or the plain

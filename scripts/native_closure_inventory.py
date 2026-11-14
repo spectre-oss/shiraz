@@ -18,15 +18,11 @@ def validate_native_inventory(stdout, manifest, mandatory):
     if len(stdout) > MAX_STDOUT:
         raise ValueError("native inventory stdout exceeds bound")
     lines = stdout.splitlines()
-    starts = [
-        index for index, line in enumerate(lines) if line.startswith(PREFIX + "BEGIN")
-    ]
+    starts = [index for index, line in enumerate(lines) if line.startswith(PREFIX + "BEGIN")]
     if len(starts) != 1:
         raise ValueError("native inventory requires one complete BEGIN report")
     first = starts[0]
-    begin = re.fullmatch(
-        r"M5_NATIVE_CLOSURE_BEGIN count=(\d+) snapshot=end-of-main", lines[first]
-    )
+    begin = re.fullmatch(r"M5_NATIVE_CLOSURE_BEGIN count=(\d+) snapshot=end-of-main", lines[first])
     if begin is None or not 1 <= int(begin[1]) <= MAX_IMAGES:
         raise ValueError("native inventory count or snapshot malformed")
     count = int(begin[1])
@@ -34,17 +30,13 @@ def validate_native_inventory(stdout, manifest, mandatory):
     if end >= len(lines) or lines[end] != f"M5_NATIVE_CLOSURE_END count={count}":
         raise ValueError("native inventory truncated or count mismatch")
     if any(
-        line.startswith(PREFIX)
-        for index, line in enumerate(lines)
-        if not first <= index <= end
+        line.startswith(PREFIX) for index, line in enumerate(lines) if not first <= index <= end
     ):
         raise ValueError("native inventory has additional or malformed report records")
     paths = []
     for index in range(count):
         line = lines[first + index + 1]
-        match = re.fullmatch(
-            r"M5_NATIVE_CLOSURE_PATH index=(\d+) hex=([0-9a-f]+)", line
-        )
+        match = re.fullmatch(r"M5_NATIVE_CLOSURE_PATH index=(\d+) hex=([0-9a-f]+)", line)
         if match is None or int(match[1]) != index or len(match[2]) % 2:
             raise ValueError("native inventory path record malformed")
         encoded = bytes.fromhex(match[2])
@@ -61,23 +53,17 @@ def validate_native_inventory(stdout, manifest, mandatory):
         raise ValueError("native inventory manifest has duplicate copied paths")
     mandatory = {str(path) for path in mandatory}
     if not mandatory or not mandatory <= owned.keys():
-        raise ValueError(
-            "native inventory mandatory images must name exact owned copies"
-        )
+        raise ValueError("native inventory mandatory images must name exact owned copies")
     observed = {}
     for name in paths:
         if is_system(name):
             continue
         item = owned.get(name)
         if item is None:
-            raise ValueError(
-                "native inventory observed foreign non-system image: " + name
-            )
+            raise ValueError("native inventory observed foreign non-system image: " + name)
         path = Path(name)
         if path.is_symlink() or path.resolve(strict=True) != path or not path.is_file():
-            raise ValueError(
-                "native inventory image is not an exact regular owned copy"
-            )
+            raise ValueError("native inventory image is not an exact regular owned copy")
         expected = item.get("signed_sha256")
         if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
             raise ValueError("native inventory copied image lacks signed hash")
@@ -85,14 +71,10 @@ def validate_native_inventory(stdout, manifest, mandatory):
             raise ValueError("native inventory copied image exceeds hash bound")
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != expected:
-            raise ValueError(
-                "native inventory copied image changed since signing: " + name
-            )
+            raise ValueError("native inventory copied image changed since signing: " + name)
         observed[name] = actual
     if not mandatory <= observed.keys():
-        raise ValueError(
-            "native inventory missing mandatory main/bridge/host-helper image"
-        )
+        raise ValueError("native inventory missing mandatory main/bridge/host-helper image")
     return {
         "snapshot": "end-of-main",
         "scope": "stable end-of-main dyld observation; no historical load/unload claim",

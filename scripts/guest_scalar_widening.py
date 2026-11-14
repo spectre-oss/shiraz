@@ -52,11 +52,15 @@ class ScalarWidening:
 
     def observe(self, group_key, constants, zero_upper):
         hash(group_key)  # Reject unhashable keys before changing retained state.
-        if (not isinstance(constants, dict)
-                or any(not isinstance(name, str) or type(value) is not int
-                       for name, value in constants.items())
-                or not isinstance(zero_upper, (set, frozenset))
-                or any(not isinstance(name, str) for name in zero_upper)):
+        if (
+            not isinstance(constants, dict)
+            or any(
+                not isinstance(name, str) or type(value) is not int
+                for name, value in constants.items()
+            )
+            or not isinstance(zero_upper, (set, frozenset))
+            or any(not isinstance(name, str) for name in zero_upper)
+        ):
             raise TypeError("invalid scalar facts")
         incoming = tuple(sorted(constants.items()))
         upper = frozenset(zero_upper)
@@ -66,16 +70,22 @@ class ScalarWidening:
                 return None
             merged = _Group(incoming, upper, 1)
         else:
-            shared = tuple((name, value) for name, value in previous.constants
-                           if name in constants and constants[name] == value)
-            merged = _Group(shared, previous.zero_upper & upper,
-                            min(previous.variants + 1, self.max_variants))
+            shared = tuple(
+                (name, value)
+                for name, value in previous.constants
+                if name in constants and constants[name] == value
+            )
+            merged = _Group(
+                shared, previous.zero_upper & upper, min(previous.variants + 1, self.max_variants)
+            )
         self._groups[group_key] = merged
         widened = merged.variants >= self.max_variants
         selected = merged.constants if widened else incoming
         selected_upper = merged.zero_upper if widened else upper
         return ScalarState(
-            selected, selected_upper, widened,
+            selected,
+            selected_upper,
+            widened,
             frozenset(constants) - frozenset(name for name, _ in selected),
             upper - selected_upper,
         )

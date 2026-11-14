@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Test the Android wolfSSL socket bridge against a bounded local TLS server."""
+
 import argparse
 import fcntl
 import http.server
@@ -26,7 +27,8 @@ def fail_vm(message, result):
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    requests=[]
+    requests = []
+
     def do_GET(self):
         self.requests.append(self.path)
         if self.path == '/redirect':
@@ -42,12 +44,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
         else:
             self.send_error(404)
+
     def log_message(self, *args):
         pass
 
-parser=argparse.ArgumentParser()
-parser.add_argument('--apk',type=Path)
-args=parser.parse_args()
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--apk', type=Path)
+args = parser.parse_args()
 work = ROOT / ('build/apk-tls-smoke' if args.apk else 'build/android-tls-smoke')
 work.mkdir(exist_ok=True)
 lock = (work / '.lock').open('a')
@@ -55,79 +59,178 @@ fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 (work / 'result.json').unlink(missing_ok=True)
 classes = work / 'classes'
 classes.mkdir(exist_ok=True)
-subprocess.run(['javac', '--release', '8', '-cp', str(ROOT/'build/framework/classes'), '-d', str(classes), str(ROOT / 'tests/java/AndroidTlsSmoke.java')], check=True)
+subprocess.run(
+    [
+        'javac',
+        '--release',
+        '8',
+        '-cp',
+        str(ROOT / 'build/framework/classes'),
+        '-d',
+        str(classes),
+        str(ROOT / 'tests/java/AndroidTlsSmoke.java'),
+    ],
+    check=True,
+)
 jar = work / 'smoke.jar'
-subprocess.run([str(HOST / 'bin/dx'), '--dex', '--min-sdk-version=27', '--output='+str(jar), str(classes)], env=environment(work), check=True)
+subprocess.run(
+    [str(HOST / 'bin/dx'), '--dex', '--min-sdk-version=27', '--output=' + str(jar), str(classes)],
+    env=environment(work),
+    check=True,
+)
 vm = HOST / 'bin/dalvikvm64'
 if not vm.is_file():
     vm = HOST / 'bin/dalvikvm'
 temporary = tempfile.TemporaryDirectory(dir=work)
 tls_dir = Path(temporary.name)
-key, cert = tls_dir/'leaf.key', tls_dir/'root.pem'
+key, cert = tls_dir / 'leaf.key', tls_dir / 'root.pem'
+
+
 def openssl(*arguments):
-    subprocess.run(['openssl', *map(str, arguments)], check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        ['openssl', *map(str, arguments)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
 
 # A root -> intermediate -> leaf chain exercises the Java trust callback;
 # a self-signed fixture alone cannot catch reversed native chain ordering.
-openssl('req','-x509','-newkey','rsa:2048','-nodes','-keyout',tls_dir/'root.key',
-        '-out',cert,'-days','1','-subj','/CN=Shiraz TLS fixture root',
-        '-addext','basicConstraints=critical,CA:TRUE,pathlen:1',
-        '-addext','keyUsage=critical,keyCertSign,cRLSign')
+openssl(
+    'req',
+    '-x509',
+    '-newkey',
+    'rsa:2048',
+    '-nodes',
+    '-keyout',
+    tls_dir / 'root.key',
+    '-out',
+    cert,
+    '-days',
+    '1',
+    '-subj',
+    '/CN=Shiraz TLS fixture root',
+    '-addext',
+    'basicConstraints=critical,CA:TRUE,pathlen:1',
+    '-addext',
+    'keyUsage=critical,keyCertSign,cRLSign',
+)
 for name, issuer, subject, extensions in (
-    ('intermediate', 'root', '/CN=Shiraz TLS fixture intermediate',
-     'basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n'),
-    ('leaf', 'intermediate', '/CN=localhost',
-     'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n'),
+    (
+        'intermediate',
+        'root',
+        '/CN=Shiraz TLS fixture intermediate',
+        'basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n',
+    ),
+    (
+        'leaf',
+        'intermediate',
+        '/CN=localhost',
+        'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n',
+    ),
 ):
-    openssl('req','-new','-newkey','rsa:2048','-nodes','-keyout',tls_dir/(name+'.key'),
-            '-out',tls_dir/(name+'.csr'),'-subj',subject)
-    extension_file=tls_dir/(name+'.ext')
+    openssl(
+        'req',
+        '-new',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-keyout',
+        tls_dir / (name + '.key'),
+        '-out',
+        tls_dir / (name + '.csr'),
+        '-subj',
+        subject,
+    )
+    extension_file = tls_dir / (name + '.ext')
     extension_file.write_text(extensions)
-    openssl('x509','-req','-in',tls_dir/(name+'.csr'),'-CA',tls_dir/(issuer+'.pem'),
-            '-CAkey',tls_dir/(issuer+'.key'),'-CAcreateserial','-days','1',
-            '-out',tls_dir/(name+'.pem'),'-extfile',extension_file)
-chain=tls_dir/'chain.pem'
-chain.write_bytes((tls_dir/'leaf.pem').read_bytes()+(tls_dir/'intermediate.pem').read_bytes())
+    openssl(
+        'x509',
+        '-req',
+        '-in',
+        tls_dir / (name + '.csr'),
+        '-CA',
+        tls_dir / (issuer + '.pem'),
+        '-CAkey',
+        tls_dir / (issuer + '.key'),
+        '-CAcreateserial',
+        '-days',
+        '1',
+        '-out',
+        tls_dir / (name + '.pem'),
+        '-extfile',
+        extension_file,
+    )
+chain = tls_dir / 'chain.pem'
+chain.write_bytes((tls_dir / 'leaf.pem').read_bytes() + (tls_dir / 'intermediate.pem').read_bytes())
+
+
 class TlsServer(http.server.ThreadingHTTPServer):
-    handshake_errors=[]
+    handshake_errors = []
+
     def get_request(self):
-        try: return super().get_request()
+        try:
+            return super().get_request()
         except ssl.SSLError as error:
             self.handshake_errors.append(str(error))
             raise
 
-tls_server = TlsServer(('127.0.0.1',0),Handler)
-ssl_context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ssl_context.load_cert_chain(chain,key)
+
+tls_server = TlsServer(('127.0.0.1', 0), Handler)
+ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ssl_context.load_cert_chain(chain, key)
 ssl_context.set_alpn_protocols(['http/1.1'])
-sni_names=[]
-ssl_context.set_servername_callback(lambda sock,name,ctx: sni_names.append(name))
-tls_server.socket=ssl_context.wrap_socket(tls_server.socket,server_side=True)
-tls_thread=threading.Thread(target=tls_server.serve_forever,daemon=True)
+sni_names = []
+ssl_context.set_servername_callback(lambda sock, name, ctx: sni_names.append(name))
+tls_server.socket = ssl_context.wrap_socket(tls_server.socket, server_side=True)
+tls_thread = threading.Thread(target=tls_server.serve_forever, daemon=True)
 tls_thread.start()
-http_server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
-http_thread=threading.Thread(target=http_server.serve_forever,daemon=True)
+http_server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
 http_thread.start()
 try:
-    command = [str(vm), '-Xbootclasspath:'+':'.join(str(HOST/'framework'/name) for name in JARS), '-Xint', '-Xusejit:false', '-Xnoimage-dex2oat', '-Xcompiler:'+str(HOST/'bin/dex2oat'), '-Djava.library.path='+str(NATIVE)+':'+str(HOST/'lib64'), '-cp', str(ROOT/'build/shiraz-framework.jar')+':'+str(jar), 'AndroidTlsSmoke', str(tls_server.server_port), str(cert)]
-    custom=subprocess.run(command[:-2]+['custom'],env=environment(work),capture_output=True,text=True,timeout=20)
-    (work/'custom-stdout.log').write_text(custom.stdout)
-    (work/'custom-stderr.log').write_text(custom.stderr)
+    command = [
+        str(vm),
+        '-Xbootclasspath:' + ':'.join(str(HOST / 'framework' / name) for name in JARS),
+        '-Xint',
+        '-Xusejit:false',
+        '-Xnoimage-dex2oat',
+        '-Xcompiler:' + str(HOST / 'bin/dex2oat'),
+        '-Djava.library.path=' + str(NATIVE) + ':' + str(HOST / 'lib64'),
+        '-cp',
+        str(ROOT / 'build/shiraz-framework.jar') + ':' + str(jar),
+        'AndroidTlsSmoke',
+        str(tls_server.server_port),
+        str(cert),
+    ]
+    custom = subprocess.run(
+        command[:-2] + ['custom'], env=environment(work), capture_output=True, text=True, timeout=20
+    )
+    (work / 'custom-stdout.log').write_text(custom.stdout)
+    (work / 'custom-stderr.log').write_text(custom.stderr)
     if custom.returncode or 'CUSTOM_TLS_DEFAULTS_PRESERVED' not in custom.stdout:
         fail_vm('Custom TLS defaults test failed', custom)
     if args.apk:
-        apk=args.apk.resolve()
-        facts=application_metadata(inspect_apk(apk)['manifest'],apk,work/'apk-data')
-        metadata=work/'application.properties'
+        apk = args.apk.resolve()
+        facts = application_metadata(inspect_apk(apk)['manifest'], apk, work / 'apk-data')
+        metadata = work / 'application.properties'
         metadata.write_text(properties_text(facts))
         command.extend([str(apk), f'http://127.0.0.1:{http_server.server_port}', str(metadata)])
-    result = subprocess.run(command, env=environment(work), capture_output=True, text=True, timeout=30)
-    (work/'server.json').write_text(json.dumps({'sni':sni_names,'errors':tls_server.handshake_errors,'requests':Handler.requests},indent=2)+'\n')
-    (work/'stdout.log').write_text(result.stdout)
-    (work/'stderr.log').write_text(result.stderr)
+    result = subprocess.run(
+        command, env=environment(work), capture_output=True, text=True, timeout=30
+    )
+    (work / 'server.json').write_text(
+        json.dumps(
+            {'sni': sni_names, 'errors': tls_server.handshake_errors, 'requests': Handler.requests},
+            indent=2,
+        )
+        + '\n'
+    )
+    (work / 'stdout.log').write_text(result.stdout)
+    (work / 'stderr.log').write_text(result.stderr)
     if result.returncode or 'ANDROID_TLS_BRIDGE_VERIFIED' not in result.stdout.splitlines():
-        fail_vm('ART TLS bridge smoke failed; inspect '+str(work)+' logs', result)
+        fail_vm('ART TLS bridge smoke failed; inspect ' + str(work) + ' logs', result)
     if args.apk:
         assert 'EXACT_APK_TLS_VERIFIED' in result.stdout.splitlines()
         assert 'EXACT_APK_HTTP_VERIFIED' in result.stdout.splitlines()
@@ -141,5 +244,23 @@ finally:
     http_server.server_close()
     http_thread.join()
     temporary.cleanup()
-(work/'result.json').write_text(json.dumps({'runtime':'art','exact_apk':bool(args.apk),'exact_apk_http':bool(args.apk),'bridge_default_factories':True,'trusted_body':True,'untrusted_rejected':True,'https_endpoint_explicit_and_implicit_rejected':True,'invalid_failed_session':True,'alpn':'http/1.1','sni_names':sni_names,'forbidden_http_request_observed':False},indent=2)+'\n')
+(work / 'result.json').write_text(
+    json.dumps(
+        {
+            'runtime': 'art',
+            'exact_apk': bool(args.apk),
+            'exact_apk_http': bool(args.apk),
+            'bridge_default_factories': True,
+            'trusted_body': True,
+            'untrusted_rejected': True,
+            'https_endpoint_explicit_and_implicit_rejected': True,
+            'invalid_failed_session': True,
+            'alpn': 'http/1.1',
+            'sni_names': sni_names,
+            'forbidden_http_request_observed': False,
+        },
+        indent=2,
+    )
+    + '\n'
+)
 print('ANDROID_TLS_BRIDGE_VERIFIED art')

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Check prepared errno query bytes/read spans, not cell or native-body lifetime."""
+
 import argparse
 import dataclasses
 import hashlib
@@ -31,10 +32,14 @@ def check_prepared_errno(path):
         'coordinate_system': 'file Mach-O VM addresses before slide',
         'effects': dataclasses.asdict(effects),
         'symbol_to_next_start_extent_verified': True,
-        'table_identity_verified': False, 'publication_verified': False,
-        'cell_ownership_verified': False, 'cell_lifetime_verified': False,
-        'stack_exclusion_verified': False, 'execution_claim': False,
-        'native_memory_purity_verified': False, 'consumer_proof': False,
+        'table_identity_verified': False,
+        'publication_verified': False,
+        'cell_ownership_verified': False,
+        'cell_lifetime_verified': False,
+        'stack_exclusion_verified': False,
+        'execution_claim': False,
+        'native_memory_purity_verified': False,
+        'consumer_proof': False,
         'scope': 'exact query instructions and inferred read spans; independent cell/row contracts required',
     }
 
@@ -47,8 +52,11 @@ def main():
     result = check_prepared_errno(args.image)
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + '\n')
-    print('M5_PREPARED_ERRNO_CODE_PASS body_sha256=' + result['effects']['body_sha256'] +
-          ' table_identity_verified=0 cell_lifetime_verified=0 consumer_proof=0')
+    print(
+        'M5_PREPARED_ERRNO_CODE_PASS body_sha256='
+        + result['effects']['body_sha256']
+        + ' table_identity_verified=0 cell_lifetime_verified=0 consumer_proof=0'
+    )
 
 
 if __name__ == '__main__':

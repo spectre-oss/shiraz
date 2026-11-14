@@ -34,15 +34,11 @@ def main():
             if target.exists():
                 data = target.read_bytes()
             else:
-                url = (
-                    f"https://raw.githubusercontent.com/nothings/stb/{REVISION}/{name}"
-                )
+                url = f"https://raw.githubusercontent.com/nothings/stb/{REVISION}/{name}"
                 with urllib.request.urlopen(url, timeout=30) as response:
                     data = response.read(1024 * 1024 + 1)
             if len(data) > 1024 * 1024 or hashlib.sha256(data).hexdigest() != expected:
-                raise ValueError(
-                    f"modified/unexpected pinned audio decoder file: {name}"
-                )
+                raise ValueError(f"modified/unexpected pinned audio decoder file: {name}")
             if not target.exists():
                 with tempfile.NamedTemporaryFile(dir=OUT, delete=False) as pending:
                     pending.write(data)
@@ -90,9 +86,7 @@ def main():
                     [compiler, *flags, "-c", str(OUT / "stb_vorbis.c"), "-o", str(obj)],
                     check=True,
                 )
-                subprocess.run(
-                    ["xcrun", "ar", "rcs", str(archive), str(obj)], check=True
-                )
+                subprocess.run(["xcrun", "ar", "rcs", str(archive), str(obj)], check=True)
                 archive.replace(library)
             manifest.write_text(
                 json.dumps(

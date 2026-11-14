@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Darwin abstract socket placement must work in deep and non-ASCII worktrees."""
+
 import os
 import tempfile
 import unittest

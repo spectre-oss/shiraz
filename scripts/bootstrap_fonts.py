@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Install hash-checked OFL Noto fonts privately; never modify host font configuration."""
+
 from pathlib import Path
 import hashlib
 import base64
@@ -23,7 +24,6 @@ FILES = {
     'NotoSerif-BoldItalic.ttf': 'e9421c1ca461ff0e5c9c3149e05a9880f92378def342dd09a567ee104330eef5',
     'NotoNaskhArabic-Regular.ttf': '2f4b88e6ee50fa82c617e2d1d4ba18281cb1c6cd71c3af3ec64970c23995db4b',
     'NotoNaskhArabic-Bold.ttf': '7432f2350487d9f784b47a24526d9fc48f2712bb6c2ff602898b104b0c26ee80',
-
     'NotoSansArabic-Regular.ttf': 'ceea25b464a656dc3b26849bab9356740401af62aedf1bfa8b7f0d9b75925b1b',
     'NotoSansArabic-Bold.ttf': 'ed2711b387750ae991b6a980b8dd16fdd65e6702b97e9f52adf3a8edf09ef4df',
     'NotoSansHebrew-Regular.ttf': 'a7fa16fffb27bedb060a0866267c29e9859aeb9c21cc33f5b3aaf6eb062eca85',
@@ -37,6 +37,7 @@ FILES = {
     'LICENSE': '0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb',
 }
 
+
 def download(url, name):
     for attempt in range(5):
         try:
@@ -48,9 +49,10 @@ def download(url, name):
         except urllib.error.URLError:
             if attempt == 4:
                 raise
-        delay = 2 ** attempt
+        delay = 2**attempt
         print(f'Retrying font download {name} in {delay}s', flush=True)
         time.sleep(delay)
+
 
 def main():
     target = ROOT / '.local/share/shiraz/fonts'
@@ -67,9 +69,17 @@ def main():
                 url = 'https://raw.githubusercontent.com/googlefonts/noto-emoji/v2.042/fonts/NotoColorEmoji.ttf'
             elif name.startswith('NotoEmoji'):
                 filename = 'OFL.txt' if name.endswith('.txt') else name
-                url = 'https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/notoemoji/' + urllib.parse.quote(filename)
-            android = name.startswith('NotoSerif-') or name in ('Roboto-Regular.ttf','Roboto-LICENSE.txt','DroidSansMono.ttf','Android-Fonts-NOTICE.txt')
-            if name in ('Roboto-Regular.ttf','Roboto-LICENSE.txt'):
+                url = (
+                    'https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/notoemoji/'
+                    + urllib.parse.quote(filename)
+                )
+            android = name.startswith('NotoSerif-') or name in (
+                'Roboto-Regular.ttf',
+                'Roboto-LICENSE.txt',
+                'DroidSansMono.ttf',
+                'Android-Fonts-NOTICE.txt',
+            )
+            if name in ('Roboto-Regular.ttf', 'Roboto-LICENSE.txt'):
                 file = 'NOTICE' if name.endswith('.txt') else name
                 url = f'https://android.googlesource.com/platform/external/roboto-fonts/+/android-14.0.0_r1/{file}?format=TEXT'
             elif name.startswith('NotoSerif-'):
@@ -90,6 +100,7 @@ def main():
 
     # Native Android renderers use this family map rather than fontconfig.
     (target / 'android-fonts.xml').write_bytes((ROOT / 'packaging/android-fonts.xml').read_bytes())
+
 
 if __name__ == '__main__':
     main()

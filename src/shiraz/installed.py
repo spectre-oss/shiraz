@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Temporary local APK-to-AppImage installation backend; no Android package daemon."""
+
 import argparse
 import fcntl
 import json
@@ -28,9 +29,11 @@ def xdg(name, fallback):
 
 
 def roots():
-    return (xdg('XDG_DATA_HOME', '.local/share') / 'shiraz/installed',
-            xdg('XDG_CACHE_HOME', '.cache') / 'shiraz/install',
-            xdg('XDG_STATE_HOME', '.local/state') / 'shiraz')
+    return (
+        xdg('XDG_DATA_HOME', '.local/share') / 'shiraz/installed',
+        xdg('XDG_CACHE_HOME', '.cache') / 'shiraz/install',
+        xdg('XDG_STATE_HOME', '.local/state') / 'shiraz',
+    )
 
 
 def atomic(path, content):
@@ -59,6 +62,7 @@ def audit(state, event, **fields):
 
 def install(template, apk, expected, installer, result):
     from package_native import extract_native
+
     os.umask(0o077)
     data, cache, state = roots()
     for directory in (data, cache, state):
@@ -86,11 +90,15 @@ def install(template, apk, expected, installer, result):
                 launchers = manifest.get('launcher_activities', [])
                 app = manifest.get('application_class') or 'android.app.Application'
                 activity = launchers[0]['target'] if launchers else ''
-                if not all(isinstance(v, str) and NAME.fullmatch(v) for v in (package, app, activity)):
+                if not all(
+                    isinstance(v, str) and NAME.fullmatch(v) for v in (package, app, activity)
+                ):
                     raise FormatError('APK must declare a valid launcher')
                 if expected and package != expected:
                     raise FormatError('APK package differs from installation request')
-                if int(manifest.get('min_sdk') or '1') > 27 or not supports_native_abis(report['native_abis']):
+                if int(manifest.get('min_sdk') or '1') > 27 or not supports_native_abis(
+                    report['native_abis']
+                ):
                     raise FormatError('APK requires an unsupported Android API or CPU architecture')
                 if manifest.get('application_enabled') == 'false':
                     raise FormatError('APK application is disabled')
@@ -101,6 +109,7 @@ def install(template, apk, expected, installer, result):
                 if shutil.disk_usage(data).free < 512 * 1024 * 1024:
                     raise OSError('Not enough space to store an AppImage')
                 appdir = work / 'AppDir'
+
                 def ignore(folder, names):
                     relative = Path(folder).relative_to(template).as_posix()
                     if relative == 'usr/share/shiraz':
@@ -110,6 +119,7 @@ def install(template, apk, expected, installer, result):
                     if relative == '.':
                         return {name for name in names if name.endswith('.desktop')}
                     return set()
+
                 shutil.copytree(template, appdir, symlinks=True, ignore=ignore)
                 share = appdir / 'usr/share/shiraz'
                 shutil.copy2(staged_apk, share / 'original.apk')
@@ -119,25 +129,64 @@ def install(template, apk, expected, installer, result):
                 facts.pop('sourceDir', None)
                 facts.pop('dataDir', None)
                 (share / 'application.properties').write_text(properties_text(facts))
-                (share / 'launch.properties').write_text(properties_text(dict(package=package,
-                    application=app, activity=activity, sha256=report['apk_sha256'],
-                    version=version, aot='false', native='true' if native else 'false')))
-                shutil.copy2(template / 'usr/share/shiraz/installer/fallback-icon.svg', appdir / 'shiraz-app.svg')
+                (share / 'launch.properties').write_text(
+                    properties_text(
+                        dict(
+                            package=package,
+                            application=app,
+                            activity=activity,
+                            sha256=report['apk_sha256'],
+                            version=version,
+                            aot='false',
+                            native='true' if native else 'false',
+                        )
+                    )
+                )
+                shutil.copy2(
+                    template / 'usr/share/shiraz/installer/fallback-icon.svg',
+                    appdir / 'shiraz-app.svg',
+                )
                 (appdir / '.DirIcon').unlink(missing_ok=True)
                 (appdir / '.DirIcon').symlink_to('shiraz-app.svg')
                 (appdir / 'shiraz-app.desktop').write_text(
-                    '[Desktop Entry]\nType=Application\nName=' + package +
-                    ' (Shiraz)\nExec=AppRun\nIcon=shiraz-app\nCategories=Utility;\nTerminal=false\n')
-                (share / 'bundle.json').write_text(json.dumps(dict(format='Shiraz installed AppImage v1',
-                    package=package, apk_sha256=report['apk_sha256'], version=version, installer=installer)))
+                    '[Desktop Entry]\nType=Application\nName='
+                    + package
+                    + ' (Shiraz)\nExec=AppRun\nIcon=shiraz-app\nCategories=Utility;\nTerminal=false\n'
+                )
+                (share / 'bundle.json').write_text(
+                    json.dumps(
+                        dict(
+                            format='Shiraz installed AppImage v1',
+                            package=package,
+                            apk_sha256=report['apk_sha256'],
+                            version=version,
+                            installer=installer,
+                        )
+                    )
+                )
                 output = work / 'application.AppImage'
                 tools = template / 'usr/share/shiraz/installer'
-                env = dict(os.environ, APPIMAGE_EXTRACT_AND_RUN='1', ARCH=platform.machine(),
-                           VERSION=version, TMPDIR=str(work))
+                env = dict(
+                    os.environ,
+                    APPIMAGE_EXTRACT_AND_RUN='1',
+                    ARCH=platform.machine(),
+                    VERSION=version,
+                    TMPDIR=str(work),
+                )
                 for key in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'PYTHONHOME', 'PYTHONPATH'):
                     env.pop(key, None)
-                subprocess.run([str(tools / 'appimagetool'), '--runtime-file', str(tools / 'runtime'),
-                                str(appdir), str(output)], env=env, check=True, timeout=600)
+                subprocess.run(
+                    [
+                        str(tools / 'appimagetool'),
+                        '--runtime-file',
+                        str(tools / 'runtime'),
+                        str(appdir),
+                        str(output),
+                    ],
+                    env=env,
+                    check=True,
+                    timeout=600,
+                )
                 output.chmod(0o700)
                 # Publish record and executable together; failed builds never appear installed.
                 publish = Path(tempfile.mkdtemp(prefix='.publish-', dir=data))
@@ -145,16 +194,27 @@ def install(template, apk, expected, installer, result):
                     shutil.copy2(output, publish / 'application.AppImage')
                     shutil.copy2(staged_apk, publish / 'original.apk')
                     now = int(time.time() * 1000)
-                    facts.update(sourceDir=str(destination / 'original.apk'),
+                    facts.update(
+                        sourceDir=str(destination / 'original.apk'),
                         dataDir=str(xdg('XDG_DATA_HOME', '.local/share') / 'shiraz-apps' / package),
-                        firstInstallTime=now, lastUpdateTime=now, installer=installer,
-                        launchActivity=activity, appImage=str(destination / 'application.AppImage'))
+                        firstInstallTime=now,
+                        lastUpdateTime=now,
+                        installer=installer,
+                        launchActivity=activity,
+                        appImage=str(destination / 'application.AppImage'),
+                    )
                     (publish / 'package.properties').write_text(properties_text(facts))
                     publish.rename(destination)
                 finally:
                     if publish.exists():
                         shutil.rmtree(publish)
-                audit(state, 'installed', package=package, sha256=report['apk_sha256'], installer=installer)
+                audit(
+                    state,
+                    'installed',
+                    package=package,
+                    sha256=report['apk_sha256'],
+                    installer=installer,
+                )
                 atomic(result, properties_text(dict(package=package)).encode())
         except Exception as error:
             audit(state, 'failed', installer=installer, expected=expected, reason=str(error))
@@ -162,7 +222,10 @@ def install(template, apk, expected, installer, result):
 
 
 def uninstall(package, installer):
-    if not re.fullmatch(r'[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*', package) or len(package) > 1024:
+    if (
+        not re.fullmatch(r'[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*', package)
+        or len(package) > 1024
+    ):
         raise ValueError('Invalid installed package')
     data, cache, state = roots()
     for directory in (data, cache, state):
@@ -173,7 +236,9 @@ def uninstall(package, installer):
         if target.is_symlink() or not target.is_dir():
             raise ValueError('Package is not installed')
         names = {entry.name for entry in target.iterdir()}
-        if names != {'package.properties', 'original.apk', 'application.AppImage'} or any(entry.is_symlink() or not entry.is_file() for entry in target.iterdir()):
+        if names != {'package.properties', 'original.apk', 'application.AppImage'} or any(
+            entry.is_symlink() or not entry.is_file() for entry in target.iterdir()
+        ):
             raise ValueError('Unexpected installed package contents')
         audit(state, 'uninstall-requested', package=package, installer=installer)
         # Hide the complete record atomically; never touch the separate app-data directory.
@@ -197,7 +262,9 @@ def main():
     else:
         if args.template is None or args.apk is None or args.result is None:
             parser.error("installation requires --template, --apk and --result")
-        install(args.template.resolve(), args.apk.resolve(), args.expected, args.installer, args.result)
+        install(
+            args.template.resolve(), args.apk.resolve(), args.expected, args.installer, args.result
+        )
 
 
 if __name__ == '__main__':

@@ -74,8 +74,9 @@ class Metadata:
 
 class GuestCrossBindingTests(unittest.TestCase):
     def test_ambiguity_stops_before_scanning_all_duplicate_exports(self):
-        self.provider = Metadata("libprovider.so", [(0, 0, 0, 0, 0, 0)] +
-                                 [(1, 0x12, 0, 1, 0x400, 16)] * 100)
+        self.provider = Metadata(
+            "libprovider.so", [(0, 0, 0, 0, 0, 0)] + [(1, 0x12, 0, 1, 0x400, 16)] * 100
+        )
         with patch.object(self.provider, "read", wraps=self.provider.read) as reads:
             result = verify_guest_target(self.importer, 0x80, self.provider)
         self.assertIsNone(result["target"])
@@ -99,9 +100,14 @@ class GuestCrossBindingTests(unittest.TestCase):
         self.provider = Metadata("libprovider.so", [null, (1, 0x12, 0, 1, 0x400, 16)])
         self.importer.relocations[0x80] = (1, 0, 1026)
         self.binding = {
-            "symbol": "function", "version": "", "provider": self.provider.name,
-            "target": 0x400, "provider_elf_sha256": hashlib.sha256(self.provider.data).hexdigest(),
-            "kind": "function", "abi": "guest-AAPCS64", "addend": 0,
+            "symbol": "function",
+            "version": "",
+            "provider": self.provider.name,
+            "target": 0x400,
+            "provider_elf_sha256": hashlib.sha256(self.provider.data).hexdigest(),
+            "kind": "function",
+            "abi": "guest-AAPCS64",
+            "addend": 0,
             "relocation_type": 1026,
         }
         self.importer.proof[0x80] = self.binding
@@ -117,8 +123,11 @@ class GuestCrossBindingTests(unittest.TestCase):
         self.assertNotIn("effect", result)
 
     def test_existing_refusal_or_same_module_result_is_not_reinterpreted(self):
-        for reason in ("same-module-production-binding", "namespace-binding-proof-missing",
-                       "native-provider-contract-untrusted"):
+        for reason in (
+            "same-module-production-binding",
+            "namespace-binding-proof-missing",
+            "native-provider-contract-untrusted",
+        ):
             self.importer.initial["reason"] = reason
             self.assertEqual(self.verify(), self.importer.initial)
 
@@ -132,9 +141,14 @@ class GuestCrossBindingTests(unittest.TestCase):
             self.verify()
 
     def test_native_addresses_and_nonfunction_bindings_cannot_be_guest_edges(self):
-        for field, value in (("target", None), ("provider_elf_sha256", None),
-                             ("kind", "object"), ("abi", "fixed/no-errno"),
-                             ("abi", "guest-local-AAPCS64"), ("nonreturning", True)):
+        for field, value in (
+            ("target", None),
+            ("provider_elf_sha256", None),
+            ("kind", "object"),
+            ("abi", "fixed/no-errno"),
+            ("abi", "guest-local-AAPCS64"),
+            ("nonreturning", True),
+        ):
             with self.subTest(field=field, value=value):
                 saved = copy.deepcopy(self.binding)
                 self.binding[field] = value
@@ -143,8 +157,12 @@ class GuestCrossBindingTests(unittest.TestCase):
                 self.binding.update(saved)
 
     def test_relocation_and_addend_evidence_is_exact_and_type_strict(self):
-        for field, value in (("relocation_type", 1025), ("relocation_type", True),
-                             ("addend", 1), ("addend", False)):
+        for field, value in (
+            ("relocation_type", 1025),
+            ("relocation_type", True),
+            ("addend", 1),
+            ("addend", False),
+        ):
             with self.subTest(field=field, value=value):
                 previous = self.binding[field]
                 self.binding[field] = value
@@ -171,9 +189,16 @@ class GuestCrossBindingTests(unittest.TestCase):
                 self.verify()
 
     def test_export_visibility_kind_and_executable_section_are_checked(self):
-        for info, visibility, section in ((0x11, 0, 1), (0x02, 0, 1), (0x12, 2, 1),
-                                           (0x12, 0, 0), (0x1A, 0, 1)):
-            self.provider.memory[0x118] = struct.pack("<IBBHQQ", 1, info, visibility, section, 0x400, 16)
+        for info, visibility, section in (
+            (0x11, 0, 1),
+            (0x02, 0, 1),
+            (0x12, 2, 1),
+            (0x12, 0, 0),
+            (0x1A, 0, 1),
+        ):
+            self.provider.memory[0x118] = struct.pack(
+                "<IBBHQQ", 1, info, visibility, section, 0x400, 16
+            )
             self.assertIsNone(self.verify()["target"])
         self.provider.memory[0x118] = struct.pack("<IBBHQQ", 1, 0x12, 3, 1, 0x400, 16)
         self.assertEqual(self.verify()["target"], 0x400)
@@ -217,7 +242,9 @@ class GuestCrossBindingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "section index"):
             self.verify()
         self.provider.memory[0x118] = struct.pack("<IBBHQQ", 1, 0x12, 0, 1, 0x4FC, 16)
-        self.provider.offset = lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("not file-backed"))
+        self.provider.offset = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("not file-backed")
+        )
         with self.assertRaisesRegex(ValueError, "file-backed"):
             self.verify()
 

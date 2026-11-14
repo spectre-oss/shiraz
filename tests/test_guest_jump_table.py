@@ -11,36 +11,63 @@ from guest_jump_table import recognize_byte_jump_table
 
 FIRST_ENTRY = 0x44AF5C
 FIRST_WORDS = (
-    0x7100375F, 0x540001A8, 0x2A1A03E8, 0x90FFEB0B, 0x910F496B,
-    0x10000089, 0x3868696A, 0x8B0A0929, 0xD61F0120,
+    0x7100375F,
+    0x540001A8,
+    0x2A1A03E8,
+    0x90FFEB0B,
+    0x910F496B,
+    0x10000089,
+    0x3868696A,
+    0x8B0A0929,
+    0xD61F0120,
 )
 SECOND_ENTRY = 0x44B014
 SECOND_WORDS = (
-    0x7100375F, 0x540004A8, 0x2A1A03E8, 0xF0FFEAEB, 0x910F816B,
-    0x10FFFAC9, 0x3868696A, 0x8B0A0929, 0xD61F0120,
+    0x7100375F,
+    0x540004A8,
+    0x2A1A03E8,
+    0xF0FFEAEB,
+    0x910F816B,
+    0x10FFFAC9,
+    0x3868696A,
+    0x8B0A0929,
+    0xD61F0120,
 )
 INTERLEAVED_ENTRY = 0x34D7DC
 INTERLEAVED_WORDS = (
-    0x7100115F, 0xAA0003E2, 0x54000388, 0xD0FFEC8B, 0x9111256B,
-    0x1000008C, 0x386A696D, 0x8B0D098C, 0xD61F0180,
+    0x7100115F,
+    0xAA0003E2,
+    0x54000388,
+    0xD0FFEC8B,
+    0x9111256B,
+    0x1000008C,
+    0x386A696D,
+    0x8B0D098C,
+    0xD61F0180,
 )
 
 
 def adr_word(destination, delta, page=False):
     value = delta & ((1 << 21) - 1)
-    return ((0x90000000 if page else 0x10000000)
-            | (value & 3) << 29 | (value >> 2) << 5 | destination)
+    return (
+        (0x90000000 if page else 0x10000000) | (value & 3) << 29 | (value >> 2) << 5 | destination
+    )
 
 
 class ByteJumpTableTests(unittest.TestCase):
     @staticmethod
-    def recognize(words=FIRST_WORDS, *, entry=FIRST_ENTRY, address=0x1AA3D2,
-                  table=bytes(range(14))):
+    def recognize(
+        words=FIRST_WORDS, *, entry=FIRST_ENTRY, address=0x1AA3D2, table=bytes(range(14))
+    ):
         graph = {entry + index * 4: word for index, word in enumerate(words)}
         return recognize_byte_jump_table(
-            graph.get, entry,
-            lambda start, count: table if start == address and isinstance(table, bytes)
-            and count == len(table) else None,
+            graph.get,
+            entry,
+            lambda start, count: (
+                table
+                if start == address and isinstance(table, bytes) and count == len(table)
+                else None
+            ),
         )
 
     def test_actual_code_encodings_with_purpose_built_table_bytes(self):
@@ -60,9 +87,16 @@ class ByteJumpTableTests(unittest.TestCase):
                 self.assertEqual(result.table_address, address)
                 self.assertEqual(result.branch_base, 0x44AF80)
                 self.assertEqual(result.limit, 13)
-                self.assertEqual((result.index_source, result.index_register,
-                                  result.table_register, result.offset_register,
-                                  result.branch_register), ("w26", "x8", "x11", "w10", "x9"))
+                self.assertEqual(
+                    (
+                        result.index_source,
+                        result.index_register,
+                        result.table_register,
+                        result.offset_register,
+                        result.branch_register,
+                    ),
+                    ("w26", "x8", "x11", "w10", "x9"),
+                )
                 self.assertEqual(result.targets, tuple(0x44AF80 + index * 4 for index in range(14)))
                 self.assertEqual(result.table_bytes, tuple(range(14)))
                 self.assertEqual(result.table_sha256, hashlib.sha256(bytes(range(14))).hexdigest())
@@ -74,23 +108,35 @@ class ByteJumpTableTests(unittest.TestCase):
     def test_interleaved_copy_uses_same_index_and_requires_path_zero_extension(self):
         # Actual code encodings, synthetic immutable table contents. Recognition
         # alone cannot establish that an earlier W10 producer was executed.
-        result = self.recognize(INTERLEAVED_WORDS, entry=INTERLEAVED_ENTRY,
-                                address=0xDF449, table=bytes(range(5)))
+        result = self.recognize(
+            INTERLEAVED_WORDS, entry=INTERLEAVED_ENTRY, address=0xDF449, table=bytes(range(5))
+        )
         self.assertIsNotNone(result)
         self.assertEqual(result.words, INTERLEAVED_WORDS)
         self.assertEqual(result.default_target, 0x34D854)
         self.assertEqual(result.table_address, 0xDF449)
         self.assertEqual(result.branch_base, 0x34D800)
         self.assertEqual(result.limit, 4)
-        self.assertEqual((result.index_source, result.index_register,
-                          result.table_register, result.offset_register,
-                          result.branch_register), ("w10", "x10", "x11", "w13", "x12"))
+        self.assertEqual(
+            (
+                result.index_source,
+                result.index_register,
+                result.table_register,
+                result.offset_register,
+                result.branch_register,
+            ),
+            ("w10", "x10", "x11", "w13", "x12"),
+        )
         self.assertEqual(result.prebranch_move, ("x2", "x0"))
         self.assertTrue(result.requires_zero_extended_index)
         self.assertEqual(result.targets, tuple(0x34D800 + index * 4 for index in range(5)))
         self.assertEqual(result.table_sha256, hashlib.sha256(bytes(range(5))).hexdigest())
-        self.assertEqual(result.body_sha256, hashlib.sha256(
-            b"".join(word.to_bytes(4, "little") for word in INTERLEAVED_WORDS)).hexdigest())
+        self.assertEqual(
+            result.body_sha256,
+            hashlib.sha256(
+                b"".join(word.to_bytes(4, "little") for word in INTERLEAVED_WORDS)
+            ).hexdigest(),
+        )
 
     def test_interleaved_each_opcode_is_checked_before_table_reader(self):
         for index in range(9):
@@ -102,8 +148,9 @@ class ByteJumpTableTests(unittest.TestCase):
                 self.fail("malformed interleaved code must not read table")
 
             with self.subTest(index=index):
-                self.assertIsNone(recognize_byte_jump_table(
-                    graph.get, INTERLEAVED_ENTRY, forbidden_reader))
+                self.assertIsNone(
+                    recognize_byte_jump_table(graph.get, INTERLEAVED_ENTRY, forbidden_reader)
+                )
 
     def test_interleaved_rejects_width_shift_condition_and_role_mutations(self):
         mutations = (
@@ -131,8 +178,11 @@ class ByteJumpTableTests(unittest.TestCase):
             words = list(INTERLEAVED_WORDS)
             words[index] = replacement
             with self.subTest(index=index, replacement=hex(replacement)):
-                self.assertIsNone(self.recognize(words, entry=INTERLEAVED_ENTRY,
-                                                address=0xDF449, table=bytes(range(5))))
+                self.assertIsNone(
+                    self.recognize(
+                        words, entry=INTERLEAVED_ENTRY, address=0xDF449, table=bytes(range(5))
+                    )
+                )
         for register in (29, 30, 31):
             for field in ("copy-destination", "copy-source", "index"):
                 words = list(INTERLEAVED_WORDS)
@@ -144,15 +194,19 @@ class ByteJumpTableTests(unittest.TestCase):
                     words[0] = words[0] & ~(31 << 5) | register << 5
                     words[6] = words[6] & ~(31 << 16) | register << 16
                 with self.subTest(field=field, register=register):
-                    self.assertIsNone(self.recognize(words, entry=INTERLEAVED_ENTRY,
-                                                    address=0xDF449, table=bytes(range(5))))
+                    self.assertIsNone(
+                        self.recognize(
+                            words, entry=INTERLEAVED_ENTRY, address=0xDF449, table=bytes(range(5))
+                        )
+                    )
         # Keep all table uses consistent while aliasing table and index.
         words = list(INTERLEAVED_WORDS)
         words[3] = words[3] & ~31 | 10
         words[4] = words[4] & ~1023 | 10 << 5 | 10
         words[6] = words[6] & ~(31 << 5) | 10 << 5
-        self.assertIsNone(self.recognize(words, entry=INTERLEAVED_ENTRY,
-                                        address=0xDF449, table=bytes(range(5))))
+        self.assertIsNone(
+            self.recognize(words, entry=INTERLEAVED_ENTRY, address=0xDF449, table=bytes(range(5)))
+        )
 
     def test_interleaved_bounds_and_table_refusals(self):
         for limit, data in ((0, b"\x00"), (63, bytes([255]) * 64)):
@@ -162,13 +216,17 @@ class ByteJumpTableTests(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual(result.targets, (0x34D800 + data[0] * 4,) * (limit + 1))
         for data in (None, b"", bytes(4), bytes(6), bytearray(5)):
-            self.assertIsNone(self.recognize(INTERLEAVED_WORDS, entry=INTERLEAVED_ENTRY,
-                                            address=0xDF449, table=data))
+            self.assertIsNone(
+                self.recognize(
+                    INTERLEAVED_WORDS, entry=INTERLEAVED_ENTRY, address=0xDF449, table=data
+                )
+            )
         for limit in (64, 4095):
             words = list(INTERLEAVED_WORDS)
             words[0] = words[0] & ~(0xFFF << 10) | limit << 10
-            self.assertIsNone(self.recognize(words, entry=INTERLEAVED_ENTRY,
-                                            address=0xDF449, table=bytes(5)))
+            self.assertIsNone(
+                self.recognize(words, entry=INTERLEAVED_ENTRY, address=0xDF449, table=bytes(5))
+            )
         words = list(INTERLEAVED_WORDS)
         words[2] = 0x54000008 | (1 << 5)  # Default enters ADRP.
         self.assertIsNone(self.recognize(words, entry=INTERLEAVED_ENTRY))
@@ -187,8 +245,11 @@ class ByteJumpTableTests(unittest.TestCase):
         words[3] = adr_word(11, -1, page=True)
         words[4] = 0x91000000 | 11 << 5 | 11
         words[5] = adr_word(12, 4072)
-        self.assertIsNone(self.recognize(words, entry=high_entry,
-                                        address=high_entry - 4096, table=bytes(range(5))))
+        self.assertIsNone(
+            self.recognize(
+                words, entry=high_entry, address=high_entry - 4096, table=bytes(range(5))
+            )
+        )
 
     def test_each_opcode_must_match_before_table_reader_runs(self):
         for index in range(9):
@@ -200,7 +261,9 @@ class ByteJumpTableTests(unittest.TestCase):
                 self.fail("malformed code must not reach table reader")
 
             with self.subTest(index=index):
-                self.assertIsNone(recognize_byte_jump_table(graph.get, FIRST_ENTRY, forbidden_reader))
+                self.assertIsNone(
+                    recognize_byte_jump_table(graph.get, FIRST_ENTRY, forbidden_reader)
+                )
 
     def test_rejects_condition_width_shift_and_register_mismatches(self):
         mutations = (
@@ -253,7 +316,9 @@ class ByteJumpTableTests(unittest.TestCase):
         for data in (b"", bytes(13), bytes(15), bytearray(14), None):
             with self.subTest(data=data):
                 graph = {FIRST_ENTRY + index * 4: word for index, word in enumerate(FIRST_WORDS)}
-                self.assertIsNone(recognize_byte_jump_table(graph.get, FIRST_ENTRY, lambda *_, data=data: data))
+                self.assertIsNone(
+                    recognize_byte_jump_table(graph.get, FIRST_ENTRY, lambda *_, data=data: data)
+                )
 
     def test_zero_and_maximum_bounds_and_duplicate_targets(self):
         for limit, table in ((0, b"\x00"), (63, bytes([255]) * 64)):
@@ -293,8 +358,11 @@ class ByteJumpTableTests(unittest.TestCase):
         words[4] = 0x91000000 | 11 << 5 | 11
         words[5] = adr_word(9, 4072)
         # Branch base becomes UINT64_MAX-3; nonzero bytes overflow the target.
-        self.assertIsNone(self.recognize(words, entry=high_entry,
-                                        address=high_entry - 4096, table=bytes(range(14))))
+        self.assertIsNone(
+            self.recognize(
+                words, entry=high_entry, address=high_entry - 4096, table=bytes(range(14))
+            )
+        )
         words = list(FIRST_WORDS)
         words[5] = adr_word(9, 1)  # Unaligned branch base.
         self.assertIsNone(self.recognize(words))

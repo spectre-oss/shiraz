@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Validate Conventional Commits and calculate their next semantic version."""
+
 import argparse
 import re
 import subprocess
@@ -8,7 +9,10 @@ from pathlib import Path
 
 
 def bump(current, message):
-    match = re.match(r'^(feat|fix|perf|docs|build|refactor|chore|test|style|ci)(\([^\r\n()]+\))?(!)?: [^\r\n]+', message)
+    match = re.match(
+        r'^(feat|fix|perf|docs|build|refactor|chore|test|style|ci)(\([^\r\n()]+\))?(!)?: [^\r\n]+',
+        message,
+    )
     if not match:
         raise ValueError('Conventional Commit required: feat(scope): summary')
     major, minor, patch = map(int, current.strip().split('.'))
@@ -42,14 +46,18 @@ def main():
             version = bump(base, args.message_file.read_text())
         except ValueError as exc:
             parser.error(str(exc))
-        staged = subprocess.run(['git', 'show', ':VERSION'], capture_output=True, text=True).stdout.strip()
+        staged = subprocess.run(
+            ['git', 'show', ':VERSION'], capture_output=True, text=True
+        ).stdout.strip()
         if not args.prepare and staged == version:
             return
         Path('VERSION').write_text(version + '\n')
         subprocess.run(['git', 'add', '--', 'VERSION'], check=True)
         print('Shiraz version:', version)
         if not args.prepare:
-            raise SystemExit('VERSION was staged for this message. Retry the commit, or use make commit MSG=... to prepare it first.')
+            raise SystemExit(
+                'VERSION was staged for this message. Retry the commit, or use make commit MSG=... to prepare it first.'
+            )
 
 
 if __name__ == '__main__':

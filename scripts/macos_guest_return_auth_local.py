@@ -43,7 +43,8 @@ def verify_wrappers(path, key):
     found = {}
     for index in range(metadata.symbol_count):
         name, info, _, section, value, size = struct.unpack(
-            "<IBBHQQ", metadata.read(metadata.tags[6] + index * 24, 24))
+            "<IBBHQQ", metadata.read(metadata.tags[6] + index * 24, 24)
+        )
         if not section or info & 15 != 2:
             continue
         name = metadata.string(name)
@@ -56,8 +57,12 @@ def verify_wrappers(path, key):
         last = struct.unpack_from("<II", data, offset + size - 8)
         if first != opcodes[0] or last != (opcodes[1], 0xD65F03C0):
             raise ValueError("guest wrapper lacks exact matching PAC/AUT/RET body boundaries")
-        found[name] = {"entry": hex(value), "size": size, "sign_opcode": hex(first),
-                       "authenticate_opcode": hex(last[0])}
+        found[name] = {
+            "entry": hex(value),
+            "size": size,
+            "sign_opcode": hex(first),
+            "authenticate_opcode": hex(last[0]),
+        }
     if len(found) != 2:
         raise ValueError("both actual guest capture wrappers required")
     return found
@@ -65,16 +70,36 @@ def verify_wrappers(path, key):
 
 def inspect_existing_hardened_signature(path, env):
     # Verification/display only. There is deliberately no --sign operation.
-    subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(path)],
-                   env=env, check=True, capture_output=True, timeout=30)
-    display = subprocess.run(["/usr/bin/codesign", "--display", "--verbose=4", str(path)],
-                             env=env, check=True, capture_output=True, text=True, timeout=30)
-    shown = subprocess.run(["/usr/bin/codesign", "--display", "--entitlements", "-", "--xml", str(path)],
-                           env=env, check=True, capture_output=True, timeout=30)
+    subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--strict", str(path)],
+        env=env,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    display = subprocess.run(
+        ["/usr/bin/codesign", "--display", "--verbose=4", str(path)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    shown = subprocess.run(
+        ["/usr/bin/codesign", "--display", "--entitlements", "-", "--xml", str(path)],
+        env=env,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
     entitlements = plistlib.loads(shown.stdout)
     flags = validate_collector_signature(display.stdout + display.stderr, entitlements)
-    return {"flags": flags, "entitlements": entitlements, "operation": "read-only verify/display",
-            "policy_sha256": digest(ROOT / "scripts/macos_guest_differential_smoke.py")}
+    return {
+        "flags": flags,
+        "entitlements": entitlements,
+        "operation": "read-only verify/display",
+        "policy_sha256": digest(ROOT / "scripts/macos_guest_differential_smoke.py"),
+    }
 
 
 def validate_execution_marker(stdout, returncode):
@@ -89,9 +114,19 @@ def validate_execution_marker(stdout, returncode):
         if key in fields:
             raise ValueError("duplicate guest result field")
         fields[key] = value
-    expected = {"guest_elf": "1", "exact_body": "1", "cases": "10", "cas_cases": "36",
-                "cas_orderings": "3", "sp_lr": "1", "nzcv": "1", "fp_control": "1",
-                "vector_samples": "2", "android_execution": "0", "app_execution": "0"}
+    expected = {
+        "guest_elf": "1",
+        "exact_body": "1",
+        "cases": "10",
+        "cas_cases": "36",
+        "cas_orderings": "3",
+        "sp_lr": "1",
+        "nzcv": "1",
+        "fp_control": "1",
+        "vector_samples": "2",
+        "android_execution": "0",
+        "app_execution": "0",
+    }
     if any(fields.get(key) != value for key, value in expected.items()):
         raise ValueError("actual guest result does not establish the required exact cases/effects")
     return markers[0]
@@ -105,12 +140,16 @@ def main():
     profile = host_return_auth_profile()
     if not profile or profile["feature_pauth"] != 1 or profile["feature_pauth_lr"] != 0:
         raise ValueError("actual observed legacy SP-only PAuth host required")
-    probes = {"normal": ROOT / "build/macos/m5/atomic-effects-probe",
-              "prebuilt-hardened": ROOT / "build/macos/m5/atomic-effects-hardened",
-              "sanitized": ROOT / "build/macos/m5/atomic-effects-sanitized"}
+    probes = {
+        "normal": ROOT / "build/macos/m5/atomic-effects-probe",
+        "prebuilt-hardened": ROOT / "build/macos/m5/atomic-effects-hardened",
+        "sanitized": ROOT / "build/macos/m5/atomic-effects-sanitized",
+    }
     for probe in probes.values():
         if not probe.is_file() or not os.access(probe, os.X_OK):
-            raise ValueError("pre-existing probe required; this target will not build or sign one: " + str(probe))
+            raise ValueError(
+                "pre-existing probe required; this target will not build or sign one: " + str(probe)
+            )
     probe_hashes = {name: digest(path) for name, path in probes.items()}
     results = []
     env = {name: value for name, value in os.environ.items() if not name.startswith("DYLD_")}
@@ -123,25 +162,50 @@ def main():
         for mode, probe in probes.items():
             if digest(probe) != probe_hashes[mode]:
                 raise ValueError("host probe changed before execution")
-            run = subprocess.run([str(probe), str(directory)], env=env,
-                                 capture_output=True, text=True, timeout=60, check=False)
+            run = subprocess.run(
+                [str(probe), str(directory)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
             log = args.output.with_name(args.output.stem + "-" + key + "-" + mode + ".log")
             log.write_text(run.stdout + run.stderr)
             if digest(probe) != probe_hashes[mode] or digest(elf) != elf_hash:
                 raise ValueError("probe/guest artifact changed during execution")
             marker = validate_execution_marker(run.stdout, run.returncode)
-            results.append({"key": key, "mode": mode, "guest_elf_sha256": elf_hash,
-                            "probe_sha256": probe_hashes[mode], "wrappers": wrappers,
-                            "returncode": run.returncode, "marker": marker, "log": str(log)})
-    report = {"schema": 1, "scope": "first-party guest return-instruction fixture; not ART/APK or cryptographic security proof",
-              "profile": profile, "new_host_build": False, "signing_performed": False,
-              "hardened_art_verified": False, "hardware_execution": True,
-              "unwind_verified": False, "authentication_failure_execution_verified": False,
-              "hardened_signature": hardened_signature,
-              "assembly_sha256": digest(ROOT / "tests/darwin/guest/atomic_effects.S"),
-              "harness_sha256": digest(Path(__file__)), "runs": results}
+            results.append(
+                {
+                    "key": key,
+                    "mode": mode,
+                    "guest_elf_sha256": elf_hash,
+                    "probe_sha256": probe_hashes[mode],
+                    "wrappers": wrappers,
+                    "returncode": run.returncode,
+                    "marker": marker,
+                    "log": str(log),
+                }
+            )
+    report = {
+        "schema": 1,
+        "scope": "first-party guest return-instruction fixture; not ART/APK or cryptographic security proof",
+        "profile": profile,
+        "new_host_build": False,
+        "signing_performed": False,
+        "hardened_art_verified": False,
+        "hardware_execution": True,
+        "unwind_verified": False,
+        "authentication_failure_execution_verified": False,
+        "hardened_signature": hardened_signature,
+        "assembly_sha256": digest(ROOT / "tests/darwin/guest/atomic_effects.S"),
+        "harness_sha256": digest(Path(__file__)),
+        "runs": results,
+    }
     args.output.write_text(json.dumps(report, indent=2) + "\n")
-    print("M5_RETURN_AUTH_LOCAL_PASS keys=2 runs=6 cases_per_run=46 new_host_build=0 signing_performed=0 art_execution=0 app_execution=0")
+    print(
+        "M5_RETURN_AUTH_LOCAL_PASS keys=2 runs=6 cases_per_run=46 new_host_build=0 signing_performed=0 art_execution=0 app_execution=0"
+    )
 
 
 if __name__ == "__main__":

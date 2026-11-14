@@ -11,6 +11,7 @@ the host system, and Homebrew libraries are never linked or staged.
   xz 5.8.4    static liblzma.a
   libpng 1.6.59  static libpng16.a (for libandroidfw; zlib comes from the macOS SDK)
 """
+
 import argparse
 import fcntl
 import hashlib
@@ -42,22 +43,45 @@ LZ4_URL = f'https://github.com/lz4/lz4/releases/download/v{LZ4_VERSION}/lz4-{LZ4
 XZ_VERSION = '5.8.4'
 # Equals the independently published Homebrew xz 5.8.4 source checksum.
 XZ_SHA256 = '0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9'
-XZ_URL = f'https://github.com/tukaani-project/xz/releases/download/v{XZ_VERSION}/xz-{XZ_VERSION}.tar.gz'
+XZ_URL = (
+    f'https://github.com/tukaani-project/xz/releases/download/v{XZ_VERSION}/xz-{XZ_VERSION}.tar.gz'
+)
 PNG_VERSION = '1.6.59'
 # Equals the independently published Homebrew libpng 1.6.59 source checksum.
 PNG_SHA256 = 'd80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389'
 PNG_URL = f'https://downloads.sourceforge.net/project/libpng/libpng16/{PNG_VERSION}/libpng-{PNG_VERSION}.tar.xz'
 ICU_LIBRARIES = ('icudata', 'icuuc', 'icui18n')
 
-ART_TARGETS = ('dalvikvm', 'libart', 'libopenjdkjvm', 'libjavacore', 'libopenjdk',
-               'libnativehelper', 'libsigchain', 'core-oj-hostdex', 'core-libart-hostdex',
-               'libandroidfw')
+ART_TARGETS = (
+    'dalvikvm',
+    'libart',
+    'libopenjdkjvm',
+    'libjavacore',
+    'libopenjdk',
+    'libnativehelper',
+    'libsigchain',
+    'core-oj-hostdex',
+    'core-libart-hostdex',
+    'libandroidfw',
+)
 HOST_TAG = 'darwin-x86'
 
 # Variables that could route a build to Homebrew or other host-wide headers/libs.
-_LEAKY_ENV = ('CPATH', 'C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH', 'OBJC_INCLUDE_PATH',
-              'LIBRARY_PATH', 'PKG_CONFIG_PATH', 'LDFLAGS', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS',
-              'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES')
+_LEAKY_ENV = (
+    'CPATH',
+    'C_INCLUDE_PATH',
+    'CPLUS_INCLUDE_PATH',
+    'OBJC_INCLUDE_PATH',
+    'LIBRARY_PATH',
+    'PKG_CONFIG_PATH',
+    'LDFLAGS',
+    'CFLAGS',
+    'CXXFLAGS',
+    'CPPFLAGS',
+    'DYLD_LIBRARY_PATH',
+    'DYLD_FALLBACK_LIBRARY_PATH',
+    'DYLD_INSERT_LIBRARIES',
+)
 
 
 def run(argv, cwd=ROOT, env=None):
@@ -69,7 +93,9 @@ def tool(name):
 
 
 def sdk():
-    return subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+    return subprocess.check_output(
+        ['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True
+    ).strip()
 
 
 def ncpu():
@@ -81,9 +107,18 @@ def dependency_env():
     env = {key: value for key, value in os.environ.items() if key not in _LEAKY_ENV}
     # The toolchain clang (unlike the /usr/bin shim) needs the SDK named explicitly.
     target = f'-arch arm64 -isysroot {sdk()} -mmacosx-version-min={MACOS_MIN}'
-    env.update(CC=tool('clang'), CXX=tool('clang++'), AR=tool('ar'), RANLIB=tool('ranlib'),
-               CFLAGS=target + ' -O2', CXXFLAGS=target + ' -O2', LDFLAGS=target,
-               INSTALL='/usr/bin/install -C', SDKROOT=sdk(), MACOSX_DEPLOYMENT_TARGET=MACOS_MIN)
+    env.update(
+        CC=tool('clang'),
+        CXX=tool('clang++'),
+        AR=tool('ar'),
+        RANLIB=tool('ranlib'),
+        CFLAGS=target + ' -O2',
+        CXXFLAGS=target + ' -O2',
+        LDFLAGS=target,
+        INSTALL='/usr/bin/install -C',
+        SDKROOT=sdk(),
+        MACOSX_DEPLOYMENT_TARGET=MACOS_MIN,
+    )
     return env
 
 
@@ -95,8 +130,11 @@ def art_env():
     in-tree ICU headers, liblz4.a and liblzma.a win.
     """
     env = {key: value for key, value in os.environ.items() if key not in _LEAKY_ENV}
-    env.update(CPATH=str(PREFIX / 'include'), LIBRARY_PATH=str(PREFIX / 'lib'),
-               MACOSX_DEPLOYMENT_TARGET=MACOS_MIN)
+    env.update(
+        CPATH=str(PREFIX / 'include'),
+        LIBRARY_PATH=str(PREFIX / 'lib'),
+        MACOSX_DEPLOYMENT_TARGET=MACOS_MIN,
+    )
     return env
 
 
@@ -148,8 +186,10 @@ def install_license(source_file, name, version, url, sha256):
     target = PREFIX / 'share/licenses' / name
     target.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source_file, target / source_file.name)
-    (target / 'PROVENANCE').write_text(f'{name} {version}\nsource: {url}\nsha256: {sha256}\n'
-                                       'Built unmodified by scripts/bootstrap_darwin.py.\n')
+    (target / 'PROVENANCE').write_text(
+        f'{name} {version}\nsource: {url}\nsha256: {sha256}\n'
+        'Built unmodified by scripts/bootstrap_darwin.py.\n'
+    )
 
 
 def icu_names():
@@ -211,11 +251,26 @@ def build_icu():
     env['LDFLAGS'] += ' -Wl,-headerpad_max_install_names'
     if not (build / 'config.status').is_file():
         # Tools stay enabled: pkgdata/icupkg are required to package libicudata.
-        run([source / 'configure', '--prefix=' + str(PREFIX), '--libdir=' + str(PREFIX / 'lib'),
-             '--enable-shared', '--disable-static', '--with-data-packaging=library',
-             '--disable-tests', '--disable-samples', '--disable-extras', '--disable-icuio',
-             '--disable-layoutex', '--disable-icu-config', '--disable-debug', '--enable-release'],
-            cwd=build, env=env)
+        run(
+            [
+                source / 'configure',
+                '--prefix=' + str(PREFIX),
+                '--libdir=' + str(PREFIX / 'lib'),
+                '--enable-shared',
+                '--disable-static',
+                '--with-data-packaging=library',
+                '--disable-tests',
+                '--disable-samples',
+                '--disable-extras',
+                '--disable-icuio',
+                '--disable-layoutex',
+                '--disable-icu-config',
+                '--disable-debug',
+                '--enable-release',
+            ],
+            cwd=build,
+            env=env,
+        )
     run(['make', f'-j{ncpu()}'], cwd=build, env=env)
     # Install only the libraries and their headers, not the ICU command-line tools.
     for directory in ('data', 'common', 'i18n'):
@@ -237,8 +292,19 @@ def build_lz4():
         shutil.rmtree(build)
     shutil.copytree(source, build, symlinks=True)
     env = dependency_env()
-    run(['make', f'-j{ncpu()}', 'install', 'BUILD_SHARED=no', 'BUILD_STATIC=yes',
-         'PREFIX=' + str(PREFIX), 'LIBDIR=' + str(PREFIX / 'lib')], cwd=build / 'lib', env=env)
+    run(
+        [
+            'make',
+            f'-j{ncpu()}',
+            'install',
+            'BUILD_SHARED=no',
+            'BUILD_STATIC=yes',
+            'PREFIX=' + str(PREFIX),
+            'LIBDIR=' + str(PREFIX / 'lib'),
+        ],
+        cwd=build / 'lib',
+        env=env,
+    )
     for stale in (PREFIX / 'lib').glob('liblz4*.dylib'):
         raise SystemExit(f'unexpected shared lz4 in prefix: {stale}')
     install_license(source / 'lib/LICENSE', 'lz4', LZ4_VERSION, LZ4_URL, LZ4_SHA256)
@@ -251,10 +317,26 @@ def build_xz():
     build.mkdir(parents=True, exist_ok=True)
     env = dependency_env()
     if not (build / 'config.status').is_file():
-        run([source / 'configure', '--prefix=' + str(PREFIX), '--libdir=' + str(PREFIX / 'lib'),
-             '--disable-shared', '--enable-static', '--with-pic', '--disable-xz', '--disable-xzdec',
-             '--disable-lzmadec', '--disable-lzmainfo', '--disable-lzma-links', '--disable-scripts',
-             '--disable-doc', '--disable-nls'], cwd=build, env=env)
+        run(
+            [
+                source / 'configure',
+                '--prefix=' + str(PREFIX),
+                '--libdir=' + str(PREFIX / 'lib'),
+                '--disable-shared',
+                '--enable-static',
+                '--with-pic',
+                '--disable-xz',
+                '--disable-xzdec',
+                '--disable-lzmadec',
+                '--disable-lzmainfo',
+                '--disable-lzma-links',
+                '--disable-scripts',
+                '--disable-doc',
+                '--disable-nls',
+            ],
+            cwd=build,
+            env=env,
+        )
     run(['make', f'-j{ncpu()}'], cwd=build / 'src/liblzma', env=env)
     run(['make', 'install'], cwd=build / 'src/liblzma', env=env)
     for stale in (PREFIX / 'lib').glob('liblzma*.dylib'):
@@ -270,14 +352,37 @@ def build_libpng():
     env = dependency_env()
     if not (build / 'config.status').is_file():
         # zlib is the SDK's libz (zlib.h + libz.tbd); no Homebrew zlib is searched.
-        run([source / 'configure', '--prefix=' + str(PREFIX), '--libdir=' + str(PREFIX / 'lib'),
-             '--disable-shared', '--enable-static', '--with-pic', '--disable-tests',
-             '--disable-tools', '--disable-unversioned-libpng-config'], cwd=build, env=env)
+        run(
+            [
+                source / 'configure',
+                '--prefix=' + str(PREFIX),
+                '--libdir=' + str(PREFIX / 'lib'),
+                '--disable-shared',
+                '--enable-static',
+                '--with-pic',
+                '--disable-tests',
+                '--disable-tools',
+                '--disable-unversioned-libpng-config',
+            ],
+            cwd=build,
+            env=env,
+        )
     run(['make', f'-j{ncpu()}', 'libpng16.la'], cwd=build, env=env)
     # Library, headers and pkg-config file only (no man pages or libpng-config script).
-    run(['make', 'install-libLTLIBRARIES', 'install-pkgincludeHEADERS',
-         'install-nodist_pkgincludeHEADERS', 'install-pkgconfigDATA', 'install-header-links',
-         'install-library-links', 'install-libpng-pc'], cwd=build, env=env)
+    run(
+        [
+            'make',
+            'install-libLTLIBRARIES',
+            'install-pkgincludeHEADERS',
+            'install-nodist_pkgincludeHEADERS',
+            'install-pkgconfigDATA',
+            'install-header-links',
+            'install-library-links',
+            'install-libpng-pc',
+        ],
+        cwd=build,
+        env=env,
+    )
     for stale in (PREFIX / 'lib').glob('libpng*.dylib'):
         raise SystemExit(f'unexpected shared libpng in prefix: {stale}')
     install_license(source / 'LICENSE', 'libpng', PNG_VERSION, PNG_URL, PNG_SHA256)
@@ -286,17 +391,31 @@ def build_libpng():
 def deps_key():
     """Everything the dependency builds bake into their Makefiles and outputs."""
     clang = subprocess.check_output([tool('clang'), '--version'], text=True)
-    material = '\n'.join([hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), str(PREFIX),
-                          str(BUILD), sdk(), MACOS_MIN, tool('clang'), clang])
+    material = '\n'.join(
+        [
+            hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            str(PREFIX),
+            str(BUILD),
+            sdk(),
+            MACOS_MIN,
+            tool('clang'),
+            clang,
+        ]
+    )
     return hashlib.sha256(material.encode()).hexdigest()
 
 
 def deps_outputs():
-    return ([PREFIX / 'lib' / name for name in icu_names()]
-            + [PREFIX / 'lib/liblz4.a', PREFIX / 'lib/liblzma.a',
-               PREFIX / 'include/unicode/uversion.h', PREFIX / 'include/lz4.h',
-               PREFIX / 'include/lzma.h', PREFIX / 'lib/libpng16.a', PREFIX / 'lib/libpng.a',
-               PREFIX / 'include/png.h'])
+    return [PREFIX / 'lib' / name for name in icu_names()] + [
+        PREFIX / 'lib/liblz4.a',
+        PREFIX / 'lib/liblzma.a',
+        PREFIX / 'include/unicode/uversion.h',
+        PREFIX / 'include/lz4.h',
+        PREFIX / 'include/lzma.h',
+        PREFIX / 'lib/libpng16.a',
+        PREFIX / 'lib/libpng.a',
+        PREFIX / 'include/png.h',
+    ]
 
 
 def build_deps():
@@ -309,12 +428,19 @@ def build_deps():
     """
     stamp = BUILD / 'deps.stamp'
     key = deps_key()
-    if (stamp.is_file() and stamp.read_text().strip() == key
-            and all(path.exists() for path in deps_outputs())):
+    if (
+        stamp.is_file()
+        and stamp.read_text().strip() == key
+        and all(path.exists() for path in deps_outputs())
+    ):
         return
     stamp.unlink(missing_ok=True)
-    for directory in (f'icu-{ICU_VERSION}', f'xz-{XZ_VERSION}', f'lz4-{LZ4_VERSION}',
-                      f'libpng-{PNG_VERSION}'):
+    for directory in (
+        f'icu-{ICU_VERSION}',
+        f'xz-{XZ_VERSION}',
+        f'lz4-{LZ4_VERSION}',
+        f'libpng-{PNG_VERSION}',
+    ):
         shutil.rmtree(BUILD / directory, ignore_errors=True)
     build_xz()
     build_lz4()
@@ -332,9 +458,18 @@ def write_versions_checked(tree):
 
 
 def art_make_command(targets=ART_TARGETS, jobs=None, dry_run=False):
-    return ['make', *(['-n'] if dry_run else []), f'-j{jobs or ncpu()}', 'SHELL=/bin/bash',
-            'ARCH=aarch64', 'WITH_HOST_DALVIK=true', 'ART_BUILD_HOST_DEBUG=false',
-            '____PREFIX=' + str(PREFIX), '____LIBDIR=lib', *targets]
+    return [
+        'make',
+        *(['-n'] if dry_run else []),
+        f'-j{jobs or ncpu()}',
+        'SHELL=/bin/bash',
+        'ARCH=aarch64',
+        'WITH_HOST_DALVIK=true',
+        'ART_BUILD_HOST_DEBUG=false',
+        '____PREFIX=' + str(PREFIX),
+        '____LIBDIR=lib',
+        *targets,
+    ]
 
 
 def stage_icu(tree):
@@ -381,8 +516,14 @@ def build_art(tree=ROOT / 'context/art_standalone', dry_run=False, log=None):
     command = art_make_command(dry_run=dry_run)
     if log is not None:
         with open(log, 'w') as stream:
-            subprocess.run(command, cwd=tree, env=art_env(), check=True, stdout=stream,
-                           stderr=subprocess.STDOUT)
+            subprocess.run(
+                command,
+                cwd=tree,
+                env=art_env(),
+                check=True,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+            )
     else:
         run(command, cwd=tree, env=art_env())
     if dry_run:
@@ -391,7 +532,10 @@ def build_art(tree=ROOT / 'context/art_standalone', dry_run=False, log=None):
     stage_icu(tree)
     sys.path.insert(0, str(ROOT / 'scripts'))
     from bootstrap_boot import desugar_boot
-    desugar_boot(ROOT, host=tree / 'out/host', host_tag=HOST_TAG, work=ROOT / 'build/macos/runtime-boot')
+
+    desugar_boot(
+        ROOT, host=tree / 'out/host', host_tag=HOST_TAG, work=ROOT / 'build/macos/runtime-boot'
+    )
 
 
 def run_stage(stage):
@@ -409,10 +553,16 @@ def run_stage(stage):
 def main():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         raise SystemExit('bootstrap_darwin.py builds for macOS arm64 hosts only')
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('stage', choices=['deps', 'art'], default='deps', nargs='?')
-    parser.add_argument('--tree', type=Path, default=ROOT / 'context/art_standalone',
-                        help='patched art_standalone checkout to build (stage art)')
+    parser.add_argument(
+        '--tree',
+        type=Path,
+        default=ROOT / 'context/art_standalone',
+        help='patched art_standalone checkout to build (stage art)',
+    )
     parser.add_argument('--dry-run', action='store_true', help='print the ART make commands only')
     parser.add_argument('--log', type=Path, help='write ART make output to this file')
     args = parser.parse_args()
@@ -421,7 +571,9 @@ def main():
     try:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        parser.exit(1, 'Another Shiraz runtime bootstrap owns the build lock. Wait for it to finish.\n')
+        parser.exit(
+            1, 'Another Shiraz runtime bootstrap owns the build lock. Wait for it to finish.\n'
+        )
     if args.stage == 'deps':
         build_deps()
         return

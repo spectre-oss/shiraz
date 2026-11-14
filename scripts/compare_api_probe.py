@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Compare exported API-probe reports without treating skips as compatibility."""
+
 import argparse
 import json
 import math
@@ -21,12 +22,23 @@ def load_report(path):
     if report.get('schemaVersion') != 1 or not isinstance(report.get('results'), dict):
         raise ValueError('unsupported report schema')
     for key, result in report['results'].items():
-        if not isinstance(result, dict) or key != result.get('id') or result.get('status') not in STATUSES:
+        if (
+            not isinstance(result, dict)
+            or key != result.get('id')
+            or result.get('status') not in STATUSES
+        ):
             raise ValueError('invalid result identity or status')
         duration = result.get('durationMs')
-        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0:
+        if (
+            isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+            or not math.isfinite(duration)
+            or duration < 0
+        ):
             raise ValueError('invalid duration')
-        if result.get('mode') not in ('automatic', 'manual') or not isinstance(result.get('expected'), str):
+        if result.get('mode') not in ('automatic', 'manual') or not isinstance(
+            result.get('expected'), str
+        ):
             raise ValueError('invalid test metadata')
     return report
 
@@ -40,9 +52,15 @@ def compare(baseline, candidate):
         if a and not b and a['mode'] == 'automatic' and a['status'] == 'PASS':
             state = 'coverage_lost'
         if a and b:
-            if (a['expected'] != b['expected'] or a['mode'] != b['mode']
-                    or (baseline.get('suiteFingerprint') and candidate.get('suiteFingerprint')
-                        and baseline['suiteFingerprint'] != candidate['suiteFingerprint'])):
+            if (
+                a['expected'] != b['expected']
+                or a['mode'] != b['mode']
+                or (
+                    baseline.get('suiteFingerprint')
+                    and candidate.get('suiteFingerprint')
+                    and baseline['suiteFingerprint'] != candidate['suiteFingerprint']
+                )
+            ):
                 state = 'definition_changed'
             elif a['mode'] == 'manual':
                 state = 'manual_observation'
@@ -56,10 +74,20 @@ def compare(baseline, candidate):
                 state = 'both_pass'
             else:
                 state = 'unresolved'
-        rows.append({'id': test_id, 'baseline': a['status'] if a else 'NOT_RUN',
-                     'candidate': b['status'] if b else 'NOT_RUN', 'comparison': state})
-    return {'baselineVersion': baseline.get('suiteVersion'), 'candidateVersion': candidate.get('suiteVersion'),
-            'note': 'Only recorded assertions are compared; this is not whole-platform compatibility.', 'cases': rows}
+        rows.append(
+            {
+                'id': test_id,
+                'baseline': a['status'] if a else 'NOT_RUN',
+                'candidate': b['status'] if b else 'NOT_RUN',
+                'comparison': state,
+            }
+        )
+    return {
+        'baselineVersion': baseline.get('suiteVersion'),
+        'candidateVersion': candidate.get('suiteVersion'),
+        'note': 'Only recorded assertions are compared; this is not whole-platform compatibility.',
+        'cases': rows,
+    }
 
 
 def main():

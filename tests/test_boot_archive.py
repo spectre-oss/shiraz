@@ -6,7 +6,9 @@ import tempfile
 import unittest
 import zipfile
 
-spec = importlib.util.spec_from_file_location('bootstrap_boot', Path(__file__).resolve().parents[1] / 'scripts/bootstrap_boot.py')
+spec = importlib.util.spec_from_file_location(
+    'bootstrap_boot', Path(__file__).resolve().parents[1] / 'scripts/bootstrap_boot.py'
+)
 boot = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boot)
 
@@ -15,7 +17,9 @@ class BootArchiveTests(unittest.TestCase):
     def test_resources_determinism_and_dex_alignment(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            classes, generated, first, second = [root / name for name in ('classes.jar', 'dex.jar', 'first.jar', 'second.jar')]
+            classes, generated, first, second = [
+                root / name for name in ('classes.jar', 'dex.jar', 'first.jar', 'second.jar')
+            ]
             with zipfile.ZipFile(classes, 'w') as archive:
                 archive.writestr('java/lang/Object.class', b'class bytecode')
                 archive.writestr('java/security/security.properties', b'actual resource\n')
@@ -26,7 +30,10 @@ class BootArchiveTests(unittest.TestCase):
             boot.boot_archive(classes, generated, second)
             self.assertEqual(first.read_bytes(), second.read_bytes())
             with zipfile.ZipFile(first) as archive:
-                self.assertEqual(set(archive.namelist()), {'java/security/security.properties', 'META-INF/NOTICE', 'classes.dex'})
+                self.assertEqual(
+                    set(archive.namelist()),
+                    {'java/security/security.properties', 'META-INF/NOTICE', 'classes.dex'},
+                )
                 self.assertEqual(archive.read('META-INF/NOTICE'), b'original dependency notice\n')
                 entry = archive.getinfo('classes.dex')
                 self.assertEqual(entry.compress_type, zipfile.ZIP_STORED)
@@ -46,6 +53,8 @@ class BootArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / '.deps').mkdir()
-            (root / '.deps' / ('r8-' + boot.R8_VERSION + '.jar')).write_bytes(b'modified build tool')
+            (root / '.deps' / ('r8-' + boot.R8_VERSION + '.jar')).write_bytes(
+                b'modified build tool'
+            )
             with self.assertRaisesRegex(SystemExit, 'checksum mismatch'):
                 boot.compiler(root)

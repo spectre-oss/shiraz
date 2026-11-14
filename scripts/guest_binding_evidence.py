@@ -31,16 +31,23 @@ def bounded_read(path, limit):
 def verify_relocation_inventory(metadata, bindings, *, absolute=False):
     """Require exact named GOT/PLT or ABS64 tuples, independently of JSON."""
     expected = {}
-    source = ({slot: row for slot, row in metadata.all_relocations.items() if row[2] == 257}
-              if absolute else metadata.relocations)
+    source = (
+        {slot: row for slot, row in metadata.all_relocations.items() if row[2] == 257}
+        if absolute
+        else metadata.relocations
+    )
     for slot, (index, addend, kind) in source.items():
         if not absolute and not index:  # Legacy named GOT/PLT excludes symbol zero.
             continue
         name, info, _, section, _, _ = struct.unpack(
-            "<IBBHQQ", metadata.read(metadata.tags[6] + index * 24, 24))
+            "<IBBHQQ", metadata.read(metadata.tags[6] + index * 24, 24)
+        )
         version = ""
         if 0x6FFFFFF0 in metadata.tags:
-            number = struct.unpack("<H", metadata.read(metadata.tags[0x6FFFFFF0] + index * 2, 2))[0] & 0x7FFF
+            number = (
+                struct.unpack("<H", metadata.read(metadata.tags[0x6FFFFFF0] + index * 2, 2))[0]
+                & 0x7FFF
+            )
             if number > 1:
                 if not 0 < section < 0xFF00:
                     requirement = metadata.needed_version(number)
@@ -55,17 +62,24 @@ def verify_relocation_inventory(metadata, bindings, *, absolute=False):
         raise ValueError("binding report lacks exact ELF relocation inventory")
     for slot, (name, version, kind, addend, strength, undefined) in expected.items():
         binding = actual[slot]
-        if absolute and (type(binding.get("symbol_index")) is not int or
-                         binding["symbol_index"] != source[slot][0]):
+        if absolute and (
+            type(binding.get("symbol_index")) is not int
+            or binding["symbol_index"] != source[slot][0]
+        ):
             raise ValueError("absolute binding symbol index disagrees with ELF metadata")
-        if (binding["symbol"], binding["version"], binding["relocation_type"], binding.get("addend")) != (
-            name, version, kind, addend
-        ) or type(binding.get("addend")) is not int:
+        if (
+            binding["symbol"],
+            binding["version"],
+            binding["relocation_type"],
+            binding.get("addend"),
+        ) != (name, version, kind, addend) or type(binding.get("addend")) is not int:
             raise ValueError("binding report relocation disagrees with ELF metadata")
         if binding["abi"] in {"", "unrecorded"}:
             raise ValueError("binding report contains unrecorded adapter")
         if not binding["provider"] and not (
-            undefined and strength == 2 and binding["abi"] == "unresolved-weak-null"
+            undefined
+            and strength == 2
+            and binding["abi"] == "unresolved-weak-null"
             and binding["target"] is None
         ):
             raise ValueError("binding report lacks selected provider")
@@ -74,24 +88,30 @@ def verify_relocation_inventory(metadata, bindings, *, absolute=False):
 
 def verify_complete_relocations(metadata, inventory):
     """Check every applied tuple; producer read-back is a historical observation."""
-    if (not isinstance(inventory, dict) or type(inventory.get("profile")) is not int or
-            inventory["profile"] != 1 or
-            inventory.get("verification") != "read-back-after-relocate-before-seal" or
-            type(inventory.get("verified_count")) is not int or
-            not isinstance(inventory.get("records"), list)):
+    if (
+        not isinstance(inventory, dict)
+        or type(inventory.get("profile")) is not int
+        or inventory["profile"] != 1
+        or inventory.get("verification") != "read-back-after-relocate-before-seal"
+        or type(inventory.get("verified_count")) is not int
+        or not isinstance(inventory.get("records"), list)
+    ):
         raise ValueError("complete relocation verification profile required")
     rows = inventory["records"]
     if len(rows) > MAX_BINDINGS or inventory["verified_count"] != len(rows):
         raise ValueError("complete relocation verified count/bound")
     actual = {}
     for row in rows:
-        if (not isinstance(row, dict) or set(row) != {"relocation", "relocation_type", "symbol_index", "addend"} or
-                any(type(row.get(key)) is not int for key in row) or
-                not 0 <= row["relocation"] < 1 << 64 or
-                not -(1 << 63) <= row["addend"] < 1 << 63 or
-                not 0 <= row["symbol_index"] < 1 << 32 or
-                row["relocation_type"] not in (257, 1025, 1026, 1027) or
-                row["relocation"] in actual):
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"relocation", "relocation_type", "symbol_index", "addend"}
+            or any(type(row.get(key)) is not int for key in row)
+            or not 0 <= row["relocation"] < 1 << 64
+            or not -(1 << 63) <= row["addend"] < 1 << 63
+            or not 0 <= row["symbol_index"] < 1 << 32
+            or row["relocation_type"] not in (257, 1025, 1026, 1027)
+            or row["relocation"] in actual
+        ):
             raise ValueError("invalid complete relocation tuple")
         actual[row["relocation"]] = (row["symbol_index"], row["addend"], row["relocation_type"])
     if actual != metadata.all_relocations:
@@ -109,10 +129,7 @@ def _validate_binding_rows(bindings, hashes, names, bridge_identity, *, absolute
             type(relocation) is not int
             or not 0 <= relocation < 2**64
             or relocation in seen
-            or (
-                target is not None
-                and (type(target) is not int or not 0 <= target < 2**64)
-            )
+            or (target is not None and (type(target) is not int or not 0 <= target < 2**64))
             or type(binding.get("relocation_type")) is not int
             or binding.get("relocation_type") not in ((257,) if absolute else (1025, 1026))
             or binding.get("kind") not in ("function", "object", "unknown")
@@ -125,11 +142,14 @@ def _validate_binding_rows(bindings, hashes, names, bridge_identity, *, absolute
         if type(binding.get("nonreturning", False)) is not bool:
             raise ValueError("invalid nonreturning binding contract")
         if absolute:
-            if (binding.get("usage") != "absolute-address" or
-                    type(binding.get("symbol_index")) is not int or
-                    not 0 <= binding["symbol_index"] < 1 << 32 or
-                    type(binding.get("current_slot_matches_link")) is not bool or
-                    "native_target" in binding or "cached_self" in binding):
+            if (
+                binding.get("usage") != "absolute-address"
+                or type(binding.get("symbol_index")) is not int
+                or not 0 <= binding["symbol_index"] < 1 << 32
+                or type(binding.get("current_slot_matches_link")) is not bool
+                or "native_target" in binding
+                or "cached_self" in binding
+            ):
                 raise ValueError("absolute binding address snapshot required")
         else:
             if byte_memory_binding(binding) and bridge_identity is None:
@@ -158,12 +178,8 @@ def _validate_binding_rows(bindings, hashes, names, bridge_identity, *, absolute
         seen.add(relocation)
         provider = binding["provider"]
         provider_hash = hashes.get(provider) if provider in names else None
-        if target is not None and (
-            provider_hash is None or binding["abi"] not in GUEST_ABIS
-        ):
-            raise ValueError(
-                "native/unknown binding must not expose a guest target"
-            )
+        if target is not None and (provider_hash is None or binding["abi"] not in GUEST_ABIS):
+            raise ValueError("native/unknown binding must not expose a guest target")
         binding["provider_elf_sha256"] = provider_hash
 
 
@@ -212,10 +228,7 @@ def augment_binding_report(
     bridge_bytes = None
     if native_bridge is not None:
         native_bridge = Path(native_bridge).resolve(strict=True)
-        if (
-            not native_bridge.is_file()
-            or not 0 < native_bridge.stat().st_size <= 256 << 20
-        ):
+        if not native_bridge.is_file() or not 0 < native_bridge.stat().st_size <= 256 << 20:
             raise ValueError("native bridge identity size bound")
         bridge_bytes = bounded_read(native_bridge, 256 << 20)
         actual_bridge_hash = hashlib.sha256(bridge_bytes).hexdigest()
@@ -249,8 +262,11 @@ def augment_binding_report(
         _validate_binding_rows(bindings, hashes, names, bridge_identity)
         absolute = module.get("absolute_bindings")
         if verify_all_relocations or absolute is not None:
-            if (not isinstance(absolute, list) or len(absolute) > MAX_BINDINGS or
-                    module.get("absolute_binding_snapshot") != "read-back-after-relocate-before-seal"):
+            if (
+                not isinstance(absolute, list)
+                or len(absolute) > MAX_BINDINGS
+                or module.get("absolute_binding_snapshot") != "read-back-after-relocate-before-seal"
+            ):
                 raise ValueError("absolute binding inventory/stage required")
             total_absolute += len(absolute)
             if total_absolute > MAX_BINDINGS:
@@ -262,7 +278,9 @@ def augment_binding_report(
             from audit_guest_tpidr import ElfBindingMetadata
             from guest_mrs_window import validate_mrs_window_record
 
-            metadata = ElfBindingMetadata(bounded_read(library_directory / module["name"], 256 << 20), module["name"])
+            metadata = ElfBindingMetadata(
+                bounded_read(library_directory / module["name"], 256 << 20), module["name"]
+            )
             if metadata.elf_sha256 != hashes[module["name"]]:
                 raise ValueError("binding inventory ELF changed since APK verification")
             if "mrs_stack_window" in module:
@@ -270,20 +288,22 @@ def augment_binding_report(
             if verify_inventory:
                 verify_relocation_inventory(metadata, bindings)
             if verify_all_relocations:
-                total_relocations += verify_complete_relocations(metadata, module.get("relocation_inventory"))
+                total_relocations += verify_complete_relocations(
+                    metadata, module.get("relocation_inventory")
+                )
                 if total_relocations > MAX_BINDINGS:
                     raise ValueError("complete relocation report limit")
                 verify_relocation_inventory(metadata, absolute, absolute=True)
     if verify_inventory:
         report["relocation_inventory_verification"] = "exact-named-GLOB_DAT-JUMP_SLOT-ELF-metadata"
     if verify_all_relocations:
-        report["complete_relocation_inventory_verification"] = "exact-all-RELA-and-ABS64-bindings-ELF-metadata"
+        report["complete_relocation_inventory_verification"] = (
+            "exact-all-RELA-and-ABS64-bindings-ELF-metadata"
+        )
     if bridge_identity is not None:
         report["native_bridge"] = bridge_identity
     report["source_report_sha256"] = hashlib.sha256(raw).hexdigest()
-    report["identity_verification"] = (
-        "unchanged-apk-members-and-exact-loaded-file-paths"
-    )
+    report["identity_verification"] = "unchanged-apk-members-and-exact-loaded-file-paths"
     encoded = (json.dumps(report, indent=2) + "\n").encode()
     if len(encoded) > MAX_REPORT:
         raise ValueError("augmented binding report size limit")

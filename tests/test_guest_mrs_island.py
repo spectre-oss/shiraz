@@ -21,33 +21,64 @@ def branch(origin, destination):
 
 
 def fixture(*, island=0x2000, site=0x1000, target=0, entry=0x5000, accessor=0x6000):
-    blob = struct.pack('<8IQQIIQ', 0xA9BF47F0, 0x10000130, 0x580000D1, 0xD61F0220,
-                       0xA8C147F0, 0xA93F7FFF, branch(island + 24, site + 4), 0xD503201F,
-                       entry, island + 16, target, 1, accessor)
-    arguments = {"island": island, "site": site, "target": target,
-                 "replacement": branch(site, island), "entry": entry, "accessor": accessor}
+    blob = struct.pack(
+        '<8IQQIIQ',
+        0xA9BF47F0,
+        0x10000130,
+        0x580000D1,
+        0xD61F0220,
+        0xA8C147F0,
+        0xA93F7FFF,
+        branch(island + 24, site + 4),
+        0xD503201F,
+        entry,
+        island + 16,
+        target,
+        1,
+        accessor,
+    )
+    arguments = {
+        "island": island,
+        "site": site,
+        "target": target,
+        "replacement": branch(site, island),
+        "entry": entry,
+        "accessor": accessor,
+    }
     return blob, arguments
 
 
 class MrsIslandTests(unittest.TestCase):
     def test_complete_default_snapshot_has_explicit_immutable_scope(self):
-        blob, args = fixture();result = validate_mrs_island(blob, **args)
+        blob, args = fixture()
+        result = validate_mrs_island(blob, **args)
         self.assertIsNotNone(result)
         self.assertEqual(struct.unpack_from('<I', blob, 24)[0], 0x17FFFBFB)
         self.assertEqual(args['replacement'], 0x14000400)
-        self.assertEqual((result.continuation, result.context, result.return_branch_pc),
-                         (0x1004, 0x2028, 0x2018))
+        self.assertEqual(
+            (result.continuation, result.context, result.return_branch_pc), (0x1004, 0x2028, 0x2018)
+        )
         self.assertEqual(result.body_sha256, hashlib.sha256(blob).hexdigest())
         self.assertEqual((result.body_size, result.default_kind), (64, 1))
-        self.assertEqual((result.outer_stack_write_bytes, result.outer_stack_clear_bytes,
-                          result.outer_stack_offset), (16, 16, -16))
-        self.assertTrue(result.requires_verified_entry_and_accessor and
-                        result.requires_verified_code_mappings and
-                        result.requires_stack_image_context_exclusion and
-                        result.requires_prepared_synchronous_lifetime)
+        self.assertEqual(
+            (
+                result.outer_stack_write_bytes,
+                result.outer_stack_clear_bytes,
+                result.outer_stack_offset,
+            ),
+            (16, 16, -16),
+        )
+        self.assertTrue(
+            result.requires_verified_entry_and_accessor
+            and result.requires_verified_code_mappings
+            and result.requires_stack_image_context_exclusion
+            and result.requires_prepared_synchronous_lifetime
+        )
         self.assertFalse(result.execution_claim or result.consumer_proof)
-        with self.assertRaises(FrozenInstanceError):result.target = 1
-        mutable = bytearray(blob);snapshot = validate_mrs_island(mutable, **args)
+        with self.assertRaises(FrozenInstanceError):
+            result.target = 1
+        mutable = bytearray(blob)
+        snapshot = validate_mrs_island(mutable, **args)
         mutable[0] ^= 1
         self.assertEqual(snapshot.body_sha256, result.body_sha256)
 
@@ -55,7 +86,8 @@ class MrsIslandTests(unittest.TestCase):
         blob, args = fixture()
         for offset in range(64):
             for bit in range(8):
-                changed = bytearray(blob);changed[offset] ^= 1 << bit
+                changed = bytearray(blob)
+                changed[offset] ^= 1 << bit
                 with self.subTest(offset=offset, bit=bit):
                     self.assertIsNone(validate_mrs_island(changed, **args))
         for bit in range(32):
@@ -77,11 +109,16 @@ class MrsIslandTests(unittest.TestCase):
 
     def test_generic_kind_old_literal_and_metadata_changes_refuse(self):
         blob, args = fixture()
-        for offset, code, value in ((32, '<Q', args['entry'] + 4),
-                                    (40, '<Q', args['island'] + 20),
-                                    (48, '<I', 1), (52, '<I', 0), (52, '<I', 2),
-                                    (56, '<Q', args['accessor'] + 4)):
-            changed = bytearray(blob);struct.pack_into(code, changed, offset, value)
+        for offset, code, value in (
+            (32, '<Q', args['entry'] + 4),
+            (40, '<Q', args['island'] + 20),
+            (48, '<I', 1),
+            (52, '<I', 0),
+            (52, '<I', 2),
+            (56, '<Q', args['accessor'] + 4),
+        ):
+            changed = bytearray(blob)
+            struct.pack_into(code, changed, offset, value)
             with self.subTest(offset=offset, value=value):
                 self.assertIsNone(validate_mrs_island(changed, **args))
         old = bytearray(blob)
@@ -95,8 +132,12 @@ class MrsIslandTests(unittest.TestCase):
             blob, args = fixture(site=site, island=island)
             with self.subTest(island=island):
                 self.assertIsNotNone(validate_mrs_island(blob, **args))
-        for island in (site - (1 << 27) - 16, site + (1 << 27) - 16,
-                       site + (1 << 27), site + (1 << 28)):
+        for island in (
+            site - (1 << 27) - 16,
+            site + (1 << 27) - 16,
+            site + (1 << 27),
+            site + (1 << 28),
+        ):
             blob, args = fixture(site=site, island=island)
             with self.subTest(out_of_reach=island):
                 self.assertIsNone(validate_mrs_island(blob, **args))
@@ -104,14 +145,23 @@ class MrsIslandTests(unittest.TestCase):
         self.assertEqual(branch(site + (1 << 27) - 16 + 20, site + 4), 0x16000000)
 
     def test_uint64_arithmetic_cannot_wrap_or_create_overlap(self):
-        blob, args = fixture(site=UINT64_END - 0x2000, island=UINT64_END - 0x1000,
-                             entry=UINT64_END - 4, accessor=UINT64_END - 8)
+        blob, args = fixture(
+            site=UINT64_END - 0x2000,
+            island=UINT64_END - 0x1000,
+            entry=UINT64_END - 4,
+            accessor=UINT64_END - 8,
+        )
         self.assertIsNotNone(validate_mrs_island(blob, **args))
         base, arguments = fixture()
-        for updates in ({'site': UINT64_END - 4}, {'island': UINT64_END - 64},
-                        {'island': UINT64_END - 48}, {'site': UINT64_END},
-                        {'island': UINT64_END}, {'site': arguments['island']},
-                        {'site': arguments['island'] + 60}):
+        for updates in (
+            {'site': UINT64_END - 4},
+            {'island': UINT64_END - 64},
+            {'island': UINT64_END - 48},
+            {'site': UINT64_END},
+            {'island': UINT64_END},
+            {'site': arguments['island']},
+            {'site': arguments['island'] + 60},
+        ):
             with self.subTest(updates=updates):
                 self.assertIsNone(validate_mrs_island(base, **dict(arguments, **updates)))
         zero_site, arguments = fixture(site=0, island=0x1000)
@@ -129,9 +179,17 @@ class MrsIslandTests(unittest.TestCase):
             for value in (None, True, -1, UINT64_END, '1'):
                 with self.subTest(field=field, value=value):
                     self.assertIsNone(validate_mrs_island(blob, **dict(args, **{field: value})))
-        for field, value in (('site', 0x1001), ('island', 0x2004), ('target', -1),
-                             ('target', 32), ('replacement', 1 << 32),
-                             ('entry', 0), ('accessor', 0), ('entry', 0x5002), ('accessor', 0x6002)):
+        for field, value in (
+            ('site', 0x1001),
+            ('island', 0x2004),
+            ('target', -1),
+            ('target', 32),
+            ('replacement', 1 << 32),
+            ('entry', 0),
+            ('accessor', 0),
+            ('entry', 0x5002),
+            ('accessor', 0x6002),
+        ):
             with self.subTest(field=field, value=value):
                 self.assertIsNone(validate_mrs_island(blob, **dict(args, **{field: value})))
 

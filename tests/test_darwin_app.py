@@ -27,7 +27,9 @@ class DarwinAppTests(unittest.TestCase):
             self.assertEqual(info["CFBundleExecutable"], executable.name)
             self.assertTrue(info["NSCameraUsageDescription"])
             self.assertTrue(info["NSMicrophoneUsageDescription"])
-            self.assertEqual(prepare_app_bundle(root / "run", vm, host, "org.example.app"), executable)
+            self.assertEqual(
+                prepare_app_bundle(root / "run", vm, host, "org.example.app"), executable
+            )
             stable = plistlib.loads((contents / "Info.plist").read_bytes())["CFBundleIdentifier"]
             self.assertEqual(stable, info["CFBundleIdentifier"])
             executable.unlink()
@@ -43,17 +45,32 @@ class DarwinAppTests(unittest.TestCase):
             vm.write_bytes(b"\xcf\xfa\xed\xfe" + bytes(16))
             icon = root / "shiraz.icns"
             icon.write_bytes(b"icns" + bytes(12))
-            executable = prepare_app_bundle(root / "run", vm, root / "art", "org.example.app", icon=icon)
+            executable = prepare_app_bundle(
+                root / "run", vm, root / "art", "org.example.app", icon=icon
+            )
             contents = executable.parent.parent
-            self.assertEqual((contents / "Resources" / "Shiraz.icns").read_bytes(), icon.read_bytes())
-            self.assertEqual(plistlib.loads((contents / "Info.plist").read_bytes())["CFBundleIconFile"], "Shiraz")
-            missing = prepare_app_bundle(root / "run2", vm, root / "art", "org.example.app", icon=root / "absent.icns")
-            self.assertNotIn("CFBundleIconFile", plistlib.loads((missing.parent.parent / "Info.plist").read_bytes()))
+            self.assertEqual(
+                (contents / "Resources" / "Shiraz.icns").read_bytes(), icon.read_bytes()
+            )
+            self.assertEqual(
+                plistlib.loads((contents / "Info.plist").read_bytes())["CFBundleIconFile"], "Shiraz"
+            )
+            missing = prepare_app_bundle(
+                root / "run2", vm, root / "art", "org.example.app", icon=root / "absent.icns"
+            )
+            self.assertNotIn(
+                "CFBundleIconFile",
+                plistlib.loads((missing.parent.parent / "Info.plist").read_bytes()),
+            )
             info = plistlib.loads((missing.parent.parent / "Info.plist").read_bytes())
             self.assertEqual(info["CFBundleName"], "Shiraz")
-            named = prepare_app_bundle(root / "run3", vm, root / "art", "org.example.app", name=" Dodge ")
+            named = prepare_app_bundle(
+                root / "run3", vm, root / "art", "org.example.app", name=" Dodge "
+            )
             info = plistlib.loads((named.parent.parent / "Info.plist").read_bytes())
-            self.assertEqual((info["CFBundleName"], info["CFBundleDisplayName"]), ("Dodge", "Dodge"))
+            self.assertEqual(
+                (info["CFBundleName"], info["CFBundleDisplayName"]), ("Dodge", "Dodge")
+            )
             self.assertIsNone(badged_icon(root / "app.apk", root / "run3", root / "no-icons"))
             icon.write_bytes(b"PNG not icns")
             with self.assertRaises(FormatError):

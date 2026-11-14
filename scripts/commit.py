@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Commit staged source with a Conventional Commit message; CI owns VERSION."""
+
 import argparse
 import os
 import subprocess

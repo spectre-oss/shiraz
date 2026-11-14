@@ -16,8 +16,11 @@ import tempfile
 from pathlib import Path
 
 LOAD_COMMANDS = {
-    "LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB",
-    "LC_LOAD_UPWARD_DYLIB", "LC_LAZY_LOAD_DYLIB",
+    "LC_LOAD_DYLIB",
+    "LC_LOAD_WEAK_DYLIB",
+    "LC_REEXPORT_DYLIB",
+    "LC_LOAD_UPWARD_DYLIB",
+    "LC_LAZY_LOAD_DYLIB",
 }
 MAX_IMAGES = 128
 MAX_IMAGE_BYTES = 256 * 1024 * 1024
@@ -30,8 +33,9 @@ def digest(path):
 
 
 def output(command, env):
-    return subprocess.check_output(list(map(str, command)), env=env, text=True,
-                                   stderr=subprocess.STDOUT, timeout=60)
+    return subprocess.check_output(
+        list(map(str, command)), env=env, text=True, stderr=subprocess.STDOUT, timeout=60
+    )
 
 
 def metadata(path, env):
@@ -57,8 +61,11 @@ def metadata(path, env):
 
 def is_system(name):
     path = Path(name)
-    return (path.is_absolute() and ".." not in path.parts and
-            (name.startswith(("/usr/lib/", "/System/Library/"))))
+    return (
+        path.is_absolute()
+        and ".." not in path.parts
+        and (name.startswith(("/usr/lib/", "/System/Library/")))
+    )
 
 
 def within(path, roots):
@@ -84,9 +91,15 @@ def stage_closure(root, host, work, env, *, extra_images=(), main_executable=Non
     (tree / "lib64").mkdir()
     # Framework JARs/images are data; no native library directory is symlinked.
     (tree / "framework").symlink_to(host / "framework", target_is_directory=True)
-    source_roots = tuple(path.resolve() for path in (
-        host / "bin", host / "lib64", root / "build/macos", root / ".local/lib",
-    ))
+    source_roots = tuple(
+        path.resolve()
+        for path in (
+            host / "bin",
+            host / "lib64",
+            root / "build/macos",
+            root / ".local/lib",
+        )
+    )
     images, by_source, by_name = [], {}, {}
     total_bytes = 0
 
@@ -115,16 +128,23 @@ def stage_closure(root, host, work, env, *, extra_images=(), main_executable=Non
         copied_hash = digest(destination)
         if copied_hash != source_hash:
             raise ValueError(f"native closure copy mismatch: {source}")
-        item = {"source": str(source), "path": str(destination),
-                "source_sha256": source_hash, "copy_sha256": copied_hash,
-                "source_load_commands": metadata(source, env), "rewrites": {}}
+        item = {
+            "source": str(source),
+            "path": str(destination),
+            "source_sha256": source_hash,
+            "copy_sha256": copied_hash,
+            "source_load_commands": metadata(source, env),
+            "rewrites": {},
+        }
         images.append(item)
         by_source[source] = item
         by_name[destination.name] = item
         return item
 
-    main = add(Path(main_executable) if main_executable is not None else host / "bin/dalvikvm",
-               executable=True)
+    main = add(
+        Path(main_executable) if main_executable is not None else host / "bin/dalvikvm",
+        executable=True,
+    )
     # ART dynamically opens some libraries without a static load command. Copy
     # every current lib64 image, including those libraries, as an explicit seed.
     for source in sorted((host / "lib64").iterdir()):
@@ -168,8 +188,7 @@ def stage_closure(root, host, work, env, *, extra_images=(), main_executable=Non
                 suffix = dependency.removeprefix("@rpath/")
                 if Path(suffix).name != suffix:
                     raise ValueError(f"nested @rpath dependency is unsupported: {dependency}")
-                candidates = [expand(value, source) / suffix
-                              for value in commands["rpaths"]]
+                candidates = [expand(value, source) / suffix for value in commands["rpaths"]]
                 # The main executable's ART rpath can be inherited by DSOs.
                 candidates.append(host / "lib64" / suffix)
             else:
@@ -223,16 +242,26 @@ def stage_closure(root, host, work, env, *, extra_images=(), main_executable=Non
                 ) from error
         item["staged_load_commands"] = metadata(destination, env)
         item["prepared_sha256"] = digest(destination)
-    manifest = {"schema": 1, "tree": str(tree), "main": main["path"],
-                "bridge": bridge["path"], "host_fixture": fixture["path"],
-                "extra_images": extras,
-                "framework_data_symlink": str(host / "framework"),
-                "runtime_routes": {"ANDROID_ROOT": str(tree),
-                                   "java.library.path": str(tree / "lib64"),
-                                   "NativeBridge": bridge["path"],
-                                   "host_fixture": fixture["path"]},
-                "identity": None, "team_identifier": None,
-                "signed": False, "execution_verified": False, "images": images}
+    manifest = {
+        "schema": 1,
+        "tree": str(tree),
+        "main": main["path"],
+        "bridge": bridge["path"],
+        "host_fixture": fixture["path"],
+        "extra_images": extras,
+        "framework_data_symlink": str(host / "framework"),
+        "runtime_routes": {
+            "ANDROID_ROOT": str(tree),
+            "java.library.path": str(tree / "lib64"),
+            "NativeBridge": bridge["path"],
+            "host_fixture": fixture["path"],
+        },
+        "identity": None,
+        "team_identifier": None,
+        "signed": False,
+        "execution_verified": False,
+        "images": images,
+    }
     validate_closure(manifest, env)
     write_manifest(manifest)
     return manifest
@@ -249,11 +278,15 @@ def validate_closure(manifest, env):
         directories = []
         for value in all_commands[path]["rpaths"]:
             if value != expected:
-                raise ValueError(f"native closure retains nonprivate runtime search path: {path}: {value}")
+                raise ValueError(
+                    f"native closure retains nonprivate runtime search path: {path}: {value}"
+                )
             suffix = value.removeprefix("@loader_path")
             directory = (path.parent / suffix.lstrip("/")).resolve()
             if directory != tree / "lib64":
-                raise ValueError(f"native closure rpath resolves outside owned lib64: {path}: {value}")
+                raise ValueError(
+                    f"native closure rpath resolves outside owned lib64: {path}: {value}"
+                )
             directories.append(directory)
         return directories
 
@@ -273,25 +306,36 @@ def validate_closure(manifest, env):
                 raise ValueError(f"native closure dependency escape: {path}: {dependency}")
             name = dependency.removeprefix("@rpath/")
             if Path(name).name != name or name in ("", ".", ".."):
-                raise ValueError(f"native closure dependency is not a single owned basename: {dependency}")
+                raise ValueError(
+                    f"native closure dependency is not a single owned basename: {dependency}"
+                )
             candidates = {directory / name for directory in search if (directory / name).exists()}
-            if not candidates or any(candidate not in owned or candidate.is_symlink()
-                                     or candidate.resolve() != candidate for candidate in candidates):
-                raise ValueError(f"native closure dependency lacks an exact owned resolution: {path}: {dependency}")
+            if not candidates or any(
+                candidate not in owned or candidate.is_symlink() or candidate.resolve() != candidate
+                for candidate in candidates
+            ):
+                raise ValueError(
+                    f"native closure dependency lacks an exact owned resolution: {path}: {dependency}"
+                )
             if len(candidates) != 1:
-                raise ValueError(f"native closure dependency resolution is ambiguous: {path}: {dependency}")
+                raise ValueError(
+                    f"native closure dependency resolution is ambiguous: {path}: {dependency}"
+                )
             resolved[dependency] = str(next(iter(candidates)))
         item["resolved_dependencies"] = resolved
 
 
 def write_manifest(manifest):
     (Path(manifest["tree"]) / "closure.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    )
 
 
 def sign_closure(manifest, identity, entitlements, env):
     if not identity or identity == "-" or "\n" in identity or "\0" in identity:
-        raise ValueError("strict hardened ART requires an explicit public signing identity with a TeamIdentifier")
+        raise ValueError(
+            "strict hardened ART requires an explicit public signing identity with a TeamIdentifier"
+        )
     if plistlib.loads(entitlements.read_bytes()) != ALLOW_JIT:
         raise ValueError("hardened ART main entitlements must be exactly allow-jit")
     validate_closure(manifest, env)
@@ -303,7 +347,15 @@ def sign_closure(manifest, identity, entitlements, env):
     teams = set()
     for item in ordered:
         path = Path(item["path"])
-        command = ["codesign", "--force", "--sign", identity, "--options", "runtime", "--timestamp=none"]
+        command = [
+            "codesign",
+            "--force",
+            "--sign",
+            identity,
+            "--options",
+            "runtime",
+            "--timestamp=none",
+        ]
         if item["path"] == manifest["main"]:
             command += ["--entitlements", entitlements]
         output([*command, path], env)
@@ -315,8 +367,13 @@ def sign_closure(manifest, identity, entitlements, env):
             raise ValueError(f"native closure lacks actual TeamIdentifier: {path}")
         if flags is None or not int(flags[1], 16) & 0x10000:
             raise ValueError(f"native closure lacks actual hardened runtime flag: {path}")
-        displayed = subprocess.run(["codesign", "--display", "--entitlements", "-", "--xml", str(path)],
-                                   env=env, capture_output=True, check=True, timeout=60).stdout
+        displayed = subprocess.run(
+            ["codesign", "--display", "--entitlements", "-", "--xml", str(path)],
+            env=env,
+            capture_output=True,
+            check=True,
+            timeout=60,
+        ).stdout
         actual = plistlib.loads(displayed) if displayed.strip() else {}
         expected = ALLOW_JIT if item["path"] == manifest["main"] else {}
         if actual != expected:
@@ -349,16 +406,9 @@ def sign_staged_adhoc_closure(manifest, entitlements, env):
     )
     write_manifest(manifest)
     for item in manifest["images"]:
-        if (
-            hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest()
-            != item["prepared_sha256"]
-        ):
-            raise ValueError(
-                "prepared native image changed before ad-hoc route signing"
-            )
-    ordered = sorted(
-        manifest["images"], key=lambda item: item["path"] == manifest["main"]
-    )
+        if hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest() != item["prepared_sha256"]:
+            raise ValueError("prepared native image changed before ad-hoc route signing")
+    ordered = sorted(manifest["images"], key=lambda item: item["path"] == manifest["main"])
     for item in ordered:
         path = Path(item["path"])
         # Numeric zero clears inherited options; verification below rejects an
@@ -425,4 +475,3 @@ def sign_staged_adhoc_closure(manifest, entitlements, env):
     )
     write_manifest(manifest)
     return manifest
-

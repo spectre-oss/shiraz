@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Build an unsigned stock-SDK fixture APK. Downloads/tools stay local-only."""
+
 import hashlib
 import http.client
 import json
@@ -27,14 +28,17 @@ TOOLS = ROOT / '.deps/android-sdk'
 DOWNLOADS = {
     'platform-35_r02.zip': (
         'https://dl.google.com/android/repository/platform-35_r02.zip',
-        '0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0'),
+        '0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0',
+    ),
     'aapt2-linux.jar': (
         'https://dl.google.com/dl/android/maven2/com/android/tools/build/aapt2/8.9.3-12782657/aapt2-8.9.3-12782657-linux.jar',
-        '8c73ebe54ab56b2d64ad499afb10f1864112b3003218befc98cd604b80c71399'),
+        '8c73ebe54ab56b2d64ad499afb10f1864112b3003218befc98cd604b80c71399',
+    ),
     # Universal x86_64+arm64 Mach-O; same aapt2 build as the Linux jar.
     'aapt2-osx.jar': (
         'https://dl.google.com/dl/android/maven2/com/android/tools/build/aapt2/8.9.3-12782657/aapt2-8.9.3-12782657-osx.jar',
-        '243fc5ce0adf8e26cb211b70c9d6ca41dd27844950f020788549e298f8a0f421'),
+        '243fc5ce0adf8e26cb211b70c9d6ca41dd27844950f020788549e298f8a0f421',
+    ),
 }
 # Google's edge mirror serves the same paths (dl.google.com returns 404 from some
 # networks); the pinned sha256 is what is trusted, not the host.
@@ -55,7 +59,9 @@ FIXTURE_RESOURCE_JAR_LIMIT = 64 * 1024 * 1024
 
 def candidate_urls(url):
     """The pinned URL, then its Google edge-mirror equivalent."""
-    return [url] + ([GOOGLE_MIRROR + url[len(GOOGLE_PRIMARY):]] if url.startswith(GOOGLE_PRIMARY) else [])
+    return [url] + (
+        [GOOGLE_MIRROR + url[len(GOOGLE_PRIMARY) :]] if url.startswith(GOOGLE_PRIMARY) else []
+    )
 
 
 def _check(path, checksum, limit, verify):
@@ -72,7 +78,10 @@ def _check(path, checksum, limit, verify):
 def _transfer(candidate, temporary, limit, timeout):
     """Stream candidate into temporary; raise ValueError on an oversized or short body."""
     total = 0
-    with urllib.request.urlopen(candidate, timeout=timeout) as source, temporary.open('wb') as target:
+    with (
+        urllib.request.urlopen(candidate, timeout=timeout) as source,
+        temporary.open('wb') as target,
+    ):
         declared = source.headers.get('Content-Length')
         declared = int(declared) if declared is not None and declared.strip().isdigit() else None
         if declared is not None and declared > limit:
@@ -101,7 +110,10 @@ def fetch(path, url, checksum, limit, timeout=30, verify=None):
             _check(path, checksum, limit, verify)
             return
         except ValueError as error:
-            print(f'{path.name}: cached download rejected ({error}); fetching it again', file=sys.stderr)
+            print(
+                f'{path.name}: cached download rejected ({error}); fetching it again',
+                file=sys.stderr,
+            )
             path.unlink()
     temporary = path.with_name(path.name + '.download')
     errors = []
@@ -130,8 +142,14 @@ def aapt2_jar(system=None):
 
 def aapt2_version(source):
     # AOSP aapt2 writes its version to stderr (including Ubuntu's build).
-    version = subprocess.run([str(source), 'version'], check=True, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, timeout=10).stdout.strip()
+    version = subprocess.run(
+        [str(source), 'version'],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+    ).stdout.strip()
     if not version.startswith('Android Asset Packaging Tool (aapt)'):
         raise ValueError('SHIRAZ_AAPT2 did not identify itself as aapt2')
     return version
@@ -157,17 +175,26 @@ def install_aapt2(cache):
         with source.open('rb') as stream:
             header = stream.read(20)
         expected = {'aarch64': 183, 'arm64': 183, 'x86_64': 62, 'amd64': 62}.get(machine)
-        if (expected is None or len(header) != 20 or header[:6] != b'\x7fELF\x02\x01'
-                or int.from_bytes(header[18:20], 'little') != expected):
+        if (
+            expected is None
+            or len(header) != 20
+            or header[:6] != b'\x7fELF\x02\x01'
+            or int.from_bytes(header[18:20], 'little') != expected
+        ):
             raise ValueError('SHIRAZ_AAPT2 must be a native little-endian 64-bit ELF executable')
         version = aapt2_version(source)
         if source.resolve() != target.resolve():
             shutil.copyfile(source, target)
         target.chmod(0o755)
-        return target, {'source': str(source), 'version': version,
-                        'binary_sha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+        return target, {
+            'source': str(source),
+            'version': version,
+            'binary_sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
+        }
     if system == 'Linux' and machine not in ('x86_64', 'amd64'):
-        raise ValueError('Google aapt2 is x86_64-only on Linux; set SHIRAZ_AAPT2 to a native compiler')
+        raise ValueError(
+            'Google aapt2 is x86_64-only on Linux; set SHIRAZ_AAPT2 to a native compiler'
+        )
     name = aapt2_jar()
     url, checksum = DOWNLOADS[name]
     archive_path = cache / name
@@ -177,8 +204,11 @@ def install_aapt2(cache):
             raise ValueError('compiler exceeds size limit')
         target.write_bytes(archive.read('aapt2'))
     target.chmod(0o755)
-    return target, {'source': url, 'archive_sha256': checksum,
-                    'binary_sha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+    return target, {
+        'source': url,
+        'archive_sha256': checksum,
+        'binary_sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
+    }
 
 
 def tools():
@@ -206,8 +236,9 @@ def fixture_resource_jar():
         if len(entries) != 1 or entries[0].filename != 'android-34/android.jar':
             raise ValueError('Unexpected fixture resource SDK archive layout')
         entry = entries[0]
-        if (not 0 < entry.file_size <= FIXTURE_RESOURCE_JAR_LIMIT
-                or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG)):
+        if not 0 < entry.file_size <= FIXTURE_RESOURCE_JAR_LIMIT or stat.S_IFMT(
+            entry.external_attr >> 16
+        ) not in (0, stat.S_IFREG):
             raise ValueError('Fixture resource android.jar is not a bounded regular file')
         with archive.open(entry) as source:
             data = source.read(FIXTURE_RESOURCE_JAR_LIMIT + 1)
@@ -224,7 +255,9 @@ def fixture_resource_jar():
                 return target
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(dir=TOOLS, prefix=target.name + '.', suffix='.pending', delete=False) as output:
+        with tempfile.NamedTemporaryFile(
+            dir=TOOLS, prefix=target.name + '.', suffix='.pending', delete=False
+        ) as output:
             temporary = Path(output.name)
             output.write(data)
         temporary.replace(target)
@@ -246,14 +279,24 @@ def main():
     if generated.exists():
         shutil.rmtree(generated)
     generated.mkdir()
-    (build / 'toolchain.json').write_text(json.dumps({
-        'java_sdk': 35,
-        'resource_sdk': 34,
-        'resource_sdk_archive_sha256': FIXTURE_RESOURCE_SDK[2],
-        'java_android_jar_sha256': hashlib.sha256((TOOLS / 'android.jar').read_bytes()).hexdigest(),
-        'resource_android_jar_sha256': hashlib.sha256(resource_jar.read_bytes()).hexdigest(),
-        'aapt2_sha256': hashlib.sha256((TOOLS / 'aapt2').read_bytes()).hexdigest(),
-    }, indent=2) + '\n')
+    (build / 'toolchain.json').write_text(
+        json.dumps(
+            {
+                'java_sdk': 35,
+                'resource_sdk': 34,
+                'resource_sdk_archive_sha256': FIXTURE_RESOURCE_SDK[2],
+                'java_android_jar_sha256': hashlib.sha256(
+                    (TOOLS / 'android.jar').read_bytes()
+                ).hexdigest(),
+                'resource_android_jar_sha256': hashlib.sha256(
+                    resource_jar.read_bytes()
+                ).hexdigest(),
+                'aapt2_sha256': hashlib.sha256((TOOLS / 'aapt2').read_bytes()).hexdigest(),
+            },
+            indent=2,
+        )
+        + '\n'
+    )
     compiled = build / 'resources.zip'
     assets = build / 'assets'
     if assets.exists():
@@ -261,32 +304,74 @@ def main():
     shutil.copytree(ROOT / 'tests/apk/assets', assets)
     # Generated compressed asset larger than the old whole-buffer limit.
     import zlib
+
     block = bytes((i * 31 + (i >> 8)) & 255 for i in range(8192))
     checksum = 0
     with (assets / 'large-stream.dat').open('wb') as output:
         for _ in range(2049):
             output.write(block)
             checksum = zlib.crc32(block, checksum)
-    (assets / 'large-stream-crc.txt').write_text(str(checksum & 0xffffffff))
+    (assets / 'large-stream-crc.txt').write_text(str(checksum & 0xFFFFFFFF))
     resource_source = build / 'resource-source'
     if resource_source.exists():
         shutil.rmtree(resource_source)
     shutil.copytree(ROOT / 'tests/apk/res', resource_source)
     prepare(resource_source, assets)
-    subprocess.run([str(TOOLS / 'aapt2'), 'compile', '--dir', str(resource_source), '-o', str(compiled)], check=True)
+    subprocess.run(
+        [str(TOOLS / 'aapt2'), 'compile', '--dir', str(resource_source), '-o', str(compiled)],
+        check=True,
+    )
     with wave.open(str(assets / 'effect.wav'), 'wb') as sound:
         sound.setparams((1, 2, 48000, 4800, 'NONE', 'not compressed'))
         sound.writeframes(b'\x00\x20' * 4800)
     apk = build / 'fixture.apk'
-    subprocess.run([str(TOOLS / 'aapt2'), 'link', '-o', str(apk), '--manifest', str(ROOT / 'tests/apk/AndroidManifest.xml'),
-                    '-I', str(resource_jar), '--compile-sdk-version-code', '35', '--compile-sdk-version-name', '15',
-                    '--version-code', '1', '-A', str(assets), '-0', 'txt', '-0', 'wav',
-                    '--java', str(generated), str(compiled)], check=True)
+    subprocess.run(
+        [
+            str(TOOLS / 'aapt2'),
+            'link',
+            '-o',
+            str(apk),
+            '--manifest',
+            str(ROOT / 'tests/apk/AndroidManifest.xml'),
+            '-I',
+            str(resource_jar),
+            '--compile-sdk-version-code',
+            '35',
+            '--compile-sdk-version-name',
+            '15',
+            '--version-code',
+            '1',
+            '-A',
+            str(assets),
+            '-0',
+            'txt',
+            '-0',
+            'wav',
+            '--java',
+            str(generated),
+            str(compiled),
+        ],
+        check=True,
+    )
     sources = sorted((ROOT / 'tests/apk/src').rglob('*.java')) + sorted(generated.rglob('*.java'))
-    subprocess.run(['javac', '--release', '8', '-cp', str(TOOLS / 'android.jar'), '-d', str(classes), *map(str, sources)], check=True)
+    subprocess.run(
+        [
+            'javac',
+            '--release',
+            '8',
+            '-cp',
+            str(TOOLS / 'android.jar'),
+            '-d',
+            str(classes),
+            *map(str, sources),
+        ],
+        check=True,
+    )
     dex = build / 'classes.dex'
     dx = host_out_dir(ROOT / 'context/art_standalone') / 'bin/dx'
-    subprocess.run([str(dx), '--dex', '--min-sdk-version=27', '--output=' + str(dex), str(classes)], check=True)
+    subprocess.run(
+        [str(dx), '--dex', '--min-sdk-version=27', '--output=' + str(dex), str(classes)], check=True
+    )
     with zipfile.ZipFile(apk, 'a') as archive:
         archive.write(dex, 'classes.dex')
     print(apk.relative_to(ROOT))

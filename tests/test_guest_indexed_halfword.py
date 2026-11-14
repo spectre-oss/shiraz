@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Byte/offset controls only; no executable-memory or TLS consumer proof."""
+
 import dataclasses
 import importlib.util
 import sys
@@ -15,14 +16,17 @@ from guest_indexed_halfword import (
 
 
 def encoded(operation='ldrh', option=3, shift=1, base=22, index=20, data=8):
-    word = (0x78600800 if operation == 'ldrh' else 0x78200800)
-    return (word | option << 13 | shift << 12 | base << 5 | index << 16 | data).to_bytes(4, 'little')
+    word = 0x78600800 if operation == 'ldrh' else 0x78200800
+    return (word | option << 13 | shift << 12 | base << 5 | index << 16 | data).to_bytes(
+        4, 'little'
+    )
 
 
 class IndexedHalfwordTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec('capstone'), 'requires pinned Capstone decoder')
     def test_independent_decoder_agrees_on_all_options_and_scales(self):
         import capstone
+
         self.assertEqual(capstone.__version__, '5.0.3')
         decoder = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_LITTLE_ENDIAN)
         decoder.detail = True
@@ -41,25 +45,53 @@ class IndexedHalfwordTests(unittest.TestCase):
     def test_actual_qtcore_words_and_frozen_descriptions(self):
         load = recognize_indexed_halfword(bytes.fromhex('c87a7478'))
         store = recognize_indexed_halfword(bytes.fromhex('c07a3578'))
-        self.assertEqual((load.operation, load.base, load.index, load.data_register,
-                          load.index_width, load.extension, load.shift, load.width),
-                         ('ldrh', 'x22', 'x20', 'w8', 64, 'lsl', 1, 2))
-        self.assertEqual((store.operation, store.base, store.index, store.data_register),
-                         ('strh', 'x22', 'x21', 'w0'))
+        self.assertEqual(
+            (
+                load.operation,
+                load.base,
+                load.index,
+                load.data_register,
+                load.index_width,
+                load.extension,
+                load.shift,
+                load.width,
+            ),
+            ('ldrh', 'x22', 'x20', 'w8', 64, 'lsl', 1, 2),
+        )
+        self.assertEqual(
+            (store.operation, store.base, store.index, store.data_register),
+            ('strh', 'x22', 'x21', 'w0'),
+        )
         with self.assertRaises(dataclasses.FrozenInstanceError):
             load.shift = 0
 
     def test_all_valid_options_scales_register_fields_and_zero_registers(self):
-        for option, bits, extension in ((2, 32, 'uxtw'), (3, 64, 'lsl'),
-                                        (6, 32, 'sxtw'), (7, 64, 'sxtx')):
+        for option, bits, extension in (
+            (2, 32, 'uxtw'),
+            (3, 64, 'lsl'),
+            (6, 32, 'sxtw'),
+            (7, 64, 'sxtx'),
+        ):
             for operation in ('ldrh', 'strh'):
                 for shift in (0, 1):
                     for register in range(32):
-                        profile = recognize_indexed_halfword(encoded(operation, option, shift, register, register, register))
-                        self.assertEqual((profile.index_width, profile.extension, profile.shift), (bits, extension, shift))
+                        profile = recognize_indexed_halfword(
+                            encoded(operation, option, shift, register, register, register)
+                        )
+                        self.assertEqual(
+                            (profile.index_width, profile.extension, profile.shift),
+                            (bits, extension, shift),
+                        )
                         self.assertEqual(profile.base, 'sp' if register == 31 else f'x{register}')
-                        self.assertEqual(profile.index, ('wzr' if bits == 32 else 'xzr') if register == 31 else f"{'w' if bits == 32 else 'x'}{register}")
-                        self.assertEqual(profile.data_register, 'wzr' if register == 31 else f'w{register}')
+                        self.assertEqual(
+                            profile.index,
+                            ('wzr' if bits == 32 else 'xzr')
+                            if register == 31
+                            else f"{'w' if bits == 32 else 'x'}{register}",
+                        )
+                        self.assertEqual(
+                            profile.data_register, 'wzr' if register == 31 else f'w{register}'
+                        )
 
     def test_invalid_options_fixed_bits_and_input_shapes_refuse(self):
         raw = encoded()
@@ -70,7 +102,9 @@ class IndexedHalfwordTests(unittest.TestCase):
             word = int.from_bytes(raw, 'little') ^ (1 << bit)
             # Opc bit22 toggles LDRH to STRH, another intentionally valid form.
             if bit == 22:
-                self.assertEqual(recognize_indexed_halfword(word.to_bytes(4, 'little')).operation, 'strh')
+                self.assertEqual(
+                    recognize_indexed_halfword(word.to_bytes(4, 'little')).operation, 'strh'
+                )
             else:
                 self.assertIsNone(recognize_indexed_halfword(word.to_bytes(4, 'little')))
         for option in (0, 1, 4, 5):
@@ -84,10 +118,14 @@ class IndexedHalfwordTests(unittest.TestCase):
                 profile = recognize_indexed_halfword(encoded(option=option, shift=shift))
                 for value in (0, 1, 19, MAX_DISPLACEMENT >> shift):
                     self.assertEqual(exact_halfword_displacement(profile, value), value << shift)
-                self.assertIsNone(exact_halfword_displacement(profile, (MAX_DISPLACEMENT >> shift) + 1))
+                self.assertIsNone(
+                    exact_halfword_displacement(profile, (MAX_DISPLACEMENT >> shift) + 1)
+                )
                 high = (1 << bits) - 1
-                self.assertEqual(exact_halfword_displacement(profile, high),
-                                 -(1 << shift) if option in (6, 7) else None)
+                self.assertEqual(
+                    exact_halfword_displacement(profile, high),
+                    -(1 << shift) if option in (6, 7) else None,
+                )
                 if option in (6, 7):
                     value = (1 << bits) - (MAX_DISPLACEMENT >> shift)
                     self.assertEqual(exact_halfword_displacement(profile, value), -MAX_DISPLACEMENT)
@@ -101,8 +139,15 @@ class IndexedHalfwordTests(unittest.TestCase):
         self.assertIsNone(exact_halfword_displacement(unsigned, (1 << 64) - 1))
         self.assertIsNone(exact_halfword_displacement(signed, 1 << 62))
         self.assertIsNone(exact_halfword_displacement(signed, (1 << 63)))
-        for replacement in ({'index_width': 32}, {'extension': 'bad'}, {'shift': 2}, {'shift': True}):
-            self.assertIsNone(exact_halfword_displacement(dataclasses.replace(unsigned, **replacement), 0))
+        for replacement in (
+            {'index_width': 32},
+            {'extension': 'bad'},
+            {'shift': 2},
+            {'shift': True},
+        ):
+            self.assertIsNone(
+                exact_halfword_displacement(dataclasses.replace(unsigned, **replacement), 0)
+            )
         self.assertIsNone(exact_halfword_displacement(None, 0))
 
 

@@ -181,9 +181,7 @@ def recognize_cas64(read_word, entry, allocated_readable_data):
         memory_order=memory_order,
         paths=(
             AtomicPath("lse", entry + 20, ("x0", "x16")),
-            AtomicPath(
-                "llsc-initial-mismatch", entry + 48, ("x0", "x16"), False, False
-            ),
+            AtomicPath("llsc-initial-mismatch", entry + 48, ("x0", "x16"), False, False),
             AtomicPath(
                 "llsc-success-or-retry-mismatch",
                 entry + 48,

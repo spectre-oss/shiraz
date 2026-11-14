@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Require executable AOT and physical boot resources after package relocation."""
+
 import fcntl
 import json
-from pathlib import Path
 import shutil
 import struct
 import subprocess
@@ -27,16 +27,30 @@ def main():
         classes = source / 'classes'
         classes.mkdir(parents=True)
         env = environment(source)
-        subprocess.run(['javac', '--release', '8', '-d', str(classes),
-                        str(ROOT / 'tests/java/shiraz/BootResourceSmoke.java')], check=True, timeout=30)
+        subprocess.run(
+            [
+                'javac',
+                '--release',
+                '8',
+                '-d',
+                str(classes),
+                str(ROOT / 'tests/java/shiraz/BootResourceSmoke.java'),
+            ],
+            check=True,
+            timeout=30,
+        )
         dex = source / 'smoke.dex'
-        subprocess.run([str(HOST / 'bin/dx'), '--dex', '--output=' + str(dex), str(classes)],
-                       env=env, check=True, timeout=30)
+        subprocess.run(
+            [str(HOST / 'bin/dx'), '--dex', '--output=' + str(dex), str(classes)],
+            env=env,
+            check=True,
+            timeout=30,
+        )
         jar = source / 'smoke.jar'
         with zipfile.ZipFile(jar, 'w') as archive:
             entry = zipfile.ZipInfo('classes.dex')
             padding = (-(30 + len(entry.filename) + 4)) % 4
-            entry.extra = struct.pack('<HH', 0xffff, padding) + b'\0' * padding
+            entry.extra = struct.pack('<HH', 0xFFFF, padding) + b'\0' * padding
             archive.writestr(entry, dex.read_bytes())
         locations = ['/shiraz/boot/' + name for name in JARS]
         compile_aot(source, jar, env, 90, boot_locations=locations)
@@ -64,33 +78,57 @@ def main():
             logical = list(locations)
             if index == 2:
                 logical[0] = '/shiraz/boot/mismatch.jar'
-            image_options = (['-Xnoimage-dex2oat', '-Xint'] if index == 3 else
-                             ['-Ximage:' + str(moved / 'runtime/boot.art'),
-                              '-Xnoimage-dex2oat', '-Xno-dex-file-fallback'])
-            command = [str(vm), '-Xbootclasspath:' + boot,
-                       '-Xbootclasspath-locations:' + ':'.join(logical),
-                       *image_options, '-Xusejit:false',
-                       '-Xcheck:jni', '-verbose:oat', '-Xcompiler:' + str(HOST / 'bin/dex2oat'),
-                       '-cp', str(moved / 'smoke.jar'), 'shiraz.BootResourceSmoke',
-                       str(moved / 'framework' / JARS[0])]
+            image_options = (
+                ['-Xnoimage-dex2oat', '-Xint']
+                if index == 3
+                else [
+                    '-Ximage:' + str(moved / 'runtime/boot.art'),
+                    '-Xnoimage-dex2oat',
+                    '-Xno-dex-file-fallback',
+                ]
+            )
+            command = [
+                str(vm),
+                '-Xbootclasspath:' + boot,
+                '-Xbootclasspath-locations:' + ':'.join(logical),
+                *image_options,
+                '-Xusejit:false',
+                '-Xcheck:jni',
+                '-verbose:oat',
+                '-Xcompiler:' + str(HOST / 'bin/dex2oat'),
+                '-cp',
+                str(moved / 'smoke.jar'),
+                'shiraz.BootResourceSmoke',
+                str(moved / 'framework' / JARS[0]),
+            ]
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
             (work / ('stdout-' + str(index) + '.log')).write_text(result.stdout)
             (work / ('stderr-' + str(index) + '.log')).write_text(result.stderr)
             marker = 'SHIRAZ_BOOT_RELOCATION_OK' in result.stdout.splitlines()
             if index == 2:
-                if result.returncode == 0 or marker or 'Failed to match oat boot class path' not in result.stderr:
+                if (
+                    result.returncode == 0
+                    or marker
+                    or 'Failed to match oat boot class path' not in result.stderr
+                ):
                     raise RuntimeError('Mismatched boot image was not rejected')
             elif index == 3:
                 if result.returncode or not marker or 'Compiling dex file:' in result.stderr:
                     raise RuntimeError('Imageless physical resource loading failed')
             else:
                 oat = moved / 'oat/x86_64/smoke.odex'
-                if (result.returncode or not marker or
-                    f'Successfully loaded {oat} with executable: 1' not in result.stderr or
-                    f'{oat} is kOatUpToDate with filter speed' not in result.stderr or
-                    'Compiling dex file:' in result.stderr or 'fall back to imageless' in result.stderr):
+                if (
+                    result.returncode
+                    or not marker
+                    or f'Successfully loaded {oat} with executable: 1' not in result.stderr
+                    or f'{oat} is kOatUpToDate with filter speed' not in result.stderr
+                    or 'Compiling dex file:' in result.stderr
+                    or 'fall back to imageless' in result.stderr
+                ):
                     raise RuntimeError('Relocated AOT/resource execution failed; inspect logs')
-            evidence.append({'case': index, 'exit_status': result.returncode, 'resource_marker': marker})
+            evidence.append(
+                {'case': index, 'exit_status': result.returncode, 'resource_marker': marker}
+            )
         (work / 'result.json').write_text(json.dumps(evidence, indent=2) + '\n')
         print('ART_BOOT_RELOCATION_OK')
 

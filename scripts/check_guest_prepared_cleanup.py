@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Inspect the prepared cleanup query read set; never certify row semantics."""
+
 import argparse
 import dataclasses
 import hashlib
@@ -26,9 +27,12 @@ def check_prepared_cleanup(path):
         'image_sha256': hashlib.sha256(data).hexdigest(),
         'coordinate_system': 'file Mach-O VM addresses before slide',
         'effects': dataclasses.asdict(effects),
-        'execution_claim': False, 'consumer_proof': False,
-        'table_identity_verified': False, 'publication_verified': False,
-        'stack_exclusion_verified': False, 'caller_guard_verified': False,
+        'execution_claim': False,
+        'consumer_proof': False,
+        'table_identity_verified': False,
+        'publication_verified': False,
+        'stack_exclusion_verified': False,
+        'caller_guard_verified': False,
         'native_memory_purity_verified': False,
         'scope': 'exact instruction read set; inferred table roles require independent runtime binding',
     }
@@ -42,8 +46,11 @@ def main():
     result = check_prepared_cleanup(args.image)
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + '\n')
-    print('M5_PREPARED_CLEANUP_CODE_PASS body_sha256=' + result['effects']['body_sha256'] +
-          ' table_identity_verified=0 execution_claim=0 consumer_proof=0')
+    print(
+        'M5_PREPARED_CLEANUP_CODE_PASS body_sha256='
+        + result['effects']['body_sha256']
+        + ' table_identity_verified=0 execution_claim=0 consumer_proof=0'
+    )
 
 
 if __name__ == '__main__':

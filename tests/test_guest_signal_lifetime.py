@@ -21,12 +21,23 @@ class SignalLifetimeEvidenceTests(unittest.TestCase):
                 work = Path(tmp)
                 result_path = work / "adhoc.result.json"
                 result_path.write_text(json.dumps({"execution_verified": True}))
-                closure = {"main": str(work / "probe"), "bridge": str(work / "bridge"), "tree": str(work)}
+                closure = {
+                    "main": str(work / "probe"),
+                    "bridge": str(work / "bridge"),
+                    "tree": str(work),
+                }
                 with (
                     patch.object(runner, "WORK", work),
                     patch.object(runner, "environment", return_value={}),
-                    patch.object(runner, "stage_closure", side_effect=ValueError("stage failed") if step == "stage" else None, return_value=closure),
-                    patch.object(runner, "sign_staged_adhoc_closure", side_effect=ValueError("sign failed")),
+                    patch.object(
+                        runner,
+                        "stage_closure",
+                        side_effect=ValueError("stage failed") if step == "stage" else None,
+                        return_value=closure,
+                    ),
+                    patch.object(
+                        runner, "sign_staged_adhoc_closure", side_effect=ValueError("sign failed")
+                    ),
                     patch.object(sys, "argv", ["fixture", "--mode", "adhoc"]),
                     self.assertRaises(ValueError),
                 ):
@@ -39,16 +50,31 @@ class SignalLifetimeEvidenceTests(unittest.TestCase):
     def test_timeout_or_launch_failure_cannot_leave_prior_success(self):
         for failing_call in (1, 2, 3):
             for error in (subprocess.TimeoutExpired(["fixture"], 60), OSError("launch failed")):
-                with self.subTest(call=failing_call, error=type(error).__name__), tempfile.TemporaryDirectory() as tmp:
+                with (
+                    self.subTest(call=failing_call, error=type(error).__name__),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
                     work = Path(tmp)
                     result_path = work / "adhoc.result.json"
-                    result_path.write_text(json.dumps({"execution_verified": True, "hardened_verified": True}))
+                    result_path.write_text(
+                        json.dumps({"execution_verified": True, "hardened_verified": True})
+                    )
                     (work / "adhoc.log").write_text("old PASS")
-                    closure = {"main": str(work / "probe"), "bridge": str(work / "bridge"), "tree": str(work)}
+                    closure = {
+                        "main": str(work / "probe"),
+                        "bridge": str(work / "bridge"),
+                        "tree": str(work),
+                    }
                     calls = 0
 
-                    def run(*args, result_path=result_path, work=work,
-                            failing_call=failing_call, error=error, **kwargs):
+                    def run(
+                        *args,
+                        result_path=result_path,
+                        work=work,
+                        failing_call=failing_call,
+                        error=error,
+                        **kwargs,
+                    ):
                         nonlocal calls
                         calls += 1
                         current = json.loads(result_path.read_text())

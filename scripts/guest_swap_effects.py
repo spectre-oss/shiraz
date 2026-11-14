@@ -84,15 +84,20 @@ def recognize_swap64(read_word, entry, allocated_readable_data):
         displacement -= 1 << 21
     page = ((entry + 4) & ~0xFFF) + displacement * 4096
     flag = page + (load >> 10 & 0xFFF)
-    if (not 0 <= page < UINT64_END or not 0 <= flag < UINT64_END
-            or entry <= flag < entry + BODY_BYTES):
+    if (
+        not 0 <= page < UINT64_END
+        or not 0 <= flag < UINT64_END
+        or entry <= flag < entry + BODY_BYTES
+    ):
         return None
     if allocated_readable_data(flag, 1) is not True:
         return None
     return Atomic64SwapEffects(
         entry=entry,
         body_size=BODY_BYTES,
-        body_sha256=hashlib.sha256(b"".join(word.to_bytes(4, "little") for word in words)).hexdigest(),
+        body_sha256=hashlib.sha256(
+            b"".join(word.to_bytes(4, "little") for word in words)
+        ).hexdigest(),
         flag_address=flag,
         paths=(
             AtomicPath("lse", entry + 20, ("x0", "x16")),

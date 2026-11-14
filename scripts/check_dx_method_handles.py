@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Exercise the real host DX method-handle section under concurrent interning."""
+
 import argparse
 import subprocess
 from pathlib import Path
@@ -18,11 +19,24 @@ def main():
     output = ROOT / 'build/test-dx-method-handles'
     output.mkdir(parents=True, exist_ok=True)
     try:
-        subprocess.run(['javac', '--release', '8', '-Xlint:-options', '-cp', str(jar),
-                        '-d', str(output), str(ROOT / 'tests/java/DxMethodHandlesRace.java')],
-                       check=True, timeout=60)
-        subprocess.run(['java', '-cp', f'{output}:{jar}', 'DxMethodHandlesRace'],
-                       check=True, timeout=120)
+        subprocess.run(
+            [
+                'javac',
+                '--release',
+                '8',
+                '-Xlint:-options',
+                '-cp',
+                str(jar),
+                '-d',
+                str(output),
+                str(ROOT / 'tests/java/DxMethodHandlesRace.java'),
+            ],
+            check=True,
+            timeout=60,
+        )
+        subprocess.run(
+            ['java', '-cp', f'{output}:{jar}', 'DxMethodHandlesRace'], check=True, timeout=120
+        )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         parser.exit(1, f'DX method-handle concurrency check failed: {error}\n')
 

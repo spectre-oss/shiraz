@@ -55,6 +55,7 @@ shader compiles, so a cold-launch time must say whether this cache was warm.
   python3 scripts/bootstrap_angle.py check    compile tests/darwin/gles/angle_probe.c
                                               and run it on the installed dylibs
 """
+
 import argparse
 import fcntl
 import hashlib
@@ -67,8 +68,20 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bootstrap_darwin import (_LEAKY_ENV, BUILD, DEPS, MACOS_MIN, PREFIX, ROOT, _dependencies,  # noqa: E402
-                              _load_commands, ncpu, run, sdk, tool)
+from bootstrap_darwin import (
+    _LEAKY_ENV,
+    BUILD,
+    DEPS,
+    MACOS_MIN,
+    PREFIX,
+    ROOT,
+    _dependencies,  # noqa: E402
+    _load_commands,
+    ncpu,
+    run,
+    sdk,
+    tool,
+)
 
 ANGLE_SRC = DEPS / 'angle'
 ANGLE_URL = 'https://chromium.googlesource.com/angle/angle'
@@ -80,22 +93,46 @@ ANGLE_BRANCH = 'chromium/8127'
 # also resolves BUILD files under jsoncpp and the SPIR-V trees with Vulkan off,
 # but none of their code is linked into the three dylibs.
 ANGLE_DEPS = (
-    ('build', 'https://chromium.googlesource.com/chromium/src/build.git',
-     '7a1d4e33658adb6757b77323b1fcb77acf534195'),
-    ('buildtools', 'https://chromium.googlesource.com/chromium/src/buildtools.git',
-     '2f41b66d4857c8efbfcb2a350f159944f71dbf7e'),
-    ('testing', 'https://chromium.googlesource.com/chromium/src/testing',
-     '1c7935b65ba426eb80ca04956aaabd6490213662'),
-    ('third_party/zlib', 'https://chromium.googlesource.com/chromium/src/third_party/zlib',
-     '9f9f52c60a14e8e772fb561029ae0a121fef7609'),
-    ('third_party/abseil-cpp', 'https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp',
-     '9a0a43cbad88a77703bd73093011a62bbe0a6740'),
-    ('third_party/jsoncpp', 'https://chromium.googlesource.com/chromium/src/third_party/jsoncpp',
-     'f62d44704b4da6014aa231cfc116e7fd29617d2a'),
-    ('third_party/spirv-headers/src', 'https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Headers',
-     'fbf86836a9b1966586faf7be7bb8a6440e156d62'),
-    ('third_party/spirv-tools/src', 'https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools',
-     '066042ec3a9af3094c794bbbbd3600689fe7ff29'),
+    (
+        'build',
+        'https://chromium.googlesource.com/chromium/src/build.git',
+        '7a1d4e33658adb6757b77323b1fcb77acf534195',
+    ),
+    (
+        'buildtools',
+        'https://chromium.googlesource.com/chromium/src/buildtools.git',
+        '2f41b66d4857c8efbfcb2a350f159944f71dbf7e',
+    ),
+    (
+        'testing',
+        'https://chromium.googlesource.com/chromium/src/testing',
+        '1c7935b65ba426eb80ca04956aaabd6490213662',
+    ),
+    (
+        'third_party/zlib',
+        'https://chromium.googlesource.com/chromium/src/third_party/zlib',
+        '9f9f52c60a14e8e772fb561029ae0a121fef7609',
+    ),
+    (
+        'third_party/abseil-cpp',
+        'https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp',
+        '9a0a43cbad88a77703bd73093011a62bbe0a6740',
+    ),
+    (
+        'third_party/jsoncpp',
+        'https://chromium.googlesource.com/chromium/src/third_party/jsoncpp',
+        'f62d44704b4da6014aa231cfc116e7fd29617d2a',
+    ),
+    (
+        'third_party/spirv-headers/src',
+        'https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Headers',
+        'fbf86836a9b1966586faf7be7bb8a6440e156d62',
+    ),
+    (
+        'third_party/spirv-tools/src',
+        'https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools',
+        '066042ec3a9af3094c794bbbbd3600689fe7ff29',
+    ),
 )
 GN_SRC = DEPS / 'gn'
 GN_URL = 'https://gn.googlesource.com/gn'
@@ -124,8 +161,11 @@ LICENSES = (
     # third_party/zlib/google/compression_utils_portable.cc is "governed by a BSD-style
     # license ... in the Chromium source repository LICENSE file"; chromium/src is not
     # fetched, and the pinned buildtools checkout carries the Chromium Authors' text.
-    ('buildtools/LICENSE', 'chromium.LICENSE',
-     'Chromium Authors, BSD-3-Clause: zlib/google compression_utils_portable; text from buildtools/LICENSE'),
+    (
+        'buildtools/LICENSE',
+        'chromium.LICENSE',
+        'Chromium Authors, BSD-3-Clause: zlib/google compression_utils_portable; text from buildtools/LICENSE',
+    ),
 )
 STAMP = BUILD / 'angle.stamp'
 CHECK_OUT = ROOT / 'build/macos/gpu-deps-check'
@@ -153,7 +193,9 @@ def gn_args():
     """args.gn for out/Release-metal. Comments cite the default each line overrides."""
     clang = Path(tool('clang'))
     toolchain_usr = clang.parent.parent  # .../XcodeDefault.xctoolchain/usr
-    clang_major = Path(subprocess.check_output([str(clang), '-print-resource-dir'], text=True).strip()).name
+    clang_major = Path(
+        subprocess.check_output([str(clang), '-print-resource-dir'], text=True).strip()
+    ).name
     return f'''\
 # Written by scripts/bootstrap_angle.py. file:line references are in .deps/angle at chromium/8127.
 target_os = "mac"
@@ -222,7 +264,7 @@ def gn_tokens(text):
             j = i + 1
             while j < len(text) and text[j] != '"':
                 j += 2 if text[j] == '\\' else 1
-            tokens.append(text[i:j + 1])
+            tokens.append(text[i : j + 1])
             i = j + 1
         elif c in '=[],{}':
             tokens.append(c)
@@ -246,7 +288,7 @@ def normalize_gn(text):
     result, i = {}, 0
     while i < len(tokens):
         if i + 1 >= len(tokens) or tokens[i + 1] != '=':
-            raise SystemExit(f'unparsable gn assignment near {tokens[i:i + 3]}')
+            raise SystemExit(f'unparsable gn assignment near {tokens[i : i + 3]}')
         name, i, depth, value = tokens[i], i + 2, 0, []
         while i < len(tokens):
             token = tokens[i]
@@ -276,7 +318,12 @@ def tree_differs_from(path, tree):
     """True when PATH's worktree has untracked files or differs from TREE."""
     if git(path, 'ls-files', '--others', '--exclude-standard', check=False):
         return True
-    return subprocess.run(['git', 'diff', '--quiet', tree, '--'], cwd=path, capture_output=True).returncode != 0
+    return (
+        subprocess.run(
+            ['git', 'diff', '--quiet', tree, '--'], cwd=path, capture_output=True
+        ).returncode
+        != 0
+    )
 
 
 def patched_tree(path):
@@ -284,7 +331,9 @@ def patched_tree(path):
     with tempfile.TemporaryDirectory() as temporary:
         env = dict(os.environ, GIT_INDEX_FILE=str(Path(temporary) / 'index'))
         for args in (['read-tree', 'HEAD'], ['apply', '--cached', str(PATCH)], ['write-tree']):
-            result = subprocess.run(['git', *args], cwd=path, env=env, capture_output=True, text=True)
+            result = subprocess.run(
+                ['git', *args], cwd=path, env=env, capture_output=True, text=True
+            )
             if result.returncode:
                 return None
         return result.stdout.strip()
@@ -292,7 +341,14 @@ def patched_tree(path):
 
 def local_changes(path):
     """'' when PATH's worktree is clean (Chromium build/: clean, or HEAD plus PATCH exactly), else its status."""
-    status = git(path, 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=all', check=False)
+    status = git(
+        path,
+        'status',
+        '--porcelain',
+        '--untracked-files=all',
+        '--ignore-submodules=all',
+        check=False,
+    )
     if status is None:
         return 'git status failed'
     if not status:
@@ -329,12 +385,23 @@ def fetch_checkout(path, url, commit, name):
             raise SystemExit(f'{path}: {state}. Remove it and rerun.')
         # At the pin, only the exact tracked patch is allowed (local_changes); before a
         # re-fetch to another commit, any change at all (the patch included) stops it.
-        changes = (state.removeprefix('local changes:\n') if state.startswith('local changes') else
-                   git(path, 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=all',
-                       check=False))
+        changes = (
+            state.removeprefix('local changes:\n')
+            if state.startswith('local changes')
+            else git(
+                path,
+                'status',
+                '--porcelain',
+                '--untracked-files=all',
+                '--ignore-submodules=all',
+                check=False,
+            )
+        )
         if changes:
-            raise SystemExit(f'{path}: {state.splitlines()[0]}; the checkout has local changes. '
-                             f'Remove it (or revert them) and rerun:\n{changes}')
+            raise SystemExit(
+                f'{path}: {state.splitlines()[0]}; the checkout has local changes. '
+                f'Remove it (or revert them) and rerun:\n{changes}'
+            )
     log(f'fetch {name} {commit}')
     path.mkdir(parents=True, exist_ok=True)
     if state == 'missing':
@@ -347,9 +414,11 @@ def fetch_checkout(path, url, commit, name):
 
 
 def all_checkouts():
-    return [(ANGLE_SRC, ANGLE_URL, ANGLE_COMMIT, f'angle {ANGLE_BRANCH}')] + [
-        (ANGLE_SRC / rel, url, commit, rel) for rel, url, commit in ANGLE_DEPS] + [
-        (GN_SRC, GN_URL, GN_COMMIT, 'gn')]
+    return (
+        [(ANGLE_SRC, ANGLE_URL, ANGLE_COMMIT, f'angle {ANGLE_BRANCH}')]
+        + [(ANGLE_SRC / rel, url, commit, rel) for rel, url, commit in ANGLE_DEPS]
+        + [(GN_SRC, GN_URL, GN_COMMIT, 'gn')]
+    )
 
 
 def sha256(data):
@@ -359,9 +428,19 @@ def sha256(data):
 def patch_state():
     """'applied', 'unapplied' or None when the build/ tree matches neither."""
     tree = ANGLE_SRC / 'build'
-    if subprocess.run(['git', 'apply', '--check', '-R', str(PATCH)], cwd=tree, capture_output=True).returncode == 0:
+    if (
+        subprocess.run(
+            ['git', 'apply', '--check', '-R', str(PATCH)], cwd=tree, capture_output=True
+        ).returncode
+        == 0
+    ):
         return 'applied'
-    if subprocess.run(['git', 'apply', '--check', str(PATCH)], cwd=tree, capture_output=True).returncode == 0:
+    if (
+        subprocess.run(
+            ['git', 'apply', '--check', str(PATCH)], cwd=tree, capture_output=True
+        ).returncode
+        == 0
+    ):
         return 'unapplied'
     return None
 
@@ -372,7 +451,9 @@ def apply_patch():
         log(f'apply {PATCH.relative_to(ROOT)}')
         run(['git', 'apply', PATCH], cwd=ANGLE_SRC / 'build')
     elif state is None:
-        raise SystemExit(f'{PATCH.relative_to(ROOT)} neither applies to nor is applied in {ANGLE_SRC / "build"}')
+        raise SystemExit(
+            f'{PATCH.relative_to(ROOT)} neither applies to nor is applied in {ANGLE_SRC / "build"}'
+        )
 
 
 def write_if_changed(path, text):
@@ -391,15 +472,25 @@ def python_identity():
 
 def toolchain_identity():
     clang = tool('clang')
-    return '\n'.join([clang, subprocess.check_output([clang, '--version'], text=True).strip(), sdk(),
-                      python_identity()])
+    return '\n'.join(
+        [
+            clang,
+            subprocess.check_output([clang, '--version'], text=True).strip(),
+            sdk(),
+            python_identity(),
+        ]
+    )
 
 
 def build_key(args_text):
     """Inputs of the ninja build: pins, normalised gn files, patch, compiler, SDK and python3."""
     material = [f'{name} {url} {commit}' for _, url, commit, name in all_checkouts()]
-    material += [repr(sorted(normalize_gn(GCLIENT_ARGS).items())), repr(sorted(normalize_gn(args_text).items())),
-                 sha256(PATCH.read_bytes()), toolchain_identity()]
+    material += [
+        repr(sorted(normalize_gn(GCLIENT_ARGS).items())),
+        repr(sorted(normalize_gn(args_text).items())),
+        sha256(PATCH.read_bytes()),
+        toolchain_identity(),
+    ]
     return sha256('\n'.join(material))
 
 
@@ -408,8 +499,11 @@ def gn_key():
 
 
 def build_env():
-    env = {key: value for key, value in os.environ.items()
-           if key not in _LEAKY_ENV and key not in ('PYTHONPATH', 'PYTHONHOME', 'SDKROOT')}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _LEAKY_ENV and key not in ('PYTHONPATH', 'PYTHONHOME', 'SDKROOT')
+    }
     env['MACOSX_DEPLOYMENT_TARGET'] = MACOS_MIN
     return env
 
@@ -420,8 +514,10 @@ def ninja():
         return str(venv)
     found = shutil.which('ninja')
     if not found:
-        raise SystemExit('ninja is required as a build tool: run make macos-graphics-deps (in-tree ninja) '
-                         'or put ninja on PATH')
+        raise SystemExit(
+            'ninja is required as a build tool: run make macos-graphics-deps (in-tree ninja) '
+            'or put ninja on PATH'
+        )
     return found
 
 
@@ -437,8 +533,12 @@ def ninja_reports_current(directory, targets):
     """
     if not (directory / 'build.ninja').is_file():
         return False
-    result = subprocess.run([ninja(), '-n', '-C', str(directory), *targets], capture_output=True, text=True,
-                            env=build_env())
+    result = subprocess.run(
+        [ninja(), '-n', '-C', str(directory), *targets],
+        capture_output=True,
+        text=True,
+        env=build_env(),
+    )
     return result.returncode == 0 and 'ninja: no work to do.' in result.stdout.splitlines()
 
 
@@ -448,14 +548,21 @@ def ensure_gn():
     key = gn_key()
     if record_matches(GN_RECORD, key) and GN_BIN.is_file():
         return
-    if GN_BIN.is_file() and not GN_RECORD.exists() and ninja_reports_current(GN_SRC / 'out', ['gn']):
+    if (
+        GN_BIN.is_file()
+        and not GN_RECORD.exists()
+        and ninja_reports_current(GN_SRC / 'out', ['gn'])
+    ):
         # Built before this script recorded builds, from the clean checkout verified above.
         log(f'take over {GN_BIN.relative_to(ROOT)}: ninja -n reports no work to do')
     else:
         log(f'build gn {GN_COMMIT}')
         # --no-last-commit-position: a shallow clone has no tag for git describe.
-        run([sys.executable, 'build/gen.py', '--no-last-commit-position', '--out-path', 'out'],
-            cwd=GN_SRC, env=build_env())
+        run(
+            [sys.executable, 'build/gen.py', '--no-last-commit-position', '--out-path', 'out'],
+            cwd=GN_SRC,
+            env=build_env(),
+        )
         run([ninja(), '-C', 'out', f'-j{ncpu()}', 'gn'], cwd=GN_SRC, env=build_env())
     GN_RECORD.write_text(f'{key}\ngn {GN_COMMIT}\n')
 
@@ -468,25 +575,41 @@ def build_angle():
     apply_patch()
     changes = local_changes(ANGLE_SRC / 'build')
     if changes:
-        raise SystemExit(f'{ANGLE_SRC / "build"} is not its pin plus {PATCH.relative_to(ROOT)} exactly:\n{changes}')
+        raise SystemExit(
+            f'{ANGLE_SRC / "build"} is not its pin plus {PATCH.relative_to(ROOT)} exactly:\n{changes}'
+        )
     ensure_gn()
     args_text = gn_args()
     key = build_key(args_text)
     args_changed = write_if_changed(OUT / 'args.gn', args_text)
     outputs = [OUT / name for name in LIBRARIES]
-    if not args_changed and record_matches(BUILD_RECORD, key) and all(path.is_file() for path in outputs):
+    if (
+        not args_changed
+        and record_matches(BUILD_RECORD, key)
+        and all(path.is_file() for path in outputs)
+    ):
         log('out/Release-metal is current (build record matches); gn gen and ninja skipped')
         return
-    if (not args_changed and not BUILD_RECORD.exists() and all(path.is_file() for path in outputs)
-            and ninja_reports_current(OUT, NINJA_TARGETS)):
-        log('take over out/Release-metal: no build record, ninja -n reports no work to do; gn gen and ninja '
-            'skipped')
+    if (
+        not args_changed
+        and not BUILD_RECORD.exists()
+        and all(path.is_file() for path in outputs)
+        and ninja_reports_current(OUT, NINJA_TARGETS)
+    ):
+        log(
+            'take over out/Release-metal: no build record, ninja -n reports no work to do; gn gen and ninja '
+            'skipped'
+        )
         BUILD_RECORD.write_text(f'{key}\ntaken over: ninja -n reported no work to do\n')
         return
     BUILD_RECORD.unlink(missing_ok=True)
     env = build_env()
     log('gn gen out/Release-metal')
-    run([GN_BIN, 'gen', 'out/Release-metal', f'--script-executable={sys.executable}'], cwd=ANGLE_SRC, env=env)
+    run(
+        [GN_BIN, 'gen', 'out/Release-metal', f'--script-executable={sys.executable}'],
+        cwd=ANGLE_SRC,
+        env=env,
+    )
     log('ninja ' + ' '.join(NINJA_TARGETS))
     run([ninja(), '-C', 'out/Release-metal', f'-j{ncpu()}', *NINJA_TARGETS], cwd=ANGLE_SRC, env=env)
     BUILD_RECORD.write_text(f'{key}\nbuilt by scripts/bootstrap_angle.py\n')
@@ -497,7 +620,7 @@ def rpaths(path):
     found = []
     for index, line in enumerate(lines):
         if line.strip() == 'cmd LC_RPATH':
-            for following in lines[index + 1:index + 4]:
+            for following in lines[index + 1 : index + 4]:
                 if following.strip().startswith('path '):
                     found.append(following.strip().split()[1])
     return found
@@ -574,40 +697,63 @@ def install_licenses(args_text):
     LICENSE_DIR.mkdir(parents=True)
     for source, target, _ in LICENSES:
         shutil.copyfile(ANGLE_SRC / source, LICENSE_DIR / target)
-    lines = [f'ANGLE {ANGLE_BRANCH} {ANGLE_COMMIT}', f'source: {ANGLE_URL}', '', 'DEPS checkouts (git, shallow):']
+    lines = [
+        f'ANGLE {ANGLE_BRANCH} {ANGLE_COMMIT}',
+        f'source: {ANGLE_URL}',
+        '',
+        'DEPS checkouts (git, shallow):',
+    ]
     lines += [f'  {rel} {url} {commit}' for rel, url, commit in ANGLE_DEPS]
-    lines += [f'gn {GN_URL} {GN_COMMIT} (build tool only)',
-              f'gn --script-executable: {python_identity()}', '',
-              'Licenses here: ' + '; '.join(f'{target} ({note})' for _, target, note in LICENSES) + '.',
-              'gn desc out/Release-metal //:libGLESv2 deps --all (M4 phase 0) lists only abseil-cpp, zlib and',
-              "xxhash besides ANGLE's own sources; libEGL and libGLESv1_CM were not described separately.",
-              'abseil-cpp has no NOTICE file. zlib/google (compression_utils_portable) is under the Chromium',
-              "Authors' BSD-3-Clause license (chromium.LICENSE); ANGLE's src/common/base/anglebase is Chromium",
-              "base code under BSD-3-Clause with ANGLE's LICENSE as its license file (README.chromium).",
-              "The dylibs also link Xcode's libclang_rt.osx.a (compiler-rt builtins; upstream Apache-2.0 WITH",
-              'LLVM-exception, whose exception covers object code embedded by compilation).',
-              'The installed Khronos headers (include/angle/EGL, GLES*, KHR) carry their own',
-              'Apache-2.0 (SPDX) and Khronos MIT-style notices.', '',
-              f'Chromium build/ modified by {PATCH.relative_to(ROOT)} (BSD-3-Clause, sha256 '
-              f'{sha256(PATCH.read_bytes())});', 'ANGLE sources themselves are unmodified.',
-              'Built by scripts/bootstrap_angle.py with Xcode clang; args.gn:', '', args_text]
+    lines += [
+        f'gn {GN_URL} {GN_COMMIT} (build tool only)',
+        f'gn --script-executable: {python_identity()}',
+        '',
+        'Licenses here: ' + '; '.join(f'{target} ({note})' for _, target, note in LICENSES) + '.',
+        'gn desc out/Release-metal //:libGLESv2 deps --all (M4 phase 0) lists only abseil-cpp, zlib and',
+        "xxhash besides ANGLE's own sources; libEGL and libGLESv1_CM were not described separately.",
+        'abseil-cpp has no NOTICE file. zlib/google (compression_utils_portable) is under the Chromium',
+        "Authors' BSD-3-Clause license (chromium.LICENSE); ANGLE's src/common/base/anglebase is Chromium",
+        "base code under BSD-3-Clause with ANGLE's LICENSE as its license file (README.chromium).",
+        "The dylibs also link Xcode's libclang_rt.osx.a (compiler-rt builtins; upstream Apache-2.0 WITH",
+        'LLVM-exception, whose exception covers object code embedded by compilation).',
+        'The installed Khronos headers (include/angle/EGL, GLES*, KHR) carry their own',
+        'Apache-2.0 (SPDX) and Khronos MIT-style notices.',
+        '',
+        f'Chromium build/ modified by {PATCH.relative_to(ROOT)} (BSD-3-Clause, sha256 '
+        f'{sha256(PATCH.read_bytes())});',
+        'ANGLE sources themselves are unmodified.',
+        'Built by scripts/bootstrap_angle.py with Xcode clang; args.gn:',
+        '',
+        args_text,
+    ]
     (LICENSE_DIR / 'PROVENANCE').write_text('\n'.join(lines))
 
 
 def outputs():
-    return ([LIB_DIR / name for name in LIBRARIES] + [INCLUDE_DIR / 'EGL/egl.h', INCLUDE_DIR / 'GLES2/gl2.h',
-            INCLUDE_DIR / 'GLES3/gl3.h', INCLUDE_DIR / 'GLES/gl.h', INCLUDE_DIR / 'KHR/khrplatform.h',
-            LICENSE_DIR / 'PROVENANCE'])
+    return [LIB_DIR / name for name in LIBRARIES] + [
+        INCLUDE_DIR / 'EGL/egl.h',
+        INCLUDE_DIR / 'GLES2/gl2.h',
+        INCLUDE_DIR / 'GLES3/gl3.h',
+        INCLUDE_DIR / 'GLES/gl.h',
+        INCLUDE_DIR / 'KHR/khrplatform.h',
+        LICENSE_DIR / 'PROVENANCE',
+    ]
 
 
 def stamp_key(args_text):
-    return sha256('\n'.join([build_key(args_text), sha256(Path(__file__).read_bytes()), str(PREFIX)]))
+    return sha256(
+        '\n'.join([build_key(args_text), sha256(Path(__file__).read_bytes()), str(PREFIX)])
+    )
 
 
 def build():
     args_text = gn_args()
     key = stamp_key(args_text)
-    if STAMP.is_file() and STAMP.read_text().splitlines()[:1] == [key] and all(p.exists() for p in outputs()):
+    if (
+        STAMP.is_file()
+        and STAMP.read_text().splitlines()[:1] == [key]
+        and all(p.exists() for p in outputs())
+    ):
         log('up to date (stamp matches)')
         return
     STAMP.unlink(missing_ok=True)
@@ -622,29 +768,53 @@ def build():
     install_licenses(args_text)
     BUILD.mkdir(parents=True, exist_ok=True)
     sizes = ' '.join(f'{name}={(LIB_DIR / name).stat().st_size}' for name in LIBRARIES)
-    STAMP.write_text(f'{key}\nangle {ANGLE_BRANCH} {ANGLE_COMMIT}\ngn {GN_COMMIT}\n'
-                     f'patch {PATCH.name} sha256 {sha256(PATCH.read_bytes())}\n'
-                     f'args.gn sha256 {sha256(args_text)}\nscript sha256 {sha256(Path(__file__).read_bytes())}\n'
-                     f'installed {LIB_DIR.relative_to(ROOT)} {sizes}\n')
+    STAMP.write_text(
+        f'{key}\nangle {ANGLE_BRANCH} {ANGLE_COMMIT}\ngn {GN_COMMIT}\n'
+        f'patch {PATCH.name} sha256 {sha256(PATCH.read_bytes())}\n'
+        f'args.gn sha256 {sha256(args_text)}\nscript sha256 {sha256(Path(__file__).read_bytes())}\n'
+        f'installed {LIB_DIR.relative_to(ROOT)} {sizes}\n'
+    )
     log(f'installed {LIB_DIR.relative_to(ROOT)} and {INCLUDE_DIR.relative_to(ROOT)}')
 
 
 def check():
     """Compile the probe against the installed headers and run it on the installed dylibs."""
     if not STAMP.is_file() or not all(p.exists() for p in outputs()):
-        raise SystemExit('ANGLE is not installed: run make macos-gpu-deps (python3 scripts/bootstrap_angle.py)')
+        raise SystemExit(
+            'ANGLE is not installed: run make macos-gpu-deps (python3 scripts/bootstrap_angle.py)'
+        )
     CHECK_OUT.mkdir(parents=True, exist_ok=True)
     binary = CHECK_OUT / 'angle_probe'
-    run([tool('clang'), '-arch', 'arm64', '-isysroot', sdk(), f'-mmacosx-version-min={MACOS_MIN}', '-O1',
-         '-Wall', '-Wextra', '-Werror', f'-I{INCLUDE_DIR}', PROBE, '-o', binary])
+    run(
+        [
+            tool('clang'),
+            '-arch',
+            'arm64',
+            '-isysroot',
+            sdk(),
+            f'-mmacosx-version-min={MACOS_MIN}',
+            '-O1',
+            '-Wall',
+            '-Wextra',
+            '-Werror',
+            f'-I{INCLUDE_DIR}',
+            PROBE,
+            '-o',
+            binary,
+        ]
+    )
     env = {key: value for key, value in os.environ.items() if not key.startswith('DYLD_')}
     # cwd / so nothing is found relative to the checkout by accident.
-    result = subprocess.run([str(binary), str(LIB_DIR)], cwd='/', env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        [str(binary), str(LIB_DIR)], cwd='/', env=env, capture_output=True, text=True
+    )
     report = CHECK_OUT / 'angle-probe.log'
     report.write_text(result.stdout + result.stderr)
     sys.stdout.write(result.stdout + result.stderr)
     if result.returncode != 0 or 'RESULT failures=0' not in result.stdout.splitlines():
-        raise SystemExit(f'ANGLE probe failed (rc={result.returncode}); see {report.relative_to(ROOT)}')
+        raise SystemExit(
+            f'ANGLE probe failed (rc={result.returncode}); see {report.relative_to(ROOT)}'
+        )
     print(f'ANGLE dependency check passed ({report.relative_to(ROOT)})')
 
 
@@ -652,10 +822,14 @@ def main():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         raise SystemExit('bootstrap_angle.py builds for macOS arm64 hosts only')
     if sys.version_info < (3, 11):
-        raise SystemExit(f'{sys.executable} {platform.python_version()} is too old: it also runs Chromium build '
-                         'scripts as gn --script-executable, and ANGLE pins CPython 3.11; run this script with '
-                         'python3 3.11 or newer (the macOS /usr/bin/python3 3.9 is too old)')
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        raise SystemExit(
+            f'{sys.executable} {platform.python_version()} is too old: it also runs Chromium build '
+            'scripts as gn --script-executable, and ANGLE pins CPython 3.11; run this script with '
+            'python3 3.11 or newer (the macOS /usr/bin/python3 3.9 is too old)'
+        )
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('stage', choices=['build', 'check'], default='build', nargs='?')
     args = parser.parse_args()
     DEPS.mkdir(exist_ok=True)

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Synthetic file/profile integration; never app execution or TLS acceptance."""
+
 import hashlib
 import struct
 import sys
@@ -19,7 +20,7 @@ def image_fixture():
     struct.pack_into('<Q', image, 32 + 152 + 32, 0x78000)  # DATA vmsize
     struct.pack_into('<Q', image, 32 + 152 + 72 + 24, 0x90000)  # LINKEDIT vmaddr
     body = struct.pack('<55I', *code_fixture(entry=0x1000))
-    image[0x1000:0x1000 + len(body)] = body
+    image[0x1000 : 0x1000 + len(body)] = body
     strings = b'\0_shiraz_guest_tls_access\0'
     image[0x4010:0x4030] = strings.ljust(32, b'\0')
     return image
@@ -33,7 +34,8 @@ class MrsAccessorCodeTests(unittest.TestCase):
             return check_accessor(path)
 
     def test_exact_file_identity_profile_and_nonclaims(self):
-        image = image_fixture();result = self.check(image)
+        image = image_fixture()
+        result = self.check(image)
         self.assertEqual(result['image_sha256'], hashlib.sha256(image).hexdigest())
         self.assertEqual(result['effects']['normal_path_calls'], 0)
         self.assertEqual(len(result['effects']['tables']), 5)
@@ -43,9 +45,9 @@ class MrsAccessorCodeTests(unittest.TestCase):
 
     def test_code_identity_and_table_ownership_changes_refuse(self):
         image = image_fixture()
-        for offset, value in ((0x1000 + 8, 0), (0x4011, ord('x')),
-                              (32 + 152 + 60, 0)):
-            changed = bytearray(image);changed[offset] = value
+        for offset, value in ((0x1000 + 8, 0), (0x4011, ord('x')), (32 + 152 + 60, 0)):
+            changed = bytearray(image)
+            changed[offset] = value
             with self.subTest(offset=offset), self.assertRaises(ValueError):
                 self.check(changed)
 

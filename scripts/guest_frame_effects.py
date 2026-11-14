@@ -4,15 +4,17 @@
 Recognition supplies conditional frame effects, never complete caller/TLS proof.
 The reader must return only independently bounded executable file words.
 """
+
 import hashlib
 from dataclasses import dataclass
 
 # STP X28,X27,[SP,#16]; MOV X29,SP; remaining callee saves; RET X30.
-WORDS = (0xA9016FFC, 0x910003FD, 0xA90267FA, 0xA9035FF8,
-         0xA90457F6, 0xA9054FF4, 0xD65F03C0)
-SAVES = tuple((f"x{register}", offset + part * 8)
-              for first, offset in ((28, 16), (26, 32), (24, 48), (22, 64), (20, 80))
-              for part, register in enumerate((first, first - 1)))
+WORDS = (0xA9016FFC, 0x910003FD, 0xA90267FA, 0xA9035FF8, 0xA90457F6, 0xA9054FF4, 0xD65F03C0)
+SAVES = tuple(
+    (f"x{register}", offset + part * 8)
+    for first, offset in ((28, 16), (26, 32), (24, 48), (22, 64), (20, 80))
+    for part, register in enumerate((first, first - 1))
+)
 
 
 @dataclass(frozen=True)

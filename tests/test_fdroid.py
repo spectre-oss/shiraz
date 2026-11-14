@@ -4,6 +4,7 @@
 A throwaway RSA key signs a synthetic index-v1.jar the way jarsigner does
 (PKCS#7 SignedData with signed attributes over the .SF file).
 """
+
 import base64
 import hashlib
 import io
@@ -42,10 +43,10 @@ def der_oid(text):
     parts = [int(p) for p in text.split('.')]
     body = bytes([40 * parts[0] + parts[1]])
     for part in parts[2:]:
-        chunk = [part & 0x7f]
+        chunk = [part & 0x7F]
         part >>= 7
         while part:
-            chunk.append(0x80 | part & 0x7f)
+            chunk.append(0x80 | part & 0x7F)
             part >>= 7
         body += bytes(reversed(chunk))
     return tlv(0x06, body)
@@ -57,7 +58,9 @@ NULL = b'\x05\x00'
 def prime(bits, rng):
     while True:
         candidate = rng.getrandbits(bits) | 1 << (bits - 1) | 1
-        if all(candidate % p for p in (3, 5, 7, 11, 13, 17, 19, 23, 29, 31)) and probable_prime(candidate, rng):
+        if all(candidate % p for p in (3, 5, 7, 11, 13, 17, 19, 23, 29, 31)) and probable_prime(
+            candidate, rng
+        ):
             return candidate
 
 
@@ -98,32 +101,56 @@ def sign(message, name='sha256'):
 
 
 CERT = seq(
-    seq(tlv(0xa0, der_int(2)), der_int(7), seq(der_oid('1.2.840.113549.1.1.11'), NULL), seq(), seq(), seq(),
-        seq(seq(der_oid(fdroid.OID_RSA), NULL), tlv(0x03, b'\x00' + seq(der_int(N), der_int(E))))),
-    seq(der_oid('1.2.840.113549.1.1.11'), NULL), tlv(0x03, b'\x00\x01'))
+    seq(
+        tlv(0xA0, der_int(2)),
+        der_int(7),
+        seq(der_oid('1.2.840.113549.1.1.11'), NULL),
+        seq(),
+        seq(),
+        seq(),
+        seq(seq(der_oid(fdroid.OID_RSA), NULL), tlv(0x03, b'\x00' + seq(der_int(N), der_int(E)))),
+    ),
+    seq(der_oid('1.2.840.113549.1.1.11'), NULL),
+    tlv(0x03, b'\x00\x01'),
+)
 FINGERPRINT = hashlib.sha256(CERT).hexdigest()
 
 
 def pkcs7(signed, name='sha256', corrupt=False):
     digest_oid = next(k for k, v in fdroid.DIGESTS.items() if v[0] == name)
     algorithm = seq(der_oid(digest_oid), NULL)
-    attributes = seq(der_oid(fdroid.OID_MESSAGE_DIGEST), tlv(0x31, tlv(0x04, hashlib.new(name, signed).digest())))
+    attributes = seq(
+        der_oid(fdroid.OID_MESSAGE_DIGEST), tlv(0x31, tlv(0x04, hashlib.new(name, signed).digest()))
+    )
     signature = bytearray(sign(tlv(0x31, attributes), name))
     if corrupt:
         signature[-1] ^= 1
-    signer = seq(der_int(1), seq(seq(), der_int(7)), algorithm, tlv(0xa0, attributes),
-                 seq(der_oid(fdroid.OID_RSA), NULL), tlv(0x04, bytes(signature)))
-    signed_data = seq(der_int(1), tlv(0x31, algorithm), seq(der_oid('1.2.840.113549.1.7.1')),
-                      tlv(0xa0, CERT), tlv(0x31, signer))
-    return seq(der_oid(fdroid.OID_SIGNED_DATA), tlv(0xa0, signed_data))
+    signer = seq(
+        der_int(1),
+        seq(seq(), der_int(7)),
+        algorithm,
+        tlv(0xA0, attributes),
+        seq(der_oid(fdroid.OID_RSA), NULL),
+        tlv(0x04, bytes(signature)),
+    )
+    signed_data = seq(
+        der_int(1),
+        tlv(0x31, algorithm),
+        seq(der_oid('1.2.840.113549.1.7.1')),
+        tlv(0xA0, CERT),
+        tlv(0x31, signer),
+    )
+    return seq(der_oid(fdroid.OID_SIGNED_DATA), tlv(0xA0, signed_data))
 
 
 def index_jar(index, name='sha256', corrupt=False, tamper=None):
     label = next(v[2] for v in fdroid.DIGESTS.values() if v[0] == name)
     b64 = lambda data: base64.b64encode(hashlib.new(name, data).digest()).decode()
     manifest = f'Manifest-Version: 1.0\r\n\r\nName: index-v1.json\r\n{label}-Digest: {b64(index)}\r\n\r\n'.encode()
-    sf = (f'Signature-Version: 1.0\r\n{label}-Digest-Manifest: {b64(manifest)}\r\n\r\n'
-          f'Name: index-v1.json\r\n{label}-Digest: x\r\n\r\n').encode()
+    sf = (
+        f'Signature-Version: 1.0\r\n{label}-Digest-Manifest: {b64(manifest)}\r\n\r\n'
+        f'Name: index-v1.json\r\n{label}-Digest: x\r\n\r\n'
+    ).encode()
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('META-INF/MANIFEST.MF', manifest)
@@ -134,24 +161,38 @@ def index_jar(index, name='sha256', corrupt=False, tamper=None):
 
 
 def package(code, **extra):
-    return {'apkName': f'org.example.app_{code}.apk', 'hash': hashlib.sha256(str(code).encode()).hexdigest(),
-            'hashType': 'sha256', 'size': 3, 'versionCode': code, 'versionName': str(code), 'minSdkVersion': 21, **extra}
+    return {
+        'apkName': f'org.example.app_{code}.apk',
+        'hash': hashlib.sha256(str(code).encode()).hexdigest(),
+        'hashType': 'sha256',
+        'size': 3,
+        'versionCode': code,
+        'versionName': str(code),
+        'minSdkVersion': 21,
+        **extra,
+    }
 
 
-INDEX = json.dumps({
-    'repo': {'name': 'Test', 'timestamp': 1, 'webBaseUrl': 'https://f-droid.org/packages'},
-    'apps': [
-        {'packageName': 'org.example.app', 'suggestedVersionCode': '20', 'localized': {'en-US': {'name': 'Example', 'summary': 'S', 'icon': 'i.png'}}},
-        {'packageName': 'org.example.x86', 'name': 'X86', 'icon': 'x.png'},
-        {'packageName': 'org.example.new', 'name': 'New'},
-        {'packageName': '../evil', 'name': 'Evil'},
-    ],
-    'packages': {
-        'org.example.app': [package(30), package(20), package(10)],
-        'org.example.x86': [package(5, nativecode=['x86_64'])],
-        'org.example.new': [package(9, minSdkVersion=33)],
-    },
-}).encode()
+INDEX = json.dumps(
+    {
+        'repo': {'name': 'Test', 'timestamp': 1, 'webBaseUrl': 'https://f-droid.org/packages'},
+        'apps': [
+            {
+                'packageName': 'org.example.app',
+                'suggestedVersionCode': '20',
+                'localized': {'en-US': {'name': 'Example', 'summary': 'S', 'icon': 'i.png'}},
+            },
+            {'packageName': 'org.example.x86', 'name': 'X86', 'icon': 'x.png'},
+            {'packageName': 'org.example.new', 'name': 'New'},
+            {'packageName': '../evil', 'name': 'Evil'},
+        ],
+        'packages': {
+            'org.example.app': [package(30), package(20), package(10)],
+            'org.example.x86': [package(5, nativecode=['x86_64'])],
+            'org.example.new': [package(9, minSdkVersion=33)],
+        },
+    }
+).encode()
 
 
 class IndexVerification(unittest.TestCase):
@@ -165,7 +206,9 @@ class IndexVerification(unittest.TestCase):
         with self.assertRaisesRegex(FormatError, 'does not verify'):
             fdroid.verify_index_jar(index_jar(INDEX, corrupt=True), FINGERPRINT)
         with self.assertRaisesRegex(FormatError, 'signed digest'):
-            fdroid.verify_index_jar(index_jar(INDEX, tamper=INDEX.replace(b'Example', b'Exampl3')), FINGERPRINT)
+            fdroid.verify_index_jar(
+                index_jar(INDEX, tamper=INDEX.replace(b'Example', b'Exampl3')), FINGERPRINT
+            )
 
     def test_rejects_malformed_archives(self):
         with self.assertRaises(FormatError):
@@ -179,7 +222,9 @@ class Catalog(unittest.TestCase):
         apps = {a['packageName']: a for a in fdroid.build_catalog(INDEX)['apps']}
         self.assertNotIn('../evil', apps)
         app = apps['org.example.app']
-        self.assertEqual((app['name'], app['versionCode'], app['compatible']), ('Example', 20, True))
+        self.assertEqual(
+            (app['name'], app['versionCode'], app['compatible']), ('Example', 20, True)
+        )
         self.assertEqual(app['iconURL'], 'https://f-droid.org/repo/org.example.app/en-US/i.png')
         self.assertFalse(apps['org.example.x86']['compatible'])
         self.assertIn('x86_64', apps['org.example.x86']['reason'])
@@ -239,6 +284,7 @@ class Fetch(unittest.TestCase):
             temporary = destination.parent / '.download-test'
             temporary.write_bytes(payload)
             return str(temporary), hashlib.sha256(payload).hexdigest()
+
         return download
 
     def test_fetch_checks_hash_and_compatibility(self):

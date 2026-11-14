@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Experimental opaque-load transfers; synthetic graphs are not ELF proof."""
+
 import json
 import sys
 import unittest
@@ -28,10 +29,16 @@ def ins(pc, op, *args, **kw):
 
 class OpaqueLoadTests(unittest.TestCase):
     def run_case(self, middle=(), *, experimental=True, load=None, cleanup=True, atomic=False):
-        graph = {i.address: i for i in [
-            ins(0, "mrs", r("x19")), ins(4, "ldr", r("x8"), mem("x19", 40)),
-            ins(8, "str", r("x19"), mem("sp")),
-            load or ins(12, "ldr", r("x10"), mem("x1")), *middle]}
+        graph = {
+            i.address: i
+            for i in [
+                ins(0, "mrs", r("x19")),
+                ins(4, "ldr", r("x8"), mem("x19", 40)),
+                ins(8, "str", r("x19"), mem("sp")),
+                load or ins(12, "ldr", r("x10"), mem("x1")),
+                *middle,
+            ]
+        }
         if cleanup:
             end = max(graph) + 4
             for index in range(31):
@@ -48,8 +55,13 @@ class OpaqueLoadTests(unittest.TestCase):
                 return graph.get(pc)
 
             def atomic32(self, pc):
-                return Atomic32Effects(16, 48, "a" * 64, 0x1000,
-                    (AtomicPath("synthetic", 20, ("x0", "x16")),)) if atomic and pc == 16 else None
+                return (
+                    Atomic32Effects(
+                        16, 48, "a" * 64, 0x1000, (AtomicPath("synthetic", 20, ("x0", "x16")),)
+                    )
+                    if atomic and pc == 16
+                    else None
+                )
 
         return a.Audit(Decoder(), track_opaque_loads=experimental).site(0)
 
@@ -63,47 +75,67 @@ class OpaqueLoadTests(unittest.TestCase):
         self.assertEqual(self.run_case(experimental=False)["classification"], "unknown")
 
     def test_fullwidth_copy_select_and_exact_spill_can_die_without_escape(self):
-        for middle in ([ins(16, "mov", r("x11"), r("x10"))],
-                       [ins(16, "csel", r("x11"), r("x10"), r("x0"))],
-                       [ins(16, "str", r("x10"), mem("sp", 8)),
-                        ins(20, "ldr", r("x11"), mem("sp", 8))]):
+        for middle in (
+            [ins(16, "mov", r("x11"), r("x10"))],
+            [ins(16, "csel", r("x11"), r("x10"), r("x0"))],
+            [ins(16, "str", r("x10"), mem("sp", 8)), ins(20, "ldr", r("x11"), mem("sp", 8))],
+        ):
             self.assertEqual(self.run_case(middle)["classification"], "guard-only")
 
     def test_opaque_address_never_becomes_guard_and_mixed_diagnostics_serialize(self):
-        report = self.run_case([ins(16, "csel", r("x11"), r("x10"), r("x19")),
-                                ins(20, "ldr", r("x8"), mem("x11", 40))])
+        report = self.run_case(
+            [ins(16, "csel", r("x11"), r("x10"), r("x19")), ins(20, "ldr", r("x8"), mem("x11", 40))]
+        )
         self.assertEqual(report["classification"], "unknown")
         self.assertIn("opaque-thread-pointer-memory-base", self.reasons(report))
-        self.assertTrue(any(item.get("value_kind") == "opaque-derived" for item in report["accesses"]))
+        self.assertTrue(
+            any(item.get("value_kind") == "opaque-derived" for item in report["accesses"])
+        )
         json.dumps(report)
 
     def test_arithmetic_narrowing_and_generic_consumers_stay_refused(self):
-        for body in ([ins(16, "add", r("x11"), r("x10"), imm(0))],
-                     [ins(16, "mov", r("w11"), r("w10"))],
-                     [ins(16, "fmov", r("d0"), r("x10"), reads=("x10",), writes=("d0",))]):
+        for body in (
+            [ins(16, "add", r("x11"), r("x10"), imm(0))],
+            [ins(16, "mov", r("w11"), r("w10"))],
+            [ins(16, "fmov", r("d0"), r("x10"), reads=("x10",), writes=("d0",))],
+        ):
             self.assertEqual(self.run_case(body)["classification"], "unknown")
 
     def test_escape_return_and_authentication_never_treat_opaque_as_control(self):
-        for body in ([ins(16, "str", r("x10"), mem("x2"))],
-                     [ins(16, "mov", r("x30"), r("x10")), ins(20, "ret")],
-                     [ins(16, "mov", r("x30"), r("x10")), ins(20, "paciasp")]):
+        for body in (
+            [ins(16, "str", r("x10"), mem("x2"))],
+            [ins(16, "mov", r("x30"), r("x10")), ins(20, "ret")],
+            [ins(16, "mov", r("x30"), r("x10")), ins(20, "paciasp")],
+        ):
             self.assertEqual(self.run_case(body)["classification"], "unknown")
-        report = self.run_case([ins(16, "mov", r("x19"), r("xzr")),
-                                ins(20, "str", r("xzr"), mem("sp")), ins(24, "ret")], cleanup=False)
+        report = self.run_case(
+            [
+                ins(16, "mov", r("x19"), r("xzr")),
+                ins(20, "str", r("xzr"), mem("sp")),
+                ins(24, "ret"),
+            ],
+            cleanup=False,
+        )
         self.assertEqual(report["classification"], "unknown")
 
     def test_literal_partial_gpr_and_pair_loads_track_but_vectors_refuse(self):
-        for load in (ins(12, "ldr", r("x10"), imm(0x4000)),
-                     ins(12, "ldrsw", r("x10"), mem("x1"), width=4),
-                     ins(12, "ldp", r("x10"), r("x11"), mem("x1"))):
+        for load in (
+            ins(12, "ldr", r("x10"), imm(0x4000)),
+            ins(12, "ldrsw", r("x10"), mem("x1"), width=4),
+            ins(12, "ldp", r("x10"), r("x11"), mem("x1")),
+        ):
             self.assertEqual(self.run_case(load=load)["classification"], "guard-only")
-        for load in (ins(12, "ldr", r("d0"), mem("x1")),
-                     ins(12, "ldr", r("q0"), imm(0x4000), width=16)):
+        for load in (
+            ins(12, "ldr", r("d0"), mem("x1")),
+            ins(12, "ldr", r("q0"), imm(0x4000), width=16),
+        ):
             self.assertEqual(self.run_case(load=load)["classification"], "unknown")
 
     def test_writeback_and_partial_spills_refuse_without_type_confusion(self):
-        for body in ([ins(16, "ldr", r("x8"), mem("x10"), writeback=True, post_index=8)],
-                     [ins(16, "str", r("w10"), mem("sp", 12), width=4)]):
+        for body in (
+            [ins(16, "ldr", r("x8"), mem("x10"), writeback=True, post_index=8)],
+            [ins(16, "str", r("w10"), mem("sp", 12), width=4)],
+        ):
             self.assertEqual(self.run_case(body)["classification"], "unknown")
 
     def test_opaque_value_is_nonnumeric_copied_and_partitioned(self):
@@ -120,48 +152,76 @@ class OpaqueLoadTests(unittest.TestCase):
         self.assertIn("unmodelled-load-may-alias-thread-pointer-stack-spill", self.reasons(report))
 
     def test_vector_view_cannot_launder_a_known_or_opaque_spill(self):
-        body = [ins(16, "str", r("x10"), mem("sp", 8)),
-                ins(20, "ldr", r("d0"), mem("sp", 8)),
-                ins(24, "fmov", r("w0"), r("s0"), reads=("s0",), writes=("w0",)),
-                ins(28, "fmov", r("d0"), r("xzr"), reads=("xzr",), writes=("d0",)),
-                ins(32, "mov", r("x19"), r("xzr")), ins(36, "mov", r("x10"), r("xzr")),
-                ins(40, "str", r("xzr"), mem("sp")), ins(44, "str", r("xzr"), mem("sp", 8)),
-                ins(48, "str", r("w0"), mem("x2"), width=4), ins(52, "ret")]
+        body = [
+            ins(16, "str", r("x10"), mem("sp", 8)),
+            ins(20, "ldr", r("d0"), mem("sp", 8)),
+            ins(24, "fmov", r("w0"), r("s0"), reads=("s0",), writes=("w0",)),
+            ins(28, "fmov", r("d0"), r("xzr"), reads=("xzr",), writes=("d0",)),
+            ins(32, "mov", r("x19"), r("xzr")),
+            ins(36, "mov", r("x10"), r("xzr")),
+            ins(40, "str", r("xzr"), mem("sp")),
+            ins(44, "str", r("xzr"), mem("sp", 8)),
+            ins(48, "str", r("w0"), mem("x2"), width=4),
+            ins(52, "ret"),
+        ]
         report = self.run_case(body, cleanup=False)
         self.assertEqual(report["classification"], "unknown")
         self.assertIn("tainted-vector-stack-reload-unmodelled", self.reasons(report))
-        known_body = [ins(16, "fmov", r("w0"), r("s0"), reads=("s0",), writes=("w0",)),
-                      ins(20, "fmov", r("d0"), r("xzr"), reads=("xzr",), writes=("d0",)),
-                      ins(24, "mov", r("x19"), r("xzr")), ins(28, "str", r("xzr"), mem("sp")),
-                      ins(32, "str", r("w0"), mem("x2"), width=4), ins(36, "ret")]
+        known_body = [
+            ins(16, "fmov", r("w0"), r("s0"), reads=("s0",), writes=("w0",)),
+            ins(20, "fmov", r("d0"), r("xzr"), reads=("xzr",), writes=("d0",)),
+            ins(24, "mov", r("x19"), r("xzr")),
+            ins(28, "str", r("xzr"), mem("sp")),
+            ins(32, "str", r("w0"), mem("x2"), width=4),
+            ins(36, "ret"),
+        ]
         for experimental in (False, True):
-            report = self.run_case(known_body, load=ins(12, "ldr", r("d0"), mem("sp")),
-                                   experimental=experimental, cleanup=False)
+            report = self.run_case(
+                known_body,
+                load=ins(12, "ldr", r("d0"), mem("sp")),
+                experimental=experimental,
+                cleanup=False,
+            )
             self.assertEqual(report["classification"], "unknown")
             self.assertIn("tainted-vector-stack-reload-unmodelled", self.reasons(report))
 
     def test_known_rmw_address_does_not_prove_flag_load_stack_separation(self):
-        graph = {i.address: i for i in [
-            ins(0, "mrs", r("x19")), ins(4, "ldr", r("x8"), mem("x19", 40)),
-            ins(8, "str", r("x19"), mem("sp")), ins(12, "mov", r("x19"), r("xzr")),
-            ins(16, "add", r("x1"), r("sp"), imm(16)), ins(20, "mov", r("x0"), imm(1)),
-            ins(24, "bl", imm(64)), ins(28, "str", r("xzr"), mem("sp")),
-            ins(32, "str", r("w16"), mem("x2"), width=4),
-            ins(36, "ldr", r("x30"), mem("sp", 8)), ins(40, "ret"),
-            ins(64, "bti"), ins(84, "ret")]}
+        graph = {
+            i.address: i
+            for i in [
+                ins(0, "mrs", r("x19")),
+                ins(4, "ldr", r("x8"), mem("x19", 40)),
+                ins(8, "str", r("x19"), mem("sp")),
+                ins(12, "mov", r("x19"), r("xzr")),
+                ins(16, "add", r("x1"), r("sp"), imm(16)),
+                ins(20, "mov", r("x0"), imm(1)),
+                ins(24, "bl", imm(64)),
+                ins(28, "str", r("xzr"), mem("sp")),
+                ins(32, "str", r("w16"), mem("x2"), width=4),
+                ins(36, "ldr", r("x30"), mem("sp", 8)),
+                ins(40, "ret"),
+                ins(64, "bti"),
+                ins(84, "ret"),
+            ]
+        }
 
         class Decoder:
             def __call__(self, pc):
                 return graph.get(pc)
 
             def atomic32(self, pc):
-                return Atomic32Effects(64, 48, "a" * 64, 4096,
-                    (AtomicPath("lse", 84, ("x0", "x16")),)) if pc == 64 else None
+                return (
+                    Atomic32Effects(64, 48, "a" * 64, 4096, (AtomicPath("lse", 84, ("x0", "x16")),))
+                    if pc == 64
+                    else None
+                )
 
         for experimental in (False, True):
             report = a.Audit(Decoder(), track_opaque_loads=experimental).site(0)
             self.assertEqual(report["classification"], "unknown")
-            self.assertIn("atomic-flag-load-may-alias-thread-pointer-stack-spill", self.reasons(report))
+            self.assertIn(
+                "atomic-flag-load-may-alias-thread-pointer-stack-spill", self.reasons(report)
+            )
 
     def test_scalar_simd_partial_store_cannot_erase_a_pointer_spill(self):
         for name, expected in (("b0", 1), ("h0", 2), ("s0", 4), ("d0", 8), ("q0", 16)):
@@ -179,7 +239,9 @@ class OpaqueLoadTests(unittest.TestCase):
                         experimental=experimental,
                     )
                     self.assertEqual(report["classification"], "unknown")
-                    self.assertIn("partial-overlap-with-thread-pointer-stack-spill", self.reasons(report))
+                    self.assertIn(
+                        "partial-overlap-with-thread-pointer-stack-spill", self.reasons(report)
+                    )
 
 
 if __name__ == "__main__":

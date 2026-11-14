@@ -55,11 +55,26 @@ def verify_headers():
 def main():
     headers.main()
     expected, groups = verify_headers()
-    command = ['xcrun', 'clang', '--target=aarch64-linux-android24', '-ffreestanding',
-               '-isystem', str(headers.SYSROOT), '-dM', '-E', '-x', 'c', '-include', 'errno.h', '/dev/null']
+    command = [
+        'xcrun',
+        'clang',
+        '--target=aarch64-linux-android24',
+        '-ffreestanding',
+        '-isystem',
+        str(headers.SYSROOT),
+        '-dM',
+        '-E',
+        '-x',
+        'c',
+        '-include',
+        'errno.h',
+        '/dev/null',
+    ]
     dependency_command = [part for part in command if part != '-dM']
     dependency_command.insert(dependency_command.index('-E'), '-M')
-    dependencies = shlex.split(subprocess.check_output(dependency_command, text=True).replace('\\\n', ''))[1:]
+    dependencies = shlex.split(
+        subprocess.check_output(dependency_command, text=True).replace('\\\n', '')
+    )[1:]
     checked = {}
     for dependency in dependencies:
         path = Path(dependency)
@@ -81,8 +96,12 @@ def main():
     resolved = {name: number(name) for name in sorted(values)}
     if len(resolved) < 100 or any(not 0 < value < 4096 for value in resolved.values()):
         raise ValueError('unexpected bionic errno inventory')
-    lines = ['// Generated from checksum-verified AOSP bionic headers; local output.',
-             '#pragma once', '#include <cerrno>', 'namespace shiraz::guest::bionic {']
+    lines = [
+        '// Generated from checksum-verified AOSP bionic headers; local output.',
+        '#pragma once',
+        '#include <cerrno>',
+        'namespace shiraz::guest::bionic {',
+    ]
     lines += [f'inline constexpr int k{name} = {value};' for name, value in resolved.items()]
     lines += ['struct ErrnoPair { int host, guest; };', 'inline constexpr ErrnoPair errors[] = {']
     for name, value in resolved.items():
@@ -92,16 +111,25 @@ def main():
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     if not OUTPUT.exists() or OUTPUT.read_text() != text:
         OUTPUT.write_text(text)
-    OUTPUT.with_suffix('.json').write_text(json.dumps({
-        'bionic_commit': headers.COMMIT,
-        'preprocessor_command': command,
-        'header_dependencies_sha256': checked,
-        'unused_case_collisions': [names for names in groups.values() if len(names) > 1],
-        'compiler': subprocess.check_output(['xcrun', 'clang', '--version'], text=True),
-        'preprocessor_sha256': hashlib.sha256(macros.encode()).hexdigest(),
-        'values': resolved,
-    }, indent=2, sort_keys=True) + '\n')
-    print(f'Guest errno ABI: {len(resolved)} compiler-derived values; pinned errno dependencies verified')
+    OUTPUT.with_suffix('.json').write_text(
+        json.dumps(
+            {
+                'bionic_commit': headers.COMMIT,
+                'preprocessor_command': command,
+                'header_dependencies_sha256': checked,
+                'unused_case_collisions': [names for names in groups.values() if len(names) > 1],
+                'compiler': subprocess.check_output(['xcrun', 'clang', '--version'], text=True),
+                'preprocessor_sha256': hashlib.sha256(macros.encode()).hexdigest(),
+                'values': resolved,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + '\n'
+    )
+    print(
+        f'Guest errno ABI: {len(resolved)} compiler-derived values; pinned errno dependencies verified'
+    )
 
 
 if __name__ == '__main__':

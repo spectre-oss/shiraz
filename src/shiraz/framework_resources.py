@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Conservative named-resource closure over pinned AOSP XML and resource files."""
+
 from collections import defaultdict
 import copy
 from pathlib import PurePosixPath
@@ -42,7 +43,13 @@ class ResourceIndex:
                         for attr in element:
                             if attr.tag == 'attr' and (attr.get('format') or len(attr)):
                                 self.add(folder, path, attr)
-                    elif element.tag not in ('public', 'public-padding', 'java-symbol', 'eat-comment', 'skip'):
+                    elif element.tag not in (
+                        'public',
+                        'public-padding',
+                        'java-symbol',
+                        'eat-comment',
+                        'skip',
+                    ):
                         self.add(folder, path, element)
             else:
                 name = filename[:-6] if filename.endswith('.9.png') else filename.rsplit('.', 1)[0]
@@ -68,14 +75,23 @@ class ResourceIndex:
                     # AOSP repeats attr declarations in different styleables. Merge their
                     # type/enum constraints, while rejecting contradictory enum values.
                     current = old[0][2]
-                    formats = set(filter(None, (current.get('format', '') + '|' + element.get('format', '')).split('|')))
-                    if formats: current.set('format', '|'.join(sorted(formats)))
+                    formats = set(
+                        filter(
+                            None,
+                            (current.get('format', '') + '|' + element.get('format', '')).split(
+                                '|'
+                            ),
+                        )
+                    )
+                    if formats:
+                        current.set('format', '|'.join(sorted(formats)))
                     children = {(child.tag, child.get('name')): child for child in current}
                     for child in element:
                         item = (child.tag, child.get('name'))
                         if item in children and children[item].attrib != child.attrib:
                             raise ValueError('conflicting attribute enum: ' + name)
-                        if item not in children: current.append(copy.deepcopy(child))
+                        if item not in children:
+                            current.append(copy.deepcopy(child))
                     return
                 self.nodes[key] = [n for n in self.nodes[key] if n[0] != folder]
         self.nodes[key].append((folder, path, element))
@@ -92,7 +108,9 @@ class ResourceIndex:
                 if parent is None and '.' in key[1]:
                     found.add(('style', key[1].rsplit('.', 1)[0]))
                 elif parent and not parent.startswith('@'):
-                    found.add(('style', parent.removeprefix('android:style/').removeprefix('style/')))
+                    found.add(
+                        ('style', parent.removeprefix('android:style/').removeprefix('style/'))
+                    )
                 for item in element:
                     if item.tag == 'item' and item.get('name'):
                         found.add(('attr', item.get('name').removeprefix('android:')))
@@ -125,14 +143,21 @@ class ResourceIndex:
 
     def stable_ids(self):
         """Reserve the full public ABI, including resources outside the closure."""
-        return ''.join(f'android:{kind}/{name} = 0x{ident:08x}\n'
-                       for (kind, name), ident in sorted(self.public.items()))
+        return ''.join(
+            f'android:{kind}/{name} = 0x{ident:08x}\n'
+            for (kind, name), ident in sorted(self.public.items())
+        )
 
     def validate_ids(self, actual, selected):
         expected = {ident: '/'.join(key) for key, ident in self.public.items()}
         for name, ident in actual.items():
             if ident in expected and expected[ident] != name:
-                raise ValueError('compiled framework public ID collision: ' + name + ' replaces ' + expected[ident])
+                raise ValueError(
+                    'compiled framework public ID collision: '
+                    + name
+                    + ' replaces '
+                    + expected[ident]
+                )
         for key in selected:
             if key in self.public and actual.get('/'.join(key)) != self.public[key]:
                 raise ValueError('compiled framework public ID changed: ' + '/'.join(key))
@@ -152,10 +177,18 @@ class ResourceIndex:
         for folder, elements in sorted(values.items()):
             root = ET.Element('resources')
             root.extend(elements)
-            result['res/' + folder + '/shiraz_subset.xml'] = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+            result['res/' + folder + '/shiraz_subset.xml'] = ET.tostring(
+                root, encoding='utf-8', xml_declaration=True
+            )
         public = ET.Element('resources')
         for key in sorted(selected):
             if key in self.public:
-                ET.SubElement(public, 'public', {'type': key[0], 'name': key[1], 'id': f'0x{self.public[key]:08x}'})
-        result['res/values/shiraz_public.xml'] = ET.tostring(public, encoding='utf-8', xml_declaration=True)
+                ET.SubElement(
+                    public,
+                    'public',
+                    {'type': key[0], 'name': key[1], 'id': f'0x{self.public[key]:08x}'},
+                )
+        result['res/values/shiraz_public.xml'] = ET.tostring(
+            public, encoding='utf-8', xml_declaration=True
+        )
         return result, {key: sorted(paths) for key, paths in sorted(provenance.items())}

@@ -26,8 +26,13 @@ def main():
         'static_assert(sizeof(JNINativeInterface) == 233 * sizeof(void*));',
     ]
     for index, (name, params) in enumerate(fields, 4):
-        lines.append(f'static_assert(offsetof(JNINativeInterface, {name}) == {index} * sizeof(void*));')
-        call = re.fullmatch(r'(NewObject|Call(Nonvirtual|Static)?(Object|Boolean|Byte|Char|Short|Int|Long|Float|Double|Void)Method)(V?)', name)
+        lines.append(
+            f'static_assert(offsetof(JNINativeInterface, {name}) == {index} * sizeof(void*));'
+        )
+        call = re.fullmatch(
+            r'(NewObject|Call(Nonvirtual|Static)?(Object|Boolean|Byte|Char|Short|Int|Long|Float|Double|Void)Method)(V?)',
+            name,
+        )
         if call:
             base, family, kind, variant = call.groups()
             family = 'Constructor' if base == 'NewObject' else family or 'Instance'
@@ -40,10 +45,17 @@ def main():
             lines.append(f'SHIRAZ_ENV_SLOT({name})')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text('\n'.join(lines) + '\n')
-    args.output.with_suffix('.json').write_text(json.dumps({
-        'header_sha256': hashlib.sha256(args.header.read_bytes()).hexdigest(),
-        'slots': [name for name, _ in fields], 'reserved': 4,
-    }, indent=2) + '\n')
+    args.output.with_suffix('.json').write_text(
+        json.dumps(
+            {
+                'header_sha256': hashlib.sha256(args.header.read_bytes()).hexdigest(),
+                'slots': [name for name, _ in fields],
+                'reserved': 4,
+            },
+            indent=2,
+        )
+        + '\n'
+    )
     print(f'Guest JNI inventory: {len(fields)} callable slots, four reserved slots')
 
 

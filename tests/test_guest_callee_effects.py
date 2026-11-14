@@ -56,9 +56,7 @@ class CalleeEffectsTests(unittest.TestCase):
         self.assertEqual(summary.body_size, 48)
         self.assertEqual(
             summary.body_sha256,
-            hashlib.sha256(
-                b"".join(w.to_bytes(4, "little") for w in WORDS)
-            ).hexdigest(),
+            hashlib.sha256(b"".join(w.to_bytes(4, "little") for w in WORDS)).hexdigest(),
         )
         self.assertEqual(summary.flag_address, 0x51548)
         self.assertEqual(
@@ -73,9 +71,7 @@ class CalleeEffectsTests(unittest.TestCase):
         self.assertEqual(summary.paths[0].clobbers, ("x0", "x16"))
         self.assertEqual(summary.paths[1].clobbers, ("x0", "x15", "x16", "x17"))
         self.assertEqual([path.ret_pc for path in summary.paths], [0x1014, 0x102C])
-        self.assertTrue(
-            summary.preserves_sp and summary.preserves_lr and summary.preserves_vectors
-        )
+        self.assertTrue(summary.preserves_sp and summary.preserves_lr and summary.preserves_vectors)
 
     def test_no_target_address_allowlist_and_bss_flag_is_accepted(self):
         entry = 0x80000000
@@ -131,9 +127,7 @@ class CalleeEffectsTests(unittest.TestCase):
     def test_truncated_invalid_and_overflowing_inputs_are_rejected(self):
         self.assertIsNone(self.recognize(WORDS[:-1]))
         for entry in (-4, 1, True, (1 << 64) - 44):
-            self.assertIsNone(
-                recognize_atomic32(lambda _: WORDS[0], entry, lambda *_: True)
-            )
+            self.assertIsNone(recognize_atomic32(lambda _: WORDS[0], entry, lambda *_: True))
         for invalid in (-1, 1 << 32, True):
             words = list(WORDS)
             words[7] = invalid
@@ -155,9 +149,7 @@ class CompareSwapEffectsTests(unittest.TestCase):
         self.assertEqual(summary.body_size, 52)
         self.assertEqual(
             summary.body_sha256,
-            hashlib.sha256(
-                b"".join(word.to_bytes(4, "little") for word in CAS_WORDS)
-            ).hexdigest(),
+            hashlib.sha256(b"".join(word.to_bytes(4, "little") for word in CAS_WORDS)).hexdigest(),
         )
         self.assertEqual(
             (
@@ -171,9 +163,7 @@ class CompareSwapEffectsTests(unittest.TestCase):
         )
         self.assertEqual(summary.flag_address, 0x51548)
         self.assertEqual([path.ret_pc for path in summary.paths], [0x1014, 0x1030, 0x1030])
-        self.assertTrue(
-            summary.preserves_sp and summary.preserves_lr and summary.preserves_vectors
-        )
+        self.assertTrue(summary.preserves_sp and summary.preserves_lr and summary.preserves_vectors)
         self.assertFalse(summary.preserves_nzcv)
 
     def test_initial_mismatch_and_retry_mismatch_keep_distinct_register_effects(self):
@@ -252,9 +242,7 @@ class CompareSwapEffectsTests(unittest.TestCase):
 
     def test_invalid_word_and_entry_bounds_are_rejected(self):
         for entry in (-4, 1, True, (1 << 64) - 48):
-            self.assertIsNone(
-                recognize_cas64(lambda _: CAS_WORDS[0], entry, lambda *_: True)
-            )
+            self.assertIsNone(recognize_cas64(lambda _: CAS_WORDS[0], entry, lambda *_: True))
         for invalid in (-1, 1 << 32, True):
             words = list(CAS_WORDS)
             words[7] = invalid

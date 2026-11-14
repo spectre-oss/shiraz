@@ -35,15 +35,24 @@ def main():
     parser.add_argument("--identity", default=os.environ.get("SHIRAZ_CODESIGN_IDENTITY"))
     args = parser.parse_args()
     WORK.mkdir(parents=True, exist_ok=True)
-    env = {key: value for key, value in environment(WORK).items()
-           if not key.startswith(("DYLD_", "LD_", "LINKER_", "BIONIC_", "BERBERIS_"))}
+    env = {
+        key: value
+        for key, value in environment(WORK).items()
+        if not key.startswith(("DYLD_", "LD_", "LINKER_", "BIONIC_", "BERBERIS_"))
+    }
     modes = ("adhoc", "hardened") if args.mode == "both" else (args.mode,)
     for mode in modes:
         evidence = {
             "scope": "single-thread real bridge/sigchain owner-reference drop; not ART unload quiescence",
-            "mode": mode, "command": None, "returncode": None, "phase": "preparing",
-            "execution_verified": False, "hardened_verified": False, "native_closure": None,
-            "foreign_owner_refusal_verified": False, "exhausted_keys_first_signal_verified": False,
+            "mode": mode,
+            "command": None,
+            "returncode": None,
+            "phase": "preparing",
+            "execution_verified": False,
+            "hardened_verified": False,
+            "native_closure": None,
+            "foreign_owner_refusal_verified": False,
+            "exhausted_keys_first_signal_verified": False,
         }
         # Invalidate prior success before staging/signing too, not just before
         # execution. Every failure must leave evidence of this attempt.
@@ -52,7 +61,10 @@ def main():
         (WORK / f"{mode}.foreign-owner.log").write_text("")
         (WORK / f"{mode}.key-exhaustion.log").write_text("")
         closure = stage_closure(
-            ROOT, HOST, WORK, env,
+            ROOT,
+            HOST,
+            WORK,
+            env,
             main_executable=ROOT / "build/macos/m5/signal-lifetime-probe",
         )
         evidence.update(phase="signing", native_closure=str(Path(closure["tree"]) / "closure.json"))
@@ -71,8 +83,9 @@ def main():
         # launch failure must leave this run's false evidence, never stale PASS.
         (WORK / f"{mode}.result.json").write_text(json.dumps(evidence, indent=2) + "\n")
         (WORK / f"{mode}.log").write_text("")
-        result = subprocess.run(command, cwd=WORK, env=env, text=True,
-                                capture_output=True, timeout=60, check=False)
+        result = subprocess.run(
+            command, cwd=WORK, env=env, text=True, capture_output=True, timeout=60, check=False
+        )
         (WORK / f"{mode}.log").write_text(result.stdout + result.stderr)
         evidence["returncode"] = result.returncode
         (WORK / f"{mode}.result.json").write_text(json.dumps(evidence, indent=2) + "\n")
@@ -82,11 +95,20 @@ def main():
             result.stdout, closure, [closure["main"], closure["bridge"], chain]
         )
         refusal_command = [*command, "--foreign-owner"]
-        evidence.update(refusal_command=refusal_command, refusal_returncode=None, phase="checking-foreign-owner")
+        evidence.update(
+            refusal_command=refusal_command, refusal_returncode=None, phase="checking-foreign-owner"
+        )
         (WORK / f"{mode}.result.json").write_text(json.dumps(evidence, indent=2) + "\n")
         (WORK / f"{mode}.foreign-owner.log").write_text("")
-        refusal = subprocess.run(refusal_command, cwd=WORK, env=env, text=True,
-                                 capture_output=True, timeout=60, check=False)
+        refusal = subprocess.run(
+            refusal_command,
+            cwd=WORK,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
         (WORK / f"{mode}.foreign-owner.log").write_text(refusal.stdout + refusal.stderr)
         evidence["refusal_returncode"] = refusal.returncode
         (WORK / f"{mode}.result.json").write_text(json.dumps(evidence, indent=2) + "\n")
@@ -96,33 +118,62 @@ def main():
             refusal.stdout, closure, [closure["main"], closure["bridge"], chain]
         )
         exhaustion_command = [*command, "--exhaust-keys"]
-        evidence.update(exhaustion_command=exhaustion_command, exhaustion_returncode=None,
-                        phase="checking-first-signal-with-keys-exhausted")
+        evidence.update(
+            exhaustion_command=exhaustion_command,
+            exhaustion_returncode=None,
+            phase="checking-first-signal-with-keys-exhausted",
+        )
         (WORK / f"{mode}.result.json").write_text(json.dumps(evidence, indent=2) + "\n")
         (WORK / f"{mode}.key-exhaustion.log").write_text("")
-        exhaustion = subprocess.run(exhaustion_command, cwd=WORK, env=env, text=True,
-                                    capture_output=True, timeout=60, check=False,
-                                    preexec_fn=no_child_core)
+        exhaustion = subprocess.run(
+            exhaustion_command,
+            cwd=WORK,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=60,
+            check=False,
+            preexec_fn=no_child_core,
+        )
         (WORK / f"{mode}.key-exhaustion.log").write_text(exhaustion.stdout + exhaustion.stderr)
         evidence["exhaustion_returncode"] = exhaustion.returncode
         (WORK / f"{mode}.result.json").write_text(json.dumps(evidence, indent=2) + "\n")
-        key_marker = re.search(r"^M5_SIGNAL_KEY_EXHAUSTION_PASS keys=(\d+) first_signal_delivered=1$",
-                               exhaustion.stdout, re.MULTILINE)
-        if (exhaustion.returncode or key_marker is None or int(key_marker[1]) > 65536
-                or MARKER not in exhaustion.stdout.splitlines()):
-            raise SystemExit("sigchain first-signal delivery failed with remaining pthread keys exhausted")
+        key_marker = re.search(
+            r"^M5_SIGNAL_KEY_EXHAUSTION_PASS keys=(\d+) first_signal_delivered=1$",
+            exhaustion.stdout,
+            re.MULTILINE,
+        )
+        if (
+            exhaustion.returncode
+            or key_marker is None
+            or int(key_marker[1]) > 65536
+            or MARKER not in exhaustion.stdout.splitlines()
+        ):
+            raise SystemExit(
+                "sigchain first-signal delivery failed with remaining pthread keys exhausted"
+            )
         exhaustion_inventory = validate_native_inventory(
             exhaustion.stdout, closure, [closure["main"], closure["bridge"], chain]
         )
-        closure.update(execution_verified=True, hardened_verified=mode == "hardened",
-                       native_image_inventory=inventory)
+        closure.update(
+            execution_verified=True,
+            hardened_verified=mode == "hardened",
+            native_image_inventory=inventory,
+        )
         write_manifest(closure)
-        evidence.update(execution_verified=True, hardened_verified=mode == "hardened", phase="verified",
-                        native_image_inventory=inventory, foreign_owner_refusal_verified=True,
-                        refusal_returncode=refusal.returncode, refusal_native_image_inventory=refusal_inventory,
-                        exhausted_keys_first_signal_verified=True, exhaustion_returncode=exhaustion.returncode,
-                        exhaustion_native_image_inventory=exhaustion_inventory,
-                        exhausted_fixture_key_count=int(key_marker[1]))
+        evidence.update(
+            execution_verified=True,
+            hardened_verified=mode == "hardened",
+            phase="verified",
+            native_image_inventory=inventory,
+            foreign_owner_refusal_verified=True,
+            refusal_returncode=refusal.returncode,
+            refusal_native_image_inventory=refusal_inventory,
+            exhausted_keys_first_signal_verified=True,
+            exhaustion_returncode=exhaustion.returncode,
+            exhaustion_native_image_inventory=exhaustion_inventory,
+            exhausted_fixture_key_count=int(key_marker[1]),
+        )
         (WORK / f"{mode}.result.json").write_text(json.dumps(evidence, indent=2) + "\n")
         print(f"M5_SIGNAL_LIFETIME_MODE_PASS mode={mode}")
 

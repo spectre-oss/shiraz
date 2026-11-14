@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Real patch metadata and local repository transitions; no dependency downloads."""
+
 import hashlib
 import subprocess
 import tempfile
@@ -27,13 +28,19 @@ class PatchRecipeTests(unittest.TestCase):
         for name in ('chain', 'other file'):
             (self.repo / name).write_text('original\n')
         self.git('add', '.')
-        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
-                 'commit', '-qm', 'fixture')
+        self.git(
+            '-c',
+            'user.name=Fixture',
+            '-c',
+            'user.email=fixture@example.invalid',
+            'commit',
+            '-qm',
+            'fixture',
+        )
         self.revision = self.git('rev-parse', 'HEAD').decode().strip()
 
     def git(self, *arguments):
-        return subprocess.check_output(['git', *arguments], cwd=self.repo,
-                                       stderr=subprocess.PIPE)
+        return subprocess.check_output(['git', *arguments], cwd=self.repo, stderr=subprocess.PIPE)
 
     def forward(self, name='forward.patch', target='chain'):
         path = self.repo / target
@@ -44,19 +51,29 @@ class PatchRecipeTests(unittest.TestCase):
 
     @contextmanager
     def recipes(self, recipes, sources=None):
-        with patch.object(bootstrap, 'ROOT', self.root), \
-                patch.object(bootstrap, 'SOURCES', sources or {'dependency': ('unused', self.revision)}), \
-                patch.object(bootstrap, 'PATCHES', {'dependency': recipes}), \
-                patch.object(bootstrap, 'PATCHES_DARWIN', {}):
+        with (
+            patch.object(bootstrap, 'ROOT', self.root),
+            patch.object(
+                bootstrap, 'SOURCES', sources or {'dependency': ('unused', self.revision)}
+            ),
+            patch.object(bootstrap, 'PATCHES', {'dependency': recipes}),
+            patch.object(bootstrap, 'PATCHES_DARWIN', {}),
+        ):
             yield
 
     def test_duplicate_recipe_rejected_before_any_clone_or_mutation(self):
         recipe = self.forward()
-        sources = {'not-created': ('unused', self.revision),
-                   'dependency': ('unused', self.revision)}
-        with self.recipes([recipe, recipe], sources), \
-                patch.object(bootstrap, 'run', side_effect=AssertionError('must preflight before mutation')), \
-            self.assertRaisesRegex(SystemExit, 'duplicate dependency patch name'):
+        sources = {
+            'not-created': ('unused', self.revision),
+            'dependency': ('unused', self.revision),
+        }
+        with (
+            self.recipes([recipe, recipe], sources),
+            patch.object(
+                bootstrap, 'run', side_effect=AssertionError('must preflight before mutation')
+            ),
+            self.assertRaisesRegex(SystemExit, 'duplicate dependency patch name'),
+        ):
             bootstrap.sources()
         self.assertFalse((self.root / 'context/not-created').exists())
         self.assertEqual((self.repo / 'chain').read_bytes(), b'original\n')
@@ -64,29 +81,39 @@ class PatchRecipeTests(unittest.TestCase):
     def test_declared_targets_cannot_hide_a_different_or_extra_file(self):
         recipe = self.forward()
         wrong = (recipe[0], {'other file': digest(b'legacy\n')})
-        with self.recipes([wrong]), patch.object(bootstrap, 'run', side_effect=AssertionError('no mutation')), \
-            self.assertRaisesRegex(SystemExit, 'targets differ from recipe'):
+        with (
+            self.recipes([wrong]),
+            patch.object(bootstrap, 'run', side_effect=AssertionError('no mutation')),
+            self.assertRaisesRegex(SystemExit, 'targets differ from recipe'),
+        ):
             bootstrap.sources()
         (self.repo / 'chain').write_text('legacy\n')
         (self.repo / 'other file').write_text('legacy\n')
         (self.root / 'patches/extra.patch').write_bytes(self.git('diff'))
         self.git('checkout', '--', '.')
-        with self.recipes([('extra.patch', {'chain': digest(b'legacy\n')})]), \
-                patch.object(bootstrap, 'run', side_effect=AssertionError('no mutation')), \
-            self.assertRaisesRegex(SystemExit, 'targets differ from recipe'):
+        with (
+            self.recipes([('extra.patch', {'chain': digest(b'legacy\n')})]),
+            patch.object(bootstrap, 'run', side_effect=AssertionError('no mutation')),
+            self.assertRaisesRegex(SystemExit, 'targets differ from recipe'),
+        ):
             bootstrap.sources()
         self.assertEqual((self.repo / 'chain').read_bytes(), b'original\n')
         self.assertEqual((self.repo / 'other file').read_bytes(), b'original\n')
 
     def test_missing_malformed_and_unsafe_patches_fail_without_source_changes(self):
         (self.root / 'patches/broken.patch').write_text('not a patch\n')
-        cases = [('missing.patch', {'chain': digest(b'legacy\n')}, 'missing'),
-                 ('broken.patch', {'chain': digest(b'legacy\n')}, 'malformed'),
-                 ('../escape.patch', {'chain': digest(b'legacy\n')}, 'unsafe')]
+        cases = [
+            ('missing.patch', {'chain': digest(b'legacy\n')}, 'missing'),
+            ('broken.patch', {'chain': digest(b'legacy\n')}, 'malformed'),
+            ('../escape.patch', {'chain': digest(b'legacy\n')}, 'unsafe'),
+        ]
         for name, files, reason in cases:
-            with self.subTest(name=name), self.recipes([(name, files)]), \
-                    patch.object(bootstrap, 'run', side_effect=AssertionError('no mutation')), \
-                self.assertRaisesRegex(SystemExit, reason):
+            with (
+                self.subTest(name=name),
+                self.recipes([(name, files)]),
+                patch.object(bootstrap, 'run', side_effect=AssertionError('no mutation')),
+                self.assertRaisesRegex(SystemExit, reason),
+            ):
                 bootstrap.sources()
         self.assertEqual((self.repo / 'chain').read_bytes(), b'original\n')
 
@@ -106,7 +133,9 @@ class PatchRecipeTests(unittest.TestCase):
         path.write_text('original\n')
         reset = ('reset.patch', {'chain': digest(b'original\n')})
         with self.recipes([forward, reset]):
-            with patch.object(bootstrap, 'run', side_effect=AssertionError('fresh is already final')):
+            with patch.object(
+                bootstrap, 'run', side_effect=AssertionError('fresh is already final')
+            ):
                 bootstrap.sources()
             path.write_text('legacy\n')
             bootstrap.sources()
@@ -123,7 +152,9 @@ class PatchRecipeTests(unittest.TestCase):
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
         archive = self.root / 'nested source archive'
         (archive / 'patches').mkdir(parents=True)
-        (archive / 'patches' / recipe[0]).write_bytes((self.root / 'patches' / recipe[0]).read_bytes())
+        (archive / 'patches' / recipe[0]).write_bytes(
+            (self.root / 'patches' / recipe[0]).read_bytes()
+        )
         with patch.object(bootstrap, 'ROOT', archive):
             bootstrap.validate_patch_recipes([recipe])
         self.assertEqual((self.repo / 'chain').read_bytes(), b'original\n')

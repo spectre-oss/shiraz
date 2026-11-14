@@ -7,6 +7,7 @@ source or header that differs from the base revision, the text left after
 removing those blocks with `unifdef -U__APPLE__` must match the base revision
 byte for byte. New files are reported but not compared.
 """
+
 import argparse
 import subprocess
 import sys
@@ -20,7 +21,9 @@ def git(*args, check=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--base', default='main', help='revision holding the Linux baseline (default: main)')
+    parser.add_argument(
+        '--base', default='main', help='revision holding the Linux baseline (default: main)'
+    )
     args = parser.parse_args()
     names = git('diff', '--name-only', '--diff-filter=AM', args.base, '--').decode().split()
     names += git('ls-files', '--others', '--exclude-standard').decode().split()

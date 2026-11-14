@@ -17,8 +17,13 @@ from guest_namespace import STRIDE, NamespaceDecoder
 
 
 def ins(pc, op, *operands):
-    return audit.Instruction(pc, op, operands, tpidr_read=op == "mrs",
-                             control_transfer=op in {"b", "bl", "cbz", "cbnz", "tbz", "tbnz"} or op.startswith("b."))
+    return audit.Instruction(
+        pc,
+        op,
+        operands,
+        tpidr_read=op == "mrs",
+        control_transfer=op in {"b", "bl", "cbz", "cbnz", "tbz", "tbnz"} or op.startswith("b."),
+    )
 
 
 def r(name):
@@ -42,21 +47,46 @@ class NamespaceTests(unittest.TestCase):
         self.provider_path = self.directory / "libprovider.so"
         self.root_path.write_bytes(b"synthetic root identity only")
         self.provider_path.write_bytes(b"synthetic provider identity only")
-        self.report = {"schema": 1, "namespace": "nativebridge", "snapshot": "post-link-before-open",
-                       "modules": [{"name": path.name, "file": str(path),
-                                    "elf_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-                                   for path in (self.root_path, self.provider_path)]}
+        self.report = {
+            "schema": 1,
+            "namespace": "nativebridge",
+            "snapshot": "post-link-before-open",
+            "modules": [
+                {
+                    "name": path.name,
+                    "file": str(path),
+                    "elf_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+                for path in (self.root_path, self.provider_path)
+            ],
+        }
         self.report_path = self.directory / "bindings.json"
-        self.root_graph = {x.address: x for x in [
-            ins(0, "mrs", r("x19")), ins(4, "ldr", r("x8"), mem("x19", 40)),
-            ins(8, "bl", i(64)), ins(12, "mov", r("x19"), r("xzr")), ins(16, "ret"),
-            ins(64, "adrp", r("x16"), i(0))]}
-        self.provider_graph = {x.address: x for x in [
-            ins(32, "sub", r("sp"), r("sp"), i(16)), ins(36, "str", r("x30"), mem("sp", 8)),
-            ins(40, "bl", i(80)), ins(44, "ldr", r("x30"), mem("sp", 8)),
-            ins(48, "add", r("sp"), r("sp"), i(16)), ins(52, "ret"),
-            ins(80, "mov", r("x0"), i(0)), ins(84, "ret"),
-            ins(120, "adrp", r("x10"), i(0x100)), ins(124, "add", r("x10"), r("x10"), i(8))]}
+        self.root_graph = {
+            x.address: x
+            for x in [
+                ins(0, "mrs", r("x19")),
+                ins(4, "ldr", r("x8"), mem("x19", 40)),
+                ins(8, "bl", i(64)),
+                ins(12, "mov", r("x19"), r("xzr")),
+                ins(16, "ret"),
+                ins(64, "adrp", r("x16"), i(0)),
+            ]
+        }
+        self.provider_graph = {
+            x.address: x
+            for x in [
+                ins(32, "sub", r("sp"), r("sp"), i(16)),
+                ins(36, "str", r("x30"), mem("sp", 8)),
+                ins(40, "bl", i(80)),
+                ins(44, "ldr", r("x30"), mem("sp", 8)),
+                ins(48, "add", r("sp"), r("sp"), i(16)),
+                ins(52, "ret"),
+                ins(80, "mov", r("x0"), i(0)),
+                ins(84, "ret"),
+                ins(120, "adrp", r("x10"), i(0x100)),
+                ins(124, "add", r("x10"), r("x10"), i(8)),
+            ]
+        }
         self.provider_name = "libprovider.so"
 
     def decoder(self, factory=None):
@@ -67,10 +97,13 @@ class NamespaceTests(unittest.TestCase):
             def __init__(self, path, report_path, bridge):
                 self.data = path.read_bytes()
                 self.bindings = SimpleNamespace(
-                    name=path.name, proof_hash=hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                    name=path.name,
+                    proof_hash=hashlib.sha256(report_path.read_bytes()).hexdigest(),
                     symbol_count=2,
-                    loads=[(0, 0x1000, 0, len(self.data), 4)], number=lambda value: int(value, 16),
-                    proof={24: {"provider": owner.provider_name}})
+                    loads=[(0, 0x1000, 0, len(self.data), 4)],
+                    number=lambda value: int(value, 16),
+                    proof={24: {"provider": owner.provider_name}},
+                )
                 self.binding_metadata_unavailable = None
                 self.identity = {"version": "synthetic-only"}
                 self.graph = owner.root_graph if path == owner.root_path else owner.provider_graph
@@ -80,8 +113,12 @@ class NamespaceTests(unittest.TestCase):
 
             def plt(self, pc):
                 if self.bindings.name == "libroot.so" and pc == 64:
-                    return {"target": None, "slot": "0x18", "symbol": "work",
-                            "reason": "external-or-preempted-namespace-binding"}
+                    return {
+                        "target": None,
+                        "slot": "0x18",
+                        "symbol": "work",
+                        "reason": "external-or-preempted-namespace-binding",
+                    }
                 return None
 
             def word(self, pc):
@@ -99,13 +136,21 @@ class NamespaceTests(unittest.TestCase):
             def cas64(self, pc):
                 return None
 
-        return NamespaceDecoder(self.root_path, self.report_path, self.directory, factory or FakeDecoder)
+        return NamespaceDecoder(
+            self.root_path, self.report_path, self.directory, factory or FakeDecoder
+        )
 
     def edge(self):
         # Only address routing is mocked here. The separate cross-binding test
         # module independently verifies actual metadata rejection/selection.
-        return patch("guest_namespace.guest_cross_binding.verify_guest_target", return_value={
-            "target": 32, "provider": "libprovider.so", "reason": "cross-module-production-binding"})
+        return patch(
+            "guest_namespace.guest_cross_binding.verify_guest_target",
+            return_value={
+                "target": 32,
+                "provider": "libprovider.so",
+                "reason": "cross-module-production-binding",
+            },
+        )
 
     def test_guest_cross_call_keeps_nested_sp_and_exact_return_pc(self):
         decoder = self.decoder()
@@ -117,13 +162,21 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(result["plt_bindings"][0]["target_module"], "libprovider.so")
 
     def test_foreign_mrs_is_reseeded_and_unsafe_use_is_not_erased(self):
-        self.provider_graph = {x.address: x for x in [
-            ins(32, "mrs", r("x20")), ins(36, "ldr", r("x8"), mem("x20", 8)),
-            ins(40, "mov", r("x20"), r("xzr")), ins(44, "ret")]}
+        self.provider_graph = {
+            x.address: x
+            for x in [
+                ins(32, "mrs", r("x20")),
+                ins(36, "ldr", r("x8"), mem("x20", 8)),
+                ins(40, "mov", r("x20"), r("xzr")),
+                ins(44, "ret"),
+            ]
+        }
         with self.edge():
             result = audit.Audit(self.decoder()).site(0)
         self.assertEqual(result["classification"], "unknown")
-        self.assertIn("non-guard-or-unmodelled-tls-memory-access", {x["reason"] for x in result["reasons"]})
+        self.assertIn(
+            "non-guard-or-unmodelled-tls-memory-access", {x["reason"] for x in result["reasons"]}
+        )
 
     def test_native_provider_has_no_guest_body_fallback(self):
         self.provider_name = "libc.so"
@@ -137,7 +190,9 @@ class NamespaceTests(unittest.TestCase):
             result = audit.Audit(self.decoder()).site(0)
         verify.assert_not_called()
         self.assertEqual(result["classification"], "unknown")
-        self.assertIn("PLT-binding:cross-binding-symbol-work-budget", {x["reason"] for x in result["reasons"]})
+        self.assertIn(
+            "PLT-binding:cross-binding-symbol-work-budget", {x["reason"] for x in result["reasons"]}
+        )
 
     def test_pc_relative_operands_rebase_but_scalar_immediates_do_not(self):
         decoder = self.decoder()
@@ -152,11 +207,18 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(decoder.sites(), [0])
 
     def test_image_arithmetic_cannot_change_origin_module(self):
-        self.root_graph.update({x.address: x for x in [
-            ins(8, "adr", r("x10"), i(STRIDE - 4)),
-            ins(12, "add", r("x10"), r("x10"), i(8)),
-            ins(16, "ldr", r("x11"), mem("x10")),
-            ins(20, "mov", r("x19"), r("xzr")), ins(24, "ret")]})
+        self.root_graph.update(
+            {
+                x.address: x
+                for x in [
+                    ins(8, "adr", r("x10"), i(STRIDE - 4)),
+                    ins(12, "add", r("x10"), r("x10"), i(8)),
+                    ins(16, "ldr", r("x11"), mem("x10")),
+                    ins(20, "mov", r("x19"), r("xzr")),
+                    ins(24, "ret"),
+                ]
+            }
+        )
         decoder = self.decoder()
         self.assertIsNone(decoder.adjust_image_address(STRIDE - 4, 8))
         self.assertIsNone(decoder.adjust_image_address(STRIDE + 4, -8))
@@ -186,7 +248,9 @@ class NamespaceTests(unittest.TestCase):
         self.report["modules"][1]["elf_sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "hash mismatch"):
             self.decoder()
-        self.report["modules"][1]["elf_sha256"] = hashlib.sha256(self.provider_path.read_bytes()).hexdigest()
+        self.report["modules"][1]["elf_sha256"] = hashlib.sha256(
+            self.provider_path.read_bytes()
+        ).hexdigest()
         self.report["modules"][1]["file"] = str(self.root_path)
         with self.assertRaisesRegex(ValueError, "explicit directory"):
             self.decoder()
@@ -210,8 +274,12 @@ class NamespaceTests(unittest.TestCase):
 
         # Existing files fit, but the selected file grows after stat. Closing
         # BytesIO must retain the observed read position for the assertion.
-        with patch.object(growing, "close"), patch("guest_namespace.MAX_FILE", 32), \
-                patch.object(Path, "open", open_file), self.assertRaisesRegex(ValueError, "aggregate"):
+        with (
+            patch.object(growing, "close"),
+            patch("guest_namespace.MAX_FILE", 32),
+            patch.object(Path, "open", open_file),
+            self.assertRaisesRegex(ValueError, "aggregate"),
+        ):
             self.decoder()
         self.assertEqual(growing.tell(), 33)
 

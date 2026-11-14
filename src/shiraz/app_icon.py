@@ -6,8 +6,8 @@ pools, dense and sparse (FLAG_SPARSE) type chunks, 16-bit offsets
 (FLAG_OFFSET16) and compact entries (FLAG_COMPACT). Only the lookups needed to
 resolve an icon are implemented; the APK is never modified.
 """
+
 import json
-import struct
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -26,7 +26,12 @@ DENSITY_ANY = 0xFFFE
 DENSITY_NONE = 0xFFFF
 TYPE_REFERENCE, TYPE_STRING = 0x01, 0x03
 TYPE_COLORS = range(0x1C, 0x20)
-IMAGE_MAGIC = {'.png': (b'\x89PNG\r\n\x1a\n',), '.webp': (b'RIFF',), '.jpg': (b'\xff\xd8\xff',), '.jpeg': (b'\xff\xd8\xff',)}
+IMAGE_MAGIC = {
+    '.png': (b'\x89PNG\r\n\x1a\n',),
+    '.webp': (b'RIFF',),
+    '.jpg': (b'\xff\xd8\xff',),
+    '.jpeg': (b'\xff\xd8\xff',),
+}
 
 
 class ResourceTable:
@@ -71,7 +76,7 @@ class ResourceTable:
     def _package(self, start, header, end):
         if header < 284:
             raise FormatError('short resources.arsc package header')
-        package, = self._unpack('<I', start + 8, end)
+        (package,) = self._unpack('<I', start + 8, end)
         if not 0 < package < 256:
             return
         pos = start + header
@@ -80,7 +85,7 @@ class ResourceTable:
             if kind == 0x0201:
                 if size < 20 + 4:
                     raise FormatError('short resources.arsc type header')
-                type_id, = self._unpack('<B', pos + 8, end)
+                (type_id,) = self._unpack('<B', pos + 8, end)
                 chunks = self.chunks.setdefault((package, type_id), [])
                 if len(chunks) >= 4096:
                     raise FormatError('too many resources.arsc type configurations')
@@ -96,11 +101,11 @@ class ResourceTable:
         result = []
         for start, header, end in self.chunks.get(key, ()):
             _, flags, _, count, entries_start = self._unpack('<BBHII', start + 8, end)
-            config_size, = self._unpack('<I', start + 20, end)
+            (config_size,) = self._unpack('<I', start + 20, end)
             density = language = 0
             if config_size >= 16 and header >= 20 + 16:
-                language, = self._unpack('<I', start + 20 + 8, end)
-                density, = self._unpack('<H', start + 20 + 14, end)
+                (language,) = self._unpack('<I', start + 20 + 8, end)
+                (density,) = self._unpack('<H', start + 20 + 14, end)
             offset = self._entry_offset(start + header, flags, count, entry, end)
             if offset is None:
                 continue
@@ -124,15 +129,15 @@ class ResourceTable:
         if entry >= count:
             return None
         if flags & 0x02:
-            offset16, = self._unpack('<H', table + entry * 2, end)
+            (offset16,) = self._unpack('<H', table + entry * 2, end)
             return None if offset16 == 0xFFFF else offset16 * 4
-        offset, = self._unpack('<I', table + entry * 4, end)
+        (offset,) = self._unpack('<I', table + entry * 4, end)
         return None if offset == NO_ENTRY else offset
 
     def _entry_value(self, pos, end):
         size, flags = self._unpack('<HH', pos, end)
         if flags & 0x0008:  # Compact: type in the high flag byte, data inline.
-            data, = self._unpack('<I', pos + 4, end)
+            (data,) = self._unpack('<I', pos + 4, end)
             return flags >> 8, data
         if flags & 0x0001:  # Complex bags (styles, arrays) are not icons.
             return None
@@ -189,8 +194,11 @@ class IconResolver:
         return 160 if density in (0, DENSITY_NONE) else density
 
     def raster(self, res_id):
-        files = [(self.rank(d), v) for d, kind, v in self.candidates(res_id)
-                 if kind == 'file' and d != DENSITY_ANY and image_suffix(v)]
+        files = [
+            (self.rank(d), v)
+            for d, kind, v in self.candidates(res_id)
+            if kind == 'file' and d != DENSITY_ANY and image_suffix(v)
+        ]
         return max(files)[1] if files else None
 
     def layer(self, element, depth):
@@ -226,7 +234,9 @@ class IconResolver:
                 root = self.parse_xml(value)
                 if root.tag in ('bitmap', 'inset', 'layer-list'):
                     return self.layer(root, depth)
-                raise FormatError(f'unsupported icon drawable <{root.tag}> (vector icons are not rendered yet)')
+                raise FormatError(
+                    f'unsupported icon drawable <{root.tag}> (vector icons are not rendered yet)'
+                )
         return None
 
     def parse_xml(self, name):

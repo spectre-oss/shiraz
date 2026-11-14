@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Build pinned HTTP/crypto/TLS modules for the Darwin ART tree, entirely in-tree."""
+
 import fcntl
 import json
 import platform
@@ -47,9 +48,19 @@ def main():
         stamp = build / 'shiraz-config.json'
         config = {'pin': SOURCES['wolfssl'][1], 'prefix': str(PREFIX), 'flags': env['CFLAGS']}
         if not stamp.exists() or json.loads(stamp.read_text()) != config:
-            run([source / 'configure', '--prefix=' + str(PREFIX), '--enable-shared',
-                 '--disable-static', '--enable-jni', '--disable-examples', '--disable-crypttests'],
-                cwd=build, env=env)
+            run(
+                [
+                    source / 'configure',
+                    '--prefix=' + str(PREFIX),
+                    '--enable-shared',
+                    '--disable-static',
+                    '--enable-jni',
+                    '--disable-examples',
+                    '--disable-crypttests',
+                ],
+                cwd=build,
+                env=env,
+            )
             stamp.write_text(json.dumps(config) + '\n')
         run(['make', '-j2'], cwd=build, env=env)
         run(['make', 'install'], cwd=build, env=env)
@@ -65,11 +76,19 @@ def main():
             fresh.replace(target)
             # Match the ART library's @loader_path rpath rather than baking in
             # this checkout's .local path. Only touch the newly built JNI file.
-            run(['install_name_tool', '-change', str(dylib), '@rpath/' + dylib.name,
-                 host / 'lib64/libwolfssljni.so'])
+            run(
+                [
+                    'install_name_tool',
+                    '-change',
+                    str(dylib),
+                    '@rpath/' + dylib.name,
+                    host / 'lib64/libwolfssljni.so',
+                ]
+            )
         refresh_vnodes(host)
-        desugar_boot(ROOT, NETWORK_MODULES, host=tree / 'out/host', host_tag=HOST_TAG,
-                     work=work / 'boot')
+        desugar_boot(
+            ROOT, NETWORK_MODULES, host=tree / 'out/host', host_tag=HOST_TAG, work=work / 'boot'
+        )
         print('MACOS_NETWORK_MODULES_BUILT (runtime verification still required)')
 
 

@@ -6,6 +6,7 @@ ownership of five inferred table spans. Matching does not authenticate actual
 arrays, published values, stack exclusion or the returned cell. No dereference
 of the returned pointer, native-memory purity or complete TLS consumer follows.
 """
+
 import hashlib
 from dataclasses import dataclass
 
@@ -18,20 +19,77 @@ UINT64_END = 1 << 64
 # Independently bounded compiled 252-byte function. Only the five ADRP/ADD
 # pairs are relocatable. Acquire loads admit their exact LDAR/LDAPR variants.
 _WORDS = (
-    0xAA0003E8, 0xD2800000, 0xD53BD069, 0xF2400D1F, 0x54000741, 0xB4000728,
-    0xB4000709, 0xD280000A, 0, 0, 0, 0,
-    0x14000004, 0x9100214A, 0xF140215F, 0x540005C0, 0x8B0A018D, 0xF8BFC1AD,
-    0xF10009BF, 0x54FFFF43, 0xF86A696E, 0xEB0901DF, 0x54FFFEE1, 0,
-    0, 0xF86A69CF, 0, 0, 0xF86A69D0, 0xEB10011F,
-    0xFA4F3100, 0xFA5021E2, 0x540003A2, 0, 0, 0x8B0A01C8,
-    0xF8BFC108, 0xB4000308, 0xD2800000, 0xB100151F, 0x540002C8, 0x92400511,
-    0xB5000291, 0xEB10011F, 0x54000082, 0x91001110, 0xEB1001FF, 0x540001C3,
-    0x8B0A018C, 0xF8BFC18C, 0xEB0D019F, 0x54000141, 0x8B0A016B, 0xF8BFC16B,
-    0xEB09017F, 0x540000C1, 0x8B0A01C9, 0xF8BFC129, 0xEB08013F, 0x9A9F0100,
-    0xD65F03C0, 0xD2800000, 0xD65F03C0,
+    0xAA0003E8,
+    0xD2800000,
+    0xD53BD069,
+    0xF2400D1F,
+    0x54000741,
+    0xB4000728,
+    0xB4000709,
+    0xD280000A,
+    0,
+    0,
+    0,
+    0,
+    0x14000004,
+    0x9100214A,
+    0xF140215F,
+    0x540005C0,
+    0x8B0A018D,
+    0xF8BFC1AD,
+    0xF10009BF,
+    0x54FFFF43,
+    0xF86A696E,
+    0xEB0901DF,
+    0x54FFFEE1,
+    0,
+    0,
+    0xF86A69CF,
+    0,
+    0,
+    0xF86A69D0,
+    0xEB10011F,
+    0xFA4F3100,
+    0xFA5021E2,
+    0x540003A2,
+    0,
+    0,
+    0x8B0A01C8,
+    0xF8BFC108,
+    0xB4000308,
+    0xD2800000,
+    0xB100151F,
+    0x540002C8,
+    0x92400511,
+    0xB5000291,
+    0xEB10011F,
+    0x54000082,
+    0x91001110,
+    0xEB1001FF,
+    0x540001C3,
+    0x8B0A018C,
+    0xF8BFC18C,
+    0xEB0D019F,
+    0x54000141,
+    0x8B0A016B,
+    0xF8BFC16B,
+    0xEB09017F,
+    0x540000C1,
+    0x8B0A01C9,
+    0xF8BFC129,
+    0xEB08013F,
+    0x9A9F0100,
+    0xD65F03C0,
+    0xD2800000,
+    0xD65F03C0,
 )
-_TABLE_PAIRS = ((8, 12, 'owners'), (10, 11, 'keys'), (23, 14, 'low'),
-                (26, 14, 'high'), (33, 14, 'errno-cells'))
+_TABLE_PAIRS = (
+    (8, 12, 'owners'),
+    (10, 11, 'keys'),
+    (23, 14, 'low'),
+    (26, 14, 'high'),
+    (33, 14, 'errno-cells'),
+)
 _ACQUIRES = ((17, 13, 13), (36, 8, 8), (49, 12, 12), (53, 11, 11), (57, 9, 9))
 _DYNAMIC = frozenset(index + delta for index, _, _ in _TABLE_PAIRS for delta in (0, 1))
 _ACQUIRE_INDICES = frozenset(index for index, _, _ in _ACQUIRES)
@@ -103,17 +161,19 @@ def recognize_prepared_errno(read_word, entry, owned_readable_data):
     words = tuple(read_word(entry + index * 4) for index in range(BODY_WORDS))
     if any(type(word) is not int or not 0 <= word < 1 << 32 for word in words):
         return None
-    if any(word != _WORDS[index] for index, word in enumerate(words)
-           if index not in _DYNAMIC and index not in _ACQUIRE_INDICES):
+    if any(
+        word != _WORDS[index]
+        for index, word in enumerate(words)
+        if index not in _DYNAMIC and index not in _ACQUIRE_INDICES
+    ):
         return None
     for index, base, target in _ACQUIRES:
-        if words[index] not in (0xF8BFC000 | base << 5 | target,
-                                0xC8DFFC00 | base << 5 | target):
+        if words[index] not in (0xF8BFC000 | base << 5 | target, 0xC8DFFC00 | base << 5 | target):
             return None
     tables = []
     spans = [(entry, entry + BODY_BYTES)]
     for index, register, role in _TABLE_PAIRS:
-        adrp, add = words[index:index + 2]
+        adrp, add = words[index : index + 2]
         if adrp & 0x9F00001F != 0x90000000 | register:
             return None
         if add & 0xFFC003FF != 0x91000000 | register << 5 | register:
@@ -132,7 +192,9 @@ def recognize_prepared_errno(read_word, entry, owned_readable_data):
         spans.append((address, end))
         tables.append(PreparedErrnoTable(role, address))
     return PreparedErrnoEffects(
-        entry, BODY_BYTES,
+        entry,
+        BODY_BYTES,
         hashlib.sha256(b''.join(word.to_bytes(4, 'little') for word in words)).hexdigest(),
-        tuple(tables), (entry + 240, entry + 248),
+        tuple(tables),
+        (entry + 240, entry + 248),
     )

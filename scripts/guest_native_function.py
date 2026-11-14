@@ -74,22 +74,36 @@ def read_native_function(source, symbol):
     if cursor != limit or starts is None:
         raise ValueError('missing native function-start command')
     offset, size = starts
-    if not 0 < size <= MAX_START_BYTES or offset > len(image.data) or size > len(image.data) - offset:
+    if (
+        not 0 < size <= MAX_START_BYTES
+        or offset > len(image.data)
+        or size > len(image.data) - offset
+    ):
         raise ValueError('native function-start byte bound')
-    owners = sum(name == '__LINKEDIT' and protection & 1 and not protection & 4
-                 and offset >= start and offset - start <= length
-                 and size <= length - (offset - start)
-                 for _, _, start, length, protection, name in image.segments)
+    owners = sum(
+        name == '__LINKEDIT'
+        and protection & 1
+        and not protection & 4
+        and offset >= start
+        and offset - start <= length
+        and size <= length - (offset - start)
+        for _, _, start, length, protection, name in image.segments
+    )
     if owners != 1:
         raise ValueError('native function-start data lacks independent linkedit ownership')
     if any(offset < start + length and start < offset + size for start, length in symbol_spans):
         raise ValueError('native function-start data overlaps symbols/strings')
-    data = image.data[offset:offset + size]
+    data = image.data[offset : offset + size]
     cursor, address = 0, image.base
     addresses = []
-    text_sections = sorted((section for section in image.sections
-                            if section[1] and image._text(section, section[0], section[1])),
-                           key=lambda section: section[0])
+    text_sections = sorted(
+        (
+            section
+            for section in image.sections
+            if section[1] and image._text(section, section[0], section[1])
+        ),
+        key=lambda section: section[0],
+    )
     if any(left[0] + left[1] > right[0] for left, right in pairwise(text_sections)):
         raise ValueError('overlapping native function-start text sections')
     text_index = 0
@@ -104,11 +118,16 @@ def read_native_function(source, symbol):
         if len(addresses) >= MAX_STARTS or delta > UINT64_END - 1 - address:
             raise ValueError('native function-start count/address bound')
         address += delta
-        while (text_index < len(text_sections)
-               and text_sections[text_index][0] + text_sections[text_index][1] <= address):
+        while (
+            text_index < len(text_sections)
+            and text_sections[text_index][0] + text_sections[text_index][1] <= address
+        ):
             text_index += 1
-        if (address & 3 or text_index == len(text_sections)
-                or not image._text(text_sections[text_index], address, 4)):
+        if (
+            address & 3
+            or text_index == len(text_sections)
+            or not image._text(text_sections[text_index], address, 4)
+        ):
             raise ValueError('native function start lacks aligned complete RX text')
         addresses.append(address)
     if not terminated:
@@ -124,13 +143,15 @@ def read_native_function(source, symbol):
     if not 0 < size <= MAX_FUNCTION_BYTES or size & 3:
         raise ValueError('native function body size bound')
     sections = [section for section in image.sections if image._text(section, image.entry, size)]
-    intersections = sum(bool(section[1]) and section[0] < end
-                        and image.entry < section[0] + section[1] for section in image.sections)
+    intersections = sum(
+        bool(section[1]) and section[0] < end and image.entry < section[0] + section[1]
+        for section in image.sections
+    )
     if len(sections) != 1 or intersections != 1:
         raise ValueError('native function body crosses text ownership')
     section = sections[0]
     offset = section[2] + image.entry - section[0]
-    return NativeFunction(image.entry, end, image.data[offset:offset + size])
+    return NativeFunction(image.entry, end, image.data[offset : offset + size])
 
 
 def read_native_function_at(source, anchor_symbol, target):
@@ -156,12 +177,16 @@ def read_native_function_at(source, anchor_symbol, target):
     names = set()
     for index in range(number):
         string, kind, section, description, value = struct.unpack_from(
-            '<IBBHQ', image.data, symbols + index * 16)
-        if value != target or kind & 0xe0:
+            '<IBBHQ', image.data, symbols + index * 16
+        )
+        if value != target or kind & 0xE0:
             continue
-        if (kind & 0xe != 0xe or description & 0x100
-                or not 1 <= section <= len(image.sections)
-                or not image._text(image.sections[section - 1], target, 4)):
+        if (
+            kind & 0xE != 0xE
+            or description & 0x100
+            or not 1 <= section <= len(image.sections)
+            or not image._text(image.sections[section - 1], target, 4)
+        ):
             raise ValueError('native target symbol lacks text definition')
         # The anchor reader already bounded every symbol string. Recheck here
         # to keep the selected identity independent of that implementation detail.

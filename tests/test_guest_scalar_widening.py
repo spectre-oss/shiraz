@@ -14,10 +14,12 @@ from guest_scalar_widening import ScalarWidening
 class ScalarWideningTests(unittest.TestCase):
     def test_initial_variants_stay_exact_then_all_observations_intersect(self):
         widening = ScalarWidening(1)
-        states = [({'x0': 4, 'x1': 7}, {'x0', 'x1'}),
-                  ({'x0': 5, 'x1': 7}, {'x0', 'x1'}),
-                  ({'x0': 6, 'x1': 7}, {'x1'}),
-                  ({'x0': 7, 'x1': 7}, {'x0', 'x1'})]
+        states = [
+            ({'x0': 4, 'x1': 7}, {'x0', 'x1'}),
+            ({'x0': 5, 'x1': 7}, {'x0', 'x1'}),
+            ({'x0': 6, 'x1': 7}, {'x1'}),
+            ({'x0': 7, 'x1': 7}, {'x0', 'x1'}),
+        ]
         for index, (constants, upper) in enumerate(states):
             result = widening.observe('pc', constants, upper)
             self.assertEqual(result.widened, index == 3)
@@ -61,11 +63,15 @@ class ScalarWideningTests(unittest.TestCase):
         widening = ScalarWidening(1, max_variants=2)
         constants, upper = {'x1': 2, 'x0': 1}, {'x0'}
         result = widening.observe('pc', constants, upper)
-        constants['x0'] = 9;constants['x2'] = 3;upper.add('x2')
+        constants['x0'] = 9
+        constants['x2'] = 3
+        upper.add('x2')
         self.assertEqual(result.constants, (('x0', 1), ('x1', 2)))
         self.assertEqual(result.zero_upper, frozenset({'x0'}))
-        with self.assertRaises(FrozenInstanceError):result.widened = True
-        with self.assertRaises(TypeError):result.constants[0] = ('x0', 4)
+        with self.assertRaises(FrozenInstanceError):
+            result.widened = True
+        with self.assertRaises(TypeError):
+            result.constants[0] = ('x0', 4)
         next_result = widening.observe('pc', {'x0': 1, 'x1': 2}, {'x0'})
         self.assertEqual(next_result.constants, result.constants)
         self.assertEqual(next_result.zero_upper, result.zero_upper)
@@ -83,8 +89,11 @@ class ScalarWideningTests(unittest.TestCase):
             widening = ScalarWidening(1, max_variants=2)
             widening.observe(0, *first)
             result = widening.observe(0, *second)
-            expected = {name: value for name, value in first[0].items()
-                        if name in second[0] and second[0][name] == value}
+            expected = {
+                name: value
+                for name, value in first[0].items()
+                if name in second[0] and second[0][name] == value
+            }
             self.assertEqual(dict(result.constants), expected)
             self.assertEqual(result.zero_upper, first[1] & second[1])
             # A third observation can only remove the widened facts.
@@ -104,14 +113,24 @@ class ScalarWideningTests(unittest.TestCase):
 
     def test_invalid_configuration_and_inputs_do_not_mutate_groups(self):
         for bounds in ((-1, 4), (1, 0)):
-            with self.subTest(bounds=bounds), self.assertRaises(ValueError):ScalarWidening(*bounds)
+            with self.subTest(bounds=bounds), self.assertRaises(ValueError):
+                ScalarWidening(*bounds)
         for bounds in ((True, 4), (1, False), (1.0, 4)):
-            with self.subTest(bounds=bounds), self.assertRaises(TypeError):ScalarWidening(*bounds)
+            with self.subTest(bounds=bounds), self.assertRaises(TypeError):
+                ScalarWidening(*bounds)
         widening = ScalarWidening(1)
-        for key, constants, upper in (([], {}, set()), ('pc', [], set()),
-                                       ('pc', {'x0': True}, set()), ('pc', {0: 1}, set()),
-                                       ('pc', {}, ['x0']), ('pc', {}, {0})):
-            with self.subTest(key=key, constants=constants, upper=upper), self.assertRaises(TypeError):
+        for key, constants, upper in (
+            ([], {}, set()),
+            ('pc', [], set()),
+            ('pc', {'x0': True}, set()),
+            ('pc', {0: 1}, set()),
+            ('pc', {}, ['x0']),
+            ('pc', {}, {0}),
+        ):
+            with (
+                self.subTest(key=key, constants=constants, upper=upper),
+                self.assertRaises(TypeError),
+            ):
                 widening.observe(key, constants, upper)
             self.assertFalse(widening._groups)
 

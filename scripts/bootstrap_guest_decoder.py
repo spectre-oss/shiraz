@@ -33,10 +33,7 @@ def main():
             url = f"https://codeload.github.com/capstone-engine/capstone/tar.gz/{REVISION}"
             with urllib.request.urlopen(url, timeout=30) as response:
                 data = response.read(32 * 1024 * 1024 + 1)
-            if (
-                len(data) > 32 * 1024 * 1024
-                or hashlib.sha256(data).hexdigest() != SHA256
-            ):
+            if len(data) > 32 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != SHA256:
                 raise ValueError("unexpected Capstone archive")
             archive.write_bytes(data)
         if archive.is_symlink() or digest(archive) != SHA256:
@@ -49,12 +46,7 @@ def main():
                 raise ValueError("Capstone source bounds")
             for member in members:
                 path = Path(member.name)
-                if (
-                    path.is_absolute()
-                    or ".." in path.parts
-                    or member.issym()
-                    or member.islnk()
-                ):
+                if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
                     raise ValueError("unsafe Capstone archive path")
                 relative = Path(*path.parts[1:])
                 if not relative.parts:
@@ -116,9 +108,7 @@ def main():
                 ],
                 check=True,
             )
-            subprocess.run(
-                ["cmake", "--build", str(OUT / "build"), "--parallel", "2"], check=True
-            )
+            subprocess.run(["cmake", "--build", str(OUT / "build"), "--parallel", "2"], check=True)
         recipe["library_sha256"] = digest(library)
         stamp.write_text(json.dumps(recipe, indent=2, sort_keys=True) + "\n")
         print(f"Guest AArch64 decoder verified: Capstone {REVISION}")

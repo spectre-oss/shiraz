@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Package native APK libraries using Shiraz's shared bounded extractor."""
+
 from shiraz.apk import MAX_NATIVE_ENTRY
-from shiraz.native_payload import RESERVED, extract_native as _extract_native
+from shiraz.native_payload import extract_native as _extract_native
 
 
 def extract_native(apk, destination, architecture='x86_64'):

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Bounded APK/DEX inventory; deliberately not a reachability/tree-shaking proof."""
+
 import hashlib
 import re
 import struct
@@ -25,7 +26,9 @@ class FormatError(ValueError):
 class Dex:
     def __init__(self, data):
         self.data = data
-        if len(data) < 112 or data[:8] not in [b'dex\n' + v + b'\0' for v in (b'035', b'037', b'038', b'039', b'040')]:
+        if len(data) < 112 or data[:8] not in [
+            b'dex\n' + v + b'\0' for v in (b'035', b'037', b'038', b'039', b'040')
+        ]:
             raise FormatError('unsupported or truncated DEX (supported: 035, 037–040)')
         if self.u32(32) != len(data) or self.u32(36) != 112 or self.u32(40) != 0x12345678:
             raise FormatError('invalid DEX header size, file size, or endian tag')
@@ -54,7 +57,9 @@ class Dex:
             if params_off:
                 count = self.u32(params_off)
                 self.bounds(params_off + 4, count * 2)
-                params = ''.join(self.index(self.types, self.u16(params_off + 4 + i * 2)) for i in range(count))
+                params = ''.join(
+                    self.index(self.types, self.u16(params_off + 4 + i * 2)) for i in range(count)
+                )
             self.protos.append('(' + params + ')' + result)
         self.methods = []
         for off in self.table(88, 8):
@@ -119,7 +124,13 @@ def inspect_apk(path, *, require_dex=True):
         for entry in entries:
             name = entry.filename
             parts = PurePosixPath(name).parts
-            if name in names or name.startswith('/') or '..' in parts or '\\' in name or '\x00' in name:
+            if (
+                name in names
+                or name.startswith('/')
+                or '..' in parts
+                or '\\' in name
+                or '\x00' in name
+            ):
                 raise FormatError('duplicate or unsafe archive entry')
             names.add(name)
             limit = MAX_NATIVE_ENTRY if re.fullmatch(r'lib/[^/]+/[^/]+\.so', name) else MAX_ENTRY
@@ -137,7 +148,14 @@ def inspect_apk(path, *, require_dex=True):
             name = entry.filename
             if re.fullmatch(r'classes(?:[2-9]|[1-9][0-9]+)?\.dex', name):
                 dex = Dex(archive.read(entry))
-                dex_files.append({'name': name, 'types': len(dex.types), 'methods': len(dex.methods), 'classes': len(dex.defined)})
+                dex_files.append(
+                    {
+                        'name': name,
+                        'types': len(dex.types),
+                        'methods': len(dex.methods),
+                        'classes': len(dex.defined),
+                    }
+                )
                 all_types.update(dex.types)
                 methods.update(dex.methods)
                 fields.update(dex.fields)
@@ -149,14 +167,21 @@ def inspect_apk(path, *, require_dex=True):
                 if len(header) < 20 or header[:4] != b'\x7fELF' or header[5] != 1:
                     raise FormatError('native library has invalid or unsupported ELF header')
                 bits, machine = header[4], struct.unpack_from('<H', header, 18)[0]
-                expected = {'x86_64': (2, 62), 'x86': (1, 3), 'arm64-v8a': (2, 183), 'armeabi-v7a': (1, 40)}
+                expected = {
+                    'x86_64': (2, 62),
+                    'x86': (1, 3),
+                    'arm64-v8a': (2, 183),
+                    'armeabi-v7a': (1, 40),
+                }
                 if abi in expected and (bits, machine) != expected[abi]:
                     raise FormatError('native library ABI directory disagrees with ELF header')
                 try:
                     elf = inspect_elf(archive.read(entry))
                 except ElfError as exc:
                     raise FormatError(str(exc)) from exc
-                native.append({'name': name, 'abi': abi, 'machine': machine, 'bytes': entry.file_size, **elf})
+                native.append(
+                    {'name': name, 'abi': abi, 'machine': machine, 'bytes': entry.file_size, **elf}
+                )
     if require_dex and not dex_files:
         raise FormatError('APK has no supported classes.dex files')
     abis = sorted({item['abi'] for item in native})
@@ -166,15 +191,21 @@ def inspect_apk(path, *, require_dex=True):
         'manifest': manifest,
         'dex': sorted(dex_files, key=lambda x: x['name']),
         'framework_types': sorted(t for t in all_types - defined if framework(t)),
-        'framework_methods': sorted(m for m in methods if framework(m.split('->')[0]) and m.split('->')[0] not in defined),
-        'framework_fields': sorted(f for f in fields if framework(f.split('->')[0]) and f.split('->')[0] not in defined),
+        'framework_methods': sorted(
+            m for m in methods if framework(m.split('->')[0]) and m.split('->')[0] not in defined
+        ),
+        'framework_fields': sorted(
+            f for f in fields if framework(f.split('->')[0]) and f.split('->')[0] not in defined
+        ),
         'native_libraries': sorted(native, key=lambda x: x['name']),
         'native_abis': abis,
         'host_native_candidate': supports_native_abis(abis),
         'analysis_kind': 'conservative DEX identifier inventory; not call-graph reachability',
-        'limitations': ['Reflection, JNI, dynamic loading and resource XML may introduce additional API requirements.',
-                        'Native ELF inventory does not resolve imported symbols or Bionic ABI compatibility.',
-                        'Only an experimental programmatic Activity/View/Canvas startup subset is available. Resources, services, input dispatch, redraw and bundling remain incomplete.'],
+        'limitations': [
+            'Reflection, JNI, dynamic loading and resource XML may introduce additional API requirements.',
+            'Native ELF inventory does not resolve imported symbols or Bionic ABI compatibility.',
+            'Only an experimental programmatic Activity/View/Canvas startup subset is available. Resources, services, input dispatch, redraw and bundling remain incomplete.',
+        ],
         'runnable': None,
         'compatibility_verified': False,
     }

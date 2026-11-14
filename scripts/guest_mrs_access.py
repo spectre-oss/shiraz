@@ -113,8 +113,7 @@ def recognize_mrs_access(read_word, entry, owned_readable_data):
     if any(words[index] != word for index, word in fixed.items()):
         return None
     for index, base, target in ((18, 14, 16), (27, 17, 17), (31, 16, 16), (47, 8, 0)):
-        if words[index] not in (0xF8BFC000 | base << 5 | target,
-                                0xC8DFFC00 | base << 5 | target):
+        if words[index] not in (0xF8BFC000 | base << 5 | target, 0xC8DFFC00 | base << 5 | target):
             return None
     failures = []
     for index in range(51, 55):
@@ -130,9 +129,14 @@ def recognize_mrs_access(read_word, entry, owned_readable_data):
         failures.append((entry + index * 4, target))
     tables = []
     spans = [(entry, entry + BODY_BYTES)]
-    for index, register, role in ((5, 10, "owners"), (7, 11, "keys"),
-                                  (9, 12, "low"), (11, 13, "high"), (44, 9, "bases")):
-        adrp, add = words[index:index + 2]
+    for index, register, role in (
+        (5, 10, "owners"),
+        (7, 11, "keys"),
+        (9, 12, "low"),
+        (11, 13, "high"),
+        (44, 9, "bases"),
+    ):
+        adrp, add = words[index : index + 2]
         if adrp & 0x9F00001F != 0x90000000 | register:
             return None
         if add & 0xFFC003FF != 0x91000000 | register << 5 | register:
@@ -151,7 +155,10 @@ def recognize_mrs_access(read_word, entry, owned_readable_data):
         spans.append((address, end))
         tables.append(MrsAccessTable(role, address))
     return MrsAccessEffects(
-        entry, BODY_BYTES,
+        entry,
+        BODY_BYTES,
         hashlib.sha256(b"".join(word.to_bytes(4, "little") for word in words)).hexdigest(),
-        tuple(tables), entry + 200, tuple(failures),
+        tuple(tables),
+        entry + 200,
+        tuple(failures),
     )

@@ -68,12 +68,20 @@ def validate_mrs_island(blob, *, island, site, target, replacement, entry, acces
     if type(blob) not in (bytes, bytearray):
         return None
     blob = bytes(blob)  # Freeze mutable snapshots before bounds/unpacking.
-    if (len(blob) != ISLAND_BYTES or not _address(site, 4, 4)
-            or not _address(island, 16, ISLAND_BYTES)
-            or type(target) is not int or not 0 <= target <= 30 or target == 18
-            or type(replacement) is not int or not 0 <= replacement < 1 << 32
-            or not _address(entry, 4) or entry == 0
-            or not _address(accessor, 4) or accessor == 0):
+    if (
+        len(blob) != ISLAND_BYTES
+        or not _address(site, 4, 4)
+        or not _address(island, 16, ISLAND_BYTES)
+        or type(target) is not int
+        or not 0 <= target <= 30
+        or target == 18
+        or type(replacement) is not int
+        or not 0 <= replacement < 1 << 32
+        or not _address(entry, 4)
+        or entry == 0
+        or not _address(accessor, 4)
+        or accessor == 0
+    ):
         return None
     # A site inside its island would give contradictory executable snapshots.
     if site < island + ISLAND_BYTES and island < site + 4:
@@ -93,11 +101,23 @@ def validate_mrs_island(blob, *, island, site, target, replacement, entry, acces
         0xA93F7FFF,  # STP xzr,xzr,[SP,#-16]
         returning,  # B site+4, from island+24
         0xD503201F,  # NOP, not the old continuation literal
-        entry, island + 16, target, 1, accessor,
+        entry,
+        island + 16,
+        target,
+        1,
+        accessor,
     )
     if blob != expected:
         return None
     return MrsIslandEffects(
-        island, site, target, replacement, entry, accessor, continuation,
-        island + 40, island + 24, hashlib.sha256(blob).hexdigest(),
+        island,
+        site,
+        target,
+        replacement,
+        entry,
+        accessor,
+        continuation,
+        island + 40,
+        island + 24,
+        hashlib.sha256(blob).hexdigest(),
     )

@@ -25,9 +25,7 @@ class StackWindowTests(unittest.TestCase):
         )
         window = report["observed_stack_fact_window"]
         self.assertEqual(window["abstract_anchor_sp"], 0)
-        self.assertEqual(
-            window["windows"]["thread_pointer"], {"min_offset": -24, "end_offset": 32}
-        )
+        self.assertEqual(window["windows"]["thread_pointer"], {"min_offset": -24, "end_offset": 32})
         self.assertFalse(window["runtime_enforced"])
 
     def test_entry_frame_coordinates_are_not_mrs_coordinates(self):
@@ -52,12 +50,8 @@ class StackWindowTests(unittest.TestCase):
         report = audit.Audit(Decoder()).site(0, entry_context=True)
         window = report["observed_stack_fact_window"]
         self.assertEqual(window["abstract_anchor_sp"], -48)
-        self.assertEqual(
-            window["windows"]["thread_pointer"], {"min_offset": 16, "end_offset": 24}
-        )
-        self.assertEqual(
-            window["windows"]["protected_facts"], {"min_offset": 16, "end_offset": 48}
-        )
+        self.assertEqual(window["windows"]["thread_pointer"], {"min_offset": 16, "end_offset": 24})
+        self.assertEqual(window["windows"]["protected_facts"], {"min_offset": 16, "end_offset": 48})
         self.assertIn("initial stack origin unproved", report["entry_frame"]["scope"])
 
     def test_window_cannot_waive_unknown_load_alias(self):

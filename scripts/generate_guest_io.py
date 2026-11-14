@@ -129,11 +129,20 @@ CONSTANTS = [
 STRUCTS = {
     "Sockaddr": ("struct sockaddr", "sa_family sa_data"),
     "SockaddrIn": ("struct sockaddr_in", "sin_family sin_port sin_addr"),
-    "SockaddrIn6": ("struct sockaddr_in6", "sin6_family sin6_port sin6_flowinfo sin6_addr sin6_scope_id"),
+    "SockaddrIn6": (
+        "struct sockaddr_in6",
+        "sin6_family sin6_port sin6_flowinfo sin6_addr sin6_scope_id",
+    ),
     "SockaddrUn": ("struct sockaddr_un", "sun_family sun_path"),
-    "Addrinfo": ("struct addrinfo", "ai_flags ai_family ai_socktype ai_protocol ai_addrlen ai_canonname ai_addr ai_next"),
+    "Addrinfo": (
+        "struct addrinfo",
+        "ai_flags ai_family ai_socktype ai_protocol ai_addrlen ai_canonname ai_addr ai_next",
+    ),
     "Iovec": ("struct iovec", "iov_base iov_len"),
-    "Msghdr": ("struct msghdr", "msg_name msg_namelen msg_iov msg_iovlen msg_control msg_controllen msg_flags"),
+    "Msghdr": (
+        "struct msghdr",
+        "msg_name msg_namelen msg_iov msg_iovlen msg_control msg_controllen msg_flags",
+    ),
     "Cmsghdr": ("struct cmsghdr", "cmsg_len cmsg_level cmsg_type"),
     "Linger": ("struct linger", "l_onoff l_linger"),
     "InPktinfo": ("struct in_pktinfo", "ipi_ifindex ipi_spec_dst ipi_addr"),
@@ -173,16 +182,104 @@ STRUCTS = {
     ),
 }
 CONSTANTS += [
-    "AF_UNSPEC", "AF_UNIX", "AF_INET", "AF_INET6", "SOCK_STREAM", "SOCK_DGRAM", "SOCK_RAW", "SOCK_SEQPACKET", "SOCK_NONBLOCK", "SOCK_CLOEXEC",
-    "SOL_SOCKET", "SCM_RIGHTS", "SO_REUSEADDR", "SO_REUSEPORT", "SO_KEEPALIVE", "SO_BROADCAST", "SO_OOBINLINE", "SO_SNDBUF", "SO_RCVBUF", "SO_ERROR", "SO_TYPE", "SO_LINGER", "SO_RCVTIMEO", "SO_SNDTIMEO", "SO_RCVLOWAT", "SO_SNDLOWAT", "SO_ACCEPTCONN",
-    "IPPROTO_IP", "IPPROTO_IPV6", "IPPROTO_TCP", "IPPROTO_UDP", "TCP_NODELAY", "TCP_KEEPIDLE", "TCP_KEEPINTVL", "TCP_KEEPCNT",
-    "IP_TTL", "IP_TOS", "IP_MULTICAST_IF", "IP_MULTICAST_TTL", "IP_MULTICAST_LOOP", "IP_ADD_MEMBERSHIP", "IP_DROP_MEMBERSHIP", "IP_PKTINFO", "IP_RECVTTL", "IP_RECVTOS",
-    "IPV6_V6ONLY", "IPV6_UNICAST_HOPS", "IPV6_MULTICAST_IF", "IPV6_MULTICAST_HOPS", "IPV6_MULTICAST_LOOP", "IPV6_JOIN_GROUP", "IPV6_LEAVE_GROUP", "IPV6_RECVPKTINFO", "IPV6_PKTINFO", "IPV6_RECVHOPLIMIT", "IPV6_HOPLIMIT", "IPV6_RECVTCLASS", "IPV6_TCLASS",
-    "MSG_OOB", "MSG_PEEK", "MSG_DONTROUTE", "MSG_CTRUNC", "MSG_TRUNC", "MSG_DONTWAIT", "MSG_EOR", "MSG_WAITALL", "MSG_NOSIGNAL", "MSG_CMSG_CLOEXEC",
-    "AI_PASSIVE", "AI_CANONNAME", "AI_NUMERICHOST", "AI_NUMERICSERV", "AI_ADDRCONFIG", "AI_V4MAPPED", "AI_ALL", "AI_V4MAPPED_CFG",
-    "NI_NUMERICHOST", "NI_NUMERICSERV", "NI_NOFQDN", "NI_NAMEREQD", "NI_DGRAM",
-    "EAI_ADDRFAMILY", "EAI_AGAIN", "EAI_BADFLAGS", "EAI_FAIL", "EAI_FAMILY", "EAI_MEMORY", "EAI_NODATA", "EAI_NONAME", "EAI_SERVICE", "EAI_SOCKTYPE", "EAI_SYSTEM", "EAI_BADHINTS", "EAI_PROTOCOL", "EAI_OVERFLOW",
-    "SHUT_RD", "SHUT_WR", "SHUT_RDWR",
+    "AF_UNSPEC",
+    "AF_UNIX",
+    "AF_INET",
+    "AF_INET6",
+    "SOCK_STREAM",
+    "SOCK_DGRAM",
+    "SOCK_RAW",
+    "SOCK_SEQPACKET",
+    "SOCK_NONBLOCK",
+    "SOCK_CLOEXEC",
+    "SOL_SOCKET",
+    "SCM_RIGHTS",
+    "SO_REUSEADDR",
+    "SO_REUSEPORT",
+    "SO_KEEPALIVE",
+    "SO_BROADCAST",
+    "SO_OOBINLINE",
+    "SO_SNDBUF",
+    "SO_RCVBUF",
+    "SO_ERROR",
+    "SO_TYPE",
+    "SO_LINGER",
+    "SO_RCVTIMEO",
+    "SO_SNDTIMEO",
+    "SO_RCVLOWAT",
+    "SO_SNDLOWAT",
+    "SO_ACCEPTCONN",
+    "IPPROTO_IP",
+    "IPPROTO_IPV6",
+    "IPPROTO_TCP",
+    "IPPROTO_UDP",
+    "TCP_NODELAY",
+    "TCP_KEEPIDLE",
+    "TCP_KEEPINTVL",
+    "TCP_KEEPCNT",
+    "IP_TTL",
+    "IP_TOS",
+    "IP_MULTICAST_IF",
+    "IP_MULTICAST_TTL",
+    "IP_MULTICAST_LOOP",
+    "IP_ADD_MEMBERSHIP",
+    "IP_DROP_MEMBERSHIP",
+    "IP_PKTINFO",
+    "IP_RECVTTL",
+    "IP_RECVTOS",
+    "IPV6_V6ONLY",
+    "IPV6_UNICAST_HOPS",
+    "IPV6_MULTICAST_IF",
+    "IPV6_MULTICAST_HOPS",
+    "IPV6_MULTICAST_LOOP",
+    "IPV6_JOIN_GROUP",
+    "IPV6_LEAVE_GROUP",
+    "IPV6_RECVPKTINFO",
+    "IPV6_PKTINFO",
+    "IPV6_RECVHOPLIMIT",
+    "IPV6_HOPLIMIT",
+    "IPV6_RECVTCLASS",
+    "IPV6_TCLASS",
+    "MSG_OOB",
+    "MSG_PEEK",
+    "MSG_DONTROUTE",
+    "MSG_CTRUNC",
+    "MSG_TRUNC",
+    "MSG_DONTWAIT",
+    "MSG_EOR",
+    "MSG_WAITALL",
+    "MSG_NOSIGNAL",
+    "MSG_CMSG_CLOEXEC",
+    "AI_PASSIVE",
+    "AI_CANONNAME",
+    "AI_NUMERICHOST",
+    "AI_NUMERICSERV",
+    "AI_ADDRCONFIG",
+    "AI_V4MAPPED",
+    "AI_ALL",
+    "AI_V4MAPPED_CFG",
+    "NI_NUMERICHOST",
+    "NI_NUMERICSERV",
+    "NI_NOFQDN",
+    "NI_NAMEREQD",
+    "NI_DGRAM",
+    "EAI_ADDRFAMILY",
+    "EAI_AGAIN",
+    "EAI_BADFLAGS",
+    "EAI_FAIL",
+    "EAI_FAMILY",
+    "EAI_MEMORY",
+    "EAI_NODATA",
+    "EAI_NONAME",
+    "EAI_SERVICE",
+    "EAI_SOCKTYPE",
+    "EAI_SYSTEM",
+    "EAI_BADHINTS",
+    "EAI_PROTOCOL",
+    "EAI_OVERFLOW",
+    "SHUT_RD",
+    "SHUT_WR",
+    "SHUT_RDWR",
 ]
 
 
@@ -231,14 +328,10 @@ def main():
         "c",
     ]
     dependencies = shlex.split(
-        subprocess.check_output([*compiler, "-M", str(source)], text=True).replace(
-            "\\\n", ""
-        )
+        subprocess.check_output([*compiler, "-M", str(source)], text=True).replace("\\\n", "")
     )[1:]
     resource = Path(
-        subprocess.check_output(
-            ["xcrun", "clang", "-print-resource-dir"], text=True
-        ).strip()
+        subprocess.check_output(["xcrun", "clang", "-print-resource-dir"], text=True).strip()
     ).resolve()
     inputs = {}
     for value in dependencies:
@@ -252,14 +345,10 @@ def main():
         elif not path.resolve().is_relative_to(resource):
             raise ValueError(f"unexpected compiler header dependency: {path}")
         inputs[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    ir = subprocess.check_output(
-        [*compiler, "-S", "-emit-llvm", str(source), "-o", "-"], text=True
-    )
+    ir = subprocess.check_output([*compiler, "-S", "-emit-llvm", str(source), "-o", "-"], text=True)
     values = {
         name: int(value)
-        for name, value in re.findall(
-            r"^@abi_(\w+) = .*?constant i64 (-?\d+)", ir, re.MULTILINE
-        )
+        for name, value in re.findall(r"^@abi_(\w+) = .*?constant i64 (-?\d+)", ir, re.MULTILINE)
     }
     if set(values) != set(expressions):
         raise ValueError("compiler did not emit every constant/layout as an integer")
@@ -269,9 +358,7 @@ def main():
         "#include <cstdint>",
         "namespace shiraz::guest::bionic {",
     ]
-    lines += [
-        f"inline constexpr int64_t k{name} = {value};" for name, value in values.items()
-    ]
+    lines += [f"inline constexpr int64_t k{name} = {value};" for name, value in values.items()]
     lines += ["}", ""]
     output = OUT / "guest_io.hpp"
     text = "\n".join(lines)

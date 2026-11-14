@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Host-specific output layout of the art_standalone AOSP make build."""
+
 import hashlib
 import os
 import platform

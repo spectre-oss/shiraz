@@ -18,6 +18,7 @@ The colours and geometry below are the single source for the smoke checks in
 scripts/macos_runtime_smoke.py; tests/macos-apk-graphics/GraphicsActivity.java
 repeats them as Java constants.
 """
+
 import argparse
 from pathlib import Path
 import struct
@@ -28,18 +29,22 @@ from fixture_images import rgba  # noqa: E402
 
 # 8x8 images split into four 4x4 quadrants: top-left, top-right, bottom-left, bottom-right.
 SIZE = 8
-QUADRANTS_PNG = (0xff3366cc, 0xffcc6633, 0xff66cc33, 0xffcccc00)
+QUADRANTS_PNG = (0xFF3366CC, 0xFFCC6633, 0xFF66CC33, 0xFFCCCC00)
 # Two values per channel: R in {20,e0}, G in {40,c0}, B in {10,f0}; all opaque.
-QUADRANTS_WEBP = (0xffe04010, 0xff20c010, 0xff2040f0, 0xffe0c0f0)
+QUADRANTS_WEBP = (0xFFE04010, 0xFF20C010, 0xFF2040F0, 0xFFE0C0F0)
 JPEG_SIZE = 16
-JPEG_RGB = 0x3090d0
+JPEG_RGB = 0x3090D0
 ASSETS = {'quadrants.png', 'quadrants.webp', 'flat.jpg'}
 
 
 def roundtrip_pixels():
     """GraphicsActivity.roundtripPixels(): 4x4, pixel 5 transparent, the rest opaque."""
-    return [0 if i == 5 else 0xff000000 | ((i * 16 + 8) << 16) | ((255 - i * 16) << 8) | ((i * 37 + 11) & 0xff)
-            for i in range(16)]
+    return [
+        0
+        if i == 5
+        else 0xFF000000 | ((i * 16 + 8) << 16) | ((255 - i * 16) << 8) | ((i * 37 + 11) & 0xFF)
+        for i in range(16)
+    ]
 
 
 def quadrant_pixels(colours, size=SIZE):
@@ -59,13 +64,13 @@ class BitWriter:
         self.value |= value << self.count
         self.count += bits
         while self.count >= 8:
-            self.data.append(self.value & 0xff)
+            self.data.append(self.value & 0xFF)
             self.value >>= 8
             self.count -= 8
 
     def finish(self):
         if self.count:
-            self.data.append(self.value & 0xff)
+            self.data.append(self.value & 0xFF)
         return bytes(self.data)
 
 
@@ -88,14 +93,16 @@ def webp_lossless(width, height, pixels):
     """VP8L bitstream in a RIFF container for opaque or translucent ARGB pixels."""
     if not (1 <= width <= 16384 and 1 <= height <= 16384) or len(pixels) != width * height:
         raise ValueError('WebP dimensions')
-    channels = [sorted({(pixel >> shift) & 0xff for pixel in pixels}) for shift in (8, 16, 0, 24)]  # G, R, B, A
+    channels = [
+        sorted({(pixel >> shift) & 0xFF for pixel in pixels}) for shift in (8, 16, 0, 24)
+    ]  # G, R, B, A
     if any(len(values) > 2 for values in channels):
         raise ValueError('simple VP8L codes carry at most two values per channel')
     bits = BitWriter()
-    bits.write(0x2f, 8)
+    bits.write(0x2F, 8)
     bits.write(width - 1, 14)
     bits.write(height - 1, 14)
-    bits.write(int(channels[3] != [0xff]), 1)  # alpha_is_used hint
+    bits.write(int(channels[3] != [0xFF]), 1)  # alpha_is_used hint
     bits.write(0, 3)  # version
     bits.write(0, 1)  # no transforms
     bits.write(0, 1)  # no colour cache
@@ -106,9 +113,11 @@ def webp_lossless(width, height, pixels):
     for pixel in pixels:
         for values, shift in zip(channels, (8, 16, 0, 24)):
             if len(values) == 2:
-                bits.write(values.index((pixel >> shift) & 0xff), 1)
+                bits.write(values.index((pixel >> shift) & 0xFF), 1)
     payload = bits.finish()
-    chunk = b'VP8L' + struct.pack('<I', len(payload)) + payload + (b'\0' if len(payload) % 2 else b'')
+    chunk = (
+        b'VP8L' + struct.pack('<I', len(payload)) + payload + (b'\0' if len(payload) % 2 else b'')
+    )
     return b'RIFF' + struct.pack('<I', 4 + len(chunk)) + b'WEBP' + chunk
 
 
@@ -124,7 +133,7 @@ class JpegBits:
             self.count += 1
             if self.count == 8:
                 self.data.append(self.value)
-                if self.value == 0xff:
+                if self.value == 0xFF:
                     self.data.append(0)
                 self.value, self.count = 0, 0
 
@@ -161,10 +170,12 @@ def jpeg_flat(width, height, rgb):
     """Baseline 4:4:4 JPEG of one flat colour (JFIF RGB->YCbCr, quantiser 1)."""
     if not (1 <= width <= 65535 and 1 <= height <= 65535):
         raise ValueError('JPEG dimensions')
-    r, g, b = (rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff
-    samples = (0.299 * r + 0.587 * g + 0.114 * b,
-               128 - 0.168736 * r - 0.331264 * g + 0.5 * b,
-               128 + 0.5 * r - 0.418688 * g - 0.081312 * b)
+    r, g, b = (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF
+    samples = (
+        0.299 * r + 0.587 * g + 0.114 * b,
+        128 - 0.168736 * r - 0.331264 * g + 0.5 * b,
+        128 + 0.5 * r - 0.418688 * g - 0.081312 * b,
+    )
     # A flat 8x8 block's DC coefficient is 8 * (sample - 128); quantiser 1 keeps it.
     dc = [round(8 * (sample - 128)) for sample in samples]
     dc_codes, ac_codes = _huffman_codes(DC_BITS, DC_SYMBOLS), _huffman_codes(AC_BITS, AC_SYMBOLS)
@@ -181,23 +192,41 @@ def jpeg_flat(width, height, rgb):
                 bits.write(diff if diff > 0 else diff + (1 << category) - 1, category)
             code, length = ac_codes[0x00]
             bits.write(code, length)
-    tables = (bytes([0x00]) + bytes(DC_BITS) + bytes(DC_SYMBOLS)
-              + bytes([0x10]) + bytes(AC_BITS) + bytes(AC_SYMBOLS))
-    return (b'\xff\xd8'
-            + _segment(0xe0, b'JFIF\0\x01\x01\x00' + struct.pack('>HH', 1, 1) + b'\0\0')
-            + _segment(0xdb, b'\x00' + b'\x01' * 64)
-            + _segment(0xc0, b'\x08' + struct.pack('>HH', height, width) + b'\x03'
-                       + b'\x01\x11\x00' + b'\x02\x11\x00' + b'\x03\x11\x00')
-            + _segment(0xc4, tables)
-            + _segment(0xda, b'\x03' + b'\x01\x00' + b'\x02\x00' + b'\x03\x00' + b'\x00\x3f\x00')
-            + bits.finish() + b'\xff\xd9')
+    tables = (
+        bytes([0x00])
+        + bytes(DC_BITS)
+        + bytes(DC_SYMBOLS)
+        + bytes([0x10])
+        + bytes(AC_BITS)
+        + bytes(AC_SYMBOLS)
+    )
+    return (
+        b'\xff\xd8'
+        + _segment(0xE0, b'JFIF\0\x01\x01\x00' + struct.pack('>HH', 1, 1) + b'\0\0')
+        + _segment(0xDB, b'\x00' + b'\x01' * 64)
+        + _segment(
+            0xC0,
+            b'\x08'
+            + struct.pack('>HH', height, width)
+            + b'\x03'
+            + b'\x01\x11\x00'
+            + b'\x02\x11\x00'
+            + b'\x03\x11\x00',
+        )
+        + _segment(0xC4, tables)
+        + _segment(0xDA, b'\x03' + b'\x01\x00' + b'\x02\x00' + b'\x03\x00' + b'\x00\x3f\x00')
+        + bits.finish()
+        + b'\xff\xd9'
+    )
 
 
 def images():
     """Asset name -> encoded bytes."""
-    return {'quadrants.png': rgba(SIZE, SIZE, quadrant_pixels(QUADRANTS_PNG)),
-            'quadrants.webp': webp_lossless(SIZE, SIZE, quadrant_pixels(QUADRANTS_WEBP)),
-            'flat.jpg': jpeg_flat(JPEG_SIZE, JPEG_SIZE, JPEG_RGB)}
+    return {
+        'quadrants.png': rgba(SIZE, SIZE, quadrant_pixels(QUADRANTS_PNG)),
+        'quadrants.webp': webp_lossless(SIZE, SIZE, quadrant_pixels(QUADRANTS_WEBP)),
+        'flat.jpg': jpeg_flat(JPEG_SIZE, JPEG_SIZE, JPEG_RGB),
+    }
 
 
 def write(directory):

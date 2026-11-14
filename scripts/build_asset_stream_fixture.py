@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Generate bounded, compressible native asset-stream test data."""
+
 from pathlib import Path
 import zipfile
 

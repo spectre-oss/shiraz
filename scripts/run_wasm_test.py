@@ -7,6 +7,7 @@ SHIRAZ_WASM_GOROOT to ``go env GOROOT``. Go itself retains its original build
 configuration; only the test runtime receives this small environment. The Node
 invocation matches GOROOT/lib/wasm/go_js_wasm_exec without needing its shell tools.
 """
+
 import argparse
 import os
 import shutil

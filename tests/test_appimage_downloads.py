@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Exercise pinned packaging downloads against a real bounded HTTP server."""
+
 import hashlib
 import http.server
 import importlib.util
@@ -12,7 +13,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('build_appimage_download_test', ROOT / 'scripts/build_appimage.py')
+spec = importlib.util.spec_from_file_location(
+    'build_appimage_download_test', ROOT / 'scripts/build_appimage.py'
+)
 packaging = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(packaging)
 
@@ -47,9 +50,12 @@ def server(statuses, body):
 class AppImageDownloadTests(unittest.TestCase):
     def test_transient_504_then_verified_body_is_published(self):
         body = b'pinned packaging fixture\n'
-        with tempfile.TemporaryDirectory() as directory, server([504, 200], body) as (url, requests), \
-                patch.dict(packaging.DOWNLOADS, {'test-tool': (url, hashlib.sha256(body).hexdigest())}), \
-                patch.object(packaging.time, 'sleep'):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            server([504, 200], body) as (url, requests),
+            patch.dict(packaging.DOWNLOADS, {'test-tool': (url, hashlib.sha256(body).hexdigest())}),
+            patch.object(packaging.time, 'sleep'),
+        ):
             cache = Path(directory)
             result = packaging.fetch('test-tool', cache)
             self.assertEqual(result.read_bytes(), body)
@@ -59,9 +65,12 @@ class AppImageDownloadTests(unittest.TestCase):
 
     def test_transient_failure_has_three_attempt_limit_and_no_output(self):
         body = b'gateway error'
-        with tempfile.TemporaryDirectory() as directory, server([504], body) as (url, requests), \
-                patch.dict(packaging.DOWNLOADS, {'test-tool': (url, hashlib.sha256(body).hexdigest())}), \
-                patch.object(packaging.time, 'sleep'):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            server([504], body) as (url, requests),
+            patch.dict(packaging.DOWNLOADS, {'test-tool': (url, hashlib.sha256(body).hexdigest())}),
+            patch.object(packaging.time, 'sleep'),
+        ):
             cache = Path(directory)
             with self.assertRaises(urllib.error.HTTPError):
                 packaging.fetch('test-tool', cache)
@@ -70,9 +79,12 @@ class AppImageDownloadTests(unittest.TestCase):
 
     def test_permanent_404_is_not_retried(self):
         body = b'not found'
-        with tempfile.TemporaryDirectory() as directory, server([404], body) as (url, requests), \
-                patch.dict(packaging.DOWNLOADS, {'test-tool': (url, hashlib.sha256(body).hexdigest())}), \
-                patch.object(packaging.time, 'sleep'):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            server([404], body) as (url, requests),
+            patch.dict(packaging.DOWNLOADS, {'test-tool': (url, hashlib.sha256(body).hexdigest())}),
+            patch.object(packaging.time, 'sleep'),
+        ):
             cache = Path(directory)
             with self.assertRaises(urllib.error.HTTPError):
                 packaging.fetch('test-tool', cache)
@@ -81,9 +93,12 @@ class AppImageDownloadTests(unittest.TestCase):
 
     def test_checksum_failure_is_not_retried_or_published(self):
         body = b'incorrect content'
-        with tempfile.TemporaryDirectory() as directory, server([200], body) as (url, requests), \
-                patch.dict(packaging.DOWNLOADS, {'test-tool': (url, '0' * 64)}), \
-                patch.object(packaging.time, 'sleep'):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            server([200], body) as (url, requests),
+            patch.dict(packaging.DOWNLOADS, {'test-tool': (url, '0' * 64)}),
+            patch.object(packaging.time, 'sleep'),
+        ):
             cache = Path(directory)
             with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
                 packaging.fetch('test-tool', cache)
@@ -92,8 +107,11 @@ class AppImageDownloadTests(unittest.TestCase):
 
     def test_bad_cached_tool_stays_fail_closed_without_network(self):
         body = b'cached content'
-        with tempfile.TemporaryDirectory() as directory, server([200], body) as (url, requests), \
-                patch.dict(packaging.DOWNLOADS, {'test-tool': (url, '0' * 64)}):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            server([200], body) as (url, requests),
+            patch.dict(packaging.DOWNLOADS, {'test-tool': (url, '0' * 64)}),
+        ):
             cache = Path(directory)
             (cache / 'test-tool').write_bytes(body)
             with self.assertRaisesRegex(RuntimeError, 'Cached packaging tool checksum mismatch'):

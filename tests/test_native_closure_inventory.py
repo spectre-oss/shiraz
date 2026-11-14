@@ -43,13 +43,9 @@ class NativeClosureInventoryTests(unittest.TestCase):
         self.observed = [*self.mandatory, Path("/usr/lib/libSystem.B.dylib")]
 
     def test_requires_observed_mandatory_but_not_unused_seed(self):
-        result = validate_native_inventory(
-            report(self.observed), self.manifest, self.mandatory
-        )
+        result = validate_native_inventory(report(self.observed), self.manifest, self.mandatory)
         self.assertEqual(result["snapshot"], "end-of-main")
-        self.assertEqual(
-            set(result["observed_non_system_sha256"]), set(map(str, self.mandatory))
-        )
+        self.assertEqual(set(result["observed_non_system_sha256"]), set(map(str, self.mandatory)))
         self.assertNotIn(str(self.paths[3]), result["observed_non_system_sha256"])
 
     def test_foreign_late_loaded_image_rejected(self):
@@ -67,16 +63,12 @@ class NativeClosureInventoryTests(unittest.TestCase):
 
     def test_missing_mandatory_helper_rejected(self):
         with self.assertRaisesRegex(ValueError, "missing mandatory"):
-            validate_native_inventory(
-                report(self.observed[:2]), self.manifest, self.mandatory
-            )
+            validate_native_inventory(report(self.observed[:2]), self.manifest, self.mandatory)
 
     def test_tampered_signed_copy_rejected(self):
         self.paths[1].write_bytes(b"tampered-after-signing")
         with self.assertRaisesRegex(ValueError, "changed since signing"):
-            validate_native_inventory(
-                report(self.observed), self.manifest, self.mandatory
-            )
+            validate_native_inventory(report(self.observed), self.manifest, self.mandatory)
 
 
 if __name__ == "__main__":

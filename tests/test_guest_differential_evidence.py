@@ -66,9 +66,7 @@ class DifferentialEvidenceTests(unittest.TestCase):
             bridge = root / "bridge.so"
             bridge.write_bytes(b"bridge-fixture")
             before = entry_binary_identity(root, bridge)
-            self.assertEqual(
-                before["vm"]["sha256"], hashlib.sha256(b"vm-fixture").hexdigest()
-            )
+            self.assertEqual(before["vm"]["sha256"], hashlib.sha256(b"vm-fixture").hexdigest())
             self.assertEqual(before["bridge"]["bytes"], len(b"bridge-fixture"))
             bridge.write_bytes(b"changed-fixture")
             self.assertNotEqual(before, entry_binary_identity(root, bridge))
@@ -124,9 +122,7 @@ class DifferentialEvidenceTests(unittest.TestCase):
 
     def test_kernel_abort_with_contradictory_fatal_is_rejected(self):
         with self.assertRaises(ValueError):
-            self.classify(
-                -signal.SIGABRT, self.valid + "\nFatal signal 11 (SIGSEGV), code 1 (?)"
-            )
+            self.classify(-signal.SIGABRT, self.valid + "\nFatal signal 11 (SIGSEGV), code 1 (?)")
 
     def test_android_reference_still_requires_actual_raw_sigabrt(self):
         manifest = {
@@ -179,9 +175,7 @@ class DifferentialEvidenceTests(unittest.TestCase):
             self.assertEqual(plan["collector_argv"][0], "/system/bin/app_process64")
             self.assertEqual(plan["collector_argv"][-1], "BionicReferenceRunner")
             self.assertEqual(plan["environment"]["CLASSPATH"], stage + "/fixture.jar")
-            self.assertIn(
-                "-Dguest.reference.collector.sha256=" + "c" * 64, plan["collector_argv"]
-            )
+            self.assertIn("-Dguest.reference.collector.sha256=" + "c" * 64, plan["collector_argv"])
             for invalid in (
                 "/data/local/tmp/other",
                 stage + "/nested",
@@ -217,9 +211,7 @@ class DifferentialEvidenceTests(unittest.TestCase):
             path = Path(directory) / "reference.json"
             path.write_text(json.dumps(evidence))
             self.assertEqual(
-                reference_result(path, manifest)["collection"]["stack_failure"][
-                    "returncode"
-                ],
+                reference_result(path, manifest)["collection"]["stack_failure"]["returncode"],
                 -6,
             )
             for raw, code in (

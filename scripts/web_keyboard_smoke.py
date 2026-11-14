@@ -5,6 +5,7 @@
 Only the WebRTC transport is stubbed; no commands reach an application.
 Requires chromium, chromium-driver and Python selenium on the test host.
 """
+
 import argparse
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
@@ -21,28 +22,42 @@ options.add_argument('--disable-dev-shm-usage')
 options.add_argument('--window-size=1400,1000')
 driver = webdriver.Chrome(options=options)
 try:
-    driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': '''
+    driver.execute_cdp_cmd(
+        'Page.addScriptToEvaluateOnNewDocument',
+        {
+            'source': '''
 window.sentCommands=[];
 window.RTCPeerConnection=class {
  createDataChannel(){return {readyState:'open',send(value){sentCommands.push(JSON.parse(value))}}}
  addTransceiver(){}
  createOffer(){return new Promise(()=>{})}
 };
-'''})
+'''
+        },
+    )
     driver.get(args.url)
     driver.execute_script("connected=true;videoReady=true;setRunning(true)")
     screen = driver.find_element(By.ID, 'screen')
     outside = driver.find_element(By.ID, 'app-name')
+
     def commands():
         return driver.execute_script('return window.sentCommands')
+
     def clear():
         driver.execute_script('window.sentCommands=[]')
-    ActionChains(driver).move_to_element(screen).click().move_to_element(outside).send_keys('a').perform()
+
+    ActionChains(driver).move_to_element(screen).click().move_to_element(outside).send_keys(
+        'a'
+    ).perform()
     assert driver.execute_script('return document.activeElement.id') == 'screen'
-    assert any(c['action'] == 'text' and c['text'] == 'a' for c in commands()), 'typing lost after pointer leaves'
+    assert any(c['action'] == 'text' and c['text'] == 'a' for c in commands()), (
+        'typing lost after pointer leaves'
+    )
     clear()
     ActionChains(driver).key_down(Keys.SHIFT).click(outside).perform()
-    assert any(c['action'] == 'keyup' and c['key'] == 'ShiftLeft' for c in commands()), 'blur leaves key held'
+    assert any(c['action'] == 'keyup' and c['key'] == 'ShiftLeft' for c in commands()), (
+        'blur leaves key held'
+    )
     ActionChains(driver).key_up(Keys.SHIFT).perform()
     clear()
     ActionChains(driver).send_keys('b').perform()
@@ -51,7 +66,9 @@ window.RTCPeerConnection=class {
     assert driver.execute_script('return document.activeElement.id') == 'screen'
     clear()
     ActionChains(driver).send_keys('c').perform()
-    assert any(c['action'] == 'text' and c['text'] == 'c' for c in commands()), 'Next field did not restore keyboard focus'
+    assert any(c['action'] == 'text' and c['text'] == 'c' for c in commands()), (
+        'Next field did not restore keyboard focus'
+    )
     clear()
     driver.execute_script('setRunning(false)')
     ActionChains(driver).send_keys('d').perform()

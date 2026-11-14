@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Manifest-to-runtime policy metadata must preserve explicit application decisions."""
+
 import subprocess
 import tempfile
 import unittest
@@ -21,12 +22,22 @@ class NetworkPolicyMetadata(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         (root / 'build').mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=root / 'build') as directory:
-            subprocess.run(['javac', '--release', '8', '-d', directory,
-                            str(root / 'java/shiraz/runtime/ManifestNetworkPolicy.java'),
-                            str(root / 'tests/java/ManifestNetworkPolicyHostSmoke.java')],
-                           check=True, timeout=30)
-            subprocess.run(['java', '-cp', directory, 'ManifestNetworkPolicyHostSmoke'],
-                           check=True, timeout=10)
+            subprocess.run(
+                [
+                    'javac',
+                    '--release',
+                    '8',
+                    '-d',
+                    directory,
+                    str(root / 'java/shiraz/runtime/ManifestNetworkPolicy.java'),
+                    str(root / 'tests/java/ManifestNetworkPolicyHostSmoke.java'),
+                ],
+                check=True,
+                timeout=30,
+            )
+            subprocess.run(
+                ['java', '-cp', directory, 'ManifestNetworkPolicyHostSmoke'], check=True, timeout=10
+            )
 
     def test_default_is_preserved_as_absent(self):
         values = application_metadata(self.manifest(), Path('/app.apk'), Path('/data'))
@@ -42,8 +53,10 @@ class NetworkPolicyMetadata(unittest.TestCase):
                 self.assertEqual(values['usesCleartextTraffic'], value)
 
     def test_resource_policy_is_retained_for_explicit_support_check(self):
-        manifest = self.manifest('android:usesCleartextTraffic="@bool/cleartext" '
-                                 'android:networkSecurityConfig="@xml/policy"')
+        manifest = self.manifest(
+            'android:usesCleartextTraffic="@bool/cleartext" '
+            'android:networkSecurityConfig="@xml/policy"'
+        )
         values = application_metadata(manifest, Path('/app.apk'), Path('/data'))
         self.assertEqual(values['usesCleartextTraffic'], '@bool/cleartext')
         self.assertEqual(values['networkSecurityConfig'], '@xml/policy')

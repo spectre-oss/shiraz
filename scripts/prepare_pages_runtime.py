@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Populate a static site from published runtime assets, independently of native CI."""
+
 import argparse
 import hashlib
 import json
@@ -29,6 +30,7 @@ def select_release(releases):
 
 def install_runtime(site, source, version):
     from build_appimage import require_architecture
+
     bases = {}
     for arch in ('x86_64', 'aarch64'):
         name = f'Shiraz-Browser-Base-{version}-{arch}.AppImage'
@@ -45,11 +47,17 @@ def install_runtime(site, source, version):
         require_architecture(path, arch)
         (site / 'base').mkdir(exist_ok=True)
         shutil.copy2(path, site / 'base' / name)
-        bases[arch] = dict(base_file='base/' + name, base_sha256=digest, base_size=path.stat().st_size)
+        bases[arch] = dict(
+            base_file='base/' + name, base_sha256=digest, base_size=path.stat().st_size
+        )
     if 'x86_64' not in bases:
         raise RuntimeError('Published x86_64 runtime missing')
-    manifest = dict(version=version, architectures=bases, **bases['x86_64'],
-                    release_url=f'https://github.com/spectre-oss/shiraz/releases/tag/v{version}')
+    manifest = dict(
+        version=version,
+        architectures=bases,
+        **bases['x86_64'],
+        release_url=f'https://github.com/spectre-oss/shiraz/releases/tag/v{version}',
+    )
     (site / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
     (site / '.nojekyll').touch()
 
@@ -60,13 +68,26 @@ def main():
     args = parser.parse_args()
     if not (args.site / 'index.html').is_file():
         raise RuntimeError('Build the SvelteKit site first')
-    releases = json.loads(subprocess.check_output([
-        'gh', 'api', 'repos/spectre-oss/shiraz/releases?per_page=20']))
+    releases = json.loads(
+        subprocess.check_output(['gh', 'api', 'repos/spectre-oss/shiraz/releases?per_page=20'])
+    )
     release = select_release(releases)
     with tempfile.TemporaryDirectory(prefix='shiraz-pages-runtime-') as tmp:
-        subprocess.run(['gh', 'release', 'download', release['tag_name'], '--repo',
-                        'spectre-oss/shiraz', '--pattern', 'Shiraz-Browser-Base-*.AppImage*',
-                        '--dir', tmp], check=True)
+        subprocess.run(
+            [
+                'gh',
+                'release',
+                'download',
+                release['tag_name'],
+                '--repo',
+                'spectre-oss/shiraz',
+                '--pattern',
+                'Shiraz-Browser-Base-*.AppImage*',
+                '--dir',
+                tmp,
+            ],
+            check=True,
+        )
         install_runtime(args.site, Path(tmp), release['tag_name'][1:])
     print('PAGES_RUNTIME_READY', release['tag_name'])
 

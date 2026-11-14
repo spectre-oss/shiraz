@@ -6,7 +6,12 @@ import unittest
 from unittest.mock import patch
 
 from shiraz.apk import FormatError
-from shiraz.runtime import ROOT, native_build_environment, selected_device_profile, validate_device_profile
+from shiraz.runtime import (
+    ROOT,
+    native_build_environment,
+    selected_device_profile,
+    validate_device_profile,
+)
 
 
 # config/app.properties models the x86_64 SDK emulator, so it is valid only
@@ -20,8 +25,10 @@ class DeviceProfileTests(unittest.TestCase):
         self.assertEqual(env['SHIRAZ_ANDROID_MODEL'], 'Shiraz Linux')
         self.assertEqual(env['SHIRAZ_ANDROID_SERIAL'], 'unknown')
         version = (ROOT / 'VERSION').read_text().strip()
-        self.assertEqual(env['SHIRAZ_ANDROID_FINGERPRINT'],
-                         'Shiraz/shiraz/linux:8.1/shiraz/' + version + ':host/unsigned')
+        self.assertEqual(
+            env['SHIRAZ_ANDROID_FINGERPRINT'],
+            'Shiraz/shiraz/linux:8.1/shiraz/' + version + ':host/unsigned',
+        )
 
     def test_explicit_native_identity_overrides_defaults(self, _abi):
         profile = validate_device_profile(ROOT / 'config/app.properties')
@@ -43,8 +50,14 @@ class DeviceProfileTests(unittest.TestCase):
                 values = validate_device_profile(profile)
                 self.assertEqual(profile.parent, Path(directory) / 'shiraz/devices')
                 self.assertEqual(profile.stat().st_mode & 0o777, 0o600)
-                self.assertNotEqual(values['settings.androidId'], validate_device_profile(ROOT / 'config/app.properties')['settings.androidId'])
-                self.assertNotEqual(values['build.serial'], validate_device_profile(ROOT / 'config/app.properties')['build.serial'])
+                self.assertNotEqual(
+                    values['settings.androidId'],
+                    validate_device_profile(ROOT / 'config/app.properties')['settings.androidId'],
+                )
+                self.assertNotEqual(
+                    values['build.serial'],
+                    validate_device_profile(ROOT / 'config/app.properties')['build.serial'],
+                )
                 self.assertEqual(selected_device_profile('example.app'), profile)
                 self.assertEqual(profile.read_bytes(), first)
                 self.assertIsNone(selected_device_profile('example.other'))
@@ -61,7 +74,9 @@ class DeviceProfileTests(unittest.TestCase):
         profile = (ROOT / 'config/app.properties').read_text()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'profile.properties'
-            path.write_text(profile.replace('telephony.simOperator=\n', 'telephony.simOperator=310260\n'))
+            path.write_text(
+                profile.replace('telephony.simOperator=\n', 'telephony.simOperator=310260\n')
+            )
             with self.assertRaisesRegex(FormatError, 'without a modem'):
                 validate_device_profile(path)
             path.write_text(profile.replace('build.incremental=4944403', 'build.incremental=1'))
@@ -70,7 +85,9 @@ class DeviceProfileTests(unittest.TestCase):
             path.write_text(profile.replace('sensors.available=false', 'sensors.available=true'))
             with self.assertRaisesRegex(FormatError, 'unbridged sensors'):
                 validate_device_profile(path)
-            path.write_text(profile.replace('settings.screenBrightness=128', 'settings.screenBrightness=300'))
+            path.write_text(
+                profile.replace('settings.screenBrightness=128', 'settings.screenBrightness=300')
+            )
             with self.assertRaisesRegex(FormatError, 'screen brightness'):
                 validate_device_profile(path)
 
@@ -87,8 +104,10 @@ class DeviceProfileHostTests(unittest.TestCase):
                     with patch.dict(os.environ, {'XDG_CONFIG_HOME': directory}, clear=False):
                         with self.assertRaisesRegex(FormatError, 'ABI and Android release'):
                             selected_device_profile('example.app', ROOT / 'config/app.properties')
-                        self.assertFalse((Path(directory) / 'shiraz/devices').exists()
-                                         and any((Path(directory) / 'shiraz/devices').iterdir()))
+                        self.assertFalse(
+                            (Path(directory) / 'shiraz/devices').exists()
+                            and any((Path(directory) / 'shiraz/devices').iterdir())
+                        )
 
 
 if __name__ == '__main__':

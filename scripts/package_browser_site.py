@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Package the built browser assembler for Pages and GitHub Releases."""
+
 import hashlib
 import json
 from pathlib import Path
@@ -44,12 +45,16 @@ def main():
         if named != name or hashlib.sha256(base.read_bytes()).hexdigest() != digest:
             raise RuntimeError('browser base checksum mismatch: ' + architecture)
         from build_appimage import require_architecture
+
         require_architecture(base, architecture)
         location = 'base/' + name
         shutil.copy2(base, site / location)
-        bases[architecture] = dict(base_file=location, base_sha256=digest, base_size=base.stat().st_size)
+        bases[architecture] = dict(
+            base_file=location, base_sha256=digest, base_size=base.stat().st_size
+        )
     manifest = {
-        'version': version, 'architectures': bases,
+        'version': version,
+        'architectures': bases,
         **bases['x86_64'],
         'release_url': f'https://github.com/spectre-oss/shiraz/releases/tag/v{version}',
     }

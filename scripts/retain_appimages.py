@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Retain the latest three numeric Shiraz versions per app in a release directory."""
+
 import argparse
 import re
 from pathlib import Path
@@ -37,9 +38,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     import fcntl
-    with (root/'build/appimage/.lock').open('a') as lock:
+
+    with (root / 'build/appimage/.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        names, size = prune(root/'dist', apply=args.apply)
+        names, size = prune(root / 'dist', apply=args.apply)
     for name in names:
         print(('REMOVED ' if args.apply else 'WOULD_REMOVE ') + name)
     print(f'{len(names)} files; {size} bytes; keep=3 versions per app')

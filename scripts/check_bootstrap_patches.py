@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Replay registered patches from pinned Git blobs without editing dependencies."""
+
 import argparse
 import hashlib
 import platform
@@ -18,7 +19,9 @@ def replay(directory, revision, recipes, patch_root, work):
         tree = Path(temporary)
         subprocess.run(['git', 'init', '-q', str(tree)], check=True)
         for name in sorted(names):
-            entry = subprocess.check_output(['git', 'ls-tree', '-z', revision, '--', name], cwd=directory)
+            entry = subprocess.check_output(
+                ['git', 'ls-tree', '-z', revision, '--', name], cwd=directory
+            )
             if not entry:
                 continue  # A registered patch creates this path.
             mode, kind, _ = entry.split(b'\t', 1)[0].split()
@@ -37,7 +40,9 @@ def replay(directory, revision, recipes, patch_root, work):
                 target = tree / name
                 if target.is_symlink():
                     raise ValueError(f'unsupported symlink patch result: {patch}: {name}')
-                actual = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+                actual = (
+                    hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
+                )
                 if actual != expected:
                     raise ValueError(f'patch postimage differs from recipe: {patch}: {name}')
     return len(recipes), len(names)
@@ -56,9 +61,16 @@ def main():
                 recipes = recipes + bootstrap.PATCHES_DARWIN.get(name, [])
             if not recipes:
                 continue
-            count, files = replay(bootstrap.ROOT / 'context' / name, revision, recipes,
-                                  bootstrap.ROOT / 'patches', work)
-            print(f'BOOTSTRAP_PATCH_REPLAY_PASS dependency={name} host={args.host} patches={count} files={files}')
+            count, files = replay(
+                bootstrap.ROOT / 'context' / name,
+                revision,
+                recipes,
+                bootstrap.ROOT / 'patches',
+                work,
+            )
+            print(
+                f'BOOTSTRAP_PATCH_REPLAY_PASS dependency={name} host={args.host} patches={count} files={files}'
+            )
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f'bootstrap patch replay failed: {error}\n')
 

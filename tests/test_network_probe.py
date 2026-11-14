@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Validate networking probe assertions on the host JVM, separately from ART proof."""
+
 import importlib.util
 import subprocess
 import tempfile
@@ -22,14 +23,32 @@ class NetworkProbeAssertions(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT / 'build') as directory:
             work = Path(directory)
             fixtures.generate(work / 'assets')
-            subprocess.run(['javac', '--release', '8', '-d', str(work),
-                            str(ROOT / 'tests/api-probe/NetworkChecks.java'),
-                            str(ROOT / 'tests/api-probe/TlsNetworkChecks.java'),
-                            str(ROOT / 'tests/api-probe/TlsEngineChecks.java'),
-                            str(ROOT / 'tests/api-probe-host/NetworkHostTest.java')],
-                           check=True, timeout=60)
-            subprocess.run(['java', '-cp', str(work), 'org.shiraz.apiprobe.NetworkHostTest',
-                            str(work / 'assets')], check=True, timeout=45)
+            subprocess.run(
+                [
+                    'javac',
+                    '--release',
+                    '8',
+                    '-d',
+                    str(work),
+                    str(ROOT / 'tests/api-probe/NetworkChecks.java'),
+                    str(ROOT / 'tests/api-probe/TlsNetworkChecks.java'),
+                    str(ROOT / 'tests/api-probe/TlsEngineChecks.java'),
+                    str(ROOT / 'tests/api-probe-host/NetworkHostTest.java'),
+                ],
+                check=True,
+                timeout=60,
+            )
+            subprocess.run(
+                [
+                    'java',
+                    '-cp',
+                    str(work),
+                    'org.shiraz.apiprobe.NetworkHostTest',
+                    str(work / 'assets'),
+                ],
+                check=True,
+                timeout=45,
+            )
 
 
 if __name__ == '__main__':

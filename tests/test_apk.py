@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import hashlib
-import json
 from pathlib import Path
 import struct
 import tempfile
@@ -30,7 +29,13 @@ def dex_fixture():
         data.extend(bytes([len(text)]) + text.encode() + b'\0')
     data[:8] = b'dex\n035\0'
     struct.pack_into('<III', data, 32, len(data), 112, 0x12345678)
-    for off, size, start in [(56, count, string_off), (64, 4, type_off), (72, 1, proto_off), (88, 1, method_off), (96, 1, class_off)]:
+    for off, size, start in [
+        (56, count, string_off),
+        (64, 4, type_off),
+        (72, 1, proto_off),
+        (88, 1, method_off),
+        (96, 1, class_off),
+    ]:
         struct.pack_into('<II', data, off, size, start)
     for i, pos in enumerate(string_offsets):
         struct.pack_into('<I', data, string_off + i * 4, pos)
@@ -62,8 +67,12 @@ class ApkTests(unittest.TestCase):
         before = path.read_bytes()
         report = inspect_apk(path)
         self.assertEqual(len(report['dex']), 2)
-        self.assertEqual(report['framework_types'], ['Landroid/app/Activity;', 'Landroid/os/Bundle;'])
-        self.assertEqual(report['framework_methods'], ['Landroid/app/Activity;->onCreate(Landroid/os/Bundle;)V'])
+        self.assertEqual(
+            report['framework_types'], ['Landroid/app/Activity;', 'Landroid/os/Bundle;']
+        )
+        self.assertEqual(
+            report['framework_methods'], ['Landroid/app/Activity;->onCreate(Landroid/os/Bundle;)V']
+        )
         self.assertIsNone(report['runnable'])
         self.assertFalse(report['compatibility_verified'])
         self.assertEqual(report['apk_sha256'], hashlib.sha256(before).hexdigest())
@@ -71,6 +80,7 @@ class ApkTests(unittest.TestCase):
 
     def test_native_size_budget_does_not_expand_other_entries(self):
         from test_elf import elf_fixture
+
         payload = elf_fixture() + bytes(2048)
         with patch('shiraz.apk.MAX_ENTRY', 1024), patch('shiraz.apk.MAX_NATIVE_ENTRY', 4096):
             inspect_apk(self.apk({'lib/x86_64/libengine.so': payload}))
@@ -108,7 +118,7 @@ class ApkTests(unittest.TestCase):
 
     def test_out_of_bounds(self):
         blob = bytearray(dex_fixture())
-        struct.pack_into('<I', blob, 60, 0xfffffff0)
+        struct.pack_into('<I', blob, 60, 0xFFFFFFF0)
         with self.assertRaises(FormatError):
             Dex(blob)
 
@@ -123,22 +133,31 @@ class ApkTests(unittest.TestCase):
         for blob in [b'', b'dex\n035\0', b'not dex' * 30]:
             with self.assertRaises(FormatError):
                 Dex(blob)
-        blob = bytearray(dex_fixture()); blob[4:7] = b'041'
+        blob = bytearray(dex_fixture())
+        blob[4:7] = b'041'
         with self.assertRaisesRegex(FormatError, 'unsupported'):
             Dex(blob)
 
     def test_native_architecture(self):
-        elf = bytearray(64); elf[:7] = b'\x7fELF\x02\x01\x01'; struct.pack_into('<H', elf, 18, 183)
+        elf = bytearray(64)
+        elf[:7] = b'\x7fELF\x02\x01\x01'
+        struct.pack_into('<H', elf, 18, 183)
         apk = self.apk({'lib/arm64-v8a/libsample.so': elf})
         for machine, compatible in [('x86_64', False), ('aarch64', True), ('riscv64', False)]:
-            with self.subTest(machine=machine), patch('shiraz.architecture.platform.machine', return_value=machine):
+            with (
+                self.subTest(machine=machine),
+                patch('shiraz.architecture.platform.machine', return_value=machine),
+            ):
                 report = inspect_apk(apk)
                 self.assertEqual(report['host_native_candidate'], compatible)
         self.assertEqual(report['native_abis'], ['arm64-v8a'])
         struct.pack_into('<H', elf, 18, 62)
         apk = self.apk({'lib/x86_64/libsample.so': elf})
         for machine, compatible in [('x86_64', True), ('aarch64', False)]:
-            with self.subTest(machine=machine), patch('shiraz.architecture.platform.machine', return_value=machine):
+            with (
+                self.subTest(machine=machine),
+                patch('shiraz.architecture.platform.machine', return_value=machine),
+            ):
                 self.assertEqual(inspect_apk(apk)['host_native_candidate'], compatible)
         struct.pack_into('<H', elf, 18, 183)
         with self.assertRaisesRegex(FormatError, 'disagrees'):
@@ -148,7 +167,9 @@ class ApkTests(unittest.TestCase):
         self.assertEqual(main(['run', str(self.apk())]), 1)
 
     def test_plan_stays_local(self):
-        self.assertEqual(main(['plan', str(self.apk()), '--output', str(Path(self.temp.name) / 'plan.json')]), 1)
+        self.assertEqual(
+            main(['plan', str(self.apk()), '--output', str(Path(self.temp.name) / 'plan.json')]), 1
+        )
 
     def test_archive_size_bound(self):
         self.apk()

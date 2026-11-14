@@ -29,9 +29,7 @@ def validate_mrs_window_record(metadata, record):
     ):
         raise ValueError("invalid MRS window record fields")
     exclusion = record.get("image_stack_exclusion_profile")
-    if "image_stack_exclusion_profile" in record and (
-        type(exclusion) is not int or exclusion != 1
-    ):
+    if "image_stack_exclusion_profile" in record and (type(exclusion) is not int or exclusion != 1):
         raise ValueError("unsupported image/native-stack exclusion profile")
     if any(type(record[key]) is not int for key in ("profile", "before", "after")) or (
         record["profile"],
@@ -49,12 +47,7 @@ def validate_mrs_window_record(metadata, record):
         raise ValueError("MRS window site count bound")
     seen = set()
     for site in sites:
-        if (
-            type(site) is not int
-            or not 0 <= site <= (1 << 64) - 4
-            or site & 3
-            or site in seen
-        ):
+        if type(site) is not int or not 0 <= site <= (1 << 64) - 4 or site & 3 or site in seen:
             raise ValueError("invalid or duplicate MRS window site")
         matches = sum(
             bool(flags & 1) and begin <= site and site + 4 <= begin + file_size

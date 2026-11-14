@@ -39,8 +39,7 @@ def recognize_indexed_halfword(raw):
     if opcode not in (0x78200800, 0x78600800):
         return None
     option = (word >> 13) & 7
-    extensions = {2: (32, "uxtw"), 3: (64, "lsl"),
-                  6: (32, "sxtw"), 7: (64, "sxtx")}
+    extensions = {2: (32, "uxtw"), 3: (64, "lsl"), 6: (32, "sxtw"), 7: (64, "sxtx")}
     if option not in extensions:
         return None
     bits, extension = extensions[option]
@@ -49,7 +48,9 @@ def recognize_indexed_halfword(raw):
         "ldrh" if opcode == 0x78600800 else "strh",
         "sp" if base == 31 else f"x{base}",
         ("wzr" if bits == 32 else "xzr") if index == 31 else f"{'w' if bits == 32 else 'x'}{index}",
-        "wzr" if data == 31 else f"w{data}", bits, extension,
+        "wzr" if data == 31 else f"w{data}",
+        bits,
+        extension,
         (word >> 12) & 1,
     )
 
@@ -65,9 +66,14 @@ def exact_halfword_displacement(profile, index_value):
     if not isinstance(profile, IndexedHalfword):
         return None
     expected = {"uxtw": 32, "lsl": 64, "sxtw": 32, "sxtx": 64}
-    if (profile.extension not in expected or profile.index_width != expected[profile.extension]
-            or type(profile.shift) is not int or profile.shift not in (0, 1)
-            or type(index_value) is not int or not 0 <= index_value < 1 << profile.index_width):
+    if (
+        profile.extension not in expected
+        or profile.index_width != expected[profile.extension]
+        or type(profile.shift) is not int
+        or profile.shift not in (0, 1)
+        or type(index_value) is not int
+        or not 0 <= index_value < 1 << profile.index_width
+    ):
         return None
     value = index_value
     signed = profile.extension in ("sxtw", "sxtx")
