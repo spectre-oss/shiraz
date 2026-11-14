@@ -11,7 +11,7 @@ namespace shiraz::audio {
 struct AudioDevice;
 #endif
 class Pool {
-public:
+  public:
     explicit Pool(int streams);
     ~Pool();
     bool reserve(int sound);
@@ -20,7 +20,8 @@ public:
     int play(int sound, float left, float right, int priority, int loops, float rate);
     void control(int stream, int operation, float a, float b, int value);
     void release();
-private:
+
+  private:
     void output();
     bool openDevice();
     std::mutex mutex_, releaseMutex_;
@@ -36,4 +37,4 @@ private:
 #endif
     std::thread worker_;
 };
-}
+} // namespace shiraz::audio

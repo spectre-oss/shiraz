@@ -16,9 +16,10 @@ namespace {
 }
 // Generated signatures come from the pinned Apache-2.0 AOSP proxy table.
 #include "trampolines_arm64_to_x86_64-inl.h"
-}
+} // namespace
 extern "C" void InitProxyLibrary(ProxyLibraryBuilder* builder) {
-    static std::vector<KnownTrampoline> functions(std::begin(kKnownTrampolines), std::end(kKnownTrampolines));
+    static std::vector<KnownTrampoline> functions(std::begin(kKnownTrampolines),
+                                                  std::end(kKnownTrampolines));
     void* library = dlopen("libandroid.so", RTLD_NOW | RTLD_GLOBAL);
     for (auto& entry : functions) {
         entry.thunk = library ? dlsym(library, entry.name) : nullptr;
@@ -30,6 +31,6 @@ extern "C" void InitProxyLibrary(ProxyLibraryBuilder* builder) {
         }
     }
     builder->Build("libandroid.so", functions.size(), functions.data(),
-                   sizeof(kKnownVariables)/sizeof(KnownVariable), kKnownVariables);
+                   sizeof(kKnownVariables) / sizeof(KnownVariable), kKnownVariables);
 }
-}
+} // namespace berberis

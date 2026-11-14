@@ -8,10 +8,9 @@ namespace shiraz::guest {
 // AAPCS64 promoted arguments are consumed separately from Darwin variadics.
 // Positional formats, %n and binary128 are explicitly unsupported.
 class GuestFormatError : public std::invalid_argument {
-public:
-  int error;
-  GuestFormatError(const char *message, int code) : std::invalid_argument(message), error(code) {}
+  public:
+    int error;
+    GuestFormatError(const char* message, int code) : std::invalid_argument(message), error(code) {}
 };
-std::string format_guest(const char *format,
-                         const std::function<uint64_t(ArgumentType)> &next);
-}
+std::string format_guest(const char* format, const std::function<uint64_t(ArgumentType)>& next);
+} // namespace shiraz::guest

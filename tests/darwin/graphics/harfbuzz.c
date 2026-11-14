@@ -7,9 +7,16 @@
 #include <string.h>
 
 int main(int argc, char** argv) {
-    if (argc != 2) { fprintf(stderr, "usage: %s font.ttf\n", argv[0]); return 2; }
-    FT_Library library; FT_Face face;
-    if (FT_Init_FreeType(&library) || FT_New_Face(library, argv[1], 0, &face)) { fprintf(stderr, "cannot open font\n"); return 1; }
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s font.ttf\n", argv[0]);
+        return 2;
+    }
+    FT_Library library;
+    FT_Face face;
+    if (FT_Init_FreeType(&library) || FT_New_Face(library, argv[1], 0, &face)) {
+        fprintf(stderr, "cannot open font\n");
+        return 1;
+    }
     FT_Set_Char_Size(face, 0, 32 * 64, 72, 72);
     hb_font_t* font = hb_ft_font_create_referenced(face);
     hb_buffer_t* buffer = hb_buffer_create();
@@ -29,8 +36,11 @@ int main(int argc, char** argv) {
     }
     // 'l' 'l' must map to the same glyph.
     ok = ok && info[2].codepoint == info[3].codepoint;
-    printf(" advance=%d direction=%s\n", advance, hb_direction_to_string(hb_buffer_get_direction(buffer)));
-    hb_buffer_destroy(buffer); hb_font_destroy(font);
-    FT_Done_Face(face); FT_Done_FreeType(library);
+    printf(" advance=%d direction=%s\n", advance,
+           hb_direction_to_string(hb_buffer_get_direction(buffer)));
+    hb_buffer_destroy(buffer);
+    hb_font_destroy(font);
+    FT_Done_Face(face);
+    FT_Done_FreeType(library);
     return ok && advance > 0 ? 0 : 1;
 }

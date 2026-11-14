@@ -9,9 +9,9 @@ int main() {
         return 1;
     }
     for (const auto mode : {SDL_RENDERER_SOFTWARE, SDL_RENDERER_ACCELERATED}) {
-        SDL_Window* window = SDL_CreateWindow("Shiraz Wayland smoke",
-            SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 320, 480,
-            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+        SDL_Window* window = SDL_CreateWindow("Shiraz Wayland smoke", SDL_WINDOWPOS_UNDEFINED,
+                                              SDL_WINDOWPOS_UNDEFINED, 320, 480,
+                                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         if (!window) {
             std::fprintf(stderr, "SDL window: %s\n", SDL_GetError());
             return 2;

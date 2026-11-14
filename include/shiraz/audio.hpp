@@ -12,15 +12,18 @@ constexpr std::size_t maxDecodedSamples = 1024 * 1024 / 2;
 struct Clip {
     int rate = 0, channels = 0;
     std::vector<float> samples;
-    std::size_t frames() const { return channels > 0 ? samples.size() / channels : 0; }
+    std::size_t frames() const {
+        return channels > 0 ? samples.size() / channels : 0;
+    }
 };
 std::shared_ptr<const Clip> decode(const std::vector<std::uint8_t>& encoded);
 
 // The output worker owns synchronization; no device or JNI state belongs here.
 class Mixer {
-public:
+  public:
     explicit Mixer(int maxStreams, int outputRate = 48000);
-    int play(std::shared_ptr<const Clip> clip, float left, float right, int priority, int loops, float rate);
+    int play(std::shared_ptr<const Clip> clip, float left, float right, int priority, int loops,
+             float rate);
     void stop(int id);
     void pause(int id);
     void resume(int id);
@@ -32,9 +35,12 @@ public:
     void priority(int id, int priority);
     void clear();
     void render(float* stereo, std::size_t frames);
-    std::size_t active() const { return voices_.size(); }
+    std::size_t active() const {
+        return voices_.size();
+    }
     bool runnable() const;
-private:
+
+  private:
     struct Voice {
         int id, priority, loops;
         std::shared_ptr<const Clip> clip;
@@ -47,4 +53,4 @@ private:
     std::int64_t nextId_ = 1;
     std::vector<Voice> voices_;
 };
-}
+} // namespace shiraz::audio

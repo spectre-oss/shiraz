@@ -15,74 +15,105 @@ int main() {
     AHardwareBuffer* buffer = nullptr;
     assert(AHardwareBuffer_allocate(nullptr, &buffer) == -EINVAL && !buffer);
     assert(AHardwareBuffer_allocate(&desc, nullptr) == -EINVAL);
-    auto invalid = desc; invalid.usage |= 1 << 14;
+    auto invalid = desc;
+    invalid.usage |= 1 << 14;
     assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
-    invalid = desc; invalid.width = 0xffffffff;
+    invalid = desc;
+    invalid.width = 0xffffffff;
     assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
-    invalid = desc; invalid.format = 0x21; // BLOB is rejected, as on Linux.
-    assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer && !AHardwareBuffer_isSupported(&invalid));
-    invalid = desc; invalid.layers = 2;
+    invalid = desc;
+    invalid.format = 0x21; // BLOB is rejected, as on Linux.
+    assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer &&
+           !AHardwareBuffer_isSupported(&invalid));
+    invalid = desc;
+    invalid.layers = 2;
     assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
     assert(AHardwareBuffer_isSupported(&desc) == 1);
     assert(AHardwareBuffer_allocate(&desc, &buffer) == 0 && buffer);
-    AHardwareBuffer_Desc actual{}; AHardwareBuffer_describe(buffer, &actual);
-    assert(actual.width == 4 && actual.height == 4 && actual.stride >= 4 && actual.format == 1 && actual.usage == 0x333);
+    AHardwareBuffer_Desc actual{};
+    AHardwareBuffer_describe(buffer, &actual);
+    assert(actual.width == 4 && actual.height == 4 && actual.stride >= 4 && actual.format == 1 &&
+           actual.usage == 0x333);
     void* pixels = nullptr;
     ARect outside{0, 0, 5, 4};
     assert(AHardwareBuffer_lock(buffer, 0x30, -1, &outside, &pixels) == -EINVAL && !pixels);
     assert(AHardwareBuffer_lock(buffer, 0x300, -1, nullptr, &pixels) == -EINVAL && !pixels);
     assert(AHardwareBuffer_lock(buffer, 0x30, -1, nullptr, &pixels) == 0 && pixels);
     auto* rgba = static_cast<unsigned char*>(pixels);
-    for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x) {
-        auto* p = rgba + (y * actual.stride + x) * 4; p[0] = 51; p[1] = 102; p[2] = 153; p[3] = 255;
-    }
+    for (unsigned y = 0; y < 4; ++y)
+        for (unsigned x = 0; x < 4; ++x) {
+            auto* p = rgba + (y * actual.stride + x) * 4;
+            p[0] = 51;
+            p[1] = 102;
+            p[2] = 153;
+            p[3] = 255;
+        }
     void* blocked = nullptr;
     assert(AHardwareBuffer_lock(buffer, 3, -1, nullptr, &blocked) == -EBUSY && !blocked);
     assert(AHardwareBuffer_lock(buffer, 0x30, -1, nullptr, &blocked) == -EBUSY && !blocked);
-    int fence = 99; assert(AHardwareBuffer_unlock(buffer, &fence) == 0 && fence == -1);
+    int fence = 99;
+    assert(AHardwareBuffer_unlock(buffer, &fence) == 0 && fence == -1);
     assert(AHardwareBuffer_unlock(buffer, nullptr) == -EINVAL);
     // Read-only locks share one mapping and see the written pixels, including the last row.
     assert(AHardwareBuffer_lock(buffer, 3, -1, nullptr, &pixels) == 0 && pixels);
     assert(std::memcmp(pixels, "\x33\x66\x99\xff", 4) == 0);
-    assert(std::memcmp(static_cast<unsigned char*>(pixels) + (3 * actual.stride + 3) * 4, "\x33\x66\x99\xff", 4) == 0);
-    void* another = nullptr; assert(AHardwareBuffer_lock(buffer, 2, -1, nullptr, &another) == 0 && another == pixels);
+    assert(std::memcmp(static_cast<unsigned char*>(pixels) + (3 * actual.stride + 3) * 4,
+                       "\x33\x66\x99\xff", 4) == 0);
+    void* another = nullptr;
+    assert(AHardwareBuffer_lock(buffer, 2, -1, nullptr, &another) == 0 && another == pixels);
     assert(AHardwareBuffer_lock(buffer, 0x30, -1, nullptr, &blocked) == -EBUSY && !blocked);
-    assert(AHardwareBuffer_unlock(buffer, nullptr) == 0 && AHardwareBuffer_unlock(buffer, nullptr) == 0);
+    assert(AHardwareBuffer_unlock(buffer, nullptr) == 0 &&
+           AHardwareBuffer_unlock(buffer, nullptr) == 0);
     assert(AHardwareBuffer_unlock(buffer, nullptr) == -EINVAL);
     // A signalled fence fd is waited on before locking.
-    int signal[2]; assert(pipe(signal) == 0 && write(signal[1], "x", 1) == 1);
+    int signal[2];
+    assert(pipe(signal) == 0 && write(signal[1], "x", 1) == 1);
     assert(AHardwareBuffer_lock(buffer, 3, signal[0], nullptr, &pixels) == 0 && pixels);
-    assert(AHardwareBuffer_unlock(buffer, nullptr) == 0); close(signal[0]); close(signal[1]);
+    assert(AHardwareBuffer_unlock(buffer, nullptr) == 0);
+    close(signal[0]);
+    close(signal[1]);
     // Reference counting matches Linux: the buffer survives until the last release.
-    AHardwareBuffer_acquire(buffer); AHardwareBuffer_release(buffer);
-    AHardwareBuffer_describe(buffer, &actual); assert(actual.width == 4);
-    AHardwareBuffer_describe(nullptr, &actual); assert(actual.width == 0 && actual.stride == 0);
+    AHardwareBuffer_acquire(buffer);
+    AHardwareBuffer_release(buffer);
+    AHardwareBuffer_describe(buffer, &actual);
+    assert(actual.width == 4);
+    AHardwareBuffer_describe(nullptr, &actual);
+    assert(actual.width == 0 && actual.stride == 0);
     // RGBX_8888 and RGB_565 allocate with element-aligned pitch.
     const uint32_t formats[] = {2, 4};
     for (uint32_t format : formats) {
         AHardwareBuffer_Desc other{17, 3, 1, format, 0x33, 0, 0, 0};
         AHardwareBuffer* extra = nullptr;
         assert(AHardwareBuffer_allocate(&other, &extra) == 0 && extra);
-        AHardwareBuffer_describe(extra, &other); assert(other.width == 17 && other.stride >= 17 && other.format == format);
-        void* data = nullptr; assert(AHardwareBuffer_lock(extra, 0x30, -1, nullptr, &data) == 0 && data);
+        AHardwareBuffer_describe(extra, &other);
+        assert(other.width == 17 && other.stride >= 17 && other.format == format);
+        void* data = nullptr;
+        assert(AHardwareBuffer_lock(extra, 0x30, -1, nullptr, &data) == 0 && data);
         unsigned element = format == 4 ? 2 : 4;
         std::memset(data, 0x5a, size_t(other.stride) * element * 3);
         assert(AHardwareBuffer_unlock(extra, nullptr) == 0);
-        assert(AHardwareBuffer_lock(extra, 3, -1, nullptr, &data) == 0 && static_cast<unsigned char*>(data)[size_t(other.stride) * element * 3 - 1] == 0x5a);
+        assert(AHardwareBuffer_lock(extra, 3, -1, nullptr, &data) == 0 &&
+               static_cast<unsigned char*>(data)[size_t(other.stride) * element * 3 - 1] == 0x5a);
         assert(AHardwareBuffer_unlock(extra, nullptr) == 0);
         AHardwareBuffer_release(extra);
     }
     // Cross-process export/import and the EGL dma-buf export fail explicitly.
-    int pair[2]; assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+    int pair[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
     assert(AHardwareBuffer_sendHandleToUnixSocket(nullptr, pair[0]) == -EINVAL);
-    errno = 0; assert(AHardwareBuffer_sendHandleToUnixSocket(buffer, pair[0]) == -ENOTSUP && errno == ENOTSUP);
+    errno = 0;
+    assert(AHardwareBuffer_sendHandleToUnixSocket(buffer, pair[0]) == -ENOTSUP && errno == ENOTSUP);
     AHardwareBuffer* imported = reinterpret_cast<AHardwareBuffer*>(1);
     assert(AHardwareBuffer_recvHandleFromUnixSocket(pair[1], nullptr) == -EINVAL);
-    errno = 0; assert(AHardwareBuffer_recvHandleFromUnixSocket(pair[1], &imported) == -ENOTSUP && !imported && errno == ENOTSUP);
-    close(pair[0]); close(pair[1]);
+    errno = 0;
+    assert(AHardwareBuffer_recvHandleFromUnixSocket(pair[1], &imported) == -ENOTSUP && !imported &&
+           errno == ENOTSUP);
+    close(pair[0]);
+    close(pair[1]);
     uint32_t format = 0, pitch = 0;
     assert(shiraz_hardware_buffer_export(buffer, nullptr, &pitch) == -EINVAL);
-    errno = 0; assert(shiraz_hardware_buffer_export(buffer, &format, &pitch) == -ENOTSUP && errno == ENOTSUP);
+    errno = 0;
+    assert(shiraz_hardware_buffer_export(buffer, &format, &pitch) == -ENOTSUP && errno == ENOTSUP);
     AHardwareBuffer_release(buffer);
     std::puts("HARDWARE_BUFFER_CPU_OK IPC_GPU=unsupported");
 }
@@ -104,50 +135,74 @@ int main() {
     AHardwareBuffer_Desc desc{4, 4, 1, 1, 0x333, 0, 0, 0};
     AHardwareBuffer* buffer = nullptr;
     assert(AHardwareBuffer_allocate(nullptr, &buffer) == -EINVAL && !buffer);
-    auto invalid = desc; invalid.usage |= 1 << 14;
+    auto invalid = desc;
+    invalid.usage |= 1 << 14;
     assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
-    invalid = desc; invalid.width = 0xffffffff;
+    invalid = desc;
+    invalid.width = 0xffffffff;
     assert(AHardwareBuffer_allocate(&invalid, &buffer) == -EINVAL && !buffer);
     assert(AHardwareBuffer_allocate(&desc, &buffer) == 0 && buffer);
-    AHardwareBuffer_Desc actual{}; AHardwareBuffer_describe(buffer, &actual);
+    AHardwareBuffer_Desc actual{};
+    AHardwareBuffer_describe(buffer, &actual);
     assert(actual.width == 4 && actual.height == 4 && actual.stride >= 4);
     void* pixels = nullptr;
     assert(AHardwareBuffer_lock(buffer, 0x30, -1, nullptr, &pixels) == 0);
     auto* rgba = static_cast<unsigned char*>(pixels);
-    for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x) {
-        auto* p = rgba + (y * actual.stride + x) * 4; p[0] = 51; p[1] = 102; p[2] = 153; p[3] = 255;
-    }
+    for (unsigned y = 0; y < 4; ++y)
+        for (unsigned x = 0; x < 4; ++x) {
+            auto* p = rgba + (y * actual.stride + x) * 4;
+            p[0] = 51;
+            p[1] = 102;
+            p[2] = 153;
+            p[3] = 255;
+        }
     void* blocked = nullptr;
     assert(AHardwareBuffer_lock(buffer, 3, -1, nullptr, &blocked) == -EBUSY && !blocked);
-    int fence = 99; assert(AHardwareBuffer_unlock(buffer, &fence) == 0 && fence == -1);
+    int fence = 99;
+    assert(AHardwareBuffer_unlock(buffer, &fence) == 0 && fence == -1);
     assert(AHardwareBuffer_unlock(buffer, nullptr) == -EINVAL);
-    int pair[2]; assert(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, pair) == 0);
+    int pair[2];
+    assert(socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, pair) == 0);
     assert(AHardwareBuffer_sendHandleToUnixSocket(buffer, pair[0]) == 0);
     AHardwareBuffer* imported = nullptr;
     assert(AHardwareBuffer_recvHandleFromUnixSocket(pair[1], &imported) == 0 && imported);
     assert(AHardwareBuffer_lock(imported, 3, -1, nullptr, &pixels) == 0);
     assert(std::memcmp(pixels, "\x33\x66\x99\xff", 4) == 0);
-    void* another = nullptr; assert(AHardwareBuffer_lock(imported, 3, -1, nullptr, &another) == 0 && another == pixels);
-    assert(AHardwareBuffer_unlock(imported, nullptr) == 0 && AHardwareBuffer_unlock(imported, nullptr) == 0);
+    void* another = nullptr;
+    assert(AHardwareBuffer_lock(imported, 3, -1, nullptr, &another) == 0 && another == pixels);
+    assert(AHardwareBuffer_unlock(imported, nullptr) == 0 &&
+           AHardwareBuffer_unlock(imported, nullptr) == 0);
     // Malformed IPC must fail without producing an object.
     assert(send(pair[0], "bad", 3, 0) == 3);
     AHardwareBuffer* rejected = nullptr;
     assert(AHardwareBuffer_recvHandleFromUnixSocket(pair[1], &rejected) == -EINVAL && !rejected);
-    close(pair[0]); close(pair[1]);
-    auto query = reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(eglGetProcAddress("eglQueryDevicesEXT"));
-    auto platform = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYPROC>(eglGetProcAddress("eglGetPlatformDisplay"));
-    auto create = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
-    auto destroy = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));
-    auto client = reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(eglGetProcAddress("eglGetNativeClientBufferANDROID"));
-    auto target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+    close(pair[0]);
+    close(pair[1]);
+    auto query =
+        reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(eglGetProcAddress("eglQueryDevicesEXT"));
+    auto platform =
+        reinterpret_cast<PFNEGLGETPLATFORMDISPLAYPROC>(eglGetProcAddress("eglGetPlatformDisplay"));
+    auto create =
+        reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(eglGetProcAddress("eglCreateImageKHR"));
+    auto destroy =
+        reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(eglGetProcAddress("eglDestroyImageKHR"));
+    auto client = reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(
+        eglGetProcAddress("eglGetNativeClientBufferANDROID"));
+    auto target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
+        eglGetProcAddress("glEGLImageTargetTexture2DOES"));
     assert(query && platform && create && destroy && client && target);
-    EGLDeviceEXT devices[8]; EGLint count = 0; assert(query(8, devices, &count));
+    EGLDeviceEXT devices[8];
+    EGLint count = 0;
+    assert(query(8, devices, &count));
     EGLDisplay display = EGL_NO_DISPLAY;
     for (int i = 0; i < count; ++i) {
         auto candidate = platform(EGL_PLATFORM_DEVICE_EXT, devices[i], nullptr);
         if (eglInitialize(candidate, nullptr, nullptr)) {
             const char* extensions = eglQueryString(candidate, EGL_EXTENSIONS);
-            if (extensions && std::strstr(extensions, "EGL_EXT_image_dma_buf_import")) { display = candidate; break; }
+            if (extensions && std::strstr(extensions, "EGL_EXT_image_dma_buf_import")) {
+                display = candidate;
+                break;
+            }
             eglTerminate(candidate);
         }
     }
@@ -156,33 +211,54 @@ int main() {
     assert(client(nullptr) == nullptr && eglGetError() == EGL_BAD_PARAMETER);
     EGLint attribs[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE};
     EGLContext context = eglCreateContext(display, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, attribs);
-    assert(context != EGL_NO_CONTEXT && eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context));
-    EGLImageKHR image = create(display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID, client(imported), nullptr);
+    assert(context != EGL_NO_CONTEXT &&
+           eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context));
+    EGLImageKHR image =
+        create(display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID, client(imported), nullptr);
     assert(image != EGL_NO_IMAGE_KHR);
-    GLuint texture = 0, framebuffer = 0; glGenTextures(1, &texture); glBindTexture(GL_TEXTURE_2D, texture);
-    target(GL_TEXTURE_2D, image); assert(glGetError() == GL_NO_ERROR);
-    glGenFramebuffers(1, &framebuffer); glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    GLuint texture = 0, framebuffer = 0;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    target(GL_TEXTURE_2D, image);
+    assert(glGetError() == GL_NO_ERROR);
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
     assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
-    unsigned char sample[4]{}; glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, sample);
+    unsigned char sample[4]{};
+    glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, sample);
     assert(std::memcmp(sample, "\x33\x66\x99\xff", 4) == 0);
-    glClearColor(1, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT); glFinish();
+    glClearColor(1, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glFinish();
     assert(AHardwareBuffer_lock(buffer, 3, -1, nullptr, &pixels) == 0);
     assert(std::memcmp(pixels, "\xff\x00\x00\xff", 4) == 0);
     assert(AHardwareBuffer_unlock(buffer, nullptr) == 0);
-    auto createSync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(eglGetProcAddress("eglCreateSyncKHR"));
-    auto destroySync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(eglGetProcAddress("eglDestroySyncKHR"));
-    auto duplicateFence = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+    auto createSync =
+        reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(eglGetProcAddress("eglCreateSyncKHR"));
+    auto destroySync =
+        reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(eglGetProcAddress("eglDestroySyncKHR"));
+    auto duplicateFence = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(
+        eglGetProcAddress("eglDupNativeFenceFDANDROID"));
     assert(createSync && destroySync && duplicateFence);
     EGLSyncKHR sync = createSync(display, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
-    assert(sync != EGL_NO_SYNC_KHR); glFlush();
-    int first = duplicateFence(display, sync); assert(first >= 0);
-    int merged = sync_merge("shiraz-test", first, first); assert(merged >= 0 && sync_wait(merged, 1000) == 0);
-    close(first); close(merged); assert(destroySync(display, sync));
-    glDeleteFramebuffers(1, &framebuffer); glDeleteTextures(1, &texture); assert(destroy(display, image));
+    assert(sync != EGL_NO_SYNC_KHR);
+    glFlush();
+    int first = duplicateFence(display, sync);
+    assert(first >= 0);
+    int merged = sync_merge("shiraz-test", first, first);
+    assert(merged >= 0 && sync_wait(merged, 1000) == 0);
+    close(first);
+    close(merged);
+    assert(destroySync(display, sync));
+    glDeleteFramebuffers(1, &framebuffer);
+    glDeleteTextures(1, &texture);
+    assert(destroy(display, image));
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    eglDestroyContext(display, context); eglTerminate(display);
-    AHardwareBuffer_release(imported); AHardwareBuffer_release(buffer);
+    eglDestroyContext(display, context);
+    eglTerminate(display);
+    AHardwareBuffer_release(imported);
+    AHardwareBuffer_release(buffer);
     std::puts("HARDWARE_BUFFER_CPU_IPC_GPU_ROUNDTRIP_OK");
 }
 #endif

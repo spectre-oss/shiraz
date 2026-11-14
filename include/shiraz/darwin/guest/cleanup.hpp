@@ -9,18 +9,19 @@ namespace shiraz::guest {
 // error, not permission to call handlers through dead guest stack records.
 // The shutdown guard runs after DSO finalizers and before image destruction.
 class CleanupRuntime {
-public:
-  explicit CleanupRuntime(CodeValidator validate);
-  ~CleanupRuntime();
-  CleanupRuntime(const CleanupRuntime &) = delete;
-  CleanupRuntime &operator=(const CleanupRuntime &) = delete;
-  std::vector<ProviderExport> exports() const;
-  void attach(Loader &loader);
-  void shutdown() const;
-  size_t pending() const;
-private:
-  struct State;
-  std::shared_ptr<State> state_;
+  public:
+    explicit CleanupRuntime(CodeValidator validate);
+    ~CleanupRuntime();
+    CleanupRuntime(const CleanupRuntime&) = delete;
+    CleanupRuntime& operator=(const CleanupRuntime&) = delete;
+    std::vector<ProviderExport> exports() const;
+    void attach(Loader& loader);
+    void shutdown() const;
+    size_t pending() const;
+
+  private:
+    struct State;
+    std::shared_ptr<State> state_;
 };
 // Optional thread-entry integration: call after the guest start routine
 // returns, before native thread/TLS epilogues. Also enforced by TLS teardown.

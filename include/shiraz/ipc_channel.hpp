@@ -7,7 +7,7 @@ namespace shiraz {
 // Private socketpair transport, not Android's kernel Binder wire protocol.
 // Each direction must have one serialized reader/writer. Packet owns received FDs.
 struct IpcPacket {
-    int pid=-1,uid=-1;
+    int pid = -1, uid = -1;
     std::vector<uint8_t> bytes;
     std::vector<int> descriptors;
     IpcPacket() = default;
@@ -16,6 +16,6 @@ struct IpcPacket {
     ~IpcPacket();
 };
 int ipc_pair(int sockets[2]);
-int ipc_send(int socket,const uint8_t* bytes,size_t size,const int* descriptors,size_t count);
-int ipc_receive(int socket,IpcPacket& packet);
-}
+int ipc_send(int socket, const uint8_t* bytes, size_t size, const int* descriptors, size_t count);
+int ipc_receive(int socket, IpcPacket& packet);
+} // namespace shiraz

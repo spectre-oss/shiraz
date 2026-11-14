@@ -4,4 +4,4 @@
 namespace shiraz::guest {
 // Explicit scalar libm ABI. Binary128 long double exports remain unsupported.
 Provider math_provider();
-}
+} // namespace shiraz::guest

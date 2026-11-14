@@ -6,7 +6,7 @@ namespace shiraz::guest {
 // Only query from an ABI entry or a prepared guest signal callback; the
 // signal dispatcher checks readiness before touching this native TLS state.
 bool in_guest_signal_handler() noexcept;
-int guest_thread_signal(pthread_t thread,int signal);
+int guest_thread_signal(pthread_t thread, int signal);
 // Owns native dispositions until shutdown. Attach before exposing guest
 // installation APIs; Loader's pre-unmap hook stops callbacks before code dies.
 // Closing ownership stays reserved until in-flight callbacks finish; another
@@ -17,15 +17,15 @@ int guest_thread_signal(pthread_t thread,int signal);
 // preserved, handler mask APIs are unsupported, and live changed thread masks
 // must be restored before shutdown. Exiting native threads release their masks.
 class SignalRuntime {
-public:
-  explicit SignalRuntime(CodeValidator validate);
-  ~SignalRuntime();
-  std::vector<ProviderExport> exports() const;
-  void attach(Loader &loader);
-  void shutdown() const;
+  public:
+    explicit SignalRuntime(CodeValidator validate);
+    ~SignalRuntime();
+    std::vector<ProviderExport> exports() const;
+    void attach(Loader& loader);
+    void shutdown() const;
 
-private:
-  struct State;
-  std::shared_ptr<State> state_;
+  private:
+    struct State;
+    std::shared_ptr<State> state_;
 };
 } // namespace shiraz::guest

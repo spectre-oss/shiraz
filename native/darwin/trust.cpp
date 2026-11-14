@@ -3,12 +3,13 @@
 #include <Security/Security.h>
 
 // Read public system anchors only. Never enumerate private keys or identities.
-extern "C" JNIEXPORT jobjectArray JNICALL
-Java_shiraz_runtime_HostTrustProvider_anchors(JNIEnv* env, jclass) {
+extern "C" JNIEXPORT jobjectArray JNICALL Java_shiraz_runtime_HostTrustProvider_anchors(JNIEnv* env,
+                                                                                        jclass) {
     CFArrayRef roots = nullptr;
     const OSStatus status = SecTrustCopyAnchorCertificates(&roots);
     if (status != errSecSuccess || roots == nullptr) {
-        if (roots != nullptr) CFRelease(roots);
+        if (roots != nullptr)
+            CFRelease(roots);
         env->ThrowNew(env->FindClass("java/security/cert/CertificateException"),
                       "Cannot read macOS system certificate anchors");
         return nullptr;
@@ -21,15 +22,20 @@ Java_shiraz_runtime_HostTrustProvider_anchors(JNIEnv* env, jclass) {
         return nullptr;
     }
     jclass bytes = env->FindClass("[B");
-    jobjectArray result = bytes == nullptr ? nullptr : env->NewObjectArray(static_cast<jsize>(count), bytes, nullptr);
-    if (bytes != nullptr) env->DeleteLocalRef(bytes);
+    jobjectArray result =
+        bytes == nullptr ? nullptr : env->NewObjectArray(static_cast<jsize>(count), bytes, nullptr);
+    if (bytes != nullptr)
+        env->DeleteLocalRef(bytes);
     for (CFIndex i = 0; result != nullptr && i < count && !env->ExceptionCheck(); ++i) {
-        auto certificate = static_cast<SecCertificateRef>(const_cast<void*>(CFArrayGetValueAtIndex(roots, i)));
+        auto certificate =
+            static_cast<SecCertificateRef>(const_cast<void*>(CFArrayGetValueAtIndex(roots, i)));
         CFDataRef data = SecCertificateCopyData(certificate);
         const CFIndex length = data == nullptr ? 0 : CFDataGetLength(data);
         if (length <= 0 || length > 1024 * 1024) {
-            if (data != nullptr) CFRelease(data);
-            env->ThrowNew(env->FindClass("java/security/cert/CertificateException"), "Invalid system certificate data");
+            if (data != nullptr)
+                CFRelease(data);
+            env->ThrowNew(env->FindClass("java/security/cert/CertificateException"),
+                          "Invalid system certificate data");
             break;
         }
         jbyteArray encoded = env->NewByteArray(static_cast<jsize>(length));

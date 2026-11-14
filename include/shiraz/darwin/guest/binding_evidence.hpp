@@ -7,7 +7,7 @@ namespace shiraz::guest {
 // Native prefixes are identity snapshots, not execution or effect proofs.
 // SHA256 is added by the owning Python harness.
 // Caller owns namespace serialization and keeps every image resident.
-size_t write_binding_evidence(const Loader &, const std::filesystem::path &output,
-                             const std::string &scope, const std::vector<std::string> &load_order,
-                             const std::vector<int> &load_flags = {});
-}
+size_t write_binding_evidence(const Loader&, const std::filesystem::path& output,
+                              const std::string& scope, const std::vector<std::string>& load_order,
+                              const std::vector<int>& load_flags = {});
+} // namespace shiraz::guest

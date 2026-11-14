@@ -6,5 +6,5 @@ namespace shiraz::guest {
 // to opening /system on the host. Other /system paths are explicitly refused.
 // Ordinary unknown paths return -1/handled=false and
 // leave errno unchanged. Successful descriptors belong to the caller.
-int openGuestFont(const char *path, int native_flags, bool &handled) noexcept;
+int openGuestFont(const char* path, int native_flags, bool& handled) noexcept;
 } // namespace shiraz::guest

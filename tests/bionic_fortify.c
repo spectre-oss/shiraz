@@ -6,7 +6,7 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
-extern void *bionic___memchr_chk(const void *, int, size_t, size_t);
+extern void* bionic___memchr_chk(const void*, int, size_t, size_t);
 int main(void) {
     const char bytes[] = {'a', 'b', 'c'};
     assert(bionic___memchr_chk(bytes, 'b', 3, 3) == bytes + 1);

@@ -26,19 +26,28 @@ static void* map(void* address, size_t size, int protection, int flags, int fd, 
 extern "C" void* mmap(void* address, size_t size, int protection, int flags, int fd, off_t offset) {
     return map(address, size, protection, flags, fd, offset);
 }
-extern "C" void* mmap64(void* address, size_t size, int protection, int flags, int fd, off64_t offset) {
+extern "C" void* mmap64(void* address, size_t size, int protection, int flags, int fd,
+                        off64_t offset) {
     return map(address, size, protection, flags, fd, offset);
 }
 
-struct BionicMutex { alignas(void*) int32_t storage[10]; };
+struct BionicMutex {
+    alignas(void*) int32_t storage[10];
+};
 int main(int argc, char** argv) {
     assert(argc == 2);
     alarm(30); // A lost lock/wakeup is a test failure, not an unbounded hang.
     void* library = dlopen(argv[1], RTLD_NOW);
-    if (!library) { std::fprintf(stderr, "%s\n", dlerror()); return 2; }
-    auto lock = reinterpret_cast<int (*)(BionicMutex*)>(dlsym(library, "bionic_pthread_mutex_lock"));
-    auto unlock = reinterpret_cast<int (*)(BionicMutex*)>(dlsym(library, "bionic_pthread_mutex_unlock"));
-    auto destroy = reinterpret_cast<int (*)(BionicMutex*)>(dlsym(library, "bionic_pthread_mutex_destroy"));
+    if (!library) {
+        std::fprintf(stderr, "%s\n", dlerror());
+        return 2;
+    }
+    auto lock =
+        reinterpret_cast<int (*)(BionicMutex*)>(dlsym(library, "bionic_pthread_mutex_lock"));
+    auto unlock =
+        reinterpret_cast<int (*)(BionicMutex*)>(dlsym(library, "bionic_pthread_mutex_unlock"));
+    auto destroy =
+        reinterpret_cast<int (*)(BionicMutex*)>(dlsym(library, "bionic_pthread_mutex_destroy"));
     assert(lock && unlock && destroy);
     for (int round = 0; round < 100; ++round) {
         BionicMutex mutex{}; // Android's static normal-mutex initializer.
@@ -46,21 +55,25 @@ int main(int argc, char** argv) {
         pthread_barrier_t start;
         assert(pthread_barrier_init(&start, nullptr, 8) == 0);
         std::vector<std::thread> threads;
-        for (int i = 0; i < 8; ++i) threads.emplace_back([&] {
-            pthread_barrier_wait(&start);
-            delayAllocation = true;
-            for (int j = 0; j < 100; ++j) {
-                assert(lock(&mutex) == 0);
-                if (inside.fetch_add(1) != 0) violations.fetch_add(1);
-                std::this_thread::yield();
-                inside.fetch_sub(1);
-                assert(unlock(&mutex) == 0);
-            }
-        });
-        for (auto& thread : threads) thread.join();
+        for (int i = 0; i < 8; ++i)
+            threads.emplace_back([&] {
+                pthread_barrier_wait(&start);
+                delayAllocation = true;
+                for (int j = 0; j < 100; ++j) {
+                    assert(lock(&mutex) == 0);
+                    if (inside.fetch_add(1) != 0)
+                        violations.fetch_add(1);
+                    std::this_thread::yield();
+                    inside.fetch_sub(1);
+                    assert(unlock(&mutex) == 0);
+                }
+            });
+        for (auto& thread : threads)
+            thread.join();
         assert(pthread_barrier_destroy(&start) == 0);
         if (violations.load()) {
-            std::fprintf(stderr, "first-use mutex overlap: round=%d violations=%d\n", round, violations.load());
+            std::fprintf(stderr, "first-use mutex overlap: round=%d violations=%d\n", round,
+                         violations.load());
             return 1;
         }
         assert(destroy(&mutex) == 0);

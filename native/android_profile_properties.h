@@ -2,7 +2,10 @@
 #ifndef SHIRAZ_ANDROID_PROFILE_PROPERTIES_H
 #define SHIRAZ_ANDROID_PROFILE_PROPERTIES_H
 // Explicit per-process values shared by host libcore and translated native code.
-static const struct { const char *name; const char *environment; } shiraz_profile_properties[] = {
+static const struct {
+    const char* name;
+    const char* environment;
+} shiraz_profile_properties[] = {
     {"ro.product.model", "SHIRAZ_ANDROID_MODEL"},
     {"ro.product.manufacturer", "SHIRAZ_ANDROID_MANUFACTURER"},
     {"ro.product.brand", "SHIRAZ_ANDROID_BRAND"},

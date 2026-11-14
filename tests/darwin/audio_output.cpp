@@ -7,8 +7,11 @@
 #include <stdexcept>
 #include <thread>
 using namespace shiraz::audio;
-static void require(bool value, const char *message) { if (!value) throw std::runtime_error(message); }
-int main(int argc, char **argv) {
+static void require(bool value, const char* message) {
+    if (!value)
+        throw std::runtime_error(message);
+}
+int main(int argc, char** argv) {
     try {
         require(argc == 3, "usage: audio-output sound-file available|unavailable");
         std::ifstream input(argv[1], std::ios::binary);
@@ -20,7 +23,8 @@ int main(int argc, char **argv) {
             require(pool.reserve(1) && !pool.reserve(1), "sound reservation");
             require(pool.load(1, bytes), "actual codec load");
             int stream = pool.play(1, 0.15f, 0.15f, 0, 0, 1);
-            require(unavailable ? stream == 0 : stream > 0, "real output availability matches result");
+            require(unavailable ? stream == 0 : stream > 0,
+                    "real output availability matches result");
             if (!unavailable) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(120));
                 pool.control(stream, 1, 0, 0, 0);
@@ -36,7 +40,8 @@ int main(int argc, char **argv) {
                 pool.control(second, 0, 0, 0, 0);
             }
             require(pool.unload(1), "loaded sound ownership");
-            pool.release(); pool.release();
+            pool.release();
+            pool.release();
             require(!pool.reserve(2), "released pool stays closed");
         }
         if (!unavailable) {
@@ -48,9 +53,11 @@ int main(int argc, char **argv) {
                 pool.release();
             }
         }
-        std::cout << (unavailable ? "MACOS_AUDIO_DEVICE_REJECTION_PASS\n" : "MACOS_AUDIO_OUTPUT_PASS real_driver=1 controls=1 release=1\n");
+        std::cout << (unavailable ? "MACOS_AUDIO_DEVICE_REJECTION_PASS\n"
+                                  : "MACOS_AUDIO_OUTPUT_PASS real_driver=1 controls=1 release=1\n");
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "macos-audio-output: " << error.what() << '\n'; return 1;
+        std::cerr << "macos-audio-output: " << error.what() << '\n';
+        return 1;
     }
 }

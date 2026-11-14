@@ -9,9 +9,9 @@ namespace shiraz::guest {
 // are process-resident. refresh_code_validation publishes newly linked code
 // before constructors can create threads or register callbacks.
 struct DynamicHooks {
-  std::function<Loader *()> get_loader;
-  std::shared_ptr<std::recursive_mutex> mutex;
-  std::function<void()> refresh_code_validation;
+    std::function<Loader*()> get_loader;
+    std::shared_ptr<std::recursive_mutex> mutex;
+    std::function<void()> refresh_code_validation;
 };
 // Adds a real libdl.so guest namespace provider. Logical dlclose releases the
 // handle; images stay resident under Loader's documented lifetime contract.

@@ -14,17 +14,17 @@
 #include <stdint.h>
 #include <unistd.h>
 
-#define RESOLVE(name, type) \
-    type name = (type)dlvsym(library, #name, "SHIRAZ_BIONIC_1.0"); \
+#define RESOLVE(name, type)                                                                        \
+    type name = (type)dlvsym(library, #name, "SHIRAZ_BIONIC_1.0");                                 \
     assert(name)
 
-typedef ssize_t (*read_fn)(int, void *, size_t);
-typedef int (*open_fn)(const char *, int, ...);
+typedef ssize_t (*read_fn)(int, void*, size_t);
+typedef int (*open_fn)(const char*, int, ...);
 typedef void (*exit_fn)(int);
-typedef void *(*malloc_fn)(size_t);
-typedef void (*free_fn)(void *);
-typedef void *(*mmap_fn)(void *, size_t, int, int, int, off_t);
-typedef int (*munmap_fn)(void *, size_t);
+typedef void* (*malloc_fn)(size_t);
+typedef void (*free_fn)(void*);
+typedef void* (*mmap_fn)(void*, size_t, int, int, int, off_t);
+typedef int (*munmap_fn)(void*, size_t);
 typedef int (*close_fn)(int);
 typedef pid_t (*fork_fn)(void);
 typedef long (*syscall_fn)(long, ...);
@@ -33,17 +33,17 @@ typedef int (*killpg_fn)(pid_t, int);
 typedef int (*eventfd_fn)(unsigned int, int);
 typedef int (*inotify_init_fn)(void);
 typedef off_t (*lseek_fn)(int, off_t, int);
-typedef int (*mprotect_fn)(void *, size_t, int);
+typedef int (*mprotect_fn)(void*, size_t, int);
 typedef long (*sysconf_fn)(int);
-typedef char *(*strstr_fn)(const char *, const char *);
+typedef char* (*strstr_fn)(const char*, const char*);
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     assert(argc == 2);
     long host_page_size = sysconf(_SC_PAGESIZE);
     sysconf_fn host_sysconf = (sysconf_fn)dlsym(RTLD_DEFAULT, "sysconf");
-    void *library = dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL);
+    void* library = dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL);
     assert(library);
-    assert(dlsym(RTLD_DEFAULT, "sysconf") == (void *)host_sysconf);
+    assert(dlsym(RTLD_DEFAULT, "sysconf") == (void*)host_sysconf);
     assert(sysconf(_SC_PAGESIZE) == host_page_size);
     RESOLVE(read, read_fn);
     RESOLVE(open, open_fn);
@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
     RESOLVE(strstr, strstr_fn);
     /* Android's _SC_PAGESIZE has a different numeric value than glibc's. */
     assert(sysconf(0x27) == host_page_size);
-    char *buffer = malloc(16);
+    char* buffer = malloc(16);
     assert(buffer);
     char path[] = "/tmp/shiraz-elf-exports-XXXXXX";
     int original = mkstemp(path);
@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
     errno = 0;
     assert(read(-1, buffer, 1) == -1 && errno == EBADF);
     free(buffer);
-    void *memory = mmap(NULL, (size_t)host_page_size, PROT_READ | PROT_WRITE,
+    void* memory = mmap(NULL, (size_t)host_page_size, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     assert(memory != MAP_FAILED);
     memcpy(memory, "mapped", 7);
@@ -105,15 +105,16 @@ int main(int argc, char **argv) {
     assert(strcmp(memory, "mapped") == 0);
     assert(munmap(memory, (size_t)host_page_size) == 0);
     /* Exercise all six syscall arguments, including the x86-64 stack slot. */
-    long mapped = syscall(SYS_mmap, 0UL, (unsigned long)host_page_size,
-                          (long)(PROT_READ | PROT_WRITE),
-                          (long)(MAP_PRIVATE | MAP_ANONYMOUS), -1L, 0L);
+    long mapped =
+        syscall(SYS_mmap, 0UL, (unsigned long)host_page_size, (long)(PROT_READ | PROT_WRITE),
+                (long)(MAP_PRIVATE | MAP_ANONYMOUS), -1L, 0L);
     assert(mapped != -1);
-    memcpy((void *)mapped, "syscall", 8);
-    assert(munmap((void *)mapped, (size_t)host_page_size) == 0);
+    memcpy((void*)mapped, "syscall", 8);
+    assert(munmap((void*)mapped, (size_t)host_page_size) == 0);
     pid_t child = fork();
     assert(child >= 0);
-    if (!child) exit(37);
+    if (!child)
+        exit(37);
     int status = 0;
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 37);

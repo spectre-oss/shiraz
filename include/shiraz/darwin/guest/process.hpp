@@ -7,5 +7,5 @@ namespace shiraz::guest {
 // bitset waits are process-local; unsupported operations fail with ENOSYS.
 // Replace core_personality's abort export with this returned abort adapter.
 std::vector<ProviderExport> process_exports(std::shared_ptr<Lifecycle> lifecycle = {},
-                                          std::vector<ProviderExport> adapters = {});
+                                            std::vector<ProviderExport> adapters = {});
 } // namespace shiraz::guest

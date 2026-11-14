@@ -11,14 +11,21 @@ static const KnownTrampoline functions[] = {
 };
 #undef ENTRY
 extern "C" void* ShirazLookupGuestGles1(const char* name) {
- static void* library=dlopen("libGLESv1_CM.so.1",RTLD_NOW|RTLD_LOCAL);
- if(!library||!name)return nullptr;
- for(const auto& entry:functions)if(strcmp(name,entry.name)==0){
-  void* symbol=dlsym(library,name);if(symbol)WrapHostFunctionImpl(reinterpret_cast<HostCode>(symbol),entry.marshal_and_call,entry.name);return symbol;
- }
- return nullptr;
+    static void* library = dlopen("libGLESv1_CM.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!library || !name)
+        return nullptr;
+    for (const auto& entry : functions)
+        if (strcmp(name, entry.name) == 0) {
+            void* symbol = dlsym(library, name);
+            if (symbol)
+                WrapHostFunctionImpl(reinterpret_cast<HostCode>(symbol), entry.marshal_and_call,
+                                     entry.name);
+            return symbol;
+        }
+    return nullptr;
 }
 extern "C" void InitProxyLibrary(ProxyLibraryBuilder* builder) {
- builder->Build("libGLESv1_CM.so.1",sizeof(functions)/sizeof(functions[0]),functions,0,nullptr);
+    builder->Build("libGLESv1_CM.so.1", sizeof(functions) / sizeof(functions[0]), functions, 0,
+                   nullptr);
 }
-}
+} // namespace berberis

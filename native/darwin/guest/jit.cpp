@@ -6,11 +6,11 @@ namespace {
 thread_local unsigned depth = 0;
 }
 JitWriteScope::JitWriteScope() {
-  if (depth++ == 0)
-    pthread_jit_write_protect_np(0);
+    if (depth++ == 0)
+        pthread_jit_write_protect_np(0);
 }
 JitWriteScope::~JitWriteScope() {
-  if (--depth == 0)
-    pthread_jit_write_protect_np(1);
+    if (--depth == 0)
+        pthread_jit_write_protect_np(1);
 }
 } // namespace shiraz::guest
