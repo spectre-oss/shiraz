@@ -1,0 +1,39 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# .clang-format: IndentWidth 4, ColumnLimit 100, UseTab Never.
+[*.{c,cc,cpp,h,hpp,mm}]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# ruff.toml: line-length 100, indent-style space.
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# .swiftformat: indent 4, no line limit.
+[*.swift]
+indent_style = space
+indent_size = 4
+
+# gofmt.
+[*.go]
+indent_style = tab
+
+# Existing landing sources and workflows use two spaces (landing/.prettierrc).
+[*.{js,mjs,svelte,css,html,json,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[{Makefile,*.mk}]
+indent_style = tab
+
+[*.md]
+trim_trailing_whitespace = false

@@ -8,10 +8,12 @@ import shutil
 import subprocess
 import tempfile
 
+from init_lint import SWIFTFORMAT_VERSION
+
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / ".local/lint/venv/bin"
 EXCLUDED = {"third_party", "context", ".deps", ".local", "build", "dist", "data"}
-CONFIGS = (".clang-format", ".clang-tidy", "ruff.toml", "config/pmd.xml")
+CONFIGS = (".clang-format", ".clang-tidy", ".swiftformat", "ruff.toml", "config/pmd.xml")
 CPP = {".c", ".cpp", ".h", ".hpp", ".mm"}
 
 
@@ -21,7 +23,7 @@ def git(*args):
 
 def eligible(name):
     return not EXCLUDED.intersection(Path(name).parts) and Path(name).suffix in (
-        CPP | {".py", ".java", ".go"}
+        CPP | {".py", ".java", ".go", ".swift"}
     )
 
 
@@ -64,6 +66,11 @@ def check(root, names):
             if result.stdout:
                 print(result.stdout, end="")
                 failed = True
+        elif suffix == ".swift":
+            swiftformat = ROOT / f".local/lint/swiftformat-{SWIFTFORMAT_VERSION}/swiftformat"
+            if not swiftformat.is_file():
+                raise RuntimeError("Missing SwiftFormat; run make init")
+            run([str(swiftformat), "--lint", "--config", ".swiftformat", name])
     java = [n for n in names if Path(n).suffix == ".java"]
     if java:
         pmd = ROOT / ".local/lint/pmd-bin-7.29.0/bin/pmd"

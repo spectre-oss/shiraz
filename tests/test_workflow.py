@@ -92,7 +92,13 @@ class GitHookTests(unittest.TestCase):
             shutil.copytree(root / '.githooks', repo / '.githooks')
             # This test targets version/artifact guards. Lint snapshot behavior
             # is covered separately in test_lint; avoid tool downloads here.
-            for name in ('.clang-format', '.clang-tidy', 'ruff.toml', 'config/pmd.xml'):
+            for name in (
+                '.clang-format',
+                '.clang-tidy',
+                '.swiftformat',
+                'ruff.toml',
+                'config/pmd.xml',
+            ):
                 dest = repo / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(root / name, dest)
@@ -121,6 +127,7 @@ class GitHookTests(unittest.TestCase):
                 'VERSION',
                 '.clang-format',
                 '.clang-tidy',
+                '.swiftformat',
                 'ruff.toml',
                 'config/pmd.xml',
             )

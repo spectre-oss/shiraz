@@ -123,3 +123,6 @@ jobs:
           cache-dependency-path: landing/package-lock.json
       - run: npm ci --prefix landing
       - run: npm --prefix landing run check
+      # Report-only until landing/src is reformatted; that is a separate decision.
+      - run: npm --prefix landing run format:check
+        continue-on-error: true

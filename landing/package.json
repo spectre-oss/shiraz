@@ -10,6 +10,7 @@
     "check": "node scripts/check-compatibility.mjs && svelte-kit sync && svelte-check --fail-on-warnings",
     "prebuild": "node scripts/prepare-assets.mjs",
     "predev": "node scripts/prepare-assets.mjs",
+    "format:check": "prettier --check src scripts tests playwright.config.js vite.config.js",
     "test": "playwright test"
   },
   "devDependencies": {
@@ -20,6 +21,8 @@
     "@sveltejs/kit": "^3.1.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "axe-core": "^4.14.0",
+    "prettier": "^3.10.1",
+    "prettier-plugin-svelte": "^4.1.1",
     "sharp": "^0.35.5",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.8",

@@ -1,0 +1,10 @@
+# SwiftFormat config for macos/. Check-only (swiftformat --lint); tuned to the
+# existing sources so the lint flags drift rather than demanding a reformat.
+--swiftversion 6.2
+--indent 4
+--maxwidth 0
+--wraparguments preserve
+--wrapparameters preserve
+--wrapcollections preserve
+--closingparen balanced
+--disable wrapIfStatementBodies,wrapFunctionBodies,wrapPropertyBodies,wrapLoopBodies,wrapIfExpressionBodies,wrapSwitchCases,wrapArguments,wrapMultilineStatementBraces,hoistPatternLet,hoistTry,hoistAwait,redundantSwiftTestingSuite,blankLinesBetweenScopes,numberFormatting,docComments,extensionAccessControl,redundantReturn,preferKeyPath,andOperator,noForceUnwrapInTests,unusedArguments,sortImports,trailingCommas,swiftTestingTestCaseNames,redundantThrows,redundantParens,contentBuilder
