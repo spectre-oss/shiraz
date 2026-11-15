@@ -11,7 +11,7 @@ let package = Package(
     targets: [
         // Models, APK import, runtime process control. No UI framework imports.
         .target(name: "LauncherCore"),
-        // SwiftUI only: no AppKit, no UIKit.
+        // SwiftUI; AppKit only to activate windows (no UIKit).
         .executableTarget(name: "ShirazLauncher", dependencies: ["LauncherCore"]),
         .testTarget(name: "LauncherCoreTests", dependencies: ["LauncherCore"]),
     ]

@@ -7,6 +7,7 @@ public enum LibraryError: Error, LocalizedError, Sendable, Equatable {
     case invalidPackageName(String)
     case inspectFailed(String)
     case alreadyInLibrary(String)
+    case notAnImage(String)
 
     public var errorDescription: String? {
         switch self {
@@ -15,6 +16,7 @@ public enum LibraryError: Error, LocalizedError, Sendable, Equatable {
         case .invalidPackageName(let name): "Invalid package name: \(name)"
         case .inspectFailed(let message): message
         case .alreadyInLibrary(let package): "\(package) is already in the library."
+        case .notAnImage(let reason): "Not a usable picture: \(reason)"
         }
     }
 }
@@ -56,6 +58,61 @@ public struct LibraryStore: Sendable {
     /// One directory per imported package. Apps running in Shiraz read it
     /// (package.properties, app.apk) to see what else is installed.
     public var appsDirectory: URL { directory.appending(path: "apps", directoryHint: .isDirectory) }
+
+    // MARK: Home screen
+
+    /// Grid order, folders, dock order and wallpaper choice (HomeLayout).
+    public var homeURL: URL { directory.appending(path: "home.json") }
+
+    /// Home layouts are small; anything larger is not ours.
+    public static let maxHomeBytes = 1024 * 1024
+
+    public func loadHome() -> HomeLayout {
+        guard let size = (try? homeURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= Self.maxHomeBytes
+        else { return HomeLayout() }
+        return HomeLayout.decode(try? Data(contentsOf: homeURL))
+    }
+
+    public func saveHome(_ layout: HomeLayout) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try layout.encoded().write(to: homeURL, options: .atomic)
+    }
+
+    /// The user's own wallpaper pictures, copied in so they outlive the original.
+    public var wallpaperDirectory: URL { directory.appending(path: "wallpaper", directoryHint: .isDirectory) }
+
+    public static let maxWallpaperBytes: Int64 = 64 * 1024 * 1024
+    public static let wallpaperExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "webp", "gif", "tif", "tiff"]
+
+    /// Copy a picture into the library and return its wallpaper value.
+    /// Earlier copies are removed; the original is not touched.
+    public func importWallpaper(from source: URL) throws -> Wallpaper {
+        let source = source.resolvingSymlinksInPath()
+        let ext = source.pathExtension.lowercased()
+        guard Self.wallpaperExtensions.contains(ext) else { throw LibraryError.notAnImage("unsupported file type") }
+        let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else { throw LibraryError.notAnImage("not a regular file") }
+        guard Int64(values.fileSize ?? 0) <= Self.maxWallpaperBytes else { throw LibraryError.notAnImage("over 64 MiB") }
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: wallpaperDirectory, withIntermediateDirectories: true)
+        let name = "wallpaper-\(UUID().uuidString).\(ext)"
+        let staged = wallpaperDirectory.appending(path: ".staging-\(name)")
+        try fileManager.copyItem(at: source, to: staged)
+        for old in (try? fileManager.contentsOfDirectory(atPath: wallpaperDirectory.path)) ?? [] where old.hasPrefix("wallpaper-") {
+            try? fileManager.removeItem(at: wallpaperDirectory.appending(path: old))
+        }
+        try fileManager.moveItem(at: staged, to: wallpaperDirectory.appending(path: name))
+        return .image(name)
+    }
+
+    /// The copied picture for an `.image` wallpaper, or nil when it is gone
+    /// or the name could leave the wallpaper directory.
+    public func wallpaperURL(_ wallpaper: Wallpaper) -> URL? {
+        guard case .image(let name) = wallpaper,
+              name.wholeMatch(of: /wallpaper-[A-F0-9-]{36}\.[a-z]{3,4}/) != nil else { return nil }
+        let url = wallpaperDirectory.appending(path: name)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
 
     /// Per-session request directories (see InstallInbox).
     public var sessionsDirectory: URL { directory.appending(path: "sessions", directoryHint: .isDirectory) }

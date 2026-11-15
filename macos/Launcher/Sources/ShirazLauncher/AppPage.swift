@@ -46,6 +46,13 @@ struct AppPage: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .background(.windowBackground)
+            .onAppear {
+                // Open console from the home screen lands on the Console tab.
+                if let requested = model.requestedSection {
+                    section = requested
+                    model.requestedSection = nil
+                }
+            }
             .navigationTitle(app.displayName)
             .toolbar {
                 ToolbarItem {

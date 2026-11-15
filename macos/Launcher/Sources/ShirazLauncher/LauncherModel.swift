@@ -2,6 +2,7 @@
 import CoreGraphics
 import CryptoKit
 import Foundation
+import ImageIO
 import LauncherCore
 import Observation
 
@@ -60,7 +61,7 @@ enum LibraryScope: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .all: "All Apps"
+        case .all: "Home"
         case .running: "Running"
         case .recent: "Recently Played"
         case .favorites: "Favorites"
@@ -68,7 +69,7 @@ enum LibraryScope: String, CaseIterable, Identifiable, Hashable {
     }
     var symbol: String {
         switch self {
-        case .all: "square.grid.2x2"
+        case .all: "house"
         case .running: "play.circle"
         case .recent: "clock"
         case .favorites: "star"
@@ -98,7 +99,9 @@ enum SidebarItem: Hashable {
 
 @MainActor @Observable
 final class LauncherModel {
-    private(set) var apps: [AppEntry] = []
+    private(set) var apps: [AppEntry] = [] {
+        didSet { if apps != oldValue { reconcileHome() } }
+    }
     private(set) var sessions: [String: Session] = [:]
     /// Imports in flight (drops, catalog installs, in-app installs).
     private var importCount = 0
@@ -106,6 +109,16 @@ final class LauncherModel {
     /// Rendered APK icons and their tint colours by package.
     private(set) var icons: [String: CGImage] = [:]
     private(set) var accents: [String: CGColor] = [:]
+    /// Packages whose icon is an adaptive icon, already masked to a squircle.
+    private(set) var adaptiveIcons: Set<String> = []
+    /// Grid order, folders, dock order and wallpaper (LibraryStore.homeURL).
+    private(set) var home = HomeLayout()
+    /// The user's wallpaper picture, decoded once.
+    private(set) var wallpaperImage: CGImage?
+    /// The home item being dragged, so drop targets know what moves.
+    var homeDragging: String?
+    /// App page section to open on the next push (Open console).
+    var requestedSection: AppSection?
     private(set) var toast: Toast?
 
     /// Changing place resets the detail stack.
@@ -158,7 +171,10 @@ final class LauncherModel {
         runtimeRootOverride = UserDefaults.standard.string(forKey: "runtimeRoot") ?? ""
         sort = LibrarySort(rawValue: UserDefaults.standard.string(forKey: "librarySort") ?? "") ?? .name
         showsGrid = UserDefaults.standard.object(forKey: "libraryGrid") as? Bool ?? true
+        home = store.loadHome()
         apps = store.load()
+        reconcileHome()
+        loadWallpaperImage()
         reloadIcons()
         extractMissingIcons()
         resolveMissingLabels()
@@ -302,6 +318,8 @@ final class LauncherModel {
     func apkURL(_ package: String) -> URL { store.apkURL(for: package) }
 
     func importAPKs(_ urls: [URL]) {
+        // Drags inside the window (home icons) carry text, not files.
+        let urls = urls.filter(\.isFileURL)
         let apks = urls.filter { $0.pathExtension.lowercased() == "apk" }
         guard !apks.isEmpty else {
             if !urls.isEmpty { present(failure: "Only APK files can be added") }
@@ -383,15 +401,18 @@ final class LauncherModel {
     private func reloadIcons() {
         var rendered: [String: CGImage] = [:]
         var tints: [String: CGColor] = [:]
+        var adaptive: Set<String> = []
         for app in apps {
             if let icon = store.icon(for: app.packageName),
                let image = icon.render(directory: store.iconDirectory(for: app.packageName)) {
                 rendered[app.packageName] = image
                 tints[app.packageName] = AppIcon.accentColor(of: image)
+                if icon.kind == .adaptive { adaptive.insert(app.packageName) }
             }
         }
         icons = rendered
         accents = tints
+        adaptiveIcons = adaptive
     }
 
     /// Apps imported before icon support, or before a runtime was available,
@@ -411,6 +432,84 @@ final class LauncherModel {
     }
 
     func requestRemoval(_ package: String) { pendingRemoval = package }
+
+    // MARK: Home screen
+
+    /// Keep the layout in step with the library; save only real changes.
+    private func reconcileHome() {
+        let favorites = apps.filter(\.isFavorite).map(\.packageName)
+        // A first layout follows the library's name order.
+        let next = home.reconciled(with: apps.map(\.packageName), favorites: favorites)
+        if next != home { updateHome { $0 = next } }
+    }
+
+    /// Apply an edit to the layout and persist it.
+    func updateHome(_ edit: (inout HomeLayout) -> Void) {
+        var next = home
+        edit(&next)
+        guard next != home else { return }
+        home = next
+        do { try store.saveHome(next) } catch { present(error) }
+    }
+
+    /// Favorites in dock order.
+    var dockApps: [AppEntry] { home.dock.compactMap(entry) }
+
+    func setWallpaper(_ wallpaper: Wallpaper) {
+        updateHome { $0.wallpaper = wallpaper }
+        loadWallpaperImage()
+    }
+
+    func importWallpaper(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let wallpaper = try store.importWallpaper(from: url)
+            guard let picture = store.wallpaperURL(wallpaper).flatMap(Self.decodeImage) else {
+                throw LibraryError.notAnImage("it could not be decoded")
+            }
+            updateHome { $0.wallpaper = wallpaper }
+            wallpaperImage = picture
+        } catch {
+            present(error)
+        }
+    }
+
+    private func loadWallpaperImage() {
+        wallpaperImage = store.wallpaperURL(home.wallpaper).flatMap(Self.decodeImage)
+    }
+
+    private nonisolated static func decodeImage(_ url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        // Wallpapers are drawn at window size; a 4K-wide thumbnail is plenty.
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 3840,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// Dock membership is the favorite flag; Add to dock appends it.
+    func toggleDock(_ package: String) {
+        guard let app = entry(package) else { return }
+        if !app.isFavorite, home.dock.count >= HomeLayout.dockLimit {
+            return present(failure: "The dock is full", "Remove an app from the dock first (at most \(HomeLayout.dockLimit)).")
+        }
+        toggleFavorite(package)
+    }
+
+    /// Push the app page at its Console section.
+    func showConsole(_ package: String) {
+        requestedSection = .console
+        show(package)
+    }
+
+    /// When the current session started, while it runs.
+    func runningSince(_ package: String) -> Date? {
+        guard let session = sessions[package], session.isRunning else { return nil }
+        return session.startedAt
+    }
 
     func remove(_ package: String) {
         let name = entry(package)?.displayName ?? package

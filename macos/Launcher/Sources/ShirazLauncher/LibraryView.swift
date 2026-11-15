@@ -7,6 +7,14 @@ struct LibraryView: View {
     let scope: LibraryScope
 
     var body: some View {
+        if scope == .all, model.showsGrid, !model.apps.isEmpty {
+            HomeScreen()
+        } else {
+            library
+        }
+    }
+
+    @ViewBuilder private var library: some View {
         let apps = model.visibleApps(in: scope)
         Group {
             if model.apps.isEmpty {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+import CryptoKit
 import Foundation
 
 /// Builds `shiraz` command-line arguments from launcher state.
@@ -59,5 +60,15 @@ public enum RuntimeCommand {
     /// Library and request directories for one session (LauncherInbox.java).
     public static func libraryEnvironment(apps: URL, inbox: URL) -> [String: String] {
         ["SHIRAZ_LAUNCHER_APPS": apps.path, "SHIRAZ_LAUNCHER_INBOX": inbox.path]
+    }
+}
+
+/// The macOS identity the runtime gives a running APK
+/// (`src/shiraz/darwin_app.py`, `prepare_app_bundle`): its Dock entry and
+/// windows belong to an app with this bundle identifier.
+public enum HostIdentity {
+    public static func bundleIdentifier(for package: String) -> String {
+        let digest = SHA256.hash(data: Data(package.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "org.shiraz.apk." + digest.prefix(24)
     }
 }

@@ -116,6 +116,37 @@ final class CatalogModel {
         }.value
     }
 
+    // MARK: Home search
+
+    private var cacheRequested = false
+
+    /// Read the catalog already on disk, without downloading, so the home
+    /// search can list F-Droid apps. Leaves `phase` alone: opening the
+    /// catalog page still refreshes a stale index.
+    func loadCachedForSearch() {
+        guard catalog == nil, !cacheRequested else { return }
+        cacheRequested = true
+        let url = launcher.store.catalogURL
+        Task {
+            guard let cached = await Self.read(url), catalog == nil else { return }
+            catalog = cached
+            catalogDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        }
+    }
+
+    /// Catalog apps not yet in the library that match `query`, at most `limit`.
+    func searchResults(_ query: String, limit: Int = 8) -> [CatalogApp] {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        guard let catalog, !query.isEmpty else { return [] }
+        let library = Set(launcher.apps.map(\.packageName))
+        var results: [CatalogApp] = []
+        for app in catalog.apps where !library.contains(app.packageName) && app.matches(query) {
+            results.append(app)
+            if results.count >= limit { break }
+        }
+        return results
+    }
+
     // MARK: Browsing
 
     func visibleApps(search: String) -> [CatalogApp] {
