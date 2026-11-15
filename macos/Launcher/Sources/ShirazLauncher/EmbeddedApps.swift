@@ -139,14 +139,20 @@ final class EmbedHub {
     /// Packages most recently shown first (Recents).
     private(set) var recents: [String] = []
 
-    /// Files and environment for a new embedded launch of `package`.
-    func prepare(_ package: String, root: URL, size: CGSize) throws -> [String: String] {
+    /// Files for a shared-host embedded launch of `package`, under the library's
+    /// `embed/` directory (symlinks resolved: the host requires a real path).
+    func prepareLaunch(_ package: String, root library: URL) throws -> EmbedPaths {
         end(package)
-        let paths = try EmbedPaths.create(in: root)
-        let session = EmbeddedSession(package: package, paths: paths, size: size)
+        // realpath(3), not resolvingSymlinksInPath(): Foundation maps /private/tmp back to /tmp.
+        let embed = library.appending(path: "embed", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: embed, withIntermediateDirectories: true)
+        guard let real = realpath(embed.path, nil) else { throw EmbedError.create(errno) }
+        defer { free(real) }
+        let paths = try EmbedPaths.create(in: URL(fileURLWithPath: String(cString: real), isDirectory: true))
+        let session = EmbeddedSession(package: package, paths: paths, size: CGSize(width: 360, height: 640))
         sessions[package] = session
         session.start()
-        return paths.environment
+        return paths
     }
 
     /// Testing aid: `SHIRAZ_EMBED_ATTACH=<package>=<directory>[,…]` attaches

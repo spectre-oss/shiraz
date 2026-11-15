@@ -57,6 +57,10 @@ extension LauncherModel {
     /// activate it. Until its window exists, show the app page instead.
     func showRunning(_ package: String) {
         if EmbedHub.shared.sessions[package] != nil {
+            // The stage lives on Home; go there from any page.
+            sidebar = .library(.all)
+            routes = []
+            if !showsGrid { showsGrid = true }
             return EmbedHub.shared.show(package)
         }
         let identifier = HostIdentity.bundleIdentifier(for: package)
