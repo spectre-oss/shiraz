@@ -7,6 +7,9 @@
 #include <vector>
 #include <atomic>
 #include "shiraz/live_input.hpp"
+#if defined(__APPLE__)
+#include "shiraz/frame_export.hpp"
+#endif
 #include "shiraz/window_aspect.hpp"
 #include <cstring>
 #include <iostream>
@@ -216,15 +219,29 @@ std::unique_lock<std::mutex> acquirePresentation() {
         throw std::runtime_error("Another presentation is already active");
     return lock;
 }
+#if defined(__APPLE__)
+// An embedding launcher shows the app's frames itself; the window starts hidden.
+bool embed_requested() {
+    const char* path = std::getenv("SHIRAZ_EMBED_FRAME");
+    return path && *path;
+}
+#endif
 struct PresentationWindow {
     std::unique_lock<std::mutex> lock;
     Video video;
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window{nullptr, SDL_DestroyWindow};
     PresentationWindow(int width, int height, const std::string& title)
         : lock(acquirePresentation()) {
+#if defined(__APPLE__)
+        window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED,
+                                      SDL_WINDOWPOS_UNDEFINED, width, height,
+                                      SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                                          (embed_requested() ? SDL_WINDOW_HIDDEN : 0)));
+#else
         window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED,
                                       SDL_WINDOWPOS_UNDEFINED, width, height,
                                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI));
+#endif
         if (!window)
             throw std::runtime_error(SDL_GetError());
     }
@@ -470,6 +487,16 @@ void present(const Surface& initial, const std::string& title, int frames,
              const std::function<uint64_t()>& contentRevision,
              const std::function<void(Surface&, const DisplayGeometry&)>& displayChanged) {
     LiveInput live(std::getenv("SHIRAZ_LIVE_INPUT"));
+#if defined(__APPLE__)
+    // Embedded: frames go to the launcher's shared file, the window stays hidden
+    // until "embed 0" detaches it. Visibility follows the embedding, not the window.
+    std::unique_ptr<FrameExport> exporter;
+    if (embed_requested())
+        exporter = std::make_unique<FrameExport>(std::getenv("SHIRAZ_EMBED_FRAME"));
+    bool embedded = bool(exporter), exportPending = false;
+    std::vector<uint32_t> exportPixels;
+    int exportWidth = 0, exportHeight = 0;
+#endif
     unsigned liveSequence = 0;
     std::deque<TestLocationCommand> pendingLocations;
     const auto replay = loadReplay();
@@ -486,15 +513,27 @@ void present(const Surface& initial, const std::string& title, int frames,
     ActivePresentation active;
     auto& window = owned->window;
     SDL_SetWindowTitle(window.get(), title.c_str());
+#if defined(__APPLE__)
+    const Uint32 liveResizeEvent = SDL_RegisterEvents(3);
+#else
     const Uint32 liveResizeEvent = SDL_RegisterEvents(2);
+#endif
     if (liveResizeEvent == Uint32(-1))
         throw std::runtime_error("Cannot allocate live resize event");
     active_window = window.get();
     std::cerr << "SHIRAZ_WINDOW backend=" << SDL_GetCurrentVideoDriver()
               << " initial=" << image.width << "x" << image.height << "\n";
+#if defined(__APPLE__)
+    if (exporter)
+        std::cerr << "SHIRAZ_EMBED frame=shared embedded=1\n";
+    if (visibility)
+        visibility(embedded || (SDL_GetWindowFlags(window.get()) &
+                                (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0);
+#else
     if (visibility)
         visibility(
             (SDL_GetWindowFlags(window.get()) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0);
+#endif
     if (focus)
         focus((SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS) != 0);
     struct CursorLifetime {
@@ -808,6 +847,21 @@ void present(const Surface& initial, const std::string& title, int frames,
                 std::cerr << "SHIRAZ_LIVE_INPUT " << ++liveSequence << " mock_location_queued\n";
                 continue;
             }
+#if defined(__APPLE__)
+            bool embedValue = false;
+            if (live_embed(line, embedValue)) {
+                if (!exporter)
+                    throw std::invalid_argument("Live embed requires SHIRAZ_EMBED_FRAME");
+                SDL_Event command{};
+                command.type = liveResizeEvent + 2;
+                command.user.windowID = SDL_GetWindowID(window.get());
+                command.user.code = embedValue ? 1 : 0;
+                if (SDL_PushEvent(&command) != 1)
+                    throw std::runtime_error("Cannot enqueue live embed");
+                std::cerr << "SHIRAZ_LIVE_INPUT " << ++liveSequence << " queued\n";
+                continue;
+            }
+#endif
             SDL_Event command = live_event(line, SDL_GetWindowID(window.get()));
             if (command.type == SDL_WINDOWEVENT &&
                 command.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
@@ -851,6 +905,27 @@ void present(const Surface& initial, const std::string& title, int frames,
                 testLocation(fix.latitude, fix.longitude, fix.accuracy);
                 continue;
             }
+#if defined(__APPLE__)
+            if (event.type == liveResizeEvent + 2 && ownWindow(event.user.windowID)) {
+                const bool embed = event.user.code == 1;
+                if (embed != embedded) {
+                    embedded = embed;
+                    exporter->setDetached(!embed);
+                    exportPending = false;
+                    if (embed)
+                        SDL_HideWindow(window.get());
+                    else {
+                        SDL_ShowWindow(window.get());
+                        SDL_RaiseWindow(window.get());
+                    }
+                    if (visibility)
+                        visibility(true);
+                    repaint = true;
+                    std::cerr << "SHIRAZ_EMBED embedded=" << embed << "\n";
+                }
+                continue;
+            }
+#endif
             if (event.type == liveResizeEvent && ownWindow(event.user.windowID)) {
                 int width = int(reinterpret_cast<intptr_t>(event.user.data1)),
                     height = int(reinterpret_cast<intptr_t>(event.user.data2));
@@ -941,7 +1016,12 @@ void present(const Surface& initial, const std::string& title, int frames,
             if (event.type == SDL_WINDOWEVENT && ownWindow(event.window.windowID) &&
                 event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && focus)
                 focus(true);
+#if defined(__APPLE__)
+            if (event.type == SDL_WINDOWEVENT && ownWindow(event.window.windowID) && visibility &&
+                !embedded) {
+#else
             if (event.type == SDL_WINDOWEVENT && ownWindow(event.window.windowID) && visibility) {
+#endif
                 switch (event.window.event) {
                 case SDL_WINDOWEVENT_HIDDEN:
                 case SDL_WINDOWEVENT_MINIMIZED:
@@ -1081,6 +1161,10 @@ void present(const Surface& initial, const std::string& title, int frames,
             repaint = true;
             gpuRevision = gpu_revision();
         }
+#if defined(__APPLE__)
+        if (exportPending && embedded)
+            exportPending = !exporter->publish(exportPixels.data(), exportWidth, exportHeight);
+#endif
         const double ticked = frameStats.enabled ? FrameStats::now() : 0;
         const uint64_t presentsBefore = presents;
         int w, h;
@@ -1101,6 +1185,24 @@ void present(const Surface& initial, const std::string& title, int frames,
             checked(SDL_RenderFlush(renderer.get()));
 #if defined(__APPLE__)
             eglSurfaceReport.sample(renderer.get());
+#endif
+#if defined(__APPLE__)
+            // Embedded: export what the renderer produced (CPU and GPU Canvas
+            // layers composed), at the window's pixel size.
+            if (exporter && embedded) {
+                int cw = 0, ch = 0;
+                checked(SDL_GetRendererOutputSize(renderer.get(), &cw, &ch));
+                if (cw > 0 && ch > 0 && cw <= FrameExportLayout::maxSide &&
+                    ch <= FrameExportLayout::maxSide &&
+                    uint64_t(cw) * uint64_t(ch) <= FrameExportLayout::maxPixels) {
+                    exportPixels.resize(size_t(cw) * size_t(ch));
+                    checked(SDL_RenderReadPixels(renderer.get(), nullptr, SDL_PIXELFORMAT_ARGB8888,
+                                                 exportPixels.data(), cw * 4));
+                    exportWidth = cw;
+                    exportHeight = ch;
+                    exportPending = !exporter->publish(exportPixels.data(), cw, ch);
+                }
+            }
 #endif
             // Opt-in app-surface observation reads the actual renderer output,
             // including GPU sampling, rather than only the CPU Canvas buffer.

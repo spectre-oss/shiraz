@@ -88,6 +88,22 @@ inline bool live_location(const std::string& line, TestLocationCommand& result) 
     result = value;
     return true;
 }
+#if defined(__APPLE__)
+// "embed 0" detaches an embedded app into its own window; "embed 1" returns it
+// to the launcher (SHIRAZ_EMBED_FRAME). Returns false for other commands.
+inline bool live_embed(const std::string& line, bool& embedded) {
+    std::istringstream row(line);
+    std::string action, extra;
+    row >> action;
+    if (action != "embed")
+        return false;
+    int value;
+    if (!(row >> value) || (value != 0 && value != 1) || (row >> extra))
+        throw std::invalid_argument("Live embed requires 0 or 1");
+    embedded = value == 1;
+    return true;
+}
+#endif
 inline SDL_Event live_event(const std::string& line, Uint32 window) {
     std::istringstream row(line);
     std::string action, extra;

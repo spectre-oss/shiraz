@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#if defined(__APPLE__)
+#include "shiraz/frame_export.hpp"
+#endif
 #include "shiraz/live_input.hpp"
 #include "shiraz/presentation.hpp"
 #include <cassert>
+#if defined(__APPLE__)
+#include <sys/stat.h>
+#include <cstring>
+#endif
 #include <cstdlib>
 #include <iostream>
 #include <filesystem>
@@ -33,6 +40,67 @@ int main() {
         }
         assert(rejected);
     }
+#if defined(__APPLE__)
+    {
+        bool embedded = false;
+        assert(!shiraz::live_embed("down 1 2", embedded) && !embedded);
+        assert(shiraz::live_embed("embed 1", embedded) && embedded);
+        assert(shiraz::live_embed("embed 0", embedded) && !embedded);
+        bool bad = false;
+        try {
+            shiraz::live_embed("embed 2", embedded);
+        } catch (const std::invalid_argument&) {
+            bad = true;
+        }
+        assert(bad);
+    }
+    {
+        std::string frame = std::string(path) + ".frame";
+        int fd = open(frame.c_str(), O_RDWR | O_CREAT | O_EXCL, 0644);
+        assert(fd >= 0);
+        bool shared = false;
+        try {
+            shiraz::FrameExport rejected(frame.c_str());
+        } catch (const std::invalid_argument&) {
+            shared = true;
+        }
+        assert(shared);
+        assert(fchmod(fd, 0600) == 0);
+        {
+            shiraz::FrameExport exporter(frame.c_str());
+            const uint32_t pixels[6] = {1, 2, 3, 4, 5, 6};
+            assert(exporter.publish(pixels, 3, 2) && exporter.revision() == 1);
+            struct stat info{};
+            assert(fstat(fd, &info) == 0 &&
+                   uint64_t(info.st_size) == shiraz::FrameExportLayout::capacity);
+            unsigned char header[36];
+            assert(pread(fd, header, sizeof header, 0) == ssize_t(sizeof header));
+            uint32_t word[9];
+            std::memcpy(word, header, sizeof word);
+            assert(word[0] == shiraz::FrameExportLayout::magic && word[1] == 1);
+            assert(word[4] == 3 && word[5] == 2 && word[6] == 12 && word[7] == 0);
+            uint32_t copied[6];
+            assert(pread(fd, copied, sizeof copied, shiraz::FrameExportLayout::header) ==
+                   ssize_t(sizeof copied));
+            assert(std::memcmp(copied, pixels, sizeof pixels) == 0);
+            assert(flock(fd, LOCK_SH) == 0);
+            assert(!exporter.publish(pixels, 3, 2) && exporter.revision() == 1);
+            assert(flock(fd, LOCK_UN) == 0);
+            exporter.setDetached(true);
+            assert(pread(fd, word, sizeof word, 0) == ssize_t(sizeof word));
+            assert(word[7] == shiraz::FrameExportLayout::detachedFlag && exporter.revision() == 2);
+            bool bounds = false;
+            try {
+                exporter.publish(pixels, 9000, 1);
+            } catch (const std::invalid_argument&) {
+                bounds = true;
+            }
+            assert(bounds);
+        }
+        close(fd);
+        unlink(frame.c_str());
+    }
+#endif
     assert(lseek(file, 0, SEEK_SET) == 0);
     assert(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0);
     auto wheel = shiraz::live_event("wheel 20 30 0 -0.5", 7);
