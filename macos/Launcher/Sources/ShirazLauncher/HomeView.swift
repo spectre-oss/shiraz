@@ -46,7 +46,7 @@ extension LauncherModel {
 
     /// Tap on a home icon: launch, or bring a running app's window forward.
     func open(_ package: String) {
-        if sessions[package]?.isRunning == true {
+        if sessions[package]?.isRunning == true || EmbedHub.shared.sessions[package] != nil {
             showRunning(package)
         } else {
             launch(package)
@@ -56,6 +56,9 @@ extension LauncherModel {
     /// The runtime gives each APK its own macOS app identity (HostIdentity);
     /// activate it. Until its window exists, show the app page instead.
     func showRunning(_ package: String) {
+        if EmbedHub.shared.sessions[package] != nil {
+            return EmbedHub.shared.show(package)
+        }
         let identifier = HostIdentity.bundleIdentifier(for: package)
         if let host = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first {
             host.activate()
@@ -78,6 +81,9 @@ struct HomeScreen: View {
     var body: some View {
         @Bindable var model = model
         let searching = !model.search.trimmingCharacters(in: .whitespaces).isEmpty
+        // While an app is on the stage, Home underneath takes no clicks and
+        // leaves the accessibility tree.
+        let staged = EmbedHub.shared.shown.flatMap { EmbedHub.shared.sessions[$0] }
         ZStack {
             WallpaperView(wallpaper: model.home.wallpaper, image: model.wallpaperImage)
                 .ignoresSafeArea()
@@ -101,8 +107,12 @@ struct HomeScreen: View {
             }
             .scrollIndicators(.automatic)
         }
+        .allowsHitTesting(staged == nil)
+        .accessibilityHidden(staged != nil)
         .overlay(alignment: .bottom) {
             DockBar()
+                .allowsHitTesting(staged == nil)
+                .accessibilityHidden(staged != nil)
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity)
                 // Icons scrolled under the dock fade out instead of colliding with it.
@@ -114,6 +124,13 @@ struct HomeScreen: View {
                 }
         }
         .overlay {
+            if let session = staged {
+                EmbeddedStage(session: session)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+        .animation(.smooth(duration: 0.25), value: EmbedHub.shared.shown)
+        .overlay {
             if let id = openFolder, let folder = model.home.folder(id: id) {
                 FolderOverlay(folder: folder) { withAnimation(.smooth(duration: 0.25)) { openFolder = nil } }
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
@@ -121,6 +138,7 @@ struct HomeScreen: View {
         }
         .foregroundStyle(HomePalette.text)
         .environment(\.colorScheme, .dark)
+        .onAppear { EmbedHub.shared.attachFromEnvironment() }
         .onChange(of: model.search) { _, query in
             if !query.isEmpty { catalog.loadCachedForSearch() }
         }
@@ -228,7 +246,7 @@ struct WallpaperView: View {
                 context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(HomePalette.wall))
                 let sx = size.width / 1072, sy = size.height / 800
                 var lines = Path()
-                for step in 0..<4 {
+                for step in 0 ..< 4 {
                     let d = CGFloat(step) * 60, e = CGFloat(step) * 20
                     lines.move(to: CGPoint(x: -40 * sx, y: (520 + d) * sy))
                     lines.addCurve(to: CGPoint(x: (560 + e) * sx, y: (500 + d) * sy),

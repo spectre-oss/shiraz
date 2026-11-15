@@ -4,7 +4,8 @@ A SwiftUI app for macOS 27 that keeps a library of APKs, lets you set per-app
 launch options, and starts and stops the Shiraz runtime for each one. UI code
 imports SwiftUI and Observation, plus CoreGraphics and ImageIO for icon bitmaps
 (no UIKit). AppKit is used only where SwiftUI has no equivalent: bringing
-the launcher forward and activating a running app's window.
+the launcher forward, activating a running app's window, and the view that
+shows an embedded app's frames and forwards its mouse and keyboard input.
 
 Experimental. The macOS runtime itself is still in progress (see
 `docs/macos_final_goal.md`), so an APK that imports can still fail to start.
@@ -82,6 +83,40 @@ The launcher shows the runtime's own output in each app's Console tab.
   `build/icons/shiraz-badge`, which the runtime uses to compose each APK's
   Dock icon. APKs without a supported raster icon get the plain ghost.
 
+## Apps inside the launcher (embedding)
+
+`Sources/ShirazLauncher/EmbeddedApps.swift`, `Sources/LauncherCore/EmbedChannel.swift`,
+runtime side `include/shiraz/frame_export.hpp` and `native/presentation.cpp`.
+
+- Transport: a per-launch owner-only directory (0700) with two 0600 files.
+  `input` is the runtime's `SHIRAZ_LIVE_INPUT` command file (append-only).
+  `frame` is `SHIRAZ_EMBED_FRAME`, a shared mapped file: a 4 KiB header
+  (magic `SHZF`, version, revision, width, height, stride, flags, pid) then
+  ARGB8888 pixels. The runtime writes under an exclusive `flock` and the
+  launcher copies under a shared one, so a frame is never torn. With
+  `SHIRAZ_EMBED_FRAME` set, the runtime's SDL window starts hidden and each
+  presented frame (GPU layers included, read back from the renderer) is
+  published.
+- Stage (artboard E): top bar with Landscape/Portrait, Fill/Phone Size,
+  Console and Detach Window; Back (⌘←), Home (⇧⌘H) and Recents below.
+  - Changing the stage size or rotating sends `resize w h`: a real Android
+    relayout at the new size, not a scaled bitmap.
+  - Mouse, scroll wheel, keys and typed text go through the normal input
+    path (`down/move/up`, `wheel`, `keydown/keyup`, `text`). Back sends the
+    SDL `AC Back` key, which the runtime maps to Android BACK.
+  - Home hides the stage and the app keeps running. Recents switches between
+    embedded apps (not yet tested with two apps).
+  - Detach sends `embed 0`: the runtime shows its own window at the current
+    size and sets the detached flag. Bring Back Here / Attach sends `embed 1`.
+- Testing aid: `SHIRAZ_EMBED_ATTACH=<package>=<dir>[,...]` attaches the stage
+  to runtimes started by hand with `SHIRAZ_LIVE_INPUT=<dir>/input` and
+  `SHIRAZ_EMBED_FRAME=<dir>/frame` (the files must exist, owner-only).
+- Not done: Launch from the launcher does not start apps embedded yet (it
+  needs the shared-host launch path to pass the two paths). An externally
+  attached stage keeps the last frame after the app exits. The readback costs
+  one full-frame copy per presented frame; it is not measured yet, and
+  scaled (HiDPI) displays are not tested.
+
 ## F-Droid
 
 - F-Droid Catalog (sidebar, or Browse F-Droid on the welcome screen) runs
@@ -132,8 +167,8 @@ report, performance stats.
 
 Also missing:
 
-- Apps still run in their own windows; the launcher does not host them yet,
-  and Continue cards have no last-frame preview.
+- Apps launched from the launcher still run in their own windows (see
+  embedding above), and Continue cards have no last-frame preview.
 
 - Vector-drawable icons are not rendered; those apps get a monogram.
 - Embedded runtime. For now the launcher drives a source checkout through
