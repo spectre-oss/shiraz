@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-11-21",
+  "apiLevel": 35,
+  "androidVersion": "15",
+  "definition": "Exported extern \"C\" symbols audited with nm across compiled Shiraz NDK shared libraries versus the API 35 NDK catalog (scripts/audit_ndk_apis.py). Exporting symbols and passing native unit tests does not establish complete hardware-driver or CTS parity.",
+  "librariesPresent": 15,
+  "librariesTotal": 15,
+  "symbolsPresent": 887,
+  "symbolsReference": 887,
+  "libraries": [
+    {
+      "library": "libandroid.so",
+      "present": 316,
+      "reference": 316,
+      "families": [
+        "ANativeWindow",
+        "AHardwareBuffer",
+        "ASharedMemory",
+        "ALooper",
+        "AChoreographer",
+        "ASensor",
+        "AFont",
+        "ATrace",
+        "AConfiguration",
+        "AInput",
+        "ANativeActivity",
+        "AAsset",
+        "ASurfaceControl",
+        "ASurfaceTexture",
+        "AImageDecoder",
+        "APerformanceHint",
+        "AThermal",
+        "AStorageManager"
+      ]
+    },
+    {
+      "library": "libjnigraphics.so",
+      "present": 6,
+      "reference": 6,
+      "families": [
+        "AndroidBitmap"
+      ]
+    },
+    {
+      "library": "libmediandk.so",
+      "present": 132,
+      "reference": 132,
+      "families": [
+        "AMediaFormat",
+        "AMediaCodec",
+        "AMediaExtractor",
+        "AMediaMuxer",
+        "AMediaDataSource",
+        "AMediaCrypto",
+        "AMediaDrm",
+        "AImageReader"
+      ]
+    },
+    {
+      "library": "libsync.so",
+      "present": 4,
+      "reference": 4,
+      "families": [
+        "sync"
+      ]
+    },
+    {
+      "library": "libOpenSLES.so",
+      "present": 11,
+      "reference": 11,
+      "families": [
+        "OpenSLES"
+      ]
+    },
+    {
+      "library": "libaaudio.so",
+      "present": 65,
+      "reference": 65,
+      "families": [
+        "AAudio"
+      ]
+    },
+    {
+      "library": "liblog.so",
+      "present": 18,
+      "reference": 18,
+      "families": [
+        "log"
+      ]
+    },
+    {
+      "library": "libicu.so",
+      "present": 91,
+      "reference": 91,
+      "families": [
+        "ICU4C"
+      ]
+    },
+    {
+      "library": "libamidi.so",
+      "present": 14,
+      "reference": 14,
+      "families": [
+        "AMidi"
+      ]
+    },
+    {
+      "library": "libcamera2ndk.so",
+      "present": 45,
+      "reference": 45,
+      "families": [
+        "ACamera2"
+      ]
+    },
+    {
+      "library": "libOpenMAXAL.so",
+      "present": 13,
+      "reference": 13,
+      "families": [
+        "OpenMAXAL"
+      ]
+    },
+    {
+      "library": "libbinder_ndk.so",
+      "present": 83,
+      "reference": 83,
+      "families": [
+        "AIBinder",
+        "AParcel",
+        "AStatus"
+      ]
+    },
+    {
+      "library": "libneuralnetworks.so",
+      "present": 43,
+      "reference": 43,
+      "families": [
+        "ANeuralNetworks"
+      ]
+    },
+    {
+      "library": "libvulkan.so",
+      "present": 32,
+      "reference": 32,
+      "families": [
+        "Vulkan"
+      ]
+    },
+    {
+      "library": "libnativewindow.so",
+      "present": 14,
+      "reference": 14,
+      "families": [
+        "ANativeWindow"
+      ]
+    }
+  ]
+}

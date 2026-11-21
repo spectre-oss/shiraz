@@ -71,4 +71,46 @@ if (snapshot) {
   }
   if (total !== snapshot.catalogSize) throw Error('Recorded assertions do not sum to the snapshot catalog');
 }
-console.log(`Validated ${support.areas.length} subsystem notes, ${classes.reference} reference classes and ${planned.total} planned assertions`);
+const ndk = JSON.parse(readFileSync(`${root}landing/src/lib/ndk-inventory.json`, 'utf8'));
+if (
+  ndk.schemaVersion !== 1 ||
+  !/^\d{4}-\d{2}-\d{2}$/.test(ndk.updated) ||
+  ndk.apiLevel !== 35 ||
+  !integer(ndk.librariesPresent) ||
+  !integer(ndk.librariesTotal) ||
+  !ndk.librariesTotal ||
+  ndk.librariesPresent > ndk.librariesTotal ||
+  !integer(ndk.symbolsPresent) ||
+  !integer(ndk.symbolsReference) ||
+  !ndk.symbolsReference ||
+  ndk.symbolsPresent > ndk.symbolsReference ||
+  !Array.isArray(ndk.libraries) ||
+  ndk.libraries.length !== ndk.librariesTotal
+) {
+  throw Error('Invalid NDK inventory');
+}
+const ndkLibs = new Set();
+for (const row of ndk.libraries) {
+  if (
+    ndkLibs.has(row.library) ||
+    !/^lib[a-zA-Z0-9_]+\.so$/.test(row.library) ||
+    !integer(row.present) ||
+    !integer(row.reference) ||
+    !row.reference ||
+    row.present > row.reference ||
+    !Array.isArray(row.families) ||
+    !row.families.length
+  ) {
+    throw Error(`Invalid NDK library row: ${row.library}`);
+  }
+  ndkLibs.add(row.library);
+}
+if (
+  ndk.libraries.reduce((sum, row) => sum + row.present, 0) !== ndk.symbolsPresent ||
+  ndk.libraries.reduce((sum, row) => sum + row.reference, 0) !== ndk.symbolsReference
+) {
+  throw Error('NDK inventory totals disagree');
+}
+console.log(
+  `Validated ${support.areas.length} subsystem notes, ${classes.reference} reference classes, ${ndk.librariesTotal} NDK libraries (${ndk.symbolsPresent}/${ndk.symbolsReference} symbols) and ${planned.total} planned assertions`
+);

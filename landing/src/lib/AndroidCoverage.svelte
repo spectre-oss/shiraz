@@ -1,6 +1,7 @@
 <script>
   // SPDX-License-Identifier: GPL-3.0-only
   import inventory from './android-inventory.json';
+  import ndk from './ndk-inventory.json';
   import support from './android-support.json';
   let query = $state('');
   let status = $state('All');
@@ -12,6 +13,7 @@
   ));
   const classes = inventory.inventory;
   const percent = (100 * classes.present / classes.reference).toFixed(1);
+  const ndkPercent = (100 * ndk.symbolsPresent / ndk.symbolsReference).toFixed(1);
   const states = ['PASS','FAIL','UNSUPPORTED','SKIPPED','TIMEOUT','NOT_RUN'];
   const snapshot = inventory.probeSnapshot;
   const total = state => snapshot.categories.reduce((sum,row) => sum + row.counts[state],0);
@@ -52,6 +54,17 @@
   <details class="coverage-details"><summary>Class inventory by Android package</summary>
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to horizontally scrollable table) -->
     <div class="coverage-scroll" role="region" aria-describedby="android-table-hint" aria-label="Android API class inventory" tabindex="0"><table class="coverage-table coverage-numbers"><caption class="visually-hidden">API 35 class-name presence by Android package</caption><thead><tr><th scope="col">Package</th><th scope="col">Present</th><th scope="col">Reference</th><th scope="col">Class names present</th></tr></thead><tbody>{#each classes.packages as item}<tr><th scope="row">{item.package}</th><td>{item.present}</td><td>{item.reference}</td><td><meter min="0" max={item.reference} value={item.present} aria-label={`${item.package}: ${item.present} of ${item.reference} class names`}></meter> {(100*item.present/item.reference).toFixed(1)}%</td></tr>{/each}</tbody></table></div>
+  </details>
+
+  <h3>NDK native library inventory</h3>
+  <p><strong>{ndk.librariesPresent} of {ndk.librariesTotal} NDK libraries built; {ndk.symbolsPresent.toLocaleString('en')} of {ndk.symbolsReference.toLocaleString('en')} cataloged C symbols exported ({ndkPercent}%).</strong> Audited from compiled shared libraries with <code>nm</code> against the Android {ndk.androidVersion} / API {ndk.apiLevel} NDK catalog and exercised by 9 native behavioral test suites. Hardware drivers such as host Vulkan ICDs and physical Camera2 capture remain host-dependent. <a href={report('docs/ndk_final_goal.md')}>Read the NDK roadmap</a>.</p>
+  <figure class="coverage-figure">
+    <div class="coverage-bar" role="img" aria-label={`${ndk.symbolsPresent} NDK symbols exported; ${ndk.symbolsReference-ndk.symbolsPresent} absent from the API ${ndk.apiLevel} NDK catalog`}><span style:width={ndkPercent + '%'}></span></div>
+    <figcaption><span>Exported: {ndk.symbolsPresent.toLocaleString('en')} ({ndk.librariesPresent}/{ndk.librariesTotal} libs)</span><span>Missing: {(ndk.symbolsReference-ndk.symbolsPresent).toLocaleString('en')}</span></figcaption>
+  </figure>
+  <details class="coverage-details"><summary>NDK symbol inventory by shared library</summary>
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to horizontally scrollable table) -->
+    <div class="coverage-scroll" role="region" aria-describedby="android-table-hint" aria-label="Android NDK symbol inventory" tabindex="0"><table class="coverage-table coverage-numbers"><caption class="visually-hidden">API 35 NDK C symbol presence by shared library</caption><thead><tr><th scope="col">Library</th><th scope="col">Present</th><th scope="col">Reference</th><th scope="col">Symbols exported</th></tr></thead><tbody>{#each ndk.libraries as item}<tr><th scope="row">{item.library}</th><td>{item.present}</td><td>{item.reference}</td><td><meter min="0" max={item.reference} value={item.present} aria-label={`${item.library}: ${item.present} of ${item.reference} symbols`}></meter> {(100*item.present/item.reference).toFixed(1)}%</td></tr>{/each}</tbody></table></div>
   </details>
 
   <h3>Behavioral probe tracker</h3>

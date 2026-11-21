@@ -219,6 +219,8 @@ test('Android tracker separates class inventory, subsystem support and historica
   await expect(coverage.getByRole('heading',{name:'How much of Android works?'})).toBeVisible();
   await expect(coverage.getByText('No whole-Android compatibility percentage has been established.',{exact:true})).toBeVisible();
   await expect(coverage.getByRole('img',{name:/class names present; .* absent from the API 35 reference/})).toBeVisible();
+  await expect(coverage.getByRole('heading',{name:'NDK native library inventory'})).toBeVisible();
+  await expect(coverage.getByRole('img',{name:/NDK symbols exported; 0 absent from the API 35 NDK catalog/})).toBeVisible();
   await coverage.getByLabel('Search Android support').fill('microphone');
   const table=coverage.getByRole('region',{name:'Android subsystem coverage'});
   await expect(table.getByRole('rowheader',{name:'Microphone and camera'})).toBeVisible();
