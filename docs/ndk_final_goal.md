@@ -40,7 +40,7 @@ behavioral unit tests:
 | **N1** | `libandroid.so` core app, input, config & assets | `AConfiguration_*`, `AInputEvent_*`, `AInputQueue_*`, `AKeyEvent_*`, `AMotionEvent_*`, `ANativeActivity_*`, `AAssetManager_*` / `AAsset_*` / `AAssetDir_*` | `[x]` |
 | **N2** | `libandroid.so` graphics/system/storage & `libjnigraphics.so` | `ASurfaceControl_*`, `ASurfaceTransaction_*`, `AImageDecoder_*`, `APerformanceHint_*`, `AThermal_*`, `AStorageManager_*`, `AObbInfo_*`, `AndroidBitmap_compress` / `_getDataSpace` / `_getHardwareBuffer` | `[x]` |
 | **N3** | `libmediandk.so` containers & codec surface | `AMediaExtractor_*` (WAV/MP4), `AMediaMuxer_*` (WAV/MP4), `AMediaDataSource_*`, `AMediaFormat_*` & `AMediaCodec_*` completion | `[x]` |
-| **N4** | `libaaudio.so` low-latency audio | Full `AAudioStreamBuilder_*` & `AAudioStream_*` over CoreAudio/ALSA + callback/ring-buffer engine | `[ ]` |
+| **N4** | `libaaudio.so` low-latency audio | Full `AAudioStreamBuilder_*` & `AAudioStream_*` over CoreAudio/ALSA + callback/ring-buffer engine | `[x]` |
 | **N5** | `libicu.so` & `liblog.so` | Unversioned NDK ICU4C ABI (`u_*`, `ubrk_*`, `ucnv_*`, `ucol_*`, `udat_*`, `uloc_*`, `unorm2_*`, `unum_*`, `ubidi_*`, `uscript_*`, `utext_*`, `utrans_*`, `ucal_*`) + full Android logging API | `[ ]` |
 | **N6** | `libamidi.so`, `libcamera2ndk.so` & `libOpenMAXAL.so` | Native MIDI port/loopback engine, Camera2 metadata/request/session API, OpenMAX AL 1.0.1 COM engine | `[ ]` |
 | **N7** | `libbinder_ndk.so` & `libneuralnetworks.so` | Real in-process NDK Binder (`AIBinder_*`, `AParcel_*`, `AStatus_*`, `ABinderProcess_*`) + real CPU NNAPI tensor engine (`ANeuralNetworks*`) | `[ ]` |
@@ -56,7 +56,7 @@ behavioral unit tests:
 | `[x]` | `libmediandk.so` | `AMediaFormat`, `AMediaCodec`, `AMediaCrypto`, `AMediaDrm`, `AImageReader`, `AImage`, `AMediaExtractor`, `AMediaMuxer`, `AMediaDataSource` | N0 + N3 |
 | `[x]` | `libsync.so` | `sync_wait`, `sync_merge`, `sync_file_info`, `sync_file_info_free` | N0 |
 | `[x]` | `libOpenSLES.so` | `slCreateEngine`, `slQueryNumSupportedEngineInterfaces`, `slQuerySupportedEngineInterfaces`, `SL_IID_*` | Existing + N0 |
-| `[ ]` | `libaaudio.so` | `AAudio_createStreamBuilder`, `AAudioStreamBuilder_*`, `AAudioStream_*`, `AAudio_convert*` | N4 |
+| `[x]` | `libaaudio.so` | `AAudio_createStreamBuilder`, `AAudioStreamBuilder_*`, `AAudioStream_*`, `AAudio_convert*` | N4 |
 | `[ ]` | `liblog.so` | `__android_log_*` | N5 |
 | `[ ]` | `libicu.so` | Unversioned NDK ICU4C (`u_*`, `ubrk_*`, `ucnv_*`, `ucol_*`, `udat_*`, `uloc_*`, `unorm2_*`, `unum_*`, `ubidi_*`, `uscript_*`, `utext_*`, `utrans_*`, `ucal_*`) | N5 |
 | `[ ]` | `libamidi.so` | `AMidiDevice_*`, `AMidiInputPort_*`, `AMidiOutputPort_*` | N6 |

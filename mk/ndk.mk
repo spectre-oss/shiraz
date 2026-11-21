@@ -8,7 +8,8 @@ NDK_LINUX_LIBS := \
 	build/libjnigraphics.so \
 	build/libmediandk.so \
 	build/libsync.so \
-	build/libOpenSLES.so
+	build/libOpenSLES.so \
+	build/libaaudio.so
 
 NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libandroid.so \
@@ -16,7 +17,8 @@ NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libjnigraphics.so \
 	$(MACOS_OUT)/libmediandk.so \
 	$(MACOS_OUT)/libsync.so \
-	$(MACOS_OUT)/libOpenSLES.so
+	$(MACOS_OUT)/libOpenSLES.so \
+	$(MACOS_OUT)/libaaudio.so
 
 # --- Milestone N0: Standalone libmediandk.so, libsync.so, libnativewindow.so, libOpenSLES.so ---
 
@@ -31,6 +33,10 @@ build/libsync.so: native/sync_fence.cpp build/libandroid.so
 build/libOpenSLES.so: build/libOpenSLES.so.1
 	ln -sfn libOpenSLES.so.1 $@
 
+build/libaaudio.so: native/ndk_aaudio.cpp include/shiraz/ndk/aaudio.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_aaudio.cpp -o $@ -pthread
+
 $(MACOS_OUT)/libnativewindow.so: $(MACOS_OUT)/libandroid.so
 	ln -sfn libandroid.so $@
 
@@ -43,6 +49,9 @@ $(MACOS_OUT)/libsync.so: native/sync_fence.cpp $(MACOS_OUT)/.dir
 $(MACOS_OUT)/libOpenSLES.so: native/opensles.cpp third_party/opensles/SLES/OpenSLES.h third_party/opensles/SLES/OpenSLES_Android.h $(MACOS_OUT)/.dir
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -isystem third_party/opensles -fPIC $(MACOS_DYLIB) native/opensles.cpp -o $@ -pthread -framework AudioToolbox -framework CoreFoundation
 
+$(MACOS_OUT)/libaaudio.so: native/ndk_aaudio.cpp include/shiraz/ndk/aaudio.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_aaudio.cpp -o $@ -pthread -framework AudioToolbox -framework CoreFoundation
+
 $(MACOS_OUT)/test-ndk-standalone: tests/ndk_standalone.cpp $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_OUT)/libnativewindow.so
 	$(MACOS_CXX) tests/ndk_standalone.cpp -o $@ $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_RPATH) -pthread
 
@@ -54,6 +63,9 @@ $(MACOS_OUT)/test-ndk-graphics-system: tests/ndk_graphics_system.cpp $(MACOS_OUT
 
 $(MACOS_OUT)/test-ndk-mediandk: tests/ndk_mediandk.cpp $(MACOS_OUT)/libmediandk.so
 	$(MACOS_CXX) tests/ndk_mediandk.cpp -o $@ $(MACOS_OUT)/libmediandk.so $(MACOS_RPATH) -pthread
+
+$(MACOS_OUT)/test-ndk-aaudio: tests/ndk_aaudio.cpp $(MACOS_OUT)/libaaudio.so
+	$(MACOS_CXX) tests/ndk_aaudio.cpp -o $@ $(MACOS_OUT)/libaaudio.so $(MACOS_RPATH) -pthread
 
 build/test-ndk-standalone: tests/ndk_standalone.cpp build/libmediandk.so build/libsync.so build/libOpenSLES.so build/libnativewindow.so
 	@mkdir -p build
@@ -71,23 +83,29 @@ build/test-ndk-mediandk: tests/ndk_mediandk.cpp build/libmediandk.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_mediandk.cpp -o $@ -Lbuild -lmediandk -Wl,-rpath,'$$ORIGIN' -pthread
 
+build/test-ndk-aaudio: tests/ndk_aaudio.cpp build/libaaudio.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_aaudio.cpp -o $@ -Lbuild -laaudio -Wl,-rpath,'$$ORIGIN' -pthread
+
 .PHONY: ndk-build ndk-test macos-ndk-build macos-ndk-test ndk-audit
 
 ndk-build: $(NDK_LINUX_LIBS)
 
-ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk
+ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk build/test-ndk-aaudio
 	./build/test-ndk-standalone
 	./build/test-ndk-core-app
 	./build/test-ndk-graphics-system
 	./build/test-ndk-mediandk
+	./build/test-ndk-aaudio
 
 macos-ndk-build: $(NDK_MACOS_LIBS)
 
-macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk
+macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk $(MACOS_OUT)/test-ndk-aaudio
 	$(MACOS_OUT)/test-ndk-standalone
 	$(MACOS_OUT)/test-ndk-core-app
 	$(MACOS_OUT)/test-ndk-graphics-system
 	$(MACOS_OUT)/test-ndk-mediandk
+	$(MACOS_OUT)/test-ndk-aaudio
 
 ndk-audit:
 	python3 scripts/audit_ndk_apis.py
