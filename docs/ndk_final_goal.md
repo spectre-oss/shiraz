@@ -43,7 +43,7 @@ behavioral unit tests:
 | **N4** | `libaaudio.so` low-latency audio | Full `AAudioStreamBuilder_*` & `AAudioStream_*` over CoreAudio/ALSA + callback/ring-buffer engine | `[x]` |
 | **N5** | `libicu.so` & `liblog.so` | Unversioned NDK ICU4C ABI (`u_*`, `ubrk_*`, `ucnv_*`, `ucol_*`, `udat_*`, `uloc_*`, `unorm2_*`, `unum_*`, `ubidi_*`, `uscript_*`, `utext_*`, `utrans_*`, `ucal_*`) + full Android logging API | `[x]` |
 | **N6** | `libamidi.so`, `libcamera2ndk.so` & `libOpenMAXAL.so` | Native MIDI port/loopback engine, Camera2 metadata/request/session API, OpenMAX AL 1.0.1 COM engine | `[x]` |
-| **N7** | `libbinder_ndk.so` & `libneuralnetworks.so` | Real in-process NDK Binder (`AIBinder_*`, `AParcel_*`, `AStatus_*`, `ABinderProcess_*`) + real CPU NNAPI tensor engine (`ANeuralNetworks*`) | `[ ]` |
+| **N7** | `libbinder_ndk.so` & `libneuralnetworks.so` | Real in-process NDK Binder (`AIBinder_*`, `AParcel_*`, `AStatus_*`, `ABinderProcess_*`) + real CPU NNAPI tensor engine (`ANeuralNetworks*`) | `[x]` |
 | **N8** | `libvulkan.so` | Dynamic Vulkan loader/ICD bridge + `VK_KHR_android_surface` & `AHardwareBuffer` Android extension hooks | `[ ]` |
 | **N9** | Guest ELF bindings, final audit & tracker update | macOS guest loader integration, `MISSING_ANDROID_LIBRARIES.md` §5 regeneration, `landing/src/lib/android-support.json` update | `[ ]` |
 
@@ -62,8 +62,8 @@ behavioral unit tests:
 | `[x]` | `libamidi.so` | `AMidiDevice_*`, `AMidiInputPort_*`, `AMidiOutputPort_*` | N6 |
 | `[x]` | `libcamera2ndk.so` | `ACameraManager_*`, `ACameraMetadata_*`, `ACameraDevice_*`, `ACaptureRequest_*`, `ACameraOutputTarget_*`, `ACaptureSessionOutput*`, `ACameraCaptureSession_*` | N6 |
 | `[x]` | `libOpenMAXAL.so` | `xaCreateEngine`, `xaQueryNumSupportedEngineInterfaces`, `xaQuerySupportedEngineInterfaces`, `XA_IID_*` | N6 |
-| `[ ]` | `libbinder_ndk.so` | `AIBinder_*`, `AParcel_*`, `AStatus_*`, `ABinderProcess_*` | N7 |
-| `[ ]` | `libneuralnetworks.so` | `ANeuralNetworksModel_*`, `Compilation_*`, `Execution_*`, `Event_*`, `Memory_*`, `Device_*`, `Burst_*` | N7 |
+| `[x]` | `libbinder_ndk.so` | `AIBinder_*`, `AParcel_*`, `AStatus_*`, `ABinderProcess_*` | N7 |
+| `[x]` | `libneuralnetworks.so` | `ANeuralNetworksModel_*`, `Compilation_*`, `Execution_*`, `Event_*`, `Memory_*`, `Device_*`, `Burst_*` | N7 |
 | `[ ]` | `libvulkan.so` | Core Vulkan 1.0–1.3 loader + `vkCreateAndroidSurfaceKHR`, `vkGetAndroidHardwareBufferPropertiesANDROID`, `vkGetMemoryAndroidHardwareBufferANDROID` | N8 |
 | `[x]` | `libnativewindow.so` | `ANativeWindow_*`, `AHardwareBuffer_*` (re-exported / symlinked from `libandroid.so`) | Existing + N0 |
 

@@ -19,7 +19,9 @@ NDK_LINUX_LIBS := \
 	build/libicu.so \
 	build/libamidi.so \
 	build/libcamera2ndk.so \
-	build/libOpenMAXAL.so
+	build/libOpenMAXAL.so \
+	build/libbinder_ndk.so \
+	build/libneuralnetworks.so
 
 NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libandroid.so \
@@ -33,7 +35,9 @@ NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libicu.so \
 	$(MACOS_OUT)/libamidi.so \
 	$(MACOS_OUT)/libcamera2ndk.so \
-	$(MACOS_OUT)/libOpenMAXAL.so
+	$(MACOS_OUT)/libOpenMAXAL.so \
+	$(MACOS_OUT)/libbinder_ndk.so \
+	$(MACOS_OUT)/libneuralnetworks.so
 
 # --- Milestone N0: Standalone libmediandk.so, libsync.so, libnativewindow.so, libOpenSLES.so ---
 
@@ -72,6 +76,14 @@ build/libOpenMAXAL.so: native/ndk_openmaxal.cpp include/shiraz/ndk/openmaxal.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_openmaxal.cpp -o $@ -pthread
 
+build/libbinder_ndk.so: native/ndk_binder.cpp include/shiraz/ndk/binder_ndk.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_binder.cpp -o $@ -pthread
+
+build/libneuralnetworks.so: native/ndk_nnapi.cpp include/shiraz/ndk/neuralnetworks.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_nnapi.cpp -o $@ -pthread
+
 $(MACOS_OUT)/libnativewindow.so: $(MACOS_OUT)/libandroid.so
 	ln -sfn libandroid.so $@
 
@@ -102,6 +114,12 @@ $(MACOS_OUT)/libcamera2ndk.so: native/ndk_camera2.cpp include/shiraz/ndk/camera2
 $(MACOS_OUT)/libOpenMAXAL.so: native/ndk_openmaxal.cpp include/shiraz/ndk/openmaxal.h $(MACOS_OUT)/.dir
 	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_openmaxal.cpp -o $@ -pthread
 
+$(MACOS_OUT)/libbinder_ndk.so: native/ndk_binder.cpp include/shiraz/ndk/binder_ndk.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_binder.cpp -o $@ -pthread
+
+$(MACOS_OUT)/libneuralnetworks.so: native/ndk_nnapi.cpp include/shiraz/ndk/neuralnetworks.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_nnapi.cpp -o $@ -pthread
+
 $(MACOS_OUT)/test-ndk-standalone: tests/ndk_standalone.cpp $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_OUT)/libnativewindow.so
 	$(MACOS_CXX) tests/ndk_standalone.cpp -o $@ $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_RPATH) -pthread
 
@@ -122,6 +140,9 @@ $(MACOS_OUT)/test-ndk-log-icu: tests/ndk_log_icu.cpp $(MACOS_OUT)/liblog.so $(MA
 
 $(MACOS_OUT)/test-ndk-midi-camera-xa: tests/ndk_midi_camera_xa.cpp $(MACOS_OUT)/libamidi.so $(MACOS_OUT)/libcamera2ndk.so $(MACOS_OUT)/libOpenMAXAL.so
 	$(MACOS_CXX) tests/ndk_midi_camera_xa.cpp -o $@ $(MACOS_OUT)/libamidi.so $(MACOS_OUT)/libcamera2ndk.so $(MACOS_OUT)/libOpenMAXAL.so $(MACOS_RPATH) -pthread
+
+$(MACOS_OUT)/test-ndk-binder-nnapi: tests/ndk_binder_nnapi.cpp $(MACOS_OUT)/libbinder_ndk.so $(MACOS_OUT)/libneuralnetworks.so
+	$(MACOS_CXX) tests/ndk_binder_nnapi.cpp -o $@ $(MACOS_OUT)/libbinder_ndk.so $(MACOS_OUT)/libneuralnetworks.so $(MACOS_RPATH) -pthread
 
 build/test-ndk-standalone: tests/ndk_standalone.cpp build/libmediandk.so build/libsync.so build/libOpenSLES.so build/libnativewindow.so
 	@mkdir -p build
@@ -151,11 +172,15 @@ build/test-ndk-midi-camera-xa: tests/ndk_midi_camera_xa.cpp build/libamidi.so bu
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_midi_camera_xa.cpp -o $@ -Lbuild -lamidi -lcamera2ndk -lOpenMAXAL -Wl,-rpath,'$$ORIGIN' -pthread
 
+build/test-ndk-binder-nnapi: tests/ndk_binder_nnapi.cpp build/libbinder_ndk.so build/libneuralnetworks.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_binder_nnapi.cpp -o $@ -Lbuild -lbinder_ndk -lneuralnetworks -Wl,-rpath,'$$ORIGIN' -pthread
+
 .PHONY: ndk-build ndk-test macos-ndk-build macos-ndk-test ndk-audit
 
 ndk-build: $(NDK_LINUX_LIBS)
 
-ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk build/test-ndk-aaudio build/test-ndk-log-icu build/test-ndk-midi-camera-xa
+ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk build/test-ndk-aaudio build/test-ndk-log-icu build/test-ndk-midi-camera-xa build/test-ndk-binder-nnapi
 	./build/test-ndk-standalone
 	./build/test-ndk-core-app
 	./build/test-ndk-graphics-system
@@ -163,10 +188,11 @@ ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graph
 	./build/test-ndk-aaudio
 	./build/test-ndk-log-icu
 	./build/test-ndk-midi-camera-xa
+	./build/test-ndk-binder-nnapi
 
 macos-ndk-build: $(NDK_MACOS_LIBS)
 
-macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk $(MACOS_OUT)/test-ndk-aaudio $(MACOS_OUT)/test-ndk-log-icu $(MACOS_OUT)/test-ndk-midi-camera-xa
+macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk $(MACOS_OUT)/test-ndk-aaudio $(MACOS_OUT)/test-ndk-log-icu $(MACOS_OUT)/test-ndk-midi-camera-xa $(MACOS_OUT)/test-ndk-binder-nnapi
 	$(MACOS_OUT)/test-ndk-standalone
 	$(MACOS_OUT)/test-ndk-core-app
 	$(MACOS_OUT)/test-ndk-graphics-system
@@ -174,6 +200,7 @@ macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app 
 	$(MACOS_OUT)/test-ndk-aaudio
 	$(MACOS_OUT)/test-ndk-log-icu
 	$(MACOS_OUT)/test-ndk-midi-camera-xa
+	$(MACOS_OUT)/test-ndk-binder-nnapi
 
 ndk-audit:
 	python3 scripts/audit_ndk_apis.py
