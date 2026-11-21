@@ -241,6 +241,7 @@ li:nth-child(5).is-active > .slab::after { opacity: 1; }
 .shiraz-row > th, .shiraz-row > td { position: relative; z-index: 1; }
 .shiraz-row > th::before { content: ""; position: absolute; left: var(--ghost-x, calc(50% - 45px)); top: var(--ghost-y, calc(50% - 45px)); width: 90px; height: 90px; background: url('./lib/spectre.svg') center / contain no-repeat; opacity: .14; transform: scaleX(-1); pointer-events: none; z-index: -1; transition: left .3s cubic-bezier(.2, 0, .2, 1), top .3s cubic-bezier(.2, 0, .2, 1); }
 .comparison-note { max-width: 70ch; margin-top: 18px; font-size: 14px; color: var(--ink-faint); }
+.comparison-note a { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
 
 /* The packaging equation draws together as it reaches the middle of the screen. */
 .packaging-path { --p: 1; overflow: clip; display: grid; place-items: center; min-height: 64vh; padding: 64px var(--gutter); background: var(--wine-deep); border-block: 1px solid var(--line); }
