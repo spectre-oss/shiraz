@@ -166,7 +166,7 @@ symbol lookup are reusable; the host-facing layer is new.
 
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
-| [ ] | Notifications | `native/notifications.cpp` | `UNUserNotificationCenter` (bundle required); urgency → `interruptionLevel`; no timeout | M |
+| [x] | Notifications | `native/notifications.cpp`, `native/darwin/notifications.mm`, `DesktopNotifications.java` | `libshiraz-notifications.so` over `UNUserNotificationCenter` with safe unbundled `.app` guard (`CFBundleIdentifier` check avoiding `NSInternalInconsistencyException` abort), urgency -> `interruptionLevel`, sound suppression, and active delivered-notification reconciliation (`make macos-notifications-check`) | M |
 | [ ] | Location | `LocationManager.java` | `CLLocationManager`; Info.plist `NSLocationUsageDescription`; Android fine/coarse → accuracy | M |
 | [x] | System fonts | `native/system_fonts.cpp` | CoreText enumeration (`CTFontManagerCopyAvailableFontURLs`, `.ttc` face index); bundled Android fonts first | M |
 | [x] | Text shaping | `native/text.cpp` | In-tree FreeType, HarfBuzz, fontconfig and ICU (system ICU has no public headers); in-tree `fonts.conf` prefers the bundled Noto fonts | M |

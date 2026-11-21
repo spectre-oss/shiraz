@@ -2,13 +2,21 @@
 package shiraz.runtime;
 /** Owned session-bus notification connection; no shell commands or GTK dependency. */
 public final class DesktopNotifications implements NotificationBackend {
-    // libshiraz-notifications is D-Bus only; on macOS it is not built and callers
-    // see the connection as unavailable (NotificationManager retries later).
-    static { if (!HostOs.darwin()) System.loadLibrary("shiraz-notifications"); }
+    private static final boolean loaded;
+    static {
+        boolean ok = false;
+        try {
+            System.loadLibrary("shiraz-notifications");
+            ok = true;
+        } catch (UnsatisfiedLinkError unavailable) {
+            if (!HostOs.darwin()) throw unavailable;
+        }
+        loaded = ok;
+    }
     private long handle;
     private final java.util.LinkedHashSet<Long> posted = new java.util.LinkedHashSet<Long>();
     public DesktopNotifications(String application) {
-        if (HostOs.darwin()) throw new IllegalStateException("Desktop notifications are not ported to macOS");
+        if (!loaded) throw new IllegalStateException("Desktop notifications native library unavailable");
         handle = open(application);
     }
     private long live() { if (handle == 0) throw new IllegalStateException("Notification connection closed"); return handle; }

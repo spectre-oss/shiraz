@@ -3308,3 +3308,29 @@ macos-video-check: $(MACOS_OUT)/libshiraz-video.so $(MACOS_OUT)/test-video-codec
 
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-video.so
 
+# DesktopNotifications on macOS: UserNotifications (UNUserNotificationCenter).
+MACOS_NOTIFICATIONS_JAVA := java/shiraz/runtime/DesktopNotifications.java
+MACOS_NOTIFICATIONS_FRAMEWORKS := -framework UserNotifications -framework Foundation
+$(MACOS_OUT)/libshiraz-notifications.so: native/darwin/notifications.mm native/darwin/notifications.exports $(MACOS_NOTIFICATIONS_JAVA) scripts/darwin_jni_exports.py mk/darwin.mk $(MACOS_OUT)/.dir
+	@$(call MACOS_EXPORTS_PRECHECK,native/darwin/notifications.exports,$(MACOS_NOTIFICATIONS_JAVA))
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC -fobjc-arc $(MACOS_DYLIB) $(call MACOS_EXPORTS_FLAGS,native/darwin/notifications.exports) native/darwin/notifications.mm -o $@ $(MACOS_NOTIFICATIONS_FRAMEWORKS) -pthread
+	@$(call MACOS_EXPORTS_CHECK,native/darwin/notifications.exports,$(MACOS_NOTIFICATIONS_JAVA))
+
+$(MACOS_OUT)/test-notifications: tests/darwin/notifications.cpp $(MACOS_OUT)/libshiraz-notifications.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) tests/darwin/notifications.cpp -o $@ -pthread
+
+.PHONY: macos-notifications-check
+macos-notifications-check: $(MACOS_OUT)/libshiraz-notifications.so $(MACOS_OUT)/test-notifications
+	$(MACOS_OUT)/test-notifications $(CURDIR)/$(MACOS_OUT)/libshiraz-notifications.so
+	@rm -rf $(MACOS_OUT)/test-notifications.app
+	@mkdir -p $(MACOS_OUT)/test-notifications.app/Contents/MacOS
+	@cp $(MACOS_OUT)/test-notifications $(MACOS_OUT)/test-notifications.app/Contents/MacOS/test-notifications
+	@printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>org.shiraz.test.notifications</string><key>CFBundleExecutable</key><string>test-notifications</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleName</key><string>ShirazNotificationTest</string></dict></plist>\n' > $(MACOS_OUT)/test-notifications.app/Contents/Info.plist
+	@codesign --force --sign - $(MACOS_OUT)/test-notifications.app
+	$(MACOS_OUT)/test-notifications.app/Contents/MacOS/test-notifications $(CURDIR)/$(MACOS_OUT)/libshiraz-notifications.so --bundled
+
+macos-runtime-libs: $(MACOS_OUT)/libshiraz-notifications.so
+
+
+
+
