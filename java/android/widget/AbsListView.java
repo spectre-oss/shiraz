@@ -11,8 +11,14 @@ import android.graphics.drawable.Drawable;
 /** Bounded adapter viewport. Rows are positioned locally, not via View.scrollY. */
 public abstract class AbsListView extends AdapterView<ListAdapter> {
  public interface SelectionBoundsAdjuster {void adjustListItemSelectionBounds(android.graphics.Rect bounds);}
+ public interface MultiChoiceModeListener extends ActionMode.Callback {void onItemCheckedStateChanged(ActionMode mode,int position,long id,boolean checked);}
+ public interface RecyclerListener {void onMovedToScrapHeap(View view);}
  public interface OnScrollListener {int SCROLL_STATE_IDLE=0,SCROLL_STATE_TOUCH_SCROLL=1,SCROLL_STATE_FLING=2;void onScrollStateChanged(AbsListView view,int state);void onScroll(AbsListView view,int first,int visible,int total);}
  public static class LayoutParams extends ViewGroup.LayoutParams {public int viewType;public LayoutParams(int w,int h){super(w,h);}public LayoutParams(Context c,AttributeSet a){super(c,a);}public LayoutParams(ViewGroup.LayoutParams p){super(p);}}
+ private MultiChoiceModeListener multiChoiceModeListener;
+ private RecyclerListener recyclerListener;
+ public void setMultiChoiceModeListener(MultiChoiceModeListener listener){multiChoiceModeListener=listener;}
+ public void setRecyclerListener(RecyclerListener listener){recyclerListener=listener;}
  // Rows render directly; retain the legacy bitmap-cache hint without changing their background.
  private int cacheColorHint;
  public void setCacheColorHint(int color){cacheColorHint=color;}
@@ -47,6 +53,45 @@ public abstract class AbsListView extends AdapterView<ListAdapter> {
  @Override protected void onDetachedFromWindow(){setPressed(false);dragging=false;super.onDetachedFromWindow();}
  private void drawSelector(Canvas canvas){if(selector==null||!isEnabled()||dragging)return;int position=isPressed()?downPosition:!touchSelection&&isFocused()?getSelectedItemPosition():-1;if(position<0||position>=count()||!adapter.isEnabled(position))return;View row=getChildAt(position-firstPosition);if(row==null)return;Rect padding=new Rect();selector.getPadding(padding);selector.setState(getDrawableState());selector.setLayoutDirection(getLayoutDirection());selector.setBounds(row.getLeft()-padding.left,row.getTop()-padding.top,row.getRight()+padding.right,row.getBottom()+padding.bottom);int saved=canvas.save();try{if(getClipToPadding())canvas.clipRect(getPaddingLeft(),getPaddingTop(),getWidth()-getPaddingRight(),getHeight()-getPaddingBottom());selector.draw(canvas);}finally{canvas.restoreToCount(saved);}}
  @Override protected void dispatchDraw(Canvas canvas){if(!selectorOnTop)drawSelector(canvas);super.dispatchDraw(canvas);if(selectorOnTop)drawSelector(canvas);}
+ // Configuration recreation is in-process; BaseSavedState explicitly rejects parcel transport.
+ private static final class SavedState extends BaseSavedState {
+  final int first,top,selection;final long firstId,selectionId;final boolean stable;
+  final int[] choices;final long[] choiceIds;
+  SavedState(android.os.Parcelable parent,AbsListView list){
+   super(parent);first=list.firstPosition;top=list.getChildCount()==0?list.offset:list.getChildAt(0).getTop()-list.getListPaddingTop();
+   selection=list.getSelectedItemPosition();firstId=list.getItemIdAtPosition(first);selectionId=list.getSelectedItemId();stable=list.adapter!=null&&list.adapter.hasStableIds();
+   int n=list.checked.size();if(n>4096)throw new IllegalStateException("Saved list choices limit");int selected=0;for(int i=0;i<n;i++)if(list.checked.valueAt(i))selected++;choices=new int[selected];choiceIds=new long[selected];
+   for(int i=0,j=0;i<n;i++)if(list.checked.valueAt(i)){choices[j]=list.checked.keyAt(i);choiceIds[j]=list.getItemIdAtPosition(choices[j]);j++;}
+  }
+ }
+ @Override protected void dispatchSaveInstanceState(android.util.SparseArray<android.os.Parcelable> state){dispatchFreezeSelfOnly(state);}
+ @Override protected void dispatchRestoreInstanceState(android.util.SparseArray<android.os.Parcelable> state){dispatchThawSelfOnly(state);}
+ private SavedState pendingRestore;
+ @Override public android.os.Parcelable onSaveInstanceState(){android.os.Parcelable parent=super.onSaveInstanceState();return pendingRestore!=null?pendingRestore:new SavedState(parent,this);}
+ @Override public void onRestoreInstanceState(android.os.Parcelable state){
+  if(!(state instanceof SavedState)){super.onRestoreInstanceState(state);return;}
+  SavedState saved=(SavedState)state;super.onRestoreInstanceState(saved.getSuperState());pendingRestore=saved;dirty=true;requestLayout();
+ }
+ private void restorePending(int n){
+  if(pendingRestore==null||n==0)return;
+  SavedState saved=pendingRestore;pendingRestore=null;
+  boolean stable=saved.stable&&adapter.hasStableIds();
+  HashMap<Long,Integer> ids=new HashMap<Long,Integer>();
+  if(stable){int center=Math.min(n-1,Math.max(0,saved.first)),start=Math.max(0,center-2048),end=Math.min(n,start+4096);for(int p=start;p<end;p++)ids.put(adapter.getItemId(p),p);}
+  firstPosition=restoredPosition(saved.first,saved.firstId,n,stable,ids,true);offset=saved.top;
+  int selection=restoredPosition(saved.selection,saved.selectionId,n,stable,ids,false);
+  checked.clear();if(choiceMode!=CHOICE_MODE_NONE)for(int i=0;i<saved.choices.length;i++){
+   int position=restoredPosition(saved.choices[i],saved.choiceIds[i],n,stable,ids,false);
+   if(position>=0){checked.put(position,true);if(choiceMode==CHOICE_MODE_SINGLE)break;}
+  }
+  shirazSelect(selection);
+ }
+ private int restoredPosition(int position,long id,int n,boolean stable,HashMap<Long,Integer> ids,boolean anchor){
+  if(position<0)return anchor?0:INVALID_POSITION;
+  if(!stable)return position<n?position:anchor?n-1:INVALID_POSITION;
+  if(position<n&&adapter.getItemId(position)==id)return position;
+  Integer found=ids.get(id);return found!=null?found:anchor?Math.min(position,n-1):INVALID_POSITION;
+ }
  private ListAdapter adapter;private OnScrollListener listener;private boolean dirty=true,invalid,laying;
  private boolean measuring;private int measureWidthSpec;
  private int lastPaddingLeft,lastPaddingTop,lastPaddingRight,lastPaddingBottom,lastGap;
@@ -64,14 +109,14 @@ public abstract class AbsListView extends AdapterView<ListAdapter> {
  public View getSelectedView(){return getChildAt(getSelectedItemPosition()-firstPosition);}
  public void setSelection(int position){setSelectionFromTop(position,0);}
  protected final void shirazClearTouchSelection(){touchSelection=false;setPressed(false);}
- public void setSelectionFromTop(int position,int y){shirazClearTouchSelection();if(Math.abs((long)y)>8192)throw new IllegalArgumentException("List selection offset");int n=count();firstPosition=n==0?0:Math.max(0,Math.min(n-1,position));offset=y;dirty=true;requestLayout();if(getWidth()>0&&getHeight()>0)layoutRows();shirazSelect(position);invalidate();}
+ public void setSelectionFromTop(int position,int y){pendingRestore=null;shirazClearTouchSelection();if(Math.abs((long)y)>8192)throw new IllegalArgumentException("List selection offset");int n=count();firstPosition=n==0?0:Math.max(0,Math.min(n-1,position));offset=y;dirty=true;requestLayout();if(getWidth()>0&&getHeight()>0)layoutRows();shirazSelect(position);invalidate();}
  public void setOnScrollListener(OnScrollListener value){listener=value;if(value!=null)value.onScroll(this,firstPosition,getChildCount(),count());}
  protected int rowGap(){return 0;}
- private void recycle(View v,Integer type){if(type==null||type<0||scrapCount>=256)return;ArrayDeque<View> pool=scrap.get(type);if(pool==null){pool=new ArrayDeque<View>();scrap.put(type,pool);}pool.addLast(v);scrapCount++;}
+ private void recycle(View v,Integer type){if(type==null||type<0||scrapCount>=256)return;ArrayDeque<View> pool=scrap.get(type);if(pool==null){pool=new ArrayDeque<View>();scrap.put(type,pool);}pool.addLast(v);scrapCount++;if(recyclerListener!=null)recyclerListener.onMovedToScrapHeap(v);}
  private void clearRows(boolean reuse){while(getChildCount()>0){View v=getChildAt(getChildCount()-1);Integer type=rowTypes.remove(v);shirazRemoveRow(getChildCount()-1);if(reuse)recycle(v,type);}}
  private View obtain(int position){int types=adapter.getViewTypeCount(),type=adapter.getItemViewType(position);if(types<1||types>256||type>=types||type< -2)throw new IllegalArgumentException("List view type");ArrayDeque<View> pool=scrap.get(type);View old=pool==null?null:pool.pollFirst();if(old!=null)scrapCount--;View v=adapter.getView(position,old,this);boolean attachedFixed=measuring&&v!=null&&type==-2&&v.getParent()==this&&Integer.valueOf(-2).equals(rowTypes.get(v));if(v==null||v.getParent()!=null&&!attachedFixed)throw new IllegalStateException("Adapter must return an unparented row");if(v!=old&&old!=null)recycle(old,type);ViewGroup.LayoutParams params=v.getLayoutParams();if(params==null)params=new LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.WRAP_CONTENT);if(!attachedFixed)v.setLayoutParams(params);int parentWidth=measuring?measureWidthSpec:MeasureSpec.makeMeasureSpec(getMeasuredWidth(),MeasureSpec.EXACTLY);int width=getChildMeasureSpec(parentWidth,getListPaddingLeft()+getListPaddingRight(),params.width);v.measure(width,MeasureSpec.makeMeasureSpec(Math.max(0,params.height),params.height>=0?MeasureSpec.EXACTLY:MeasureSpec.UNSPECIFIED));if(v.getMeasuredHeight()<0||v.getMeasuredHeight()>65536)throw new IllegalArgumentException("List row height bound");rowTypes.put(v,type);return v;}
  private void discard(View v){if(v.getParent()==this)return;recycle(v,rowTypes.remove(v));}
- protected final void layoutRows(){if(laying)return;laying=true;try{int n=count();clearRows(true);if(n==0){firstPosition=0;offset=0;dirty=false;shirazSelect(-1);return;}firstPosition=Math.min(firstPosition,n-1);int top=getListPaddingTop(),bottom=getHeight()-getListPaddingBottom(),gap=rowGap(),steps=0;
+ protected final void layoutRows(){if(laying)return;laying=true;try{int n=count();restorePending(n);clearRows(true);if(n==0){firstPosition=0;offset=0;dirty=false;shirazSelect(-1);return;}firstPosition=Math.min(firstPosition,n-1);int top=getListPaddingTop(),bottom=getHeight()-getListPaddingBottom(),gap=rowGap(),steps=0;
   while(offset>0&&firstPosition>0){if(++steps>4096)throw new IllegalStateException("List scroll work bound");View previous=obtain(--firstPosition);offset-=previous.getMeasuredHeight()+gap;discard(previous);}if(firstPosition==0)offset=Math.min(0,offset);
   int y=top+offset;while(firstPosition<n-1){if(++steps>4096)throw new IllegalStateException("List scroll work bound");View v=obtain(firstPosition);int h=v.getMeasuredHeight()+gap;if(y+h>top){discard(v);break;}y+=h;firstPosition++;discard(v);}offset=y-top;
   for(int p=firstPosition;p<n&&y<bottom;p++){if(getChildCount()>=256)throw new IllegalStateException("List visible row bound");View v=obtain(p);shirazAddRow(v,-1,v.getLayoutParams());v.layout(getListPaddingLeft(),y,getListPaddingLeft()+v.getMeasuredWidth(),y+v.getMeasuredHeight());y+=v.getMeasuredHeight()+gap;}

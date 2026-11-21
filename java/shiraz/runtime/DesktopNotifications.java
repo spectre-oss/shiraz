@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package shiraz.runtime;
-import java.io.Closeable;
 /** Owned session-bus notification connection; no shell commands or GTK dependency. */
-public final class DesktopNotifications implements Closeable {
+public final class DesktopNotifications implements NotificationBackend {
     // libshiraz-notifications is D-Bus only; on macOS it is not built and callers
     // see the connection as unavailable (NotificationManager retries later).
     static { if (!HostOs.darwin()) System.loadLibrary("shiraz-notifications"); }

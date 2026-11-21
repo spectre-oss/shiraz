@@ -8,7 +8,7 @@ public final class ActivityConfigurationPolicy {
  public ActivityConfigurationPolicy(Properties metadata,String activity,int targetSdk) {
   if(metadata==null||activity==null)throw new NullPointerException();
   int count=Integer.parseInt(metadata.getProperty("activity.count","0"));
-  if(count<0||count>256)throw new IllegalArgumentException("Activity declaration limit");
+  if(count<0||count>512)throw new IllegalArgumentException("Activity declaration limit");
   int flags=0,requested=-1;boolean found=false;
   for(int i=0;i<count;i++)if(activity.equals(metadata.getProperty("activity."+i+".name"))) {
    if(found)throw new IllegalArgumentException("Duplicate activity metadata");found=true;

@@ -36,6 +36,16 @@ public final class ContextImpl extends Context {
         return theme;
     }
     @Override public void setTheme(int id) { getTheme().applyStyle(id, true); }
+    @Override public shiraz.runtime.HostSyncAdapters shirazSyncAdapters() {
+        Application app=ActivityThread.currentApplication();
+        if(app==null)throw new IllegalStateException("Sync owner unavailable before application binding");
+        return app.shirazSyncAdapters();
+    }
+    @Override public shiraz.runtime.HostContentObservers shirazContentObservers() {
+        Application app=ActivityThread.currentApplication();
+        if(app==null)throw new IllegalStateException("Content observer owner unavailable before application binding");
+        return app.shirazContentObservers();
+    }
     @Override public Object getSystemService(String name) {
         Application app = ActivityThread.currentApplication();
         if (app == null) throw new UnsupportedOperationException("Service unavailable before application binding: " + name);

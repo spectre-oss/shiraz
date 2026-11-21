@@ -66,6 +66,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(guard.unsafe('link', b'target', '120000'))
         self.assertIsNone(guard.unsafe('native/main.cpp', b'int main() { return 0; }'))
 
+    def test_android_credentials_package_is_source(self):
+        for path in [
+            'java/android/credentials/Credential.java',
+            'java/android/service/credentials/CredentialEntry.java',
+            'java/android/telephony/data/ApnSetting.java',
+        ]:
+            self.assertIsNone(guard.unsafe(path, b'package android.credentials;'))
+            self.assertIsNotNone(guard.unsafe(path, b'password=' + b'a' * 32))
+        self.assertIsNotNone(guard.unsafe('credentials/value', b'ordinary text'))
+        self.assertIsNotNone(guard.unsafe('data/value', b'ordinary text'))
+        self.assertIsNotNone(guard.unsafe('scripts/credentials/a.py', b'ordinary text'))
+        self.assertIsNotNone(guard.unsafe('java/build/A.java', b'ordinary text'))
+
     def test_public_docs_keep_content_protection(self):
         for path in guard.PUBLIC_DOCS:
             self.assertIsNone(guard.unsafe(path, b'# Public guide'))
@@ -108,6 +121,11 @@ class GitHookTests(unittest.TestCase):
                 tool = tools / name
                 tool.write_text('#!/bin/sh\nexit 0\n')
                 tool.chmod(0o755)
+            # scripts/java/VerifyApk.java is included in this fixture snapshot.
+            pmd = repo / '.local/lint/pmd-bin-7.29.0/bin/pmd'
+            pmd.parent.mkdir(parents=True)
+            pmd.write_text('#!/bin/sh\nexit 0\n')
+            pmd.chmod(0o755)
             (repo / 'VERSION').write_text('0.0.0\n')
             env = {**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_SYSTEM': os.devnull}
 

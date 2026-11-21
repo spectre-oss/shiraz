@@ -11,6 +11,7 @@ public class LayerDrawable extends Drawable implements Drawable.Callback {
     }
     private final Layer[] layers;
     private int paddingMode;
+    private int opacityOverride=PixelFormat.UNKNOWN;
     private ColorFilter filter;
     public LayerDrawable(Drawable[] values) {
         if(values==null)throw new NullPointerException("layers"); if(values.length>256)throw new IllegalArgumentException("Layer count");
@@ -59,7 +60,11 @@ public class LayerDrawable extends Drawable implements Drawable.Callback {
     public void setTintList(android.content.res.ColorStateList value){for(Layer l:layers)if(l.child!=null)l.child.setTintList(value);refreshTintOwner();}
     public void setTintMode(PorterDuff.Mode value){for(Layer l:layers)if(l.child!=null)l.child.setTintMode(value);invalidateSelf();}
     public ColorFilter getColorFilter(){return filter;}
-    public int getOpacity(){int result=PixelFormat.TRANSPARENT;boolean first=true;for(Layer l:layers)if(l.child!=null){result=first?l.child.getOpacity():resolveOpacity(result,l.child.getOpacity());first=false;}return result;}
+    public void setOpacity(int value){
+        if(value!=PixelFormat.UNKNOWN&&value!=PixelFormat.OPAQUE&&value!=PixelFormat.TRANSPARENT&&value!=PixelFormat.TRANSLUCENT)throw new IllegalArgumentException("Layer opacity classification");
+        if(opacityOverride!=value){opacityOverride=value;invalidateSelf();}
+    }
+    public int getOpacity(){if(opacityOverride!=PixelFormat.UNKNOWN)return opacityOverride;int result=PixelFormat.TRANSPARENT;boolean first=true;for(Layer l:layers)if(l.child!=null){result=first?l.child.getOpacity():resolveOpacity(result,l.child.getOpacity());first=false;}return result;}
     public boolean hasFocusStateSpecified(){for(Layer l:layers)if(l.child!=null&&l.child.hasFocusStateSpecified())return true;return false;}
     public boolean isStateful(){for(Layer l:layers)if(l.child!=null&&l.child.isStateful())return true;return false;}
     protected boolean onStateChange(int[] state){boolean changed=false;for(Layer l:layers)if(l.child!=null)changed|=l.child.setState(state);if(changed)update();return changed;}

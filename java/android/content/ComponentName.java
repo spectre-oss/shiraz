@@ -12,6 +12,7 @@ public final class ComponentName implements Parcelable, Comparable<ComponentName
     public String getClassName() { return cls; }
     public String getShortClassName() { return cls.startsWith(pkg + ".") ? cls.substring(pkg.length()) : cls; }
     public String flattenToString() { return pkg + "/" + cls; }
+    public String toShortString() { return "{" + flattenToString() + "}"; }
     public String flattenToShortString() { return pkg + "/" + getShortClassName(); }
     public static ComponentName unflattenFromString(String value) { int slash = value.indexOf('/'); return slash < 0 || slash + 1 == value.length() ? null : createRelative(value.substring(0, slash), value.substring(slash + 1)); }
     @Override public ComponentName clone() { return new ComponentName(pkg, cls); }

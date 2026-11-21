@@ -8,9 +8,17 @@ public class MatrixCursor implements Cursor {
     protected List<Object[]> rows;
     protected int position = -1;
     private boolean closed;
+    private final CursorNotification notification=new CursorNotification(new Runnable(){public void run(){onChange(false);}});
+    public void setNotificationUri(android.content.ContentResolver resolver,android.net.Uri uri){live();notification.set(resolver,uri);}
+    public android.net.Uri getNotificationUri(){return notification.uri();}
+    protected void onChange(boolean selfChange){
+        if(closed)return;
+        contentObservers.dispatchChange(selfChange);
+        notification.changed(selfChange);
+    }
     private Bundle extras = Bundle.EMPTY;
     private final Set<DataSetObserver> observers = new LinkedHashSet<DataSetObserver>();
-    private final Set<ContentObserver> contentObservers = new LinkedHashSet<ContentObserver>();
+    private final ContentObservable contentObservers = new ContentObservable();
     public MatrixCursor(String[] columns) { this(columns, 16); }
     public MatrixCursor(String[] columns, int capacity) {
         if (columns == null) throw new NullPointerException("columns");
@@ -56,14 +64,14 @@ public class MatrixCursor implements Cursor {
     public boolean isNull(int index) { return value(index) == null; }
     public void copyStringToBuffer(int index, CharArrayBuffer buffer) { String text = getString(index); if (buffer == null) throw new NullPointerException("buffer"); buffer.sizeCopied = text == null ? 0 : text.length(); if (buffer.data == null || buffer.data.length < buffer.sizeCopied) buffer.data = new char[buffer.sizeCopied]; if (text != null) text.getChars(0, text.length(), buffer.data, 0); }
     protected final void changed() { for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onChanged(); }
-    public void deactivate() { live(); for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onInvalidated(); }
-    public boolean requery() { live(); changed(); return true; }
-    public void close() { if (!closed) { closed = true; rows.clear(); try { for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onInvalidated(); } finally { observers.clear(); contentObservers.clear(); } } }
+    public void deactivate() { live(); notification.deactivate(); for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onInvalidated(); }
+    public boolean requery() { live(); notification.requery(); changed(); return true; }
+    public void close() { if (!closed) { closed = true; notification.close(); rows.clear(); try { for (DataSetObserver observer : new ArrayList<DataSetObserver>(observers)) observer.onInvalidated(); } finally { observers.clear(); contentObservers.unregisterAll(); } } }
     public boolean isClosed() { return closed; }
     public void registerDataSetObserver(DataSetObserver observer) { live(); if (!observers.add(Objects.requireNonNull(observer))) throw new IllegalStateException("Observer already registered"); }
     public void unregisterDataSetObserver(DataSetObserver observer) { if (!observers.remove(Objects.requireNonNull(observer))) throw new IllegalStateException("Observer is not registered"); }
-    public void registerContentObserver(ContentObserver observer) { if (observer == null) throw new IllegalArgumentException("The observer is null."); live(); if (!contentObservers.add(observer)) throw new IllegalStateException("Observer already registered"); }
-    public void unregisterContentObserver(ContentObserver observer) { if (observer == null) throw new IllegalArgumentException("The observer is null."); if (!closed && !contentObservers.remove(observer)) throw new IllegalStateException("Observer is not registered"); }
+    public void registerContentObserver(ContentObserver observer) { if (observer == null) throw new IllegalArgumentException("The observer is null."); live(); contentObservers.registerObserver(observer); }
+    public void unregisterContentObserver(ContentObserver observer) { if (observer == null) throw new IllegalArgumentException("The observer is null."); if (!closed) contentObservers.unregisterObserver(observer); }
     public Bundle getExtras() { live(); return extras; }
     public void setExtras(Bundle value) { live(); extras = value == null ? Bundle.EMPTY : new Bundle(value); }
     public Bundle respond(Bundle value) { live(); return Bundle.EMPTY; }

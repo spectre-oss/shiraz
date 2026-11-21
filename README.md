@@ -44,7 +44,7 @@ Shiraz executes Android DEX bytecode with a standalone host build of **ART** (An
 | --- | --- | --- |
 | `01` **Your APK** | Inspects the unmodified package, manifest, resources, and native ABIs. | [`src/shiraz/`](src/shiraz) |
 | `02` **ART** | Standalone host build executes DEX bytecode (interpreter and AOT where supported). | [`scripts/bootstrap_runtime.py`](scripts/bootstrap_runtime.py) |
-| `03` **Android™ API layer** | Growing Java compatibility surface for views, resources, services, and OS APIs. | [`java/android/`](java/android) |
+| `03` **Android™ API layer** | All 4,445 Android API 35 `android.*` class surfaces in Java + ART boot jars (bounded per-subsystem behavior). | [`java/android/`](java/android) |
 | `04` **Native bridges** | JNI, bionic compatibility, Skia, fonts, audio, SQLite, EGL/GLES, and guest ELF loading. | [`native/`](native) |
 | `05` **Desktop host** | Presents windows, input, and lifecycle directly on Linux or macOS. | [`native/presentation.cpp`](native/presentation.cpp) |
 
@@ -52,11 +52,11 @@ Shiraz executes Android DEX bytecode with a standalone host build of **ART** (An
 
 | Platform | State | Current scope & limits |
 | --- | --- | --- |
-| **Linux** (`x86_64`, `aarch64`) | Experimental · Active | Prebuilt `x86_64` and `aarch64` browser base AppImages, the browser builder, and an `amd64` `shiraz-web` Debian package are published on [GitHub Releases](https://github.com/spectre-oss/shiraz/releases). Selected apps and games work interactively ([tested applications](docs/tested.md), [compatibility tracker](https://spectre-oss.github.io/shiraz/compatibility/)), while missing APIs, graphics gaps, and unsupported media features remain. |
+| **Linux** (`x86_64`, `aarch64`) | Experimental · Active | Prebuilt `x86_64` and `aarch64` browser base AppImages, the browser builder, and an `amd64` `shiraz-web` Debian package are published on [GitHub Releases](https://github.com/spectre-oss/shiraz/releases). Selected apps and games work interactively ([tested applications](docs/tested.md), [compatibility tracker](https://spectre-oss.github.io/shiraz/compatibility/)), while behavioral gaps, graphics limits, and unsupported media features remain. |
 | **macOS** (Apple Silicon) | Experimental · Early | Native Mach-O ART, ANGLE-Metal GLES/Skia GPU canvas, guest ELF loader, bionic ABI adapters, and SwiftUI [Launcher](macos/Launcher/README.md). Loaded OsmAnd+'s seven native libraries through an OsmAndCore JNI round trip and Telegram's native initialization, but full app compatibility and a supported macOS release remain in progress ([macOS goal & checklist](docs/macos_final_goal.md)). |
 | **Linux phones** | Future goal | Long-term target. `aarch64` base AppImages build in CI and Shiraz Web targets mobile touch and keyboard controls, but phone-level compatibility is not yet established. |
 
-- **Framework API coverage:** Tracking all 4,445 Android API 35 framework classes toward full compatibility — see [Framework APIs goal](docs/framework_final_goal.md) and [missing Android libraries](docs/MISSING_ANDROID_LIBRARIES.md).
+- **Framework API coverage:** All 4,445 / 4,445 Android API 35 `android.*` framework class surfaces (49 / 49 areas) are implemented and smoke-tested on OpenJDK and standalone ART; behavioral parity and hardware backends remain bounded per subsystem — see [Framework APIs goal](docs/framework_final_goal.md) and [missing Android libraries](docs/MISSING_ANDROID_LIBRARIES.md).
 - **Local verification:** With pinned development dependencies prepared, run `make check` on Linux (includes Linux EGL/JNI checks) or `make macos-guest-check` on Apple Silicon macOS.
 
 ## Get started

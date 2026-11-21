@@ -57,7 +57,6 @@ public final class NotificationChannel implements Parcelable {
     void validate() {
         if (id == null || id.isEmpty() || DEFAULT_CHANNEL_ID.equals(id) || name == null || name.isEmpty()) throw new IllegalArgumentException("Channel needs a nonreserved ID and name");
         if (importance < 0 || importance > 5) throw new IllegalArgumentException("Invalid notification importance");
-        if (group != null) throw new IllegalArgumentException("NotificationChannelGroup does not exist");
     }
     byte[] encode() {
         try {

@@ -10,6 +10,12 @@ public final class AssetManager implements AutoCloseable {
     private final Resources resources;
     private boolean closed;
     AssetManager(Resources resources) { this.resources = resources; }
+    synchronized Resources shirazResourceOwner() {
+        if (closed) throw new IllegalStateException("Asset manager is closed");
+        return resources;
+    }
+    public synchronized String[] getLocales(){return shirazResourceOwner().shirazLocales(false);}
+    public synchronized String[] getNonSystemLocales(){return shirazResourceOwner().shirazLocales(true);}
     private void check(String name) {
         if (closed) throw new IllegalStateException("Asset manager is closed");
         if (name == null) throw new NullPointerException("Asset name");
@@ -51,6 +57,8 @@ public final class AssetManager implements AutoCloseable {
         catch(Resources.NotFoundException failure){throw new FileNotFoundException("Missing packaged file: "+name);}
     }
     public InputStream openNonAsset(String name) throws IOException {return openNonAsset(0,name,ACCESS_STREAMING);}
+    public InputStream openNonAsset(int cookie,String name) throws IOException {return openNonAsset(cookie,name,ACCESS_STREAMING);}
+    public InputStream openNonAsset(String name,int mode) throws IOException {return openNonAsset(0,name,mode);}
     public synchronized InputStream open(String name) throws IOException { return open(name, ACCESS_STREAMING); }
     public synchronized InputStream open(String name, int mode) throws IOException {
         check(name);

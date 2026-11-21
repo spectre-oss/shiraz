@@ -45,6 +45,77 @@ public class Toolbar extends LinearLayout {
     public void setTitleTextColor(int color){title.setTextColor(color);}
     public void setSubtitleTextColor(int color){subtitle.setTextColor(color);}
     public void setNavigationIcon(Drawable icon){navigation.setImageDrawable(icon);navigation.setVisibility(icon==null?GONE:VISIBLE);}
+    public interface OnMenuItemClickListener {
+        boolean onMenuItemClick(android.view.MenuItem item);
+    }
+
+    public static class LayoutParams extends android.app.ActionBar.LayoutParams {
+        public LayoutParams(Context c, AttributeSet attrs) {
+            super(WRAP_CONTENT, WRAP_CONTENT);
+            if (attrs != null) {
+                android.view.ViewGroup.MarginLayoutParams mlp =
+                        new android.view.ViewGroup.MarginLayoutParams(c, attrs);
+                this.width = mlp.width;
+                this.height = mlp.height;
+                this.leftMargin = mlp.leftMargin;
+                this.topMargin = mlp.topMargin;
+                this.rightMargin = mlp.rightMargin;
+                this.bottomMargin = mlp.bottomMargin;
+                shiraz.runtime.XmlAttributes a = new shiraz.runtime.XmlAttributes(c, attrs);
+                this.gravity = a.integer("layout_gravity", Gravity.NO_GRAVITY);
+            }
+        }
+
+        public LayoutParams(int width, int height) {
+            super(width, height, Gravity.START | Gravity.CENTER_VERTICAL);
+        }
+
+        public LayoutParams(int width, int height, int gravity) {
+            super(width, height, gravity);
+        }
+
+        public LayoutParams(int gravity) {
+            this(WRAP_CONTENT, MATCH_PARENT, gravity);
+        }
+
+        public LayoutParams(LayoutParams source) {
+            super(source.width, source.height, source.gravity);
+            setMargins(source.leftMargin, source.topMargin, source.rightMargin, source.bottomMargin);
+        }
+
+        public LayoutParams(android.app.ActionBar.LayoutParams source) {
+            super(source.width, source.height, source.gravity);
+            setMargins(source.leftMargin, source.topMargin, source.rightMargin, source.bottomMargin);
+        }
+
+        public LayoutParams(android.view.ViewGroup.MarginLayoutParams source) {
+            super(source.width, source.height);
+            setMargins(source.leftMargin, source.topMargin, source.rightMargin, source.bottomMargin);
+        }
+
+        public LayoutParams(android.view.ViewGroup.LayoutParams source) {
+            super(source.width, source.height);
+        }
+    }
+
+    private OnMenuItemClickListener menuItemClickListener;
+
+    public void setOnMenuItemClickListener(OnMenuItemClickListener listener) {
+        menuItemClickListener = listener;
+    }
+
+    @Override
+    public void addView(View child, int index, android.view.ViewGroup.LayoutParams params) {
+        if (params != null && !(params instanceof LinearLayout.LayoutParams)) {
+            LinearLayout.LayoutParams converted = new LinearLayout.LayoutParams(params);
+            if (params instanceof android.app.ActionBar.LayoutParams) {
+                converted.gravity = ((android.app.ActionBar.LayoutParams) params).gravity;
+            }
+            params = converted;
+        }
+        super.addView(child, index, params);
+    }
+
     public void setNavigationIcon(int resource){setNavigationIcon(resource==0?null:getContext().getDrawable(resource));}
     public Drawable getNavigationIcon(){return navigation.getDrawable();}
     public void setNavigationOnClickListener(View.OnClickListener listener){navigation.setOnClickListener(listener);}

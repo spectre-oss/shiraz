@@ -105,4 +105,13 @@ public final class Debug {
    public MemoryInfo[] newArray(int size){return new MemoryInfo[size];}
   };
  }
+
+ @Deprecated
+ public static class InstructionCount {
+  public InstructionCount() {}
+  public boolean resetAndStart() { return false; }
+  public boolean collect() { return false; }
+  public int globalTotal() { return 0; }
+  public int globalMethodInvocations() { return 0; }
+ }
 }

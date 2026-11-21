@@ -66,6 +66,13 @@ public class ImageView extends View {
     }
     public void setImageBitmap(Bitmap value) { setImageDrawable(value == null ? null : new BitmapDrawable(getResources(),value)); }
     public void setImageResource(int id) { setImageDrawable(id == 0 ? null : getContext().getDrawable(id)); }
+    public void setImageURI(android.net.Uri uri) {
+        if (uri == null) { setImageDrawable(null); return; }
+        if ("android.resource".equals(uri.getScheme()) && uri.getLastPathSegment() != null) {
+            try { setImageResource(Integer.parseInt(uri.getLastPathSegment())); return; } catch (NumberFormatException ignored) { }
+        }
+        setImageDrawable(Drawable.createFromPath(uri.getPath()));
+    }
     public void setImageLevel(int value) { level=value; if (image != null && image.setLevel(value)) { requestLayout(); invalidate(); } }
     public void setImageAlpha(int value) {
         if (value < 0 || value > 255) throw new IllegalArgumentException("image alpha");

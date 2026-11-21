@@ -16,10 +16,35 @@ public class StorageManager {
         if(storage==null)throw new NullPointerException("storage");
         this.storage=storage;primary=new StorageVolume(storage);
     }
+    public static class StorageVolumeCallback {
+        public StorageVolumeCallback() {
+        }
+
+        public void onStateChanged(StorageVolume volume) {
+        }
+    }
+
+    private final List<StorageVolumeCallback> callbacks = new ArrayList<StorageVolumeCallback>();
+
     public static StorageManager shirazForStorage(HostStorage storage) { return new StorageManager(storage); }
     public StorageVolume getPrimaryStorageVolume() { return primary; }
     public List<StorageVolume> getStorageVolumes() {
         ArrayList<StorageVolume> result=new ArrayList<StorageVolume>(1);result.add(primary);return result;
     }
     public StorageVolume getStorageVolume(File file) { return storage.onPrimary(file)?primary:null; }
+    public void registerStorageVolumeCallback(java.util.concurrent.Executor executor, StorageVolumeCallback callback) {
+        java.util.Objects.requireNonNull(executor, "executor");
+        java.util.Objects.requireNonNull(callback, "callback");
+        synchronized (callbacks) {
+            if (!callbacks.contains(callback)) {
+                callbacks.add(callback);
+            }
+        }
+    }
+    public void unregisterStorageVolumeCallback(StorageVolumeCallback callback) {
+        java.util.Objects.requireNonNull(callback, "callback");
+        synchronized (callbacks) {
+            callbacks.remove(callback);
+        }
+    }
 }

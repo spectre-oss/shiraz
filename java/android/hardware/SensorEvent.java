@@ -5,6 +5,7 @@ public class SensorEvent {
     public Sensor sensor;
     public int accuracy;
     public long timestamp;
+    public boolean firstEventAfterDiscontinuity;
     public final float[] values;
     SensorEvent(int size) {
         if (size < 1 || size > 64) throw new IllegalArgumentException("Sensor payload size");

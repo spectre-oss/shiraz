@@ -86,7 +86,10 @@ public class TextUtils {
         return encoded.toString();
     }
     public static int indexOf(CharSequence text, char value) { return indexOf(text, value, 0); }
-    public static int indexOf(CharSequence text, char value, int start) { return indexOf(text, value, start, text.length()); }
+    public static int indexOf(CharSequence text, char value, int start) {
+        if (text.getClass() == String.class) return ((String) text).indexOf(value, start);
+        return indexOf(text, value, start, text.length());
+    }
     public static int indexOf(CharSequence text, char value, int start, int end) {
         for (int i = start; i < end; i++) if (text.charAt(i) == value) return i;
         return -1;
@@ -100,9 +103,15 @@ public class TextUtils {
     public static int indexOf(CharSequence text, CharSequence value) { return indexOf(text, value, 0); }
     public static int indexOf(CharSequence text, CharSequence value, int start) { return indexOf(text, value, start, text.length()); }
     public static int indexOf(CharSequence text, CharSequence value, int start, int end) {
-        if (value.length() == 0) return start;
-        for (int i = start; i <= end-value.length(); i++) if (regionMatches(text, i, value, 0, value.length())) return i;
-        return -1;
+        int length = value.length();
+        if (length == 0) return start;
+        char first = value.charAt(0);
+        for (;;) {
+            start = indexOf(text, first, start);
+            if (start < 0 || start > end - length) return -1;
+            if (regionMatches(text, start, value, 0, length)) return start;
+            start++;
+        }
     }
     public static boolean regionMatches(CharSequence first, int firstStart, CharSequence second, int secondStart, int length) {
         if (firstStart < 0 || secondStart < 0 || length < 0 || firstStart > first.length()-length || secondStart > second.length()-length) throw new IndexOutOfBoundsException();
@@ -200,5 +209,228 @@ public class TextUtils {
         char[] copy = new char[end - start];
         getChars(value, start, end, copy, 0);
         return new String(copy);
+    }
+
+    public static void writeToParcel(CharSequence cs, android.os.Parcel p, int parcelableFlags) {
+        if (cs == null) {
+            p.writeInt(1);
+            p.writeString(null);
+        } else {
+            p.writeInt(1);
+            p.writeString(cs.toString());
+        }
+    }
+
+    public static final android.os.Parcelable.Creator<CharSequence> CHAR_SEQUENCE_CREATOR =
+            new android.os.Parcelable.Creator<CharSequence>() {
+                @Override
+                public CharSequence createFromParcel(android.os.Parcel p) {
+                    int kind = p.readInt();
+                    String str = p.readString();
+                    if (str == null) return null;
+                    if (kind == 1) return str;
+                    return new SpannableString(str);
+                }
+
+                @Override
+                public CharSequence[] newArray(int size) {
+                    return new CharSequence[size];
+                }
+            };
+
+    public static final int SAFE_STRING_FLAG_TRIM = 0x1;
+    public static final int SAFE_STRING_FLAG_SINGLE_LINE = 0x2;
+    public static final int SAFE_STRING_FLAG_FIRST_LINE = 0x4;
+
+    public static void copySpansFrom(
+            Spanned source, int start, int end, Class kind, Spannable dest, int destoff) {
+        if (kind == null) {
+            kind = Object.class;
+        }
+        Object[] spans = source.getSpans(start, end, kind);
+        for (int i = 0; i < spans.length; i++) {
+            int st = source.getSpanStart(spans[i]);
+            int en = source.getSpanEnd(spans[i]);
+            int fl = source.getSpanFlags(spans[i]);
+            if (st < start) st = start;
+            if (en > end) en = end;
+            dest.setSpan(spans[i], st - start + destoff, en - start + destoff, fl);
+        }
+    }
+
+    public static CharSequence stringOrSpannedString(CharSequence source) {
+        if (source == null) return null;
+        if (source instanceof SpannedString) return source;
+        if (source instanceof Spanned) return new SpannedString(source);
+        return source.toString();
+    }
+
+    @Deprecated
+    public static boolean isGraphic(CharSequence str) {
+        final int len = str.length();
+        for (int cp, i = 0; i < len; i += Character.charCount(cp)) {
+            cp = Character.codePointAt(str, i);
+            int gc = Character.getType(cp);
+            if (gc != Character.CONTROL
+                    && gc != Character.FORMAT
+                    && gc != Character.SURROGATE
+                    && gc != Character.UNASSIGNED
+                    && gc != Character.LINE_SEPARATOR
+                    && gc != Character.PARAGRAPH_SEPARATOR
+                    && gc != Character.SPACE_SEPARATOR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Deprecated
+    public static boolean isGraphic(char c) {
+        int gc = Character.getType(c);
+        return gc != Character.CONTROL
+                && gc != Character.FORMAT
+                && gc != Character.SURROGATE
+                && gc != Character.UNASSIGNED
+                && gc != Character.LINE_SEPARATOR
+                && gc != Character.PARAGRAPH_SEPARATOR
+                && gc != Character.SPACE_SEPARATOR;
+    }
+
+    public static void dumpSpans(CharSequence cs, android.util.Printer printer, String prefix) {
+        if (cs instanceof Spanned) {
+            Spanned sp = (Spanned) cs;
+            Object[] os = sp.getSpans(0, cs.length(), Object.class);
+            for (int i = 0; i < os.length; i++) {
+                Object o = os[i];
+                printer.println(prefix + cs.subSequence(sp.getSpanStart(o), sp.getSpanEnd(o))
+                        + ": " + Integer.toHexString(System.identityHashCode(o))
+                        + " " + o.getClass().getCanonicalName()
+                        + " (" + sp.getSpanStart(o) + "-" + sp.getSpanEnd(o)
+                        + ") fl=#" + sp.getSpanFlags(o));
+            }
+        } else {
+            printer.println(prefix + cs + ": (no spans)");
+        }
+    }
+
+    public static CharSequence replace(
+            CharSequence template, String[] sources, CharSequence[] destinations) {
+        SpannableStringBuilder tb = new SpannableStringBuilder(template);
+        for (int i = 0; i < sources.length; i++) {
+            int where = indexOf(tb, sources[i]);
+            if (where >= 0) {
+                tb.setSpan(sources[i], where, where + sources[i].length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
+        for (int i = 0; i < sources.length; i++) {
+            int start = tb.getSpanStart(sources[i]);
+            int end = tb.getSpanEnd(sources[i]);
+            if (start >= 0) {
+                tb.replace(start, end, destinations[i]);
+            }
+        }
+        return tb;
+    }
+
+    public static CharSequence expandTemplate(CharSequence template, CharSequence... values) {
+        if (values.length > 9) {
+            throw new IllegalArgumentException("max of 9 values are supported");
+        }
+        SpannableStringBuilder ssb = new SpannableStringBuilder(template);
+        int i = 0;
+        while (i < ssb.length()) {
+            if (ssb.charAt(i) == '^') {
+                char next = i + 1 < ssb.length() ? ssb.charAt(i + 1) : '\0';
+                if (next == '^') {
+                    ssb.delete(i + 1, i + 2);
+                    i++;
+                    continue;
+                } else if (Character.isDigit(next)) {
+                    int which = Character.getNumericValue(next) - 1;
+                    if (which < 0) {
+                        throw new IllegalArgumentException("template requests value ^0");
+                    }
+                    if (which >= values.length) {
+                        throw new IllegalArgumentException(
+                                "template requests value ^" + (which + 1)
+                                        + "; only " + values.length + " provided");
+                    }
+                    ssb.replace(i, i + 2, values[which]);
+                    i += values[which].length();
+                    continue;
+                }
+            }
+            i++;
+        }
+        return ssb;
+    }
+
+    @Deprecated
+    public static CharSequence getReverse(CharSequence source, int start, int end) {
+        StringBuilder sb = new StringBuilder(end - start);
+        for (int i = end - 1; i >= start; i--) {
+            sb.append(source.charAt(i));
+        }
+        return sb.toString();
+    }
+
+    public static CharSequence commaEllipsize(
+            CharSequence text, TextPaint p, float avail, String oneMore, String more) {
+        if (text == null) return "";
+        if (p.measureText(text.toString()) <= avail) return text;
+        String[] parts = text.toString().split(",");
+        StringBuilder fit = new StringBuilder();
+        int kept = 0;
+        for (int i = 0; i < parts.length; i++) {
+            String candidate = (kept == 0 ? "" : ", ") + parts[i].trim();
+            int remaining = parts.length - (i + 1);
+            String suffix = remaining == 0 ? "" : ", " + (remaining == 1 ? oneMore : String.format(more, Integer.valueOf(remaining)));
+            if (p.measureText(fit.toString() + candidate + suffix) <= avail) {
+                fit.append(candidate);
+                kept++;
+            } else {
+                int rem = parts.length - kept;
+                if (kept > 0 && rem > 0) {
+                    fit.append(", ").append(rem == 1 ? oneMore : String.format(more, Integer.valueOf(rem)));
+                }
+                break;
+            }
+        }
+        return fit.toString();
+    }
+
+    public static CharSequence listEllipsize(
+            android.content.Context context,
+            java.util.List<CharSequence> elements,
+            String separator,
+            TextPaint paint,
+            float avail,
+            int moreId) {
+        if (elements == null || elements.isEmpty()) return "";
+        String sep = separator == null ? ", " : separator;
+        String joined = join(sep, elements);
+        if (paint.measureText(joined) <= avail) return joined;
+        return ellipsize(joined, paint, avail, TruncateAt.END);
+    }
+
+    public static CharSequence makeSafeForPresentation(
+            String unclean, int maxCharactersToConsider, float ellipsizeDip, int flags) {
+        if (unclean == null) throw new NullPointerException("unclean");
+        String s = maxCharactersToConsider > 0 && unclean.length() > maxCharactersToConsider
+                ? unclean.substring(0, maxCharactersToConsider)
+                : unclean;
+        if ((flags & SAFE_STRING_FLAG_FIRST_LINE) != 0) {
+            int nl = s.indexOf('\n');
+            int cr = s.indexOf('\r');
+            int cut = nl >= 0 && cr >= 0 ? Math.min(nl, cr) : Math.max(nl, cr);
+            if (cut >= 0) s = s.substring(0, cut);
+        } else if ((flags & SAFE_STRING_FLAG_SINGLE_LINE) != 0) {
+            s = s.replace('\n', ' ').replace('\r', ' ');
+        }
+        if ((flags & SAFE_STRING_FLAG_TRIM) != 0) {
+            s = s.trim();
+        }
+        return s;
     }
 }

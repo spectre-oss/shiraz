@@ -8,7 +8,7 @@ import java.util.*;
 /** Owned compiled-resource pull cursor and typed AttributeSet; resource references remain references. */
 public final class CompiledXmlParser implements XmlResourceParser {
     private static final class Event {final BinaryXml.Node node;final int type,depth;final String text;Event(BinaryXml.Node n,int t,int d){this(n,t,d,null);}Event(BinaryXml.Node n,int t,int d,String value){node=n;type=t;depth=d;text=value;}}
-    private final ArrayList<Event> events=new ArrayList<Event>();private int at,resource;private final int encodedSize;private boolean closed;
+    private final ArrayList<Event> events=new ArrayList<Event>();private int at,resource;private final int encodedSize;private boolean closed;private int describedAt=-1;private String positionDescription;
     public CompiledXmlParser(byte[] bytes,int resource){this.resource=resource;encodedSize=bytes.length;BinaryXml.Node root=BinaryXml.parse(bytes);events.add(new Event(null,START_DOCUMENT,0));flatten(root,1);events.add(new Event(null,END_DOCUMENT,0));}
     private final Object sourceKey=new Object();
     private Object sharedKey;
@@ -23,7 +23,7 @@ public final class CompiledXmlParser implements XmlResourceParser {
     public BinaryXml.Node shirazNode(){return event().node;}
     private BinaryXml.Attribute attribute(int index){Event e=event();if(e.type!=START_TAG||index<0||index>=e.node.attributes.size())throw new IndexOutOfBoundsException("XML attribute");return e.node.attributes.get(index);}
     private int index(String ns,String name){Event e=event();if(e.type!=START_TAG)return -1;for(int i=0;i<e.node.attributes.size();i++){BinaryXml.Attribute a=e.node.attributes.get(i);if(a.name.equals(name)&&(ns==null||a.namespace.equals(ns)))return i;}return -1;}
-    public void close(){closed=true;events.clear();at=0;}
+    public void close(){closed=true;events.clear();at=0;positionDescription=null;describedAt=-1;}
     public int getEventType(){return event().type;}
     public int next(){event();if(at<events.size()-1)at++;return event().type;}
     public int nextToken(){return next();}
@@ -34,7 +34,7 @@ public final class CompiledXmlParser implements XmlResourceParser {
     public String getPrefix(){return getName()==null?null:prefix(event().node.namespace);}
     public int getLineNumber(){return event().node==null?-1:event().type==END_TAG?event().node.endLine:event().node.line;}
     public int getColumnNumber(){return -1;}
-    public String getPositionDescription(){return "Binary XML resource #"+Integer.toHexString(resource)+" line "+getLineNumber();}
+    public String getPositionDescription(){event();if(describedAt!=at){positionDescription="Binary XML resource #"+Integer.toHexString(resource)+" line "+getLineNumber();describedAt=at;}return positionDescription;}
     public int getNamespaceCount(int depth)throws XmlPullParserException{if(depth<0||depth>getDepth())throw new XmlPullParserException("Invalid namespace depth");if(depth==0)return 0;BinaryXml.Node n=event().node;for(int d=getDepth();d>depth;d--)n=n.parent;return n.namespaces.size();}
     public String getNamespacePrefix(int pos){BinaryXml.Namespace n=event().node.namespaces.get(pos);return n.prefix.isEmpty()?null:n.prefix;}
     public String getNamespaceUri(int pos){return event().node.namespaces.get(pos).uri;}

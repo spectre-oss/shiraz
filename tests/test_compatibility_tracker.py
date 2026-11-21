@@ -38,6 +38,14 @@ class CompatibilityTrackerTests(unittest.TestCase):
             self.assertEqual(
                 result["packages"][0], {"package": "android", "present": 0, "reference": 1}
             )
+            boot = root / "core-libart.jar"
+            with zipfile.ZipFile(boot, "w") as archive:
+                archive.writestr("android/Manifest.class", b"boot")
+            with_boot = tracker.class_inventory(jar, root / "classes", [boot])
+            self.assertEqual((with_boot["present"], with_boot["reference"]), (2, 3))
+            self.assertEqual(
+                with_boot["packages"][0], {"package": "android", "present": 1, "reference": 1}
+            )
 
     def fixture(self, root):
         cases = [

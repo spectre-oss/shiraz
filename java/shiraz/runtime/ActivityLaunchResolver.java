@@ -11,7 +11,8 @@ public final class ActivityLaunchResolver {
  public static final class Request {
   private final Intent intent;
   public final int launchMode;
-  private Request(Intent intent,int mode){this.intent=intent;launchMode=mode;}
+  public final String processName;
+  private Request(Intent intent,int mode,String process){this.intent=intent;launchMode=mode;processName=process;}
   public Intent intent(){return intent.shirazBroadcastCopy();}
   public int bytes(){return intent.shirazBroadcastBytes();}
  }
@@ -21,7 +22,7 @@ public final class ActivityLaunchResolver {
   Intent snapshot=intent.shirazBroadcastCopy();
   int singleTop=Intent.FLAG_ACTIVITY_SINGLE_TOP;
   int ignored=Intent.FLAG_ACTIVITY_NEW_TASK|0x80000|Intent.FLAG_ACTIVITY_NO_ANIMATION|Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION;
-  int unsupported=snapshot.getFlags()&~(singleTop|Intent.FLAG_ACTIVITY_FORWARD_RESULT|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_CLEAR_TOP|ignored);
+  int unsupported=snapshot.getFlags()&~(singleTop|Intent.FLAG_ACTIVITY_CLEAR_TASK|Intent.FLAG_ACTIVITY_FORWARD_RESULT|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_CLEAR_TOP|ignored);
   if(unsupported!=0)throw new UnsupportedOperationException("Activity task flags are not implemented: 0x"+Integer.toHexString(unsupported));
   ComponentName component=snapshot.getComponent();
   if(snapshot.getPackage()!=null&&!packageName.equals(snapshot.getPackage())||component!=null&&!packageName.equals(component.getPackageName()))throw new ActivityNotFoundException("No external activity registry");
@@ -36,9 +37,11 @@ public final class ActivityLaunchResolver {
    info=best.activityInfo;component=new ComponentName(info.packageName,info.name);snapshot.setComponent(component);
   }
   if(!packageName.equals(info.packageName)||!info.isEnabled())throw new ActivityNotFoundException("Activity is unavailable in loaded APK");
-  if(info.processName!=null&&!packageName.equals(info.processName))throw new UnsupportedOperationException("Separate activity processes are not implemented");
-  if(info.launchMode<0||info.launchMode>2)throw new UnsupportedOperationException("Separate activity tasks are not implemented");
+  String process=info.processName;
+  if(process!=null&&process.startsWith(":"))process=packageName+process;
+  process=ActivityRunner.activityProcessName(packageName,process);
+  if(info.launchMode<0||info.launchMode>3)throw new UnsupportedOperationException("Separate activity tasks are not implemented: component="+component.flattenToString()+", launchMode="+info.launchMode+", flags=0x"+Integer.toHexString(snapshot.getFlags()));
   int mode=info.launchMode==0&&(snapshot.getFlags()&singleTop)!=0?1:info.launchMode;
-  return new Request(snapshot.shirazBroadcastCopy(),mode);
+  return new Request(snapshot.shirazBroadcastCopy(),mode,process);
  }
 }

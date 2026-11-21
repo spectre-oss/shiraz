@@ -13,7 +13,7 @@ import android.view.ViewGroup;
  * PopupWindow list of drop-down views. Dialog mode, prompts and entries
  * arrays from XML are not supported.
  */
-public class Spinner extends AdapterView<SpinnerAdapter> {
+public class Spinner extends AbsSpinner {
     public static final int MODE_DIALOG=0,MODE_DROPDOWN=1;
     private SpinnerAdapter adapter;
     private int selected=INVALID_POSITION;

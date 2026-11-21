@@ -148,7 +148,7 @@ runtime-aot-smoke: framework build/libshiraz-jni.so build/libshiraz-test-input.s
 	python3 scripts/art_smoke.py --program surface --aot
 
 framework: build/shiraz-framework.jar
-build/shiraz-framework.jar: $(shell rg --files java -g '*.java') scripts/build_framework.py VERSION
+build/shiraz-framework.jar: $(shell rg --files java optional-java/icu-inner-overlay -g '*.java') src/shiraz/android_attributes.py scripts/build_framework.py VERSION
 	python3 scripts/build_framework.py
 apk-fixture: build/apk-fixture/fixture.apk
 build/apk-fixture/fixture.apk: $(shell rg --files tests/apk) scripts/build_apk_fixture.py scripts/fixture_images.py

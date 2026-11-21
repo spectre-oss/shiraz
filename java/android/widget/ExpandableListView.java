@@ -12,6 +12,16 @@ public class ExpandableListView extends ListView {
  public interface OnChildClickListener{boolean onChildClick(ExpandableListView parent,View view,int group,int child,long id);}
  public interface OnGroupClickListener{boolean onGroupClick(ExpandableListView parent,View view,int group,long id);}
  public interface OnGroupExpandListener{void onGroupExpand(int group);}public interface OnGroupCollapseListener{void onGroupCollapse(int group);}
+ public static class ExpandableListContextMenuInfo implements ContextMenu.ContextMenuInfo {
+  public View targetView;
+  public long packedPosition;
+  public long id;
+  public ExpandableListContextMenuInfo(View targetView, long packedPosition, long id) {
+   this.targetView = targetView;
+   this.packedPosition = packedPosition;
+   this.id = id;
+  }
+ }
  private OnChildClickListener childClick;private OnGroupClickListener groupClick;private OnGroupExpandListener expandListener;private OnGroupCollapseListener collapseListener;
  private ExpandableListAdapter source;private Flat flat;
  private final HashSet<Long> expanded=new HashSet<Long>();

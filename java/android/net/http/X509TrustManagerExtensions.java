@@ -5,10 +5,10 @@ import java.security.cert.*;
 import java.util.List;
 import javax.net.ssl.X509TrustManager;
 /** Delegates Android chain validation to the supplied trust manager's real host-aware API. */
-public final class X509TrustManagerExtensions {
+public class X509TrustManagerExtensions {
     private final X509TrustManager manager;
     private final Method check;
-    public X509TrustManagerExtensions(X509TrustManager manager){
+    public X509TrustManagerExtensions(X509TrustManager manager) throws IllegalArgumentException {
         if(manager==null)throw new IllegalArgumentException("trust manager");this.manager=manager;
         try{check=manager.getClass().getMethod("checkServerTrusted",X509Certificate[].class,String.class,String.class);}
         catch(NoSuchMethodException failure){throw new IllegalArgumentException("Trust manager has no Android chain validation API",failure);}

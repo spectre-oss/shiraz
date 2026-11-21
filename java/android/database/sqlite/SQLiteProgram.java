@@ -15,7 +15,7 @@ public abstract class SQLiteProgram extends SQLiteClosable {
             if (initial != null && initial.length > arguments.length) throw new SQLiteBindOrColumnIndexOutOfRangeException("Too many bind arguments");
             if (initial != null) for (int i = 0; i < initial.length; ++i) arguments[i] = normalize(initial[i]);
             statement = owned; guard.open("close");
-        } catch (Throwable error) { if (owned != 0) NativeSqlite.finalizeStatement(owned); databaseHeld = false; database.releaseReference(); throw error; }
+        } catch (Throwable error) { if (owned != 0) database.releaseProgram(owned); databaseHeld = false; database.releaseReference(); throw error; }
     }
     private static Object normalize(Object value) {
         if (value == null || value instanceof String || value instanceof byte[]) return value;
@@ -38,7 +38,7 @@ public abstract class SQLiteProgram extends SQLiteClosable {
     final NativeSqlite.Result query() { return database.snapshot(this); }
     @Override protected void onAllReferencesReleased() {
         long owned; synchronized (this) { owned = statement; statement = 0; guard.close(); if (!databaseHeld) return; databaseHeld = false; }
-        try { if (owned != 0) NativeSqlite.finalizeStatement(owned); } finally { database.releaseReference(); }
+        try { if (owned != 0) database.releaseProgram(owned); } finally { database.releaseReference(); }
     }
     @Override protected void finalize() throws Throwable { try { if (guard != null) { guard.warnIfOpen(); if (databaseHeld) onAllReferencesReleased(); } } finally { super.finalize(); } }
 }

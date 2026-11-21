@@ -13,6 +13,7 @@ public class Path {
     // need the original verbs, including quadratics before cubic conversion.
     private float[] semanticData=new float[32];
     private int semanticSize;
+    private java.util.HashMap<Integer,Float> conicWeights;
     private long shirazNativePath;
     private boolean nativePathDirty=true;
     private int nativePathGeneration=1,nativePathPublishedGeneration;
@@ -100,10 +101,34 @@ public class Path {
     private void ensureStart() { if (size == 0) moveTo(0,0); }
     float[] commands() { if (snapshot == null) snapshot=Arrays.copyOf(data,size); return snapshot; }
     /** Snapshot for host property animation: distance, x, y triples. */
+    // Geometry only: no resources, theme, configuration or mutable Path identity.
+    private static final class SampleKey {
+        final float[] commands;final long precision;final int hash;
+        SampleKey(float[] source,double segment){commands=source.clone();precision=Double.doubleToLongBits(segment);hash=31*Arrays.hashCode(commands)+(int)(precision^(precision>>>32));}
+        public int hashCode(){return hash;}
+        public boolean equals(Object other){if(!(other instanceof SampleKey))return false;SampleKey key=(SampleKey)other;return precision==key.precision&&Arrays.equals(commands,key.commands);}
+    }
+    private static final java.util.LinkedHashMap<SampleKey,double[]> SAMPLE_CACHE=new java.util.LinkedHashMap<SampleKey,double[]>(16,.75f,true);
+    private static int sampleCacheBytes;
+    private static double[] cachedSamples(SampleKey key){synchronized(SAMPLE_CACHE){double[] value=SAMPLE_CACHE.get(key);return value==null?null:value.clone();}}
+    private static void cacheSamples(SampleKey key,double[] points){
+        if(key==null||points.length>49152)return;
+        synchronized(SAMPLE_CACHE){
+            if(SAMPLE_CACHE.containsKey(key))return;
+            int bytes=key.commands.length*4+points.length*8;
+            while(!SAMPLE_CACHE.isEmpty()&&(SAMPLE_CACHE.size()>=64||sampleCacheBytes+bytes>2*1024*1024)){
+                java.util.Map.Entry<SampleKey,double[]> oldest=SAMPLE_CACHE.entrySet().iterator().next();
+                sampleCacheBytes-=oldest.getKey().commands.length*4+oldest.getValue().length*8;SAMPLE_CACHE.remove(oldest.getKey());
+            }
+            SAMPLE_CACHE.put(key,points.clone());sampleCacheBytes+=bytes;
+        }
+    }
     public double[] shirazAnimationPoints() { return shirazAnimationPoints(1); }
     public double[] shirazAnimationPoints(final double maxSegment) {
         if(!shirazIsFinite())throw new IllegalArgumentException("Nonfinite animation path");
         if(!Double.isFinite(maxSegment)||maxSegment<=0)throw new IllegalArgumentException("Sampling precision");
+        float[] source=commands();SampleKey key=source.length<=256?new SampleKey(source,maxSegment):null;
+        double[] cached=key==null?null:cachedSamples(key);if(cached!=null)return cached;
         final java.util.ArrayList<Double> points=new java.util.ArrayList<Double>();
         class Sampler {
             double length,px,py;
@@ -123,7 +148,7 @@ public class Path {
                 cubic(ax,ay,abx,aby,ex,ey,mx,my,depth+1);cubic(mx,my,fx,fy,cdx,cdy,dx,dy,depth+1);
             }
         }
-        Sampler sampler=new Sampler();double sx=0,sy=0;float[] source=commands();
+        Sampler sampler=new Sampler();double sx=0,sy=0;
         for(int i=0;i<source.length;){int op=(int)source[i++];
             if(op==1){sx=source[i++];sy=source[i++];sampler.add(sx,sy,true);}
             else if(op==2){sampler.add(source[i++],source[i++],false);}
@@ -131,11 +156,11 @@ public class Path {
             else sampler.add(sx,sy,false);
         }
         if(points.isEmpty())throw new IllegalArgumentException("Empty animation path");
-        double[] result=new double[points.size()];for(int i=0;i<result.length;i++)result[i]=points.get(i);return result;
+        double[] result=new double[points.size()];for(int i=0;i<result.length;i++)result[i]=points.get(i);cacheSamples(key,result);return result;
     }
-    public void set(Path other) { if (other == this) return; float[] copy=other.commands().clone(),semantic=Arrays.copyOf(other.semanticData,other.semanticSize);data=copy;size=data.length;semanticData=semantic;semanticSize=semantic.length;x=other.x;y=other.y;startX=other.startX;startY=other.startY;fill=other.fill;snapshot=null;changed(); }
-    public void reset() { size=semanticSize=0; x=y=startX=startY=0; snapshot=null;changed(); }
-    public void rewind() { FillType old=fill; reset(); fill=old; }
+    public void set(Path other) { if (other == null) { reset(); return; } if (other == this) return; float[] copy=other.commands().clone(),semantic=Arrays.copyOf(other.semanticData,other.semanticSize);data=copy;size=data.length;semanticData=semantic;semanticSize=semantic.length;conicWeights=other.conicWeights==null?null:new java.util.HashMap<Integer,Float>(other.conicWeights);x=other.x;y=other.y;startX=other.startX;startY=other.startY;fill=other.fill;snapshot=null;changed(); }
+    public void reset() { size=semanticSize=0; conicWeights=null; x=y=startX=startY=0; snapshot=null; changed(); }
+    public void rewind() { reset(); }
     public int shirazCommandCount() { return size; }
     public boolean isEmpty() { return size == 0; }
     public void setFillType(FillType value) { if (value == null) throw new NullPointerException("fill type"); if(fill!=value){fill=value;changed();} }
@@ -149,7 +174,8 @@ public class Path {
         float[] commands=Arrays.copyOf(semanticData,semanticSize);int end=-1;
         for(int i=0;i<commands.length;){int verb=(int)commands[i++],count=verb==3?6:verb==5?4:verb==4?0:2;if(count!=0)end=i+count-2;i+=count;}
         commands[end]=px;commands[end+1]=py;
-        rewind();for(int i=0;i<commands.length;){int verb=(int)commands[i++];if(verb==1){moveTo(commands[i],commands[i+1]);i+=2;}else if(verb==2){lineTo(commands[i],commands[i+1]);i+=2;}else if(verb==3){cubicTo(commands[i],commands[i+1],commands[i+2],commands[i+3],commands[i+4],commands[i+5]);i+=6;}else if(verb==5){quadTo(commands[i],commands[i+1],commands[i+2],commands[i+3]);i+=4;}else close();}
+        java.util.HashMap<Integer,Float> savedConics=conicWeights==null?null:new java.util.HashMap<Integer,Float>(conicWeights);
+        rewind();for(int i=0;i<commands.length;){int pos=i;int verb=(int)commands[i++];if(verb==1){moveTo(commands[i],commands[i+1]);i+=2;}else if(verb==2){lineTo(commands[i],commands[i+1]);i+=2;}else if(verb==3){cubicTo(commands[i],commands[i+1],commands[i+2],commands[i+3],commands[i+4],commands[i+5]);i+=6;}else if(verb==5){Float cw=savedConics==null?null:savedConics.get(Integer.valueOf(pos));if(cw!=null)conicTo(commands[i],commands[i+1],commands[i+2],commands[i+3],cw.floatValue());else quadTo(commands[i],commands[i+1],commands[i+2],commands[i+3]);i+=4;}else close();}
     }
     public void lineTo(float x,float y) { valid(x); valid(y); ensureStart(); append(2,x,y); this.x=x; this.y=y; }
     public void rLineTo(float dx,float dy) { lineTo(x+dx,y+dy); }
@@ -157,13 +183,31 @@ public class Path {
     public void rCubicTo(float dx1,float dy1,float dx2,float dy2,float dx3,float dy3) { cubicTo(x+dx1,y+dy1,x+dx2,y+dy2,x+dx3,y+dy3); }
     public void quadTo(float x1,float y1,float x2,float y2) {
         valid(x1);valid(y1);valid(x2);valid(y2);
-        float a=x+(x1-x)*2/3,b=y+(y1-y)*2/3,c=x2+(x1-x2)*2/3,d=y2+(y1-y2)*2/3;
+        float sx=size==0?0:x,sy=size==0?0:y;
+        float a=sx+(x1-sx)*2/3,b=sy+(y1-sy)*2/3,c=x2+(x1-x2)*2/3,d=y2+(y1-y2)*2/3;
         valid(a);valid(b);valid(c);valid(d);ensureStart();reserve(7);
         data[size++]=3;data[size++]=a;data[size++]=b;data[size++]=c;data[size++]=d;data[size++]=x2;data[size++]=y2;
         semanticData[semanticSize++]=5;semanticData[semanticSize++]=x1;semanticData[semanticSize++]=y1;semanticData[semanticSize++]=x2;semanticData[semanticSize++]=y2;
         x=x2;y=y2;changed();
     }
     public void rQuadTo(float dx1,float dy1,float dx2,float dy2) { quadTo(x+dx1,y+dy1,x+dx2,y+dy2); }
+    public void conicTo(float x1,float y1,float x2,float y2,float weight) {
+        valid(x1);valid(y1);valid(x2);valid(y2);
+        if(!(weight>0f)){lineTo(x2,y2);return;}
+        if(!Float.isFinite(weight)){lineTo(x1,y1);lineTo(x2,y2);return;}
+        if(weight==1f){quadTo(x1,y1,x2,y2);return;}
+        float sx=size==0?0:x,sy=size==0?0:y;
+        float k=(float)((4.0*weight)/(3.0*(1.0+weight)));
+        float a=sx+(x1-sx)*k,b=sy+(y1-sy)*k,c=x2+(x1-x2)*k,d=y2+(y1-y2)*k;
+        valid(a);valid(b);valid(c);valid(d);ensureStart();reserve(7);
+        data[size++]=3;data[size++]=a;data[size++]=b;data[size++]=c;data[size++]=d;data[size++]=x2;data[size++]=y2;
+        int semPos=semanticSize;
+        semanticData[semanticSize++]=5;semanticData[semanticSize++]=x1;semanticData[semanticSize++]=y1;semanticData[semanticSize++]=x2;semanticData[semanticSize++]=y2;
+        if(conicWeights==null)conicWeights=new java.util.HashMap<Integer,Float>();
+        conicWeights.put(Integer.valueOf(semPos),Float.valueOf(weight));
+        x=x2;y=y2;changed();
+    }
+    public void rConicTo(float dx1,float dy1,float dx2,float dy2,float weight) { conicTo(x+dx1,y+dy1,x+dx2,y+dy2,weight); }
     public void close() { if (size != 0) { append(4); x=startX; y=startY; } }
     public void addRect(float left,float top,float right,float bottom,Direction direction) {
         if (direction == null) throw new NullPointerException("direction");
@@ -185,12 +229,19 @@ public class Path {
     public void addPath(Path other) {
         if(other==null)throw new NullPointerException("path"); float[] values=other.commands(); if(values.length==0)return;
         float[] semantic=Arrays.copyOf(other.semanticData,other.semanticSize);
+        java.util.HashMap<Integer,Float> otherConics=other.conicWeights==null?null:new java.util.HashMap<Integer,Float>(other.conicWeights);
         if(size+values.length>65536)throw new IllegalStateException("Path exceeds 65536 command values");
         float nextX=other.x,nextY=other.y,nextStartX=other.startX,nextStartY=other.startY;
+        int baseSemantic=semanticSize;
         if(size+values.length>data.length)data=Arrays.copyOf(data,size+values.length);
         if(semanticSize+semantic.length>semanticData.length)semanticData=Arrays.copyOf(semanticData,semanticSize+semantic.length);
         System.arraycopy(values,0,data,size,values.length);size+=values.length;snapshot=null;
-        System.arraycopy(semantic,0,semanticData,semanticSize,semantic.length);semanticSize+=semantic.length;changed();
+        System.arraycopy(semantic,0,semanticData,semanticSize,semantic.length);semanticSize+=semantic.length;
+        if(otherConics!=null){
+            if(conicWeights==null)conicWeights=new java.util.HashMap<Integer,Float>();
+            for(java.util.Map.Entry<Integer,Float> e:otherConics.entrySet())conicWeights.put(Integer.valueOf(baseSemantic+e.getKey().intValue()),e.getValue());
+        }
+        changed();
         x=nextX;y=nextY;startX=nextStartX;startY=nextStartY;
     }
     private void ellipseArc(float cx,float cy,float rx,float ry,double start,double sweep) {
@@ -294,9 +345,10 @@ public class Path {
         float[] cursor={x,y,startX,startY};if(size!=0){matrix.mapPoints(cursor);for(float value:cursor)valid(value);}
         float[] semantic=Arrays.copyOf(semanticData,semanticSize);
         for(int i=0;i<semantic.length;){int command=(int)semantic[i++],count=command==3?6:command==5?4:command==4?0:2;matrix.mapPoints(semantic,i,semantic,i,count/2);i+=count;}
+        java.util.HashMap<Integer,Float> nextConics=conicWeights==null?null:new java.util.HashMap<Integer,Float>(conicWeights);
         if(destination==null)destination=this;
         destination.data=copy;destination.size=copy.length;destination.snapshot=null;destination.fill=fill;
-        destination.semanticData=semantic;destination.semanticSize=semantic.length;destination.changed();
+        destination.semanticData=semantic;destination.semanticSize=semantic.length;destination.conicWeights=nextConics;destination.changed();
         destination.x=cursor[0];destination.y=cursor[1];destination.startX=cursor[2];destination.startY=cursor[3];
     }
     public void offset(float dx,float dy) { offset(dx,dy,this); }
@@ -312,8 +364,195 @@ public class Path {
         FillType nextFill=fill;
         float[] semantic=Arrays.copyOf(semanticData,semanticSize);
         for(int i=0;i<semantic.length;){int command=(int)semantic[i++],count=command==3?6:command==5?4:command==4?0:2;for(int j=0;j<count;j++)semantic[i+j]+=j%2==0?dx:dy;i+=count;}
+        java.util.HashMap<Integer,Float> nextConics=conicWeights==null?null:new java.util.HashMap<Integer,Float>(conicWeights);
         destination.data=copy; destination.size=copy.length; destination.snapshot=null;
-        destination.semanticData=semantic;destination.semanticSize=semantic.length;destination.changed();
+        destination.semanticData=semantic;destination.semanticSize=semantic.length;destination.conicWeights=nextConics;destination.changed();
         destination.x=nextX; destination.y=nextY; destination.startX=nextStartX; destination.startY=nextStartY; destination.fill=nextFill;
+    }
+    public void incReserve(int extraPtCount) {
+        if (extraPtCount > 0) reserve(Math.min(1024, extraPtCount * 3));
+    }
+    public int getGenerationId() { return nativePathGeneration; }
+    public PathIterator getPathIterator() {
+        java.util.ArrayList<Integer> vList = new java.util.ArrayList<Integer>();
+        java.util.ArrayList<float[]> pList = new java.util.ArrayList<float[]>();
+        java.util.ArrayList<Float> wList = new java.util.ArrayList<Float>();
+        float cx = 0f, cy = 0f, sx = 0f, sy = 0f;
+        for (int i = 0; i < semanticSize; ) {
+            int semPos = i;
+            int cmd = (int) semanticData[i++];
+            if (cmd == 1) {
+                float nx = semanticData[i++], ny = semanticData[i++];
+                vList.add(Integer.valueOf(PathIterator.VERB_MOVE));
+                pList.add(new float[]{nx, ny});
+                wList.add(Float.valueOf(0f));
+                cx = sx = nx; cy = sy = ny;
+            } else if (cmd == 2) {
+                float nx = semanticData[i++], ny = semanticData[i++];
+                vList.add(Integer.valueOf(PathIterator.VERB_LINE));
+                pList.add(new float[]{cx, cy, nx, ny});
+                wList.add(Float.valueOf(0f));
+                cx = nx; cy = ny;
+            } else if (cmd == 3) {
+                float x1 = semanticData[i++], y1 = semanticData[i++], x2 = semanticData[i++], y2 = semanticData[i++], x3 = semanticData[i++], y3 = semanticData[i++];
+                vList.add(Integer.valueOf(PathIterator.VERB_CUBIC));
+                pList.add(new float[]{cx, cy, x1, y1, x2, y2, x3, y3});
+                wList.add(Float.valueOf(0f));
+                cx = x3; cy = y3;
+            } else if (cmd == 5) {
+                float x1 = semanticData[i++], y1 = semanticData[i++], x2 = semanticData[i++], y2 = semanticData[i++];
+                Float cw = conicWeights == null ? null : conicWeights.get(Integer.valueOf(semPos));
+                if (cw != null) {
+                    vList.add(Integer.valueOf(PathIterator.VERB_CONIC));
+                    pList.add(new float[]{cx, cy, x1, y1, x2, y2});
+                    wList.add(cw);
+                } else {
+                    vList.add(Integer.valueOf(PathIterator.VERB_QUAD));
+                    pList.add(new float[]{cx, cy, x1, y1, x2, y2});
+                    wList.add(Float.valueOf(0f));
+                }
+                cx = x2; cy = y2;
+            } else if (cmd == 4) {
+                vList.add(Integer.valueOf(PathIterator.VERB_CLOSE));
+                pList.add(new float[0]);
+                wList.add(Float.valueOf(0f));
+                cx = sx; cy = sy;
+            }
+        }
+        int n = vList.size();
+        int[] verbs = new int[n];
+        float[][] pts = new float[n][];
+        float[] weights = new float[n];
+        for (int i = 0; i < n; i++) {
+            verbs[i] = vList.get(i).intValue();
+            pts[i] = pList.get(i);
+            weights[i] = wList.get(i).floatValue();
+        }
+        return new PathIterator(this, verbs, pts, weights, getGenerationId());
+    }
+    public boolean isRect(RectF rect) {
+        if (semanticSize == 0 || !shirazIsFinite()) return false;
+        float[] px = new float[5], py = new float[5];
+        int count = 0;
+        boolean sawClose = false;
+        for (int i = 0; i < semanticSize; ) {
+            int cmd = (int) semanticData[i++];
+            if (cmd == 1) {
+                if (count != 0) return false;
+                px[count] = semanticData[i++]; py[count++] = semanticData[i++];
+            } else if (cmd == 2) {
+                if (count == 0 || count >= 5 || sawClose) return false;
+                px[count] = semanticData[i++]; py[count++] = semanticData[i++];
+            } else if (cmd == 4) {
+                sawClose = true;
+            } else {
+                return false;
+            }
+        }
+        if (count == 5) {
+            if (px[4] != px[0] || py[4] != py[0]) return false;
+            count = 4;
+        } else if (count != 4 || !sawClose) {
+            return false;
+        }
+        float minX = Math.min(Math.min(px[0], px[1]), Math.min(px[2], px[3]));
+        float maxX = Math.max(Math.max(px[0], px[1]), Math.max(px[2], px[3]));
+        float minY = Math.min(Math.min(py[0], py[1]), Math.min(py[2], py[3]));
+        float maxY = Math.max(Math.max(py[0], py[1]), Math.max(py[2], py[3]));
+        if (minX >= maxX || minY >= maxY) return false;
+        for (int i = 0; i < 4; i++) {
+            int j = (i + 1) & 3;
+            boolean horiz = py[i] == py[j] && px[i] != px[j];
+            boolean vert = px[i] == px[j] && py[i] != py[j];
+            if (!horiz && !vert) return false;
+            if ((px[i] != minX && px[i] != maxX) || (py[i] != minY && py[i] != maxY)) return false;
+        }
+        if (rect != null) rect.set(minX, minY, maxX, maxY);
+        return true;
+    }
+    public float[] approximate(float acceptableError) {
+        if (acceptableError < 0f || Float.isNaN(acceptableError)) {
+            throw new IllegalArgumentException("acceptableError must be >= 0");
+        }
+        if (isEmpty() || !shirazIsFinite()) {
+            return new float[]{0f, 0f, 0f, 1f, 0f, 0f};
+        }
+        double step = Math.max(0.25, Math.min(64.0, acceptableError == 0f ? 0.25 : acceptableError * 4.0));
+        double[] samples = shirazAnimationPoints(step);
+        int count = samples.length / 3;
+        if (count < 2) {
+            float sx = (float) samples[1], sy = (float) samples[2];
+            return new float[]{0f, sx, sy, 1f, sx, sy};
+        }
+        double total = samples[(count - 1) * 3];
+        float[] out = new float[count * 3];
+        for (int i = 0; i < count; i++) {
+            out[i * 3] = total <= 0.0 ? (i / (float) (count - 1)) : (float) (samples[i * 3] / total);
+            out[i * 3 + 1] = (float) samples[i * 3 + 1];
+            out[i * 3 + 2] = (float) samples[i * 3 + 2];
+        }
+        out[0] = 0f;
+        out[(count - 1) * 3] = 1f;
+        return out;
+    }
+    public boolean isInterpolatable(Path otherPath) {
+        if (otherPath == null) throw new NullPointerException("otherPath");
+        if (semanticSize != otherPath.semanticSize) return false;
+        for (int i = 0; i < semanticSize; ) {
+            int v1 = (int) semanticData[i], v2 = (int) otherPath.semanticData[i];
+            if (v1 != v2) return false;
+            boolean c1 = conicWeights != null && conicWeights.containsKey(Integer.valueOf(i));
+            boolean c2 = otherPath.conicWeights != null && otherPath.conicWeights.containsKey(Integer.valueOf(i));
+            if (c1 != c2) return false;
+            int step = v1 == 3 ? 7 : v1 == 5 ? 5 : v1 == 4 ? 1 : 3;
+            i += step;
+        }
+        return true;
+    }
+    public boolean interpolate(Path otherPath, float t, Path interpolatedPath) {
+        if (otherPath == null || interpolatedPath == null) throw new NullPointerException();
+        if (!isInterpolatable(otherPath)) return false;
+        Path out = new Path();
+        out.setFillType(fill);
+        for (int i = 0; i < semanticSize; ) {
+            int pos = i;
+            int verb = (int) semanticData[i++];
+            if (verb == 1) {
+                float ix = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float iy = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                out.moveTo(ix, iy);
+            } else if (verb == 2) {
+                float ix = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float iy = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                out.lineTo(ix, iy);
+            } else if (verb == 3) {
+                float x1 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float y1 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float x2 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float y2 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float x3 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float y3 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                out.cubicTo(x1, y1, x2, y2, x3, y3);
+            } else if (verb == 5) {
+                float x1 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float y1 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float x2 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                float y2 = lerp(semanticData[i], otherPath.semanticData[i], t); i++;
+                Float w1 = conicWeights == null ? null : conicWeights.get(Integer.valueOf(pos));
+                if (w1 != null) {
+                    float w2 = otherPath.conicWeights.get(Integer.valueOf(pos)).floatValue();
+                    out.conicTo(x1, y1, x2, y2, lerp(w1.floatValue(), w2, t));
+                } else {
+                    out.quadTo(x1, y1, x2, y2);
+                }
+            } else if (verb == 4) {
+                out.close();
+            }
+        }
+        interpolatedPath.set(out);
+        return true;
+    }
+    private static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
     }
 }

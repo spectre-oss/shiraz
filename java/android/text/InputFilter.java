@@ -52,4 +52,48 @@ public interface InputFilter {
             return mMax;
         }
     }
+
+    public static class AllCaps implements InputFilter {
+        private final java.util.Locale mLocale;
+
+        public AllCaps() {
+            mLocale = null;
+        }
+
+        public AllCaps(java.util.Locale locale) {
+            if (locale == null) {
+                throw new NullPointerException("locale");
+            }
+            mLocale = locale;
+        }
+
+        @Override
+        public CharSequence filter(
+                CharSequence source, int start, int end, Spanned dest, int dstart, int dend) {
+            boolean needUpper = false;
+            for (int i = start; i < end; i++) {
+                int cp = Character.codePointAt(source, i);
+                if (Character.isLowerCase(cp) || Character.isTitleCase(cp)) {
+                    needUpper = true;
+                    break;
+                }
+                if (cp > 0xFFFF) {
+                    i++;
+                }
+            }
+            if (!needUpper) {
+                return null;
+            }
+            java.util.Locale loc = mLocale != null ? mLocale : java.util.Locale.getDefault();
+            String upper = source.subSequence(start, end).toString().toUpperCase(loc);
+            if (source instanceof Spanned) {
+                SpannableString sp = new SpannableString(upper);
+                if (upper.length() == end - start) {
+                    TextUtils.copySpansFrom((Spanned) source, start, end, null, sp, 0);
+                }
+                return sp;
+            }
+            return upper;
+        }
+    }
 }

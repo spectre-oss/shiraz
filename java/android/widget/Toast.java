@@ -12,14 +12,32 @@ import java.util.ArrayList;
 /** Text toasts rendered as an overlay in the host window, without a desktop notification service. */
 public class Toast {
     public static final int LENGTH_SHORT = 0, LENGTH_LONG = 1;
+    public abstract static class Callback {
+        public Callback() {}
+        public void onToastShown() {}
+        public void onToastHidden() {}
+    }
     private final Context context;
     private final Handler handler;
+    private final ArrayList<Callback> callbacks = new ArrayList<Callback>();
     private volatile int duration;
     private volatile View view;
     public Toast(Context context) {
         if (context == null) throw new NullPointerException("context");
         if (Looper.myLooper() == null) throw new RuntimeException("Toast requires a prepared Looper");
         this.context = context; handler = new Handler(context.getMainLooper());
+    }
+    public void addCallback(Callback callback) {
+        if (callback == null) throw new NullPointerException("callback");
+        synchronized (callbacks) {
+            if (!callbacks.contains(callback)) callbacks.add(callback);
+        }
+    }
+    public void removeCallback(Callback callback) {
+        if (callback == null) throw new NullPointerException("callback");
+        synchronized (callbacks) {
+            callbacks.remove(callback);
+        }
     }
     public static Toast makeText(Context context, CharSequence text, int duration) {
         Toast toast = new Toast(context); toast.view = new TextToast(context, text); toast.setDuration(duration); return toast;
@@ -28,7 +46,7 @@ public class Toast {
     public void setDuration(int value) { if (value != LENGTH_SHORT && value != LENGTH_LONG) throw new IllegalArgumentException("duration"); duration = value; }
     public int getDuration() { return duration; }
     public View getView() { return view; }
-    public void setView(View value) {
+    public void setView(android.view.View value) {
         if (value != null) throw new UnsupportedOperationException("Custom toast View measurement/layout is not implemented");
         view = null;
     }
@@ -42,9 +60,19 @@ public class Toast {
     public void show() {
         if (view == null) throw new IllegalStateException("Toast has no View; use makeText");
         final View shown = view; final long millis = duration == LENGTH_LONG ? 3500 : 2000;
-        submit(new Runnable() { @Override public void run() { ToastOverlay.show(Toast.this, shown, millis); } });
+        submit(new Runnable() { @Override public void run() {
+            ToastOverlay.show(Toast.this, shown, millis);
+            ArrayList<Callback> snapshot;
+            synchronized (callbacks) { snapshot = new ArrayList<Callback>(callbacks); }
+            for (int i = 0; i < snapshot.size(); i++) snapshot.get(i).onToastShown();
+        } });
     }
-    public void cancel() { submit(new Runnable() { @Override public void run() { ToastOverlay.cancel(Toast.this); } }); }
+    public void cancel() { submit(new Runnable() { @Override public void run() {
+        ToastOverlay.cancel(Toast.this);
+        ArrayList<Callback> snapshot;
+        synchronized (callbacks) { snapshot = new ArrayList<Callback>(callbacks); }
+        for (int i = 0; i < snapshot.size(); i++) snapshot.get(i).onToastHidden();
+    } }); }
     private static final class TextToast extends View {
         private volatile String text;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);

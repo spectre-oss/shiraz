@@ -29,4 +29,17 @@ public class PackageItemInfo {
         }
         return null;
     }
+    public static class DisplayNameComparator implements java.util.Comparator<PackageItemInfo> {
+        private final java.text.Collator sCollator = java.text.Collator.getInstance();
+        private final PackageManager mPM;
+        public DisplayNameComparator(PackageManager pm) { mPM = pm; }
+        @Override
+        public final int compare(PackageItemInfo aa, PackageItemInfo ab) {
+            CharSequence sa = mPM != null ? aa.loadLabel(mPM) : aa.nonLocalizedLabel;
+            if (sa == null) sa = aa.name != null ? aa.name : "";
+            CharSequence sb = mPM != null ? ab.loadLabel(mPM) : ab.nonLocalizedLabel;
+            if (sb == null) sb = ab.name != null ? ab.name : "";
+            return sCollator.compare(sa.toString(), sb.toString());
+        }
+    }
 }

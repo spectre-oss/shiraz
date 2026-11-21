@@ -7,6 +7,7 @@ import java.util.Locale;
 public class Resources {
     static { System.loadLibrary("shiraz-resources"); }
     private volatile long handle;
+    private volatile ResourcesImpl mResourcesImpl;
     private final String apkPath;
     private final String[] splitPaths;
     private Resources parent;
@@ -34,6 +35,11 @@ public class Resources {
     private final android.util.DisplayMetrics baseMetrics;
     private int width, height;
     private AssetManager assets;
+    /** Creates an unattached resource facade; an implementation is installed by the runtime. */
+    public Resources(ClassLoader classLoader) {
+        this.apkPath=null;this.splitPaths=new String[0];this.processSystem=false;
+        this.baseMetrics=new android.util.DisplayMetrics();
+    }
     private Resources(String apk, int width, int height, Locale locale,boolean processSystem) {
         this(apk,width,height,locale,processSystem,160);
     }
@@ -42,7 +48,7 @@ public class Resources {
     }
     private Resources(String apk,String[] splits,int width,int height,Locale locale,boolean processSystem,int density) {
         if(density<1||density>1280)throw new IllegalArgumentException("Display density");
-        this.processSystem=processSystem; this.apkPath=apk;
+        this.processSystem=processSystem; this.apkPath=apk;this.mResourcesImpl=new ResourcesImpl(this);
         if(splits==null)throw new NullPointerException("split paths");
         if(splits.length>256)throw new IllegalArgumentException("Split resource limit");
         this.splitPaths=splits.clone();
@@ -112,6 +118,7 @@ public class Resources {
         } catch(Throwable failure) {boolean counted=child!=null&&child.parent!=null;if(child!=null)child.closeOwned();if(!counted)familySize.decrementAndGet();throw failure;}
     }
     public void shirazClose() {
+        if(apkPath==null&&mResourcesImpl!=null)throw new UnsupportedOperationException("A resource facade does not own its resource manager");
         if(processSystem&&parent==null)throw new IllegalStateException("System resources belong to the process");
         closeOwned();
     }
@@ -119,7 +126,7 @@ public class Resources {
         java.util.ArrayList<Resources> owned;
         synchronized(this) {
             if(handle==0)return;
-            nativeClose(handle);handle=0;valueCache.clear();styleCache.clear();clearXmlCache();
+            nativeClose(handle);handle=0;identifiers.clear();valueCache.clear();styleCache.clear();clearXmlCache();
             owned=new java.util.ArrayList<Resources>(children);children.clear();
             if(parent!=null)familySize.decrementAndGet();
         }
@@ -133,7 +140,7 @@ public class Resources {
         for(int i=0;i<result.length;i++){Configuration value=new Configuration();value.screenWidthDp=values[i*3];value.screenHeightDp=values[i*3+1];value.smallestScreenWidthDp=values[i*3+2];result[i]=value;}
         return result;
     }
-    public synchronized AssetManager getAssets() { requireOpen(); if (assets == null) assets = new AssetManager(this); return assets; }
+    public synchronized AssetManager getAssets() { Resources owner=facadeOwner();if(owner!=null)return mResourcesImpl.getAssets();requireOpen(); if (assets == null) assets = new AssetManager(this); return assets; }
     synchronized String[] shirazAssetArchives(){
         requireOpen();String[] paths=new String[splitPaths.length+1];paths[0]=apkPath;
         System.arraycopy(splitPaths,0,paths,1,splitPaths.length);return paths;
@@ -174,6 +181,7 @@ public class Resources {
     public void getValue(int id,android.util.TypedValue out,boolean resolveRefs) { getValueForDensity(id,0,out,resolveRefs); }
     public void getValue(String name,android.util.TypedValue out,boolean resolveRefs) { getValue(getIdentifier(name,"string",null),out,resolveRefs); }
     public synchronized void getValueForDensity(int id,int density,android.util.TypedValue out,boolean resolveRefs) {
+        Resources owner=facadeOwner();if(owner!=null){owner.getValueForDensity(id,density,out,resolveRefs);return;}
         if (out == null) throw new NullPointerException("typed value"); requireOpen();
         if (density < 0 || density > 65535) throw new IllegalArgumentException("Resource density");
         resourceValue(id,density,resolveRefs,false,out);
@@ -183,17 +191,17 @@ public class Resources {
         if (value.type != type) throw new NotFoundException("Resource 0x"+Integer.toHexString(id)+" has incompatible type "+value.type);
         return value;
     }
-    public synchronized float getDimension(int id) { return scalar(id,5).getDimension(metrics); }
-    public synchronized int getDimensionPixelOffset(int id) { return android.util.TypedValue.complexToDimensionPixelOffset(scalar(id,5).data,metrics); }
-    public synchronized int getDimensionPixelSize(int id) { return android.util.TypedValue.complexToDimensionPixelSize(scalar(id,5).data,metrics); }
+    public synchronized float getDimension(int id) { Resources owner=facadeOwner();return owner!=null?owner.getDimension(id):scalar(id,5).getDimension(metrics); }
+    public synchronized int getDimensionPixelOffset(int id) { Resources owner=facadeOwner();return owner!=null?owner.getDimensionPixelOffset(id):android.util.TypedValue.complexToDimensionPixelOffset(scalar(id,5).data,metrics); }
+    public synchronized int getDimensionPixelSize(int id) { Resources owner=facadeOwner();return owner!=null?owner.getDimensionPixelSize(id):android.util.TypedValue.complexToDimensionPixelSize(scalar(id,5).data,metrics); }
     public float getFraction(int id,int base,int parentBase) { return scalar(id,6).getFraction(base,parentBase); }
     public int getInteger(int id) {
         android.util.TypedValue value=new android.util.TypedValue(); getValue(id,value,true);
         if (value.type < 16 || value.type > 31) throw new NotFoundException("Resource is not an integer"); return value.data;
     }
-    public synchronized CharSequence[] getTextArray(int id) { requireOpen(); return nativeTextArray(handle,id); }
-    public synchronized String[] getStringArray(int id) { requireOpen(); return nativeTextArray(handle,id); }
-    public synchronized int[] getIntArray(int id) { requireOpen(); return nativeIntArray(handle,id); }
+    public synchronized CharSequence[] getTextArray(int id) { Resources owner=facadeOwner();if(owner!=null)return owner.getTextArray(id);requireOpen(); return nativeTextArray(handle,id); }
+    public synchronized String[] getStringArray(int id) { Resources owner=facadeOwner();if(owner!=null)return owner.getStringArray(id);requireOpen(); return nativeTextArray(handle,id); }
+    public synchronized int[] getIntArray(int id) { Resources owner=facadeOwner();if(owner!=null)return owner.getIntArray(id);requireOpen(); return nativeIntArray(handle,id); }
     public synchronized TypedArray obtainTypedArray(int id) {
         requireOpen();
         if (id == 0) throw new NotFoundException("Resource ID #0x0");
@@ -215,6 +223,7 @@ public class Resources {
     private static native int[] nativeIntArray(long handle,int id);
     private static native Object[] nativeTypedArray(long handle,int id);
     public synchronized CharSequence getQuantityText(int id, int quantity) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.getQuantityText(id,quantity);
         requireOpen(); Object[] bag = nativePlural(handle, id);
         int[] keys = (int[]) bag[0]; String[] values = (String[]) bag[1];
         String selected = textFor(keys, values, quantityAttribute(shiraz.runtime.CardinalPlural.select(configuration.locale, quantity)));
@@ -224,6 +233,7 @@ public class Resources {
     }
     public synchronized String getQuantityString(int id, int quantity) { return getQuantityText(id, quantity).toString(); }
     public synchronized String getQuantityString(int id, int quantity, Object... formatArgs) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.getQuantityString(id,quantity,formatArgs);
         return String.format(configuration.locale, getQuantityString(id, quantity), formatArgs);
     }
     private static String textFor(int[] keys, String[] values, int attribute) {
@@ -254,17 +264,30 @@ public class Resources {
         return nativeResourceFile(handle,value.assetCookie,value.string.toString().getBytes(StandardCharsets.UTF_8));
     }
     public synchronized byte[] shirazReadResourceFile(int id,android.util.TypedValue out) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.shirazReadResourceFile(id,out);
         if (out == null) throw new NullPointerException("typed value"); android.util.TypedValue value=new android.util.TypedValue(); getValue(id,value,true);
         byte[] bytes=fileBytes(value); out.setTo(value); return bytes;
     }
-    private final java.util.LinkedHashMap<Integer,shiraz.runtime.CompiledXmlParser> xmlCache=new java.util.LinkedHashMap<Integer,shiraz.runtime.CompiledXmlParser>(16,.75f,true);
-    private int xmlBytes;
-    private void clearXmlCache(){xmlCache.clear();xmlBytes=0;fontCache.clear();}
+    private void clearXmlCache(){mResourcesImpl.flushLayoutCache();fontCache.clear();}
+    public ResourcesImpl getImpl(){return mResourcesImpl;}
+    public synchronized void setImpl(ResourcesImpl impl){
+        if(impl==null)throw new NullPointerException("resource implementation");
+        if(mResourcesImpl==impl)return;
+        if(apkPath!=null||mResourcesImpl!=null)throw new UnsupportedOperationException("Replacing an attached resource implementation is not supported");
+        Resources owner=impl.shirazResourceOwner();if(owner==this)throw new IllegalArgumentException("Recursive resource facade");
+        if(impl.getAssets()!=owner.getAssets())throw new UnsupportedOperationException("Custom resource asset managers are not supported");
+        mResourcesImpl=impl;
+    }
+    private Resources facadeOwner(){
+        if(apkPath!=null||mResourcesImpl==null)return null;
+        Resources owner=mResourcesImpl.shirazResourceOwner();
+        if(mResourcesImpl.getAssets()!=owner.getAssets())throw new UnsupportedOperationException("Custom resource asset managers are not supported");
+        return owner;
+    }
+    public synchronized android.view.DisplayAdjustments getDisplayAdjustments(){Resources owner=facadeOwner();if(owner==null)requireOpen();return mResourcesImpl.getDisplayAdjustments();}
     public synchronized XmlResourceParser getXml(int id) {
-        requireOpen();shiraz.runtime.CompiledXmlParser parsed=xmlCache.get(id);if(parsed!=null)return parsed.shirazFork();
-        byte[] bytes=shirazReadResourceFile(id,new android.util.TypedValue());
-        try{parsed=new shiraz.runtime.CompiledXmlParser(bytes,id);if(bytes.length<=65536){xmlCache.put(id,parsed);xmlBytes+=bytes.length;while(xmlCache.size()>32||xmlBytes>262144){Integer oldest=xmlCache.keySet().iterator().next();xmlBytes-=xmlCache.remove(oldest).shirazEncodedSize();}}return parsed.shirazFork();}
-        catch(RuntimeException failure){throw new NotFoundException("Cannot parse XML resource #"+Integer.toHexString(id),failure);}
+        Resources owner=facadeOwner();if(owner!=null)return mResourcesImpl.loadXmlResourceParser(id);
+        requireOpen();return mResourcesImpl.loadXmlResourceParser(id);
     }
     private final java.util.LinkedHashMap<Integer,android.graphics.Typeface> fontCache=new java.util.LinkedHashMap<Integer,android.graphics.Typeface>(16,.75f,true);
     public synchronized android.graphics.Typeface getFont(int id) {
@@ -323,24 +346,29 @@ public class Resources {
     private int drawableNodes; private long drawableBytes,drawablePixels;
     public synchronized void shirazClaimDrawableNode() { if(drawableStack.isEmpty()) throw new IllegalStateException("No drawable inflation"); if(++drawableNodes>1024) throw new IllegalArgumentException("Drawable inflation node budget"); }
     private byte[] drawableFile(android.util.TypedValue value) { byte[] bytes=fileBytes(value); drawableBytes+=bytes.length; if(drawableBytes>32L*1024*1024) throw new IllegalArgumentException("Drawable inflation byte budget"); return bytes; }
-    public synchronized android.graphics.drawable.Drawable getDrawable(int id,Theme theme) {
+    public android.graphics.drawable.Drawable getDrawable(int id,Theme theme) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.getDrawable(id,theme);
+        if(theme!=null&&theme.owner()!=this){Theme local=newThemeFor(this);local.setTo(theme);theme=local;}
+        synchronized(this){
         if(drawableStack.size()>=32 || drawableStack.contains(id)) throw new NotFoundException("Drawable reference cycle/depth");
         if(drawableStack.isEmpty()) {drawableNodes=0;drawableBytes=drawablePixels=0;}
         drawableStack.add(id);
         try { shirazClaimDrawableNode(); return loadDrawable(id,theme); } finally { drawableStack.remove(drawableStack.size()-1); }
+        }
     }
     private android.graphics.drawable.Drawable loadDrawable(int id,Theme theme) {
-        if (theme != null && theme.getResources() != this) throw new UnsupportedOperationException("Cross-manager drawable themes are not implemented");
+        if (theme != null && theme.owner() != this) throw new UnsupportedOperationException("Cross-manager drawable themes are not implemented");
         android.util.TypedValue value=new android.util.TypedValue(); getValue(id,value,true); int flags=value.changingConfigurations;
         if (value.type == 2 && (theme == null || !theme.resolveAttribute(value.data,value,true))) throw new NotFoundException("Drawable requires a theme");
         flags |= value.changingConfigurations; android.graphics.drawable.Drawable drawable;
         if (value.type >= 28 && value.type <= 31) drawable=new android.graphics.drawable.ColorDrawable(value.data);
         else if (value.type == 3 && value.string != null) {
             String filename=value.string.toString();
-            if (filename.endsWith(".xml")) drawable=shiraz.runtime.DrawableXml.inflate(this,theme,drawableFile(value));
+            byte[] encoded=drawableFile(value);
+            boolean compiledXml=encoded.length>=4 && encoded[0]==3 && encoded[1]==0 && encoded[2]==8 && encoded[3]==0;
+            if (filename.endsWith(".xml") || compiledXml) drawable=shiraz.runtime.DrawableXml.inflate(this,theme,encoded);
             else {
-                if (!filename.endsWith(".png")&&!filename.endsWith(".webp")&&!filename.endsWith(".jpg")&&!filename.endsWith(".jpeg")) throw new UnsupportedOperationException("Only PNG, JPEG, static WebP and supported XML file drawables are implemented");
-                android.graphics.Bitmap bitmap=android.graphics.BitmapFactory.decodeResourceBytes(this,value,drawableFile(value),null);
+                android.graphics.Bitmap bitmap=android.graphics.BitmapFactory.decodeResourceBytes(this,value,encoded,null);
                 if (bitmap == null) throw new NotFoundException("Cannot decode image drawable");
                 drawablePixels+=(long)bitmap.getWidth()*bitmap.getHeight(); if(drawablePixels>16L*1024*1024) {bitmap.recycle();throw new IllegalArgumentException("Drawable inflation pixel budget");}
                 drawable=bitmap.getNinePatchChunk()==null?new android.graphics.drawable.BitmapDrawable(this,bitmap):new android.graphics.drawable.NinePatchDrawable(this,bitmap,bitmap.getNinePatchChunk(),null,filename);
@@ -354,14 +382,17 @@ public class Resources {
         try{return getText(id);}catch(NotFoundException missing){return fallback;}
     }
     public synchronized String getString(int id) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.getString(id);
         requireOpen();
         return nativeString(handle, id);
     }
-    public synchronized String getString(int id, Object... formatArgs) { requireOpen(); return String.format(configuration.locale, getString(id), formatArgs); }
+    public synchronized String getString(int id, Object... formatArgs) { Resources owner=facadeOwner();if(owner!=null)return owner.getString(id,formatArgs);requireOpen(); return String.format(configuration.locale, getString(id), formatArgs); }
     public synchronized Configuration getConfiguration() {
+        Resources owner=facadeOwner();if(owner!=null)return owner.getConfiguration();
         requireOpen(); return new Configuration(configuration);
     }
     public synchronized android.util.DisplayMetrics getDisplayMetrics() {
+        Resources owner=facadeOwner();if(owner!=null)return owner.getDisplayMetrics();
         requireOpen(); android.util.DisplayMetrics copy = new android.util.DisplayMetrics(); copy.setTo(metrics); return copy;
     }
     public synchronized android.util.DisplayMetrics shirazBaseDisplayMetrics() {
@@ -377,7 +408,9 @@ public class Resources {
     }
     /** Host-only resize; applications cannot resize the window through updateConfiguration. */
     public synchronized Configuration shirazPreviewInheritedConfiguration(Configuration rootConfiguration) {
-        if(rootConfiguration==null)throw new NullPointerException("configuration");requireOpen();
+        if(rootConfiguration==null)throw new NullPointerException("configuration");
+        Resources owner=facadeOwner();if(owner!=null)return owner.shirazPreviewInheritedConfiguration(rootConfiguration);
+        requireOpen();
         Configuration next=parent==null?new Configuration(rootConfiguration):parent.shirazPreviewInheritedConfiguration(rootConfiguration);
         if(parent!=null)next.updateFrom(override);return next;
     }
@@ -414,6 +447,7 @@ public class Resources {
         baseMetrics.widthPixels=newWidth;baseMetrics.heightPixels=newHeight;if(hostDensity)baseMetrics.setTo(dm);
     }
     private void requireOpen() {
+        if(handle==0&&apkPath==null&&mResourcesImpl!=null)throw new UnsupportedOperationException("This resource facade operation is not implemented");
         if(handle==0)throw new IllegalStateException("Resources are closed");
         if(parent!=null) {
             DisplayState state=parent.displayState();Configuration inherited=state.configuration;
@@ -426,6 +460,7 @@ public class Resources {
         }
     }
     public synchronized void updateConfiguration(Configuration changes, android.util.DisplayMetrics display) {
+        Resources owner=facadeOwner();if(owner!=null){owner.updateConfiguration(changes,display);return;}
         requireOpen();
         Configuration next = new Configuration(configuration);
         if (changes != null) {
@@ -456,20 +491,35 @@ public class Resources {
         }
     }
     private long themeGeneration;
+    synchronized long shirazResourceGeneration(){requireOpen();return themeGeneration;}
     private void configure(Configuration c, android.util.DisplayMetrics dm) {
         nativeConfigure(handle, c.locale.toLanguageTag(), new int[]{dm.widthPixels, dm.heightPixels, dm.densityDpi, c.screenWidthDp,
             c.screenHeightDp, c.smallestScreenWidthDp, c.orientation, c.screenLayout, c.uiMode});
         themeGeneration++;valueCache.clear();styleCache.clear();clearXmlCache();
     }
-    public synchronized Theme newTheme() { requireOpen(); return new Theme(); }
+    public synchronized Theme newTheme() {
+        Resources owner=facadeOwner();
+        return owner==null?newThemeFor(this):owner.newThemeFor(this);
+    }
+    private synchronized Theme newThemeFor(Resources view) { requireOpen(); return new Theme(view); }
     public int getColor(int id) { return getColor(id, null); }
     public int getColor(int id, Theme theme) { return loadColors(id, theme, true).getDefaultColor(); }
     public ColorStateList getColorStateList(int id) { return getColorStateList(id, null); }
     public ColorStateList getColorStateList(int id, Theme theme) { return loadColors(id, theme, false); }
-    private synchronized ColorStateList loadColors(int id, Theme theme, boolean integers) {
+    private ColorStateList loadColors(int id, Theme theme, boolean integers) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.loadColors(id,theme,integers);
+        int[] styles=null;
+        if(theme!=null){
+            Resources source=theme.owner();
+            if(!apkPath.equals(source.apkPath)||!java.util.Arrays.equals(splitPaths,source.splitPaths)||processSystem!=source.processSystem)
+                throw new UnsupportedOperationException("Color themes between different APKs are not implemented");
+            // Snapshot before taking this manager's lock: opposite-direction lookups
+            // must not nest two resource-owner monitors. Resolve against our config.
+            synchronized(source){source.requireOpen();styles=theme.sequence();}
+        }
+        synchronized(this){
         requireOpen();
-        if (theme != null && theme.getResources() != this) throw new UnsupportedOperationException("Cross-manager color themes are not implemented");
-        int[] packed = nativeColorList(handle, id, theme == null ? null : theme.sequence(), integers);
+        int[] packed = nativeColorList(handle, id, styles, integers);
         int count = packed[0], offset = 1; int[] colors = new int[count]; int[][] states = new int[count][];
         int[][] deferred = new int[count][]; boolean hasDeferred = false;
         for (int i = 0; i < count; ++i) {
@@ -480,6 +530,7 @@ public class Resources {
             System.arraycopy(packed, offset, states[i], 0, size); offset += size;
         }
         return new ColorStateList(states, colors, hasDeferred ? deferred : null);
+        }
     }
     public TypedArray obtainAttributes(android.util.AttributeSet set,int[] attrs){return styledAttributes(null,set,attrs,0,0);}
     private boolean styleValue(int style,int attr,android.util.TypedValue out) {
@@ -497,6 +548,10 @@ public class Resources {
         public boolean equals(Object other){if(!(other instanceof StyleQuery))return false;StyleQuery q=(StyleQuery)other;return source==q.source&&position==q.position&&defAttr==q.defAttr&&defRes==q.defRes&&java.util.Arrays.equals(attrs,q.attrs);}
     }
     private TypedArray styledAttributes(Theme base,android.util.AttributeSet set,int[] attrs,int defAttr,int defRes) {
+        return styledAttributes(base,set,attrs,defAttr,defRes,this);
+    }
+    private TypedArray styledAttributes(Theme base,android.util.AttributeSet set,int[] attrs,int defAttr,int defRes,Resources view) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.styledAttributes(base,set,attrs,defAttr,defRes,view);
         if(attrs==null)throw new NullPointerException("attrs");
         if(attrs.length>4096)throw new IllegalArgumentException("Attribute query limit");
         if(set!=null&&!(set instanceof shiraz.runtime.CompiledXmlParser))throw new UnsupportedOperationException("Only compiled XML attributes are implemented");
@@ -505,7 +560,7 @@ public class Resources {
             StyleQuery query=null;
             if(base!=null&&set instanceof shiraz.runtime.CompiledXmlParser&&attrs.length>=16&&attrs.length<=128){
                 if(base.generation!=themeGeneration)base.invalidate();query=new StyleQuery((shiraz.runtime.CompiledXmlParser)set,attrs,defAttr,defRes);
-                android.util.TypedValue[] cached=base.styled.get(query);if(cached!=null)return new TypedArray(this,base,cached,set.getPositionDescription());
+                android.util.TypedValue[] cached=base.styled.get(query);if(cached!=null)return new TypedArray(view,base,cached,set.getPositionDescription());
             }
             android.util.TypedValue selected=new android.util.TypedValue();
             if(base!=null&&defAttr!=0&&base.resolveAttribute(defAttr,selected,false)&&selected.type==1)defRes=selected.data;
@@ -519,12 +574,28 @@ public class Resources {
                 else if(style.type!=1)throw new IllegalArgumentException("XML style type");
                 if(id!=0)nativeValidateStyle(handle,id);xmlStyle=id;
             }
-            android.util.TypedValue[] values=new android.util.TypedValue[attrs.length];
-            for(int i=0;i<attrs.length;i++) {
-                android.util.TypedValue value=new android.util.TypedValue();boolean found=false;
-                if(node!=null)for(shiraz.runtime.BinaryXml.Attribute attribute:node.attributes)if(attribute.resourceId==attrs[i]&&attrs[i]!=0) {
-                    value.type=attribute.value.type;value.data=attribute.value.data;value.string=attribute.value.text;value.assetCookie=-1;found=true;break;
+            // Index explicit attributes once for constructor-sized queries. Keep
+            // this query-local: parser nodes and callers' ID arrays can change.
+            android.util.SparseArray<shiraz.runtime.BinaryXml.Attribute> explicit=null;
+            if(node!=null&&attrs.length>=16&&node.attributes.size()>=4){
+                explicit=new android.util.SparseArray<shiraz.runtime.BinaryXml.Attribute>(node.attributes.size());
+                for(int j=0;j<node.attributes.size();j++){
+                    shiraz.runtime.BinaryXml.Attribute attribute=node.attributes.get(j);
+                    if(attribute.resourceId!=0&&explicit.get(attribute.resourceId)==null)explicit.put(attribute.resourceId,attribute);
                 }
+            }
+            android.util.TypedValue[] values=new android.util.TypedValue[attrs.length];
+            android.util.TypedValue value=null;
+            for(int i=0;i<attrs.length;i++) {
+                // A missing lookup leaves the output untouched. Reuse its empty
+                // scratch value instead of allocating once per absent attribute.
+                if(value==null)value=new android.util.TypedValue();boolean found=false;
+                shiraz.runtime.BinaryXml.Attribute attribute=null;
+                if(node!=null&&attrs[i]!=0){
+                    if(explicit!=null)attribute=explicit.get(attrs[i]);
+                    else for(int j=0;j<node.attributes.size();j++){shiraz.runtime.BinaryXml.Attribute candidate=node.attributes.get(j);if(candidate.resourceId==attrs[i]){attribute=candidate;break;}}
+                }
+                if(attribute!=null){value.type=attribute.value.type;value.data=attribute.value.data;value.string=attribute.value.text;value.assetCookie=-1;found=true;}
                 if(!found&&xmlStyle!=0)found=styleValue(xmlStyle,attrs[i],value);
                 if(!found&&defRes!=0)found=styleValue(defRes,attrs[i],value);
                 if(!found&&base!=null)found=base.resolveAttribute(attrs[i],value,false);
@@ -536,10 +607,10 @@ public class Resources {
                     else {if(base==null)break;int id=value.data;if(!base.resolveAttribute(id,value,false))break;}
                     flags|=value.changingConfigurations;
                 }
-                value.changingConfigurations|=flags;values[i]=value;
+                value.changingConfigurations|=flags;values[i]=value;value=null;
             }
-            if(query!=null){int chars=0;for(android.util.TypedValue value:values)if(value!=null&&value.string!=null)chars+=value.string.length();if(chars<=2048){if(base.styled.size()>=128)base.styled.clear();base.styled.put(query,values);}}
-            return new TypedArray(this,base,values,set==null?"<theme>":set.getPositionDescription());
+            if(query!=null){int chars=0;for(android.util.TypedValue item:values)if(item!=null&&item.string!=null)chars+=item.string.length();if(chars<=2048){if(base.styled.size()>=128)base.styled.clear();base.styled.put(query,values);}}
+            return new TypedArray(view,base,values,set==null?"<theme>":set.getPositionDescription());
         }
     }
     public final class Theme {
@@ -548,23 +619,30 @@ public class Resources {
         private int[] cachedSequence;
         private long generation=-1;
         private final java.util.HashMap<StyleQuery,android.util.TypedValue[]> styled=new java.util.HashMap<StyleQuery,android.util.TypedValue[]>();
-        private final java.util.HashMap<Long,Resolved> resolved=new java.util.HashMap<Long,Resolved>();
+        // Keep frequently reused attributes when a new query reaches the bound.
+        // Theme/configuration changes still invalidate every cached resolution.
+        private final java.util.LinkedHashMap<Long,Resolved> resolved=new java.util.LinkedHashMap<Long,Resolved>(32,0.75f,true){
+            protected boolean removeEldestEntry(java.util.Map.Entry<Long,Resolved> entry){return size()>256;}
+        };
         private final class Resolved {
-            final int[] fields;final String text;
-            Resolved(int[] fields,String text){this.fields=fields;this.text=text;}
+            final android.util.TypedValue value;
+            Resolved(int[] fields,String text){value=fields==null?null:new android.util.TypedValue();if(value!=null)assignValue(value,fields,text);}
         }
+        private final Resolved missing=new Resolved(null,null);
         private void invalidate(){cachedSequence=null;resolved.clear();styled.clear();generation=themeGeneration;}
-        public TypedArray obtainStyledAttributes(int[] attrs){return styledAttributes(this,null,attrs,0,0);}
-        public TypedArray obtainStyledAttributes(int style,int[] attrs){return styledAttributes(this,null,attrs,0,style);}
-        public TypedArray obtainStyledAttributes(android.util.AttributeSet set,int[] attrs,int defStyleAttr,int defStyleRes){return styledAttributes(this,set,attrs,defStyleAttr,defStyleRes);}
-        private Theme() { }
+        public TypedArray obtainStyledAttributes(int[] attrs){return styledAttributes(this,null,attrs,0,0,resourceView);}
+        public TypedArray obtainStyledAttributes(int style,int[] attrs){return styledAttributes(this,null,attrs,0,style,resourceView);}
+        public TypedArray obtainStyledAttributes(android.util.AttributeSet set,int[] attrs,int defStyleAttr,int defStyleRes){return styledAttributes(this,set,attrs,defStyleAttr,defStyleRes,resourceView);}
+        private final Resources resourceView;
+        private Theme(Resources view) { resourceView=view; }
+        private Resources owner() { return Resources.this; }
         private int[] sequence() {
             if(cachedSequence!=null)return cachedSequence;
             int[] sequence = new int[styles.size()];
             for (int i = 0; i < sequence.length; ++i) sequence[i] = styles.get(i);
             cachedSequence=sequence;return sequence;
         }
-        public Resources getResources() { return Resources.this; }
+        public Resources getResources() { return resourceView; }
         public void applyStyle(int id, boolean force) {
             synchronized (Resources.this) {
                 requireOpen();
@@ -577,10 +655,10 @@ public class Resources {
         }
         public void setTo(Theme other) {
             if (other == null) throw new NullPointerException("theme");
-            if (!apkPath.equals(other.getResources().apkPath) || !java.util.Arrays.equals(splitPaths,other.getResources().splitPaths) || processSystem!=other.getResources().processSystem)
+            if (!apkPath.equals(other.owner().apkPath) || !java.util.Arrays.equals(splitPaths,other.owner().splitPaths) || processSystem!=other.owner().processSystem)
                 throw new UnsupportedOperationException("Theme copying between different APKs is not implemented");
             int[] copied;
-            synchronized(other.getResources()){other.getResources().requireOpen();copied=other.sequence();}
+            synchronized(other.owner()){other.owner().requireOpen();copied=other.sequence();}
             synchronized(Resources.this){requireOpen();styles.clear();for(int value:copied)styles.add(value);invalidate();}
         }
 
@@ -590,13 +668,12 @@ public class Resources {
                 requireOpen();if(generation!=themeGeneration)invalidate();
                 long key=((long)id<<1)|(resolveRefs?1:0);
                 Resolved found=resolved.get(key);
-                if(found!=null){assignValue(out,found.fields,found.text);return true;}if(resolved.containsKey(key))return false;
+                if(found!=null){if(found.value==null)return false;out.setTo(found.value);return true;}
                 int[] sequence = sequence();
                 int[] value = new int[6]; String[] text = new String[1];
-                if (!nativeThemeResolve(handle, sequence, id, resolveRefs, value, text)){if(resolved.size()>=256)resolved.clear();resolved.put(key,null);return false;}
-                if(resolved.size()>=256)resolved.clear();
-                resolved.put(key,new Resolved(value,text[0]));
-                assignValue(out,value,text[0]);
+                if (!nativeThemeResolve(handle, sequence, id, resolveRefs, value, text)){resolved.put(key,missing);return false;}
+                Resolved result=new Resolved(value,text[0]);resolved.put(key,result);
+                out.setTo(result.value);
                 return true;
             }
         }
@@ -605,13 +682,25 @@ public class Resources {
             synchronized (Resources.this) { requireOpen();invalidate(); for (int i = 0; i < styles.size(); i += 2) nativeValidateStyle(handle, styles.get(i)); }
         }
     }
-    private synchronized String resourceNamePart(int id,int part){requireOpen();return nativeResourceName(handle,id,part);}
+    private synchronized String resourceNamePart(int id,int part){Resources owner=facadeOwner();if(owner!=null)return owner.resourceNamePart(id,part);requireOpen();return nativeResourceName(handle,id,part);}
     public String getResourcePackageName(int id){return resourceNamePart(id,0);}
     public String getResourceTypeName(int id){return resourceNamePart(id,1);}
     public String getResourceEntryName(int id){return resourceNamePart(id,2);}
     public synchronized String getResourceName(int id){return getResourcePackageName(id)+":"+getResourceTypeName(id)+"/"+getResourceEntryName(id);}
     private static native String nativeResourceName(long handle,int id,int part);
+    private static final class IdentifierKey {
+        final String name,type,pkg;final int hash;
+        IdentifierKey(String name,String type,String pkg){this.name=name;this.type=type;this.pkg=pkg;hash=(name.hashCode()*31+type.hashCode())*31+pkg.hashCode();}
+        public int hashCode(){return hash;}
+        public boolean equals(Object value){if(!(value instanceof IdentifierKey))return false;IdentifierKey other=(IdentifierKey)value;return name.equals(other.name)&&type.equals(other.type)&&pkg.equals(other.pkg);}
+    }
+    // Resource names/IDs are immutable for this owner's fixed APK/split set.
+    // Keep symbolic lookup on the Java side to avoid repeated UTF-8/JNI work.
+    private final java.util.LinkedHashMap<IdentifierKey,Integer> identifiers=new java.util.LinkedHashMap<IdentifierKey,Integer>(64,0.75f,true){
+        protected boolean removeEldestEntry(java.util.Map.Entry<IdentifierKey,Integer> entry){return size()>512;}
+    };
     public synchronized int getIdentifier(String name, String defType, String defPackage) {
+        Resources owner=facadeOwner();if(owner!=null)return owner.getIdentifier(name,defType,defPackage);
         if (name == null) throw new NullPointerException("Resource name");
         if (handle == 0) throw new IllegalStateException("Resources are closed");
         // Most callers pass symbolic names. Avoid allocating an exception and its
@@ -620,9 +709,12 @@ public class Resources {
                 || Character.digit(name.charAt(0), 10) >= 0)) {
             try { return Integer.parseInt(name); } catch (NumberFormatException ignored) { }
         }
-        return nativeIdentifier(handle, name.getBytes(StandardCharsets.UTF_8),
-            (defType == null ? "" : defType).getBytes(StandardCharsets.UTF_8),
-            (defPackage == null ? "" : defPackage).getBytes(StandardCharsets.UTF_8));
+        String type=defType==null?"":defType,pkg=defPackage==null?"":defPackage;
+        IdentifierKey key=(long)name.length()+type.length()+pkg.length()<=512?new IdentifierKey(name,type,pkg):null;
+        if(key!=null){Integer cached=identifiers.get(key);if(cached!=null)return cached;}
+        int result=nativeIdentifier(handle,name.getBytes(StandardCharsets.UTF_8),type.getBytes(StandardCharsets.UTF_8),pkg.getBytes(StandardCharsets.UTF_8));
+        if(key!=null)identifiers.put(key,result);
+        return result;
     }
     public static class NotFoundException extends RuntimeException {
         public NotFoundException() { }
@@ -647,6 +739,16 @@ public class Resources {
         if (type >= 0x10 && type <= 0x1f) return Integer.toString(data);
         throw new NotFoundException("Resource cannot be represented as text");
     }
+    synchronized String[] shirazLocales(boolean excludeSystem){
+        Resources owner=facadeOwner();if(owner!=null)return owner.shirazLocales(excludeSystem);
+        requireOpen();
+        try{return nativeLocales(handle,excludeSystem);}
+        catch(UnsatisfiedLinkError fallback){
+            String tag=configuration!=null&&configuration.locale!=null?configuration.locale.toLanguageTag():"";
+            return tag.isEmpty()?new String[0]:new String[]{tag};
+        }
+    }
+    private static native String[] nativeLocales(long handle,boolean excludeSystem);
     private static native int[] nativeSizeConfigurations(long handle);
     private static native long nativeOpenSystem(byte[] path,String locale,int width,int height);
     private static native long nativeOpen(byte[] path, byte[][] splits, byte[] framework, String locale, int width, int height);

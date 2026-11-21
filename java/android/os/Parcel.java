@@ -80,9 +80,12 @@ public final class Parcel {
   if((length&1)!=0)position+=2;
   return new String(chars);
  }
- public final void writeByteArray(byte[] value){
+ public final void writeByteArray(byte[] value){writeByteArray(value,0,value==null?0:value.length);}
+ public final void writeByteArray(byte[] value,int offset,int length){
   if(value==null){writeInt(-1);return;}
-  writeInt(value.length);ensure(value.length);System.arraycopy(value,0,data,position,value.length);position+=value.length;
+  if(offset<0||length<0||offset>value.length||length>value.length-offset)throw new ArrayIndexOutOfBoundsException();
+  live();if(length>MAX-4-position)throw new IllegalStateException("Parcel capacity");
+  writeInt(length);ensure(length);System.arraycopy(value,offset,data,position,length);position+=length;
  }
  public final byte[] createByteArray(){
   int length=readInt();if(length<0)return null;
@@ -205,6 +208,7 @@ public final class Parcel {
  public final void writeStrongBinder(IBinder binder){if(binder==null)writeInt(0);else writeObject(binder,0x42494e44);}
  public final void writeStrongInterface(IInterface owner){writeStrongBinder(owner==null?null:owner.asBinder());}
  public final IBinder readStrongBinder(){return (IBinder)readObject(0x42494e44,IBinder.class);}
+ public final boolean hasBinders(){live();for(Object value:objects.values())if(value instanceof IBinder)return true;return false;}
  public final boolean hasFileDescriptors(){live();for(Object value:objects.values())if(value instanceof ParcelFileDescriptor)return true;return false;}
  public final void writeFileDescriptor(java.io.FileDescriptor descriptor){
   ParcelFileDescriptor copy;
@@ -234,6 +238,32 @@ public final class Parcel {
   byte[] replacement=new byte[64];discardObjects(0,MAX);
   java.util.TreeMap<Integer,Object> empty=objects;objects=source.objects;source.objects=empty;
   data=source.data;size=source.size;position=0;source.data=replacement;source.size=source.position=0;
+ }
+ /** Copy data and owned attachments; source position and lifetime are independent. */
+ public final void appendFrom(Parcel source,int offset,int length){
+  live();java.util.Objects.requireNonNull(source,"source").live();
+  if(offset<0||length<0||offset>source.size||length>source.size-offset)throw new IllegalArgumentException("Parcel copy range");
+  if(length==0)return;
+  if(length>MAX-position)throw new IllegalStateException("Parcel capacity");
+  int end=offset+length,destination=position,remaining=0;
+  java.util.TreeMap<Integer,Object> copied=new java.util.TreeMap<Integer,Object>();
+  for(java.util.Map.Entry<Integer,Object> entry:source.objects.entrySet()){
+   int slot=entry.getKey();if(slot<end&&slot+4>offset){
+    if(slot<offset||slot+4>end)throw new IllegalArgumentException("Partial parcel attachment");
+    copied.put(destination+slot-offset,entry.getValue());
+   }
+  }
+  for(Integer slot:objects.keySet())if(!(slot<destination+length&&slot+4>destination))remaining++;
+  if(remaining+copied.size()>1024)throw new IllegalStateException("Parcel attachment limit");
+  byte[] bytes=java.util.Arrays.copyOfRange(source.data,offset,end);
+  ArrayList<ParcelFileDescriptor> owned=new ArrayList<ParcelFileDescriptor>();boolean committed=false;
+  try{
+   for(java.util.Map.Entry<Integer,Object> entry:copied.entrySet())if(entry.getValue() instanceof ParcelFileDescriptor){
+    ParcelFileDescriptor duplicate=((ParcelFileDescriptor)entry.getValue()).dup();owned.add(duplicate);entry.setValue(duplicate);
+   }
+   ensure(length);System.arraycopy(bytes,0,data,destination,length);position+=length;objects.putAll(copied);committed=true;
+  }catch(java.io.IOException error){throw new IllegalStateException("Cannot duplicate parcel attachment",error);}
+  finally{if(!committed)for(ParcelFileDescriptor descriptor:owned)try{descriptor.close();}catch(java.io.IOException ignored){}}
  }
  public final byte[] marshall(){live();if(!objects.isEmpty())throw new IllegalStateException("Cannot marshall Binder or descriptor attachments as bytes");byte[] out=new byte[size];System.arraycopy(data,0,out,0,size);return out;}
  public final void unmarshall(byte[] buffer,int offset,int length){

@@ -25,9 +25,16 @@ public class ViewOverlay implements Drawable.Callback {
     public void clear(){for(Drawable d:new ArrayList<Drawable>(drawables))remove(d);}
     public final int shirazDrawableCount(){return drawables.size();}
     final boolean contains(Drawable drawable){return drawables.contains(drawable);}
+    void shirazDrawOverlayViews(Canvas canvas){}
     final void draw(Canvas canvas){
-        if(drawables.isEmpty())return;int saved=canvas.save();
-        try{canvas.clipRect(0,0,host.getWidth(),host.getHeight());for(Drawable d:new ArrayList<Drawable>(drawables))if(contains(d)){int childSave=canvas.save();try{d.draw(canvas);}finally{canvas.restoreToCount(childSave);}}}
+        int saved=canvas.save();
+        try{
+            if(!drawables.isEmpty()){
+                canvas.clipRect(0,0,host.getWidth(),host.getHeight());
+                for(Drawable d:new ArrayList<Drawable>(drawables))if(contains(d)){int childSave=canvas.save();try{d.draw(canvas);}finally{canvas.restoreToCount(childSave);}}
+            }
+            shirazDrawOverlayViews(canvas);
+        }
         finally{canvas.restoreToCount(saved);}
     }
     public void invalidateDrawable(Drawable who){if(contains(who))host.invalidate();}

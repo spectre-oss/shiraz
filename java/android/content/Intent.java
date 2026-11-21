@@ -14,10 +14,11 @@ public class Intent implements Parcelable, Cloneable {
         ACTION_BATTERY_CHANGED = "android.intent.action.BATTERY_CHANGED",
         ACTION_SCREEN_ON = "android.intent.action.SCREEN_ON", ACTION_SCREEN_OFF = "android.intent.action.SCREEN_OFF",
         ACTION_LOCALE_CHANGED = "android.intent.action.LOCALE_CHANGED", ACTION_TIMEZONE_CHANGED = "android.intent.action.TIMEZONE_CHANGED",
-        CATEGORY_DEFAULT = "android.intent.category.DEFAULT", CATEGORY_LAUNCHER = "android.intent.category.LAUNCHER",
+        CATEGORY_DEFAULT = "android.intent.category.DEFAULT", CATEGORY_LAUNCHER = "android.intent.category.LAUNCHER", CATEGORY_APP_BROWSER = "android.intent.category.APP_BROWSER",
         CATEGORY_OPENABLE = "android.intent.category.OPENABLE",
-        EXTRA_TEXT = "android.intent.extra.TEXT", EXTRA_SUBJECT = "android.intent.extra.SUBJECT";
-    public static final int FLAG_ACTIVITY_NEW_TASK = 0x10000000, FLAG_ACTIVITY_CLEAR_TOP = 0x04000000, FLAG_ACTIVITY_FORWARD_RESULT = 0x02000000, FLAG_ACTIVITY_SINGLE_TOP = 0x20000000, FLAG_ACTIVITY_REORDER_TO_FRONT = 0x00020000,
+        EXTRA_TEXT = "android.intent.extra.TEXT", EXTRA_SUBJECT = "android.intent.extra.SUBJECT",
+        EXTRA_COMPONENT_NAME = "android.intent.extra.COMPONENT_NAME";
+    public static final int FLAG_ACTIVITY_NEW_TASK = 0x10000000, FLAG_ACTIVITY_CLEAR_TASK = 0x00008000, FLAG_ACTIVITY_CLEAR_TOP = 0x04000000, FLAG_ACTIVITY_FORWARD_RESULT = 0x02000000, FLAG_ACTIVITY_SINGLE_TOP = 0x20000000, FLAG_ACTIVITY_REORDER_TO_FRONT = 0x00020000,
         FLAG_ACTIVITY_NO_ANIMATION = 0x00010000, FLAG_GRANT_READ_URI_PERMISSION = 0x00000001, FLAG_GRANT_WRITE_URI_PERMISSION = 0x00000002, FLAG_GRANT_PERSISTABLE_URI_PERMISSION = 0x00000040, FLAG_GRANT_PREFIX_URI_PERMISSION = 0x00000080,
         FLAG_RECEIVER_REGISTERED_ONLY = 0x40000000, FLAG_RECEIVER_FOREGROUND = 0x10000000, FLAG_RECEIVER_REPLACE_PENDING = 0x20000000;
     public static final int URI_INTENT_SCHEME=1,URI_ANDROID_APP_SCHEME=2,URI_ALLOW_UNSAFE=4;
@@ -43,6 +44,24 @@ public class Intent implements Parcelable, Cloneable {
     public Intent(String action, Uri uri, Context context, Class<?> cls) { this(action, uri); component = new ComponentName(context, cls); }
     public Intent(Intent source) { this(source,0); }
     private Intent(Intent source,int depth) { clipData=source.clipData==null?null:new ClipData(source.clipData);if(depth>32)throw new IllegalArgumentException("Intent selector depth");selector=source.selector==null?null:new Intent(source.selector,depth+1);sourceBounds=source.sourceBounds==null?null:new android.graphics.Rect(source.sourceBounds);action = source.action; type = source.type; pkg = source.pkg; data = source.data; component = source.component; flags = source.flags; categories = source.categories == null ? null : new LinkedHashSet<String>(source.categories); extras = source.extras == null ? null : new Bundle(source.extras); }
+    /** API 27 routing identity; payload, flags, selector and source bounds are excluded. */
+    public boolean filterEquals(Intent other) {
+        return other!=null&&Objects.equals(action,other.action)&&Objects.equals(data,other.data)
+            &&Objects.equals(type,other.type)&&Objects.equals(pkg,other.pkg)
+            &&Objects.equals(component,other.component)&&Objects.equals(categories,other.categories);
+    }
+    public int filterHashCode() {
+        return Objects.hashCode(action)+Objects.hashCode(data)+Objects.hashCode(type)
+            +Objects.hashCode(pkg)+Objects.hashCode(component)+Objects.hashCode(categories);
+    }
+    public static final class FilterComparison {
+        private final Intent intent;
+        private final int hash;
+        public FilterComparison(Intent intent){this.intent=Objects.requireNonNull(intent);hash=intent.filterHashCode();}
+        public Intent getIntent(){return intent;}
+        @Override public int hashCode(){return hash;}
+        @Override public boolean equals(Object other){return other instanceof FilterComparison&&intent.filterEquals(((FilterComparison)other).intent);}
+    }
     public Intent cloneFilter() { Intent value = new Intent(this); value.extras = null; value.clipData = null; return value; }
     @Override public Object clone() { return new Intent(this); }
     public String getAction() { return action; }
@@ -82,6 +101,7 @@ public class Intent implements Parcelable, Cloneable {
     public Set<String> getCategories() { return categories == null ? null : Collections.unmodifiableSet(categories); }
     private Bundle values() { if (extras == null) extras = new Bundle(); return extras; }
     public Bundle getExtras() { return extras == null ? null : new Bundle(extras); }
+    public void setExtrasClassLoader(ClassLoader loader) { if (extras != null) extras.setClassLoader(loader); }
     public boolean hasExtra(String key) { return extras != null && extras.containsKey(key); }
     public boolean hasFileDescriptors() { return extras != null && extras.hasFileDescriptors(); }
     public void removeExtra(String key) { if (extras != null) extras.remove(key); }
@@ -180,6 +200,45 @@ public class Intent implements Parcelable, Cloneable {
             result.extras=in.readBundle(Intent.class.getClassLoader());
             if(in.readInt()!=0)result.sourceBounds=new android.graphics.Rect(in.readInt(),in.readInt(),in.readInt(),in.readInt());
             if(in.readInt()!=0)result.setSelector(readParcel(in,depth+1));return result; }
+    public void readFromParcel(Parcel in) {
+        Intent parsed = readParcel(in, 0);
+        this.action = parsed.action;
+        this.type = parsed.type;
+        this.pkg = parsed.pkg;
+        this.data = parsed.data;
+        this.component = parsed.component;
+        this.flags = parsed.flags;
+        this.categories = parsed.categories;
+        this.extras = parsed.extras;
+        this.sourceBounds = parsed.sourceBounds;
+        this.selector = parsed.selector;
+    }
+    public static class ShortcutIconResource implements Parcelable {
+        public String packageName;
+        public String resourceName;
+        public ShortcutIconResource() {}
+        public static ShortcutIconResource fromContext(Context context, int resourceId) {
+            ShortcutIconResource icon = new ShortcutIconResource();
+            icon.packageName = context.getPackageName();
+            icon.resourceName = context.getResources().getResourceName(resourceId);
+            return icon;
+        }
+        public int describeContents() { return 0; }
+        public void writeToParcel(Parcel dest, int flags) {
+            dest.writeString(packageName);
+            dest.writeString(resourceName);
+        }
+        public static final Parcelable.Creator<ShortcutIconResource> CREATOR = new Parcelable.Creator<ShortcutIconResource>() {
+            public ShortcutIconResource createFromParcel(Parcel source) {
+                ShortcutIconResource icon = new ShortcutIconResource();
+                icon.packageName = source.readString();
+                icon.resourceName = source.readString();
+                return icon;
+            }
+            public ShortcutIconResource[] newArray(int size) { return new ShortcutIconResource[size]; }
+        };
+        @Override public String toString() { return resourceName; }
+    }
     public static final Parcelable.Creator<Intent> CREATOR = new Parcelable.Creator<Intent>() {
         public Intent createFromParcel(Parcel in){return readParcel(in,0);}
         public Intent[] newArray(int size) { return new Intent[size]; }

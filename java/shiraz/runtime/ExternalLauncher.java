@@ -20,12 +20,26 @@ public final class ExternalLauncher {
  }};
  private ExternalLauncher(){}
  public static void setRunner(Runner replacement){if(replacement==null)throw new NullPointerException("runner");runner=replacement;}
+ private static boolean browserSelector(Intent intent){
+  if(!Intent.ACTION_MAIN.equals(intent.getAction())||intent.getType()!=null)return false;
+  java.util.Set<String> outer=intent.getCategories();
+  if(outer==null||outer.size()!=1||!outer.contains(Intent.CATEGORY_LAUNCHER))return false;
+  Intent selector=intent.getSelector();
+  if(selector==null||!Intent.ACTION_MAIN.equals(selector.getAction())||selector.getComponent()!=null||selector.getPackage()!=null||selector.getSelector()!=null||selector.getData()!=null||selector.getType()!=null)return false;
+  java.util.Set<String> categories=selector.getCategories();
+  return categories!=null&&categories.size()==1&&categories.contains(Intent.CATEGORY_APP_BROWSER);
+ }
  public static String externalTarget(Intent intent){
-  if(intent==null||!Intent.ACTION_VIEW.equals(intent.getAction())||intent.getComponent()!=null||intent.getPackage()!=null)return null;
+  if(intent==null||intent.getComponent()!=null||intent.getPackage()!=null)return null;
+  boolean browser=browserSelector(intent);
+  // A selector, when present, chooses the recipient. Do not discard its
+  // package, component or filter by treating the outer VIEW as an open link.
+  if(!browser&&(!Intent.ACTION_VIEW.equals(intent.getAction())||intent.getSelector()!=null))return null;
   Uri data=intent.getData();if(data==null)return null;
   String scheme=data.getScheme();
   if(scheme==null)return null;
-  scheme=scheme.toLowerCase();
+  scheme=scheme.toLowerCase(java.util.Locale.ROOT);
+  if(browser&&!scheme.equals("http")&&!scheme.equals("https"))return null;
   if(!scheme.equals("http")&&!scheme.equals("https")&&!scheme.equals("mailto")&&!scheme.equals("tel"))return null;
   String text=data.toString();
   if(text.length()>MAX_URI)return null;

@@ -11,6 +11,14 @@ public class AlertDialog extends Dialog {
   private final Context context;
   private final int theme;
   private CharSequence title,message;private boolean cancelable=true;
+  private android.graphics.drawable.Drawable icon;
+  private View customView;
+  private CharSequence[] items;
+  private boolean[] checkedItems;
+  private int checkedItem=-1;
+  private boolean singleChoice,multiChoice;
+  private OnClickListener itemClickListener;
+  private OnMultiChoiceClickListener multiChoiceClickListener;
   private OnCancelListener cancelListener;private OnDismissListener dismissListener;private OnKeyListener keyListener;
   private final CharSequence[] labels=new CharSequence[3];
   private final OnClickListener[] listeners=new OnClickListener[3];
@@ -21,6 +29,12 @@ public class AlertDialog extends Dialog {
   public Builder setTitle(int resource){return setTitle(context.getText(resource));}
   public Builder setMessage(CharSequence value){message=value;return this;}
   public Builder setMessage(int resource){return setMessage(context.getText(resource));}
+  public Builder setIcon(android.graphics.drawable.Drawable value){icon=value;return this;}
+  public Builder setIcon(int resourceId){return setIcon(resourceId==0?null:context.getDrawable(resourceId));}
+  public Builder setView(View view){customView=view;return this;}
+  public Builder setItems(CharSequence[] items,OnClickListener listener){this.items=items;this.itemClickListener=listener;this.singleChoice=false;this.multiChoice=false;return this;}
+  public Builder setSingleChoiceItems(CharSequence[] items,int checkedItem,OnClickListener listener){this.items=items;this.checkedItem=checkedItem;this.itemClickListener=listener;this.singleChoice=true;this.multiChoice=false;return this;}
+  public Builder setMultiChoiceItems(CharSequence[] items,boolean[] checkedItems,OnMultiChoiceClickListener listener){this.items=items;this.checkedItems=checkedItems;this.multiChoiceClickListener=listener;this.multiChoice=true;this.singleChoice=false;return this;}
   private Builder button(int which,CharSequence text,OnClickListener listener){int i=index(which);labels[i]=text;listeners[i]=listener;return this;}
   public Builder setPositiveButton(CharSequence text,OnClickListener listener){return button(BUTTON_POSITIVE,text,listener);}
   public Builder setPositiveButton(int resource,OnClickListener listener){return setPositiveButton(context.getText(resource),listener);}
@@ -33,7 +47,26 @@ public class AlertDialog extends Dialog {
   public Builder setOnDismissListener(OnDismissListener value){dismissListener=value;return this;}
   public Builder setOnKeyListener(OnKeyListener value){keyListener=value;return this;}
   public AlertDialog create(){
-   AlertDialog dialog=new AlertDialog(context,theme);dialog.setTitle(title);dialog.setMessage(message);
+   final AlertDialog dialog=new AlertDialog(context,theme);dialog.setTitle(title);dialog.setMessage(message);
+   dialog.setIcon(icon);
+   if(customView!=null)dialog.setView(customView);
+   else if(items!=null){
+    LinearLayout listBody=new LinearLayout(context);listBody.setOrientation(LinearLayout.VERTICAL);
+    for(int idx=0;idx<items.length;idx++){
+     final int which=idx;
+     if(multiChoice){
+      final CheckBox cb=new CheckBox(context);cb.setText(items[idx]);
+      if(checkedItems!=null&&idx<checkedItems.length)cb.setChecked(checkedItems[idx]);
+      cb.setOnClickListener(new View.OnClickListener(){public void onClick(View v){boolean c=cb.isChecked();if(checkedItems!=null&&which<checkedItems.length)checkedItems[which]=c;if(multiChoiceClickListener!=null)multiChoiceClickListener.onClick(dialog,which,c);}});
+      listBody.addView(cb);
+     }else{
+      Button itemBtn=new Button(context);itemBtn.setText(items[idx]);
+      itemBtn.setOnClickListener(new View.OnClickListener(){public void onClick(View v){if(itemClickListener!=null)itemClickListener.onClick(dialog,which);if(!singleChoice)dialog.dismiss();}});
+      listBody.addView(itemBtn);
+     }
+    }
+    dialog.setView(listBody);
+   }
    dialog.setCancelable(cancelable);dialog.setCanceledOnTouchOutside(cancelable);
    dialog.setOnCancelListener(cancelListener);dialog.setOnDismissListener(dismissListener);dialog.setOnKeyListener(keyListener);
    for(int i=0;i<3;++i)dialog.setButton(-i-1,labels[i],listeners[i]);
@@ -42,17 +75,21 @@ public class AlertDialog extends Dialog {
   public AlertDialog show(){AlertDialog dialog=create();dialog.show();return dialog;}
  }
  private CharSequence title,message;private TextView titleView,messageView;
+ private android.graphics.drawable.Drawable icon;private View customBody;
  private final CharSequence[] labels=new CharSequence[3];private final DialogInterface.OnClickListener[] listeners=new DialogInterface.OnClickListener[3];private final Message[] messages=new Message[3];private final Button[] buttons=new Button[3];
  public AlertDialog(Context context){this(context,0);}public AlertDialog(Context context,int theme){super(context,alertTheme(context,theme));}protected AlertDialog(Context context,boolean cancelable,OnCancelListener listener){this(context);setCancelable(cancelable);setOnCancelListener(listener);}
  protected final int dp(int value){return Math.max(1,Math.round(value*getContext().getResources().getDisplayMetrics().density));}
  private static int index(int which){if(which>BUTTON_POSITIVE||which<BUTTON_NEUTRAL)throw new IllegalArgumentException("Dialog button");return -which-1;}
  @Override public void setTitle(CharSequence value){super.setTitle(value);title=value;if(titleView!=null){titleView.setText(value);titleView.setVisibility(value==null||value.length()==0?View.GONE:View.VISIBLE);}}
  public void setMessage(CharSequence value){message=value;if(messageView!=null){messageView.setText(value);messageView.setVisibility(value==null||value.length()==0?View.GONE:View.VISIBLE);}}
+ public void setIcon(android.graphics.drawable.Drawable value){icon=value;}
+ public void setIcon(int resId){icon=resId==0?null:getContext().getDrawable(resId);}
+ public void setView(View view){customBody=view;}
  public void setButton(int which,CharSequence text,OnClickListener listener){int i=index(which);labels[i]=text;listeners[i]=listener;messages[i]=null;updateButton(i);}
  public void setButton(int which,CharSequence text,Message message){int i=index(which);labels[i]=text;messages[i]=message;listeners[i]=null;updateButton(i);}
  public Button getButton(int which){return buttons[index(which)];}
  private void updateButton(int i){if(buttons[i]!=null){buttons[i].setText(labels[i]);buttons[i].setVisibility(labels[i]==null?View.GONE:View.VISIBLE);}}
- protected View createBody(){return null;}
+ protected View createBody(){return customBody;}
  private static android.content.res.ColorStateList textColor(Context c,int attribute,int fallback){
   android.util.TypedValue value=new android.util.TypedValue();
   if(c.getTheme().resolveAttribute(attribute,value,true)){

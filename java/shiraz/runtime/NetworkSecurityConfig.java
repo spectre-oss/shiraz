@@ -107,7 +107,8 @@ public final class NetworkSecurityConfig {
                 if(!names.add(name))throw bad("Duplicate domain");if(domains.size()>=1024)throw bad("Domain count limit");
                 domains.add(new Domain(name,Boolean.TRUE.equals(bool(child,"includeSubdomains")),rule));count++;
             }else if(child.name.equals("domain-config"))domainConfig(child,rule,depth+1);
-            else if(!child.name.equals("trust-anchors")&&!child.name.equals("pin-set")&&!child.name.equals("certificateTransparency"))throw unsupported(child.name);
+            // Android skips element names it does not define (XmlUtils.skipCurrentTag);
+            // directives() applies the known ones.
         }
         if(count==0)throw bad("domain-config requires a domain");
         directives(node,rule);
@@ -118,7 +119,7 @@ public final class NetworkSecurityConfig {
             if(child.name.equals("certificateTransparency")){if(transparency)throw bad("Duplicate certificateTransparency");transparency=true;certificateTransparency(child);continue;}
             if(child.name.equals("trust-anchors")){if(rule.anchors!=null)throw bad("Duplicate trust-anchors");rule.anchors=trust(child,false);}
             else if(child.name.equals("pin-set")){if(!node.name.equals("domain-config"))throw bad("pin-set requires domain-config");if(rule.pins!=null)throw bad("Duplicate pin-set");rule.pins=pins(child);}
-            else if(!node.name.equals("domain-config")||!child.name.equals("domain")&&!child.name.equals("domain-config"))throw unsupported(child.name);
+            // Unknown elements carry no policy on Android and are skipped there too.
         }
     }
     /**

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-11-09",
+  "updated": "2026-11-21",
   "note": "Maintained subsystem notes describe bounded development support. Partial never means a whole subsystem is complete. Shared framework rows do not certify every host backend.",
   "areas": [
     {
@@ -9,16 +9,16 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "Component and app flows",
-      "notes": "Standalone ART, threads, exceptions and reflection run real apps. Broad Java/API behavior remains incremental.",
-      "evidence": "docs/tested.md"
+      "notes": "Standalone ART, multi-DEX loading and all 4,445 Android API 35 android.* class surfaces compile and smoke-test on OpenJDK and ART. Complete method-level Android behavior remains incremental.",
+      "evidence": "docs/framework_final_goal.md"
     },
     {
       "id": "ui",
       "name": "Views, input and lifecycle",
       "scope": "Shared framework",
       "status": "Partial",
-      "verification": "App flows",
-      "notes": "Onboarding, pointer input, text entry and resizing exercised. Complex layouts, animations and complete app flows still expose gaps.",
+      "verification": "App and component tests",
+      "notes": "Layouts, widgets, transitions, property animations, accessibility nodes, IME sessions, pointer input and resizing are exercised; complex custom app flows still expose gaps.",
       "evidence": "docs/tested.md"
     },
     {
@@ -27,7 +27,7 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "App flows",
-      "notes": "APK resources, density/configuration changes and selected theme paths work; arbitrary attributes and full theme parity remain incomplete.",
+      "notes": "APK resources, binary XML attributes, ICU formatting, density/configuration changes and selected theme paths work; full Material theme parity remains incomplete.",
       "evidence": "docs/tested.md"
     },
     {
@@ -36,7 +36,7 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "Component tests",
-      "notes": "Synthetic committed preferences and queued apply writes survive separate OpenJDK/ART processes. Telegram saved-login persistence is still unverified.",
+      "notes": "Committed preferences, queued apply writes, PreferenceScreen hierarchies and DocumentsContract/MediaStore URI models pass OpenJDK/ART tests. Telegram saved-login persistence is still unverified.",
       "evidence": "docs/tested.md"
     },
     {
@@ -44,8 +44,8 @@
       "name": "SQLite storage",
       "scope": "Shared framework",
       "status": "Partial",
-      "verification": "App flows",
-      "notes": "SQLite-backed app state is used by tested apps; complete Android database APIs and every failure mode are not established.",
+      "verification": "App and component tests",
+      "notes": "Host SQLite, CursorWindow, MergeCursor, CursorJoiner, SQLiteQueryBuilder and SQLiteRawStatement are exercised; every Android SQLite edge case is not established.",
       "evidence": "docs/tested.md"
     },
     {
@@ -54,7 +54,7 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "Targeted probes",
-      "notes": "A historical targeted network run records 49 passes. Guest sockets and initial MTProto exchange tested; full current network suite remains unrun.",
+      "notes": "Guest sockets, TLS, DnsResolver, HttpEngine over HttpURLConnection and LinkProperties/IKEv2 models exist; a historical targeted network run records 49 passes while the full suite remains unrun.",
       "evidence": "tests/api-probe/catalog.json"
     },
     {
@@ -63,7 +63,7 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "Component tests",
-      "notes": "Selected in-process/host IPC services exist. Full Android service behavior and cross-process compatibility are not established.",
+      "notes": "Selected in-process/host IPC services, AccountManager, Telecom CallControl and service SPI classes exist. Full Android system_server behavior and cross-process compatibility are not established.",
       "evidence": "java/shiraz/runtime/ServiceProcess.java"
     },
     {
@@ -71,9 +71,45 @@
       "name": "Canvas, EGL and GLES",
       "scope": "Shared framework",
       "status": "Partial",
-      "verification": "App flows",
-      "notes": "Real apps render through software/host graphics paths. Rendering parity and all graphics APIs are not verified.",
+      "verification": "App and component tests",
+      "notes": "Real apps render through software/host EGL/GLES paths alongside ColorSpace connectors, ImageDecoder, YuvImage and OpenGL Matrix/ETC1 helpers. Full hardware-accelerated RenderNode parity is not verified.",
       "evidence": "docs/tested.md"
+    },
+    {
+      "id": "pdf-print",
+      "name": "PDF, print and gestures",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "Pure-Java %PDF-1.4 writer, software PDF rasterizer, text search/selection/annotations, PrintDocumentAdapter pipelines and 2D gesture stroke recognition pass on OpenJDK and ART; host print spooling is not wired.",
+      "evidence": "docs/framework_final_goal.md"
+    },
+    {
+      "id": "media-containers",
+      "name": "Media containers, EXIF and RenderScript",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "WAV/ISO-BMFF MediaExtractor and MediaMuxer, TIFF/JPEG ExifInterface read-write, DTMF ToneGenerator, Visualizer DFT and CPU RenderScript intrinsics pass component tests; broad codec coverage remains bounded.",
+      "evidence": "docs/framework_final_goal.md"
+    },
+    {
+      "id": "search-health",
+      "name": "AppSearch, Health Connect and AdServices",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "In-memory AppSearch BM25 indexing, Health Connect typed records/unit conversions and AdServices models pass on OpenJDK and ART; cross-app Android system stores are not emulated.",
+      "evidence": "docs/framework_final_goal.md"
+    },
+    {
+      "id": "security-wire",
+      "name": "Keystore, Identity, Credentials and NDEF",
+      "scope": "Shared framework",
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "Host keystore entries, ISO 18013-5 Identity Credential COSE/CBOR sessions, CredentialManager models and NFC Forum NDEF/BLE scan wire codecs work in-process; Secure Element, NFC RF and Bluetooth radios fail explicitly.",
+      "evidence": "docs/framework_final_goal.md"
     },
     {
       "id": "native-macos",
@@ -135,7 +171,7 @@
       "scope": "Shared framework",
       "status": "Unsupported",
       "verification": "App limitation",
-      "notes": "The current WebView subset does not supply a JavaScript/DOM engine; rich editing and arbitrary web content are not supported.",
+      "notes": "WebKit API 35 classes, WebMessagePort channels and URL helpers exist, but Shiraz does not embed a JavaScript/DOM browser engine; rich editing and arbitrary web apps are unsupported.",
       "evidence": "docs/experiments/react-native/JOPLIN.md"
     },
     {
@@ -153,7 +189,7 @@
       "scope": "Shared framework",
       "status": "Unverified",
       "verification": "Not accepted",
-      "notes": "No claim of real modem control, phone calls or carrier SMS compatibility. App login over the network is a separate flow.",
+      "notes": "E.164 formatting, GSM 7-bit/UCS-2 SMS PDU codecs and CellInfo models work in Java, but Shiraz makes no claim of real modem control, phone calls or carrier SMS.",
       "evidence": "java/android/telephony/TelephonyManager.java"
     },
     {

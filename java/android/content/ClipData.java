@@ -17,12 +17,23 @@ public class ClipData implements Parcelable {
  public int getItemCount(){return items.size();}public Item getItemAt(int index){return items.get(index);}
  public void addItem(Item item){if(item==null)throw new NullPointerException("item");if(items.size()>=4096)throw new IllegalArgumentException("Clip item limit");items.add(item);}
  public static class Item {
-  private final CharSequence text;private final String html;private final Intent intent;private final Uri uri;
-  public Item(CharSequence text){this(text,null,null,null);}public Item(CharSequence text,String html){this(text,html,null,null);}public Item(Intent intent){this(null,null,intent,null);}public Item(Uri uri){this(null,null,null,uri);}
-  public Item(CharSequence text,Intent intent,Uri uri){this(text,null,intent,uri);}
-  public Item(CharSequence text,String html,Intent intent,Uri uri){if(html!=null&&text==null)throw new IllegalArgumentException("HTML requires plain text");this.text=text;this.html=html;this.intent=intent;this.uri=uri;}
-  public CharSequence getText(){return text;}public String getHtmlText(){return html;}public Intent getIntent(){return intent;}public Uri getUri(){return uri;}
+  private final CharSequence text;private final String html;private final Intent intent;private final IntentSender intentSender;private final Uri uri;
+  public Item(CharSequence text){this(text,null,null,null,null);}public Item(CharSequence text,String html){this(text,html,null,null,null);}public Item(Intent intent){this(null,null,intent,null,null);}public Item(Uri uri){this(null,null,null,null,uri);}
+  public Item(CharSequence text,Intent intent,Uri uri){this(text,null,intent,null,uri);}
+  public Item(CharSequence text,String html,Intent intent,Uri uri){this(text,html,intent,null,uri);}
+  Item(CharSequence text,String html,Intent intent,IntentSender intentSender,Uri uri){if(html!=null&&text==null)throw new IllegalArgumentException("HTML requires plain text");this.text=text;this.html=html;this.intent=intent;this.intentSender=intentSender;this.uri=uri;}
+  public CharSequence getText(){return text;}public String getHtmlText(){return html;}public Intent getIntent(){return intent;}public IntentSender getIntentSender(){return intentSender;}public Uri getUri(){return uri;}
   public CharSequence coerceToText(Context context){if(text!=null)return text;if(uri!=null||intent!=null)throw new UnsupportedOperationException("URI/Intent text coercion");return "";}
+  public static final class Builder {
+   private CharSequence mText;private String mHtmlText;private Intent mIntent;private IntentSender mIntentSender;private Uri mUri;
+   public Builder(){}
+   public Builder setText(CharSequence text){mText=text;return this;}
+   public Builder setHtmlText(String htmlText){mHtmlText=htmlText;return this;}
+   public Builder setIntent(Intent intent){mIntent=intent;return this;}
+   public Builder setIntentSender(IntentSender intentSender){if(intentSender!=null&&!intentSender.isImmutable())throw new IllegalArgumentException("Expected intent sender to be immutable");mIntentSender=intentSender;return this;}
+   public Builder setUri(Uri uri){mUri=uri;return this;}
+   public Item build(){return new Item(mText,mHtmlText,mIntent,mIntentSender,mUri);}
+  }
  }
  public int describeContents(){return 0;}public void writeToParcel(Parcel out,int flags){throw new UnsupportedOperationException("ClipData parcel transport");}
  public static final Parcelable.Creator<ClipData> CREATOR=new Parcelable.Creator<ClipData>(){public ClipData createFromParcel(Parcel in){throw new UnsupportedOperationException("ClipData parcel transport");}public ClipData[] newArray(int count){return new ClipData[count];}};

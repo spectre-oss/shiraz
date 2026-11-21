@@ -24,9 +24,11 @@ public abstract class ContentProvider {
  public int bulkInsert(Uri uri,ContentValues[] values){int count=0;for(ContentValues value:values){if(insert(uri,value)!=null)count++;}return count;}
  public Bundle call(String method,String arg,Bundle extras){return null;}
  public ParcelFileDescriptor openFile(Uri uri,String mode)throws FileNotFoundException{throw new FileNotFoundException("No files supported by provider at "+uri);}
+ public ParcelFileDescriptor openFile(Uri uri,String mode,CancellationSignal signal)throws FileNotFoundException{return openFile(uri,mode);}
  public AssetFileDescriptor openAssetFile(Uri uri,String mode)throws FileNotFoundException{
   ParcelFileDescriptor fd=openFile(uri,mode);return fd==null?null:new AssetFileDescriptor(fd,0,AssetFileDescriptor.UNKNOWN_LENGTH);
  }
+ public AssetFileDescriptor openAssetFile(Uri uri,String mode,CancellationSignal signal)throws FileNotFoundException{return openAssetFile(uri,mode);}
  public final Context getContext(){return context;}
  public void attachInfo(Context context,ProviderInfo info){
   if(this.context!=null)return;this.context=context;this.info=info;onCreate();
@@ -45,4 +47,20 @@ public abstract class ContentProvider {
  public void onLowMemory(){}
  public void onTrimMemory(int level){}
  public void shutdown(){}
+ public static final class CallingIdentity {
+  final long binderToken;final String callingPackage;
+  CallingIdentity(long binderToken,String callingPackage){this.binderToken=binderToken;this.callingPackage=callingPackage;}
+ }
+ public final CallingIdentity clearCallingIdentity(){return new CallingIdentity(android.os.Binder.clearCallingIdentity(),null);}
+ public final void restoreCallingIdentity(CallingIdentity identity){if(identity!=null)android.os.Binder.restoreCallingIdentity(identity.binderToken);}
+ public interface PipeDataWriter<T> {
+  void writeDataToPipe(ParcelFileDescriptor output,Uri uri,String mimeType,Bundle opts,T args);
+ }
+ public <T> ParcelFileDescriptor openPipeHelper(final Uri uri,final String mimeType,final Bundle opts,final T args,final PipeDataWriter<T> func) throws FileNotFoundException {
+  try{
+   final ParcelFileDescriptor[] fds=ParcelFileDescriptor.createPipe();
+   new Thread(new Runnable(){@Override public void run(){try{func.writeDataToPipe(fds[1],uri,mimeType,opts,args);}finally{try{fds[1].close();}catch(java.io.IOException ignored){}}}}).start();
+   return fds[0];
+  }catch(java.io.IOException e){throw new FileNotFoundException("failure making pipe");}
+ }
 }

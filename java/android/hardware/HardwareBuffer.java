@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package android.hardware;
+
+import android.os.Parcel;
+import android.os.Parcelable;
+import java.util.concurrent.atomic.AtomicLong;
+
+public final class HardwareBuffer implements Parcelable, AutoCloseable {
+    public static final int RGBA_8888 = 1;
+    public static final int RGBX_8888 = 2;
+    public static final int RGB_888 = 3;
+    public static final int RGB_565 = 4;
+    public static final int RGBA_FP16 = 22;
+    public static final int BLOB = 33;
+    public static final int YCBCR_420_888 = 35;
+    public static final int RGBA_1010102 = 43;
+    public static final int D_16 = 48;
+    public static final int D_24 = 49;
+    public static final int DS_24UI8 = 50;
+    public static final int D_FP32 = 51;
+    public static final int DS_FP32UI8 = 52;
+    public static final int S_UI8 = 53;
+    public static final int YCBCR_P010 = 54;
+    public static final int R_8 = 56;
+    public static final int R_16 = 57;
+    public static final int RG_1616 = 58;
+    public static final int RGBA_10101010 = 59;
+
+    public static final long USAGE_CPU_READ_RARELY = 2L;
+    public static final long USAGE_CPU_READ_OFTEN = 3L;
+    public static final long USAGE_CPU_WRITE_RARELY = 32L;
+    public static final long USAGE_CPU_WRITE_OFTEN = 48L;
+    public static final long USAGE_GPU_SAMPLED_IMAGE = 256L;
+    public static final long USAGE_GPU_COLOR_OUTPUT = 512L;
+    public static final long USAGE_COMPOSER_OVERLAY = 2048L;
+    public static final long USAGE_PROTECTED_CONTENT = 16384L;
+    public static final long USAGE_VIDEO_ENCODE = 65536L;
+    public static final long USAGE_SENSOR_DIRECT_DATA = 8388608L;
+    public static final long USAGE_GPU_DATA_BUFFER = 16777216L;
+    public static final long USAGE_GPU_CUBE_MAP = 33554432L;
+    public static final long USAGE_GPU_MIPMAP_COMPLETE = 67108864L;
+    public static final long USAGE_FRONT_BUFFER = 4294967296L;
+
+    private static final AtomicLong NEXT_ID = new AtomicLong(1L);
+
+    private final long mId;
+    private final int mWidth;
+    private final int mHeight;
+    private final int mFormat;
+    private final int mLayers;
+    private final long mUsage;
+    private volatile boolean mClosed;
+
+    private HardwareBuffer(long id, int width, int height, int format, int layers, long usage) {
+        mId = id;
+        mWidth = width;
+        mHeight = height;
+        mFormat = format;
+        mLayers = layers;
+        mUsage = usage;
+    }
+
+    private static boolean isValidFormat(int format) {
+        switch (format) {
+            case RGBA_8888:
+            case RGBX_8888:
+            case RGB_888:
+            case RGB_565:
+            case RGBA_FP16:
+            case BLOB:
+            case YCBCR_420_888:
+            case RGBA_1010102:
+            case D_16:
+            case D_24:
+            case DS_24UI8:
+            case D_FP32:
+            case DS_FP32UI8:
+            case S_UI8:
+            case YCBCR_P010:
+            case R_8:
+            case R_16:
+            case RG_1616:
+            case RGBA_10101010:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static void validate(int width, int height, int format, int layers, long usage) {
+        if (!isValidFormat(format)) {
+            throw new IllegalArgumentException("Invalid pixel format " + format);
+        }
+        if (width <= 0) {
+            throw new IllegalArgumentException("Invalid width " + width);
+        }
+        if (height <= 0) {
+            throw new IllegalArgumentException("Invalid height " + height);
+        }
+        if (layers <= 0) {
+            throw new IllegalArgumentException("Invalid layer count " + layers);
+        }
+        if (format == BLOB && height != 1) {
+            throw new IllegalArgumentException("Height must be 1 for using the BLOB format");
+        }
+        if (usage < 0) {
+            throw new IllegalArgumentException("Invalid usage " + usage);
+        }
+    }
+
+    public static HardwareBuffer create(
+            int width, int height, int format, int layers, long usage) {
+        validate(width, height, format, layers, usage);
+        return new HardwareBuffer(
+                NEXT_ID.getAndIncrement(), width, height, format, layers, usage);
+    }
+
+    public static boolean isSupported(
+            int width, int height, int format, int layers, long usage) {
+        validate(width, height, format, layers, usage);
+        if ((usage & USAGE_PROTECTED_CONTENT) != 0L) {
+            return false;
+        }
+        return format == RGBA_8888
+                || format == RGBX_8888
+                || format == RGB_888
+                || format == RGB_565
+                || format == RGBA_FP16
+                || format == RGBA_1010102
+                || format == BLOB
+                || format == R_8;
+    }
+
+    private void ensureOpen() {
+        if (mClosed) {
+            throw new IllegalStateException(
+                    "This HardwareBuffer has been closed and cannot be used.");
+        }
+    }
+
+    @Override
+    protected void finalize() throws Throwable {
+        try {
+            close();
+        } finally {
+            super.finalize();
+        }
+    }
+
+    public int getWidth() {
+        ensureOpen();
+        return mWidth;
+    }
+
+    public int getHeight() {
+        ensureOpen();
+        return mHeight;
+    }
+
+    public int getFormat() {
+        ensureOpen();
+        return mFormat;
+    }
+
+    public int getLayers() {
+        ensureOpen();
+        return mLayers;
+    }
+
+    public long getUsage() {
+        ensureOpen();
+        return mUsage;
+    }
+
+    public long getId() {
+        ensureOpen();
+        return mId;
+    }
+
+    @Override
+    public void close() {
+        mClosed = true;
+    }
+
+    public boolean isClosed() {
+        return mClosed;
+    }
+
+    @Override
+    public int describeContents() {
+        return Parcelable.CONTENTS_FILE_DESCRIPTOR;
+    }
+
+    @Override
+    public void writeToParcel(Parcel dest, int flags) {
+        ensureOpen();
+        dest.writeLong(mId);
+        dest.writeInt(mWidth);
+        dest.writeInt(mHeight);
+        dest.writeInt(mFormat);
+        dest.writeInt(mLayers);
+        dest.writeLong(mUsage);
+    }
+
+    public static final Parcelable.Creator<HardwareBuffer> CREATOR =
+            new Parcelable.Creator<HardwareBuffer>() {
+                @Override
+                public HardwareBuffer createFromParcel(Parcel in) {
+                    long id = in.readLong();
+                    int width = in.readInt();
+                    int height = in.readInt();
+                    int format = in.readInt();
+                    int layers = in.readInt();
+                    long usage = in.readLong();
+                    return new HardwareBuffer(id, width, height, format, layers, usage);
+                }
+
+                @Override
+                public HardwareBuffer[] newArray(int size) {
+                    return new HardwareBuffer[size];
+                }
+            };
+}

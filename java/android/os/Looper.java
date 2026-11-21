@@ -48,6 +48,20 @@ public final class Looper {
         looper.blockingLoop=true;android.view.Choreographer.shirazStartLoop();
         try{for (;;) { Message message = looper.queue.next(true); if (message == null) return; looper.dispatch(message); }}finally{looper.blockingLoop=false;android.view.Choreographer.shirazReleaseCurrent();}
     }
+    /** Run a windowless session until its owner has no work, or the queue is stopped. */
+    public void shirazLoopWhile(java.util.function.BooleanSupplier active) {
+        if (!isCurrentThread()) throw new IllegalStateException("Background loop must run on owning thread");
+        if (active == null) throw new NullPointerException("active");
+        if (blockingLoop) throw new IllegalStateException("Nested blocking loop");
+        blockingLoop = true;
+        try {
+            while (active.getAsBoolean()) {
+                Message message = queue.next(true);
+                if (message == null) return;
+                dispatch(message);
+            }
+        } finally { blockingLoop = false; }
+    }
     /** Host SDL loop budget: pending callbacks cannot monopolize an entire frame. */
     public void shirazDispatchDue(int limit) {
         if (!isCurrentThread()) throw new IllegalStateException("Dispatch must run on the owning thread");
@@ -57,6 +71,8 @@ public final class Looper {
             Message message = queue.next(false); if (message == null) return; dispatch(message);
         }
     }
+    /** Internal lifecycle observation for host-owned asynchronous registrations. */
+    public boolean shirazIsQuitting() { return queue.shirazIsQuitting(); }
     public void quit() { queue.quit(false, false); }
     public void quitSafely() { queue.quit(true, false); }
     public static void shirazRequestMainExit(){Looper value=main;if(value!=null)value.queue.quit(false,true);}

@@ -254,4 +254,130 @@ public class WebView extends FrameLayout {
  public void resumeTimers(){}
  public void freeMemory(){}
  public void destroy(){removeAllViews();}
+
+ public static class HitTestResult {
+  public static final int UNKNOWN_TYPE = 0;
+  @Deprecated public static final int ANCHOR_TYPE = 1;
+  public static final int PHONE_TYPE = 2;
+  public static final int GEO_TYPE = 3;
+  public static final int EMAIL_TYPE = 4;
+  public static final int IMAGE_TYPE = 5;
+  @Deprecated public static final int IMAGE_ANCHOR_TYPE = 6;
+  public static final int SRC_ANCHOR_TYPE = 7;
+  public static final int SRC_IMAGE_ANCHOR_TYPE = 8;
+  public static final int EDIT_TEXT_TYPE = 9;
+  private int mType = UNKNOWN_TYPE;
+  private String mExtra;
+  public HitTestResult() {}
+  public void setType(int type) { mType = type; }
+  public void setExtra(String extra) { mExtra = extra; }
+  public int getType() { return mType; }
+  public String getExtra() { return mExtra; }
+ }
+
+ @Deprecated
+ public interface PictureListener {
+  @Deprecated void onNewPicture(WebView view, android.graphics.Picture picture);
+ }
+
+ public abstract static class VisualStateCallback {
+  public VisualStateCallback() {}
+  public abstract void onComplete(long requestId);
+ }
+
+ public class WebViewTransport {
+  private WebView mWebview;
+  public WebViewTransport() {}
+  public synchronized void setWebView(WebView webview) { mWebview = webview; }
+  public synchronized WebView getWebView() { return mWebview; }
+ }
+
+ private WebViewRenderProcessClient renderProcessClient;
+ private PictureListener pictureListener;
+
+ public HitTestResult getHitTestResult() { return new HitTestResult(); }
+ @Deprecated public void setPictureListener(PictureListener listener) { pictureListener = listener; }
+ public void postVisualStateCallback(final long requestId, final VisualStateCallback callback) {
+  if (callback == null) return;
+  post(new Runnable() {
+   @Override public void run() { callback.onComplete(requestId); }
+  });
+ }
+ public WebMessagePort[] createWebMessageChannel() {
+  final LocalMessagePort p0 = new LocalMessagePort();
+  final LocalMessagePort p1 = new LocalMessagePort();
+  p0.peer = p1;
+  p1.peer = p0;
+  return new WebMessagePort[] { p0, p1 };
+ }
+ public void postWebMessage(WebMessage message, android.net.Uri targetOrigin) {}
+ public WebBackForwardList copyBackForwardList() {
+  final String currentUrl = this.url;
+  final String currentTitle = this.title;
+  return new SnapshotBackForwardList(currentUrl, currentTitle);
+ }
+ public void setWebViewRenderProcessClient(java.util.concurrent.Executor executor, WebViewRenderProcessClient client) {
+  renderProcessClient = client;
+ }
+ public void setWebViewRenderProcessClient(WebViewRenderProcessClient client) {
+  renderProcessClient = client;
+ }
+ public WebViewRenderProcessClient getWebViewRenderProcessClient() { return renderProcessClient; }
+ public WebViewRenderProcess getWebViewRenderProcess() { return null; }
+
+ private static final class LocalMessagePort extends WebMessagePort {
+  LocalMessagePort peer;
+  private volatile boolean closed;
+  private volatile WebMessageCallback callback;
+  private volatile android.os.Handler handler;
+  @Override public void postMessage(final WebMessage message) {
+   if (closed) throw new IllegalStateException("Port is already closed");
+   final LocalMessagePort target = peer;
+   if (target == null || target.closed) return;
+   final WebMessageCallback cb = target.callback;
+   final android.os.Handler h = target.handler;
+   if (cb != null) {
+    if (h != null) {
+     h.post(new Runnable() { @Override public void run() { if (!target.closed) cb.onMessage(target, message); } });
+    } else {
+     cb.onMessage(target, message);
+    }
+   }
+  }
+  @Override public void close() { closed = true; callback = null; handler = null; }
+  @Override public void setWebMessageCallback(WebMessageCallback cb) { setWebMessageCallback(cb, null); }
+  @Override public void setWebMessageCallback(WebMessageCallback cb, android.os.Handler h) {
+   if (closed) throw new IllegalStateException("Port is already closed");
+   this.callback = cb;
+   this.handler = h;
+  }
+ }
+
+ private static final class SnapshotHistoryItem extends WebHistoryItem {
+  private final String itemUrl;
+  private final String itemTitle;
+  SnapshotHistoryItem(String itemUrl, String itemTitle) {
+   this.itemUrl = itemUrl != null ? itemUrl : "";
+   this.itemTitle = itemTitle != null ? itemTitle : "";
+  }
+  @Override public String getUrl() { return itemUrl; }
+  @Override public String getOriginalUrl() { return itemUrl; }
+  @Override public String getTitle() { return itemTitle; }
+  @Override public android.graphics.Bitmap getFavicon() { return null; }
+  @Override protected WebHistoryItem clone() { return new SnapshotHistoryItem(itemUrl, itemTitle); }
+ }
+
+ private static final class SnapshotBackForwardList extends WebBackForwardList {
+  private final SnapshotHistoryItem item;
+  SnapshotBackForwardList(String u, String t) {
+   this.item = (u != null && !u.isEmpty()) ? new SnapshotHistoryItem(u, t) : null;
+  }
+  @Override public WebHistoryItem getCurrentItem() { return item; }
+  @Override public int getCurrentIndex() { return item != null ? 0 : -1; }
+  @Override public WebHistoryItem getItemAtIndex(int index) { return (item != null && index == 0) ? item : null; }
+  @Override public int getSize() { return item != null ? 1 : 0; }
+  @Override protected WebBackForwardList clone() {
+   return item != null ? new SnapshotBackForwardList(item.getUrl(), item.getTitle()) : new SnapshotBackForwardList("", "");
+  }
+ }
 }

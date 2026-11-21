@@ -163,7 +163,7 @@ public class VectorDrawable extends Drawable {
         }
         VectorGradient gradient(BinaryXml.Value value){
             if(value==null)return null;int id=0;TypedValue meta=new TypedValue();
-            if(value.type==1)id=value.data;else if(value.type==2){model.themed=true;if(theme==null||!theme.resolveAttribute(value.data,meta,true))throw new Resources.NotFoundException("Gradient theme attribute");id=meta.resourceId;}
+            if(value.type==1)id=value.data;else if(value.type==2){model.themed=true;if(theme==null||!theme.resolveAttribute(value.data,meta,true))return null;id=meta.resourceId;}
             if(id==0)return null;resources.getValue(id,meta,true);model.flags|=meta.changingConfigurations;if(meta.type!=TypedValue.TYPE_STRING)return null;
             BinaryXml.Node node;try(XmlResourceParser parser=resources.getXml(id)){while(parser.next()!=org.xmlpull.v1.XmlPullParser.START_TAG){if(parser.getEventType()==org.xmlpull.v1.XmlPullParser.END_DOCUMENT)throw new IllegalArgumentException("Missing gradient root");}node=((shiraz.runtime.CompiledXmlParser)parser).shirazNode();}catch(Exception failure){throw new Resources.NotFoundException("Cannot load vector color XML",failure);}
             if(!node.name.equals("gradient"))return null;
@@ -174,7 +174,8 @@ public class VectorDrawable extends Drawable {
             int[] values=new int[colors.size()];float[] positions=new float[values.length];for(int i=0;i<values.length;i++){values[i]=colors.get(i);positions[i]=stops.get(i);}
             return new VectorGradient(enumeration(node,"type",0),enumeration(node,"tileMode",0),number(node,"startX",0),number(node,"startY",0),number(node,"endX",0),number(node,"endY",0),number(node,"centerX",0),number(node,"centerY",0),number(node,"gradientRadius",0),values,positions);
         }
-        ColorStateList color(BinaryXml.Value value) {
+        ColorStateList color(BinaryXml.Value value) { return color(value,false); }
+        ColorStateList color(BinaryXml.Value value,boolean tint) {
             if (value == null || value.type == 0 || value.type == 1 && value.data == 0) return ColorStateList.valueOf(0);
             if (value.type == 1) {
                 TypedValue metadata=new TypedValue(); resources.getValue(value.data,metadata,true); model.flags |= metadata.changingConfigurations;
@@ -182,7 +183,8 @@ public class VectorDrawable extends Drawable {
             }
             if (value.type == 2) {
                 model.themed=true; TypedValue out=new TypedValue();
-                if (theme == null || !theme.resolveAttribute(value.data,out,true)) throw new Resources.NotFoundException("Vector color requires a theme");
+                // Preserve source XML and theme dependency for a later applyTheme call.
+                if (theme == null || !theme.resolveAttribute(value.data,out,true)) return tint?null:ColorStateList.valueOf(0);
                 model.flags |= out.changingConfigurations;
                 if (out.type == 3 && out.resourceId != 0) return resources.getColorStateList(out.resourceId,theme);
                 value=new BinaryXml.Value(out.type,out.data,null);
@@ -191,7 +193,8 @@ public class VectorDrawable extends Drawable {
             return ColorStateList.valueOf(value.data);
         }
         void attributes(BinaryXml.Node node,String allowed) {
-            for (BinaryXml.Attribute attribute:node.attributes) if (!BinaryXml.ANDROID.equals(attribute.namespace) || !Arrays.asList(allowed.split(" ")).contains(attribute.name)) throw new UnsupportedOperationException("Vector attribute "+attribute.name);
+            java.util.Set<String> names=shiraz.runtime.XmlAttributeNames.compile(allowed);
+            for (BinaryXml.Attribute attribute:node.attributes) if (!BinaryXml.ANDROID.equals(attribute.namespace) || !names.contains(attribute.name)) throw new UnsupportedOperationException("Vector attribute "+attribute.name);
         }
         String name(BinaryXml.Node node){BinaryXml.Value value=node.android("name");if(value==null)return null;value=resolved(value);if(value.type!=3||value.text==null)throw new IllegalArgumentException("Vector target name");return value.text;}
         Model load() {
@@ -199,7 +202,7 @@ public class VectorDrawable extends Drawable {
             attributes(root,"name width height viewportWidth viewportHeight alpha tint tintMode autoMirrored opticalInsetLeft opticalInsetTop opticalInsetRight opticalInsetBottom");
             model.name=name(root);model.width=dimension(root,"width"); model.height=dimension(root,"height"); model.viewportW=number(root,"viewportWidth",0); model.viewportH=number(root,"viewportHeight",0);
             if (model.viewportW <= 0 || model.viewportH <= 0) throw new IllegalArgumentException("Vector viewport"); model.alpha=alpha(root,"alpha"); model.mirrored=number(root,"autoMirrored",0) != 0;
-            if (root.android("tint") != null && !(root.android("tint").type == 1 && root.android("tint").data == 0)) model.tint=color(root.android("tint"));
+            if (root.android("tint") != null && !(root.android("tint").type == 1 && root.android("tint").data == 0)) model.tint=color(root.android("tint"),true);
             int mode=enumeration(root,"tintMode",5); switch (mode) { case 3:model.tintMode=PorterDuff.Mode.SRC_OVER;break; case 5:break; case 9:model.tintMode=PorterDuff.Mode.SRC_ATOP;break; case 14:model.tintMode=PorterDuff.Mode.MULTIPLY;break; case 15:model.tintMode=PorterDuff.Mode.SCREEN;break; case 16:model.tintMode=PorterDuff.Mode.ADD;break; default:throw new UnsupportedOperationException("Vector XML tint mode"); }
             children(root,null,0,new ArrayList<Entry>()); boolean painted=false;for(Entry entry:model.entries)if(!entry.clip)painted=true;if (!painted) throw new IllegalArgumentException("Vector requires a path"); return model;
         }

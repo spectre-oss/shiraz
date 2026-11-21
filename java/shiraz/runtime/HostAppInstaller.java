@@ -22,7 +22,7 @@ public final class HostAppInstaller {
   catch(IOException e){throw new IllegalStateException("Installed package metadata",e);}
  }
  public static List<String> packages(){ArrayList<String> result=new ArrayList<>();String[] files=LauncherInbox.active()?LauncherInbox.packages():registry().list();if(files!=null){if(files.length>4096)throw new IllegalStateException("Installed package registry limit");for(String pkg:files)if(metadata(pkg)!=null)result.add(pkg);}return result;}
- public static Intent launchIntent(String pkg){Properties facts=metadata(pkg);if(facts==null)return null;String activity=facts.getProperty("launchActivity");return activity==null?null:new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(new ComponentName(pkg,activity)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
+ public static Intent launchIntent(String pkg){Properties facts=metadata(pkg);if(facts==null)return null;String activity=facts.getProperty("launchComponent",facts.getProperty("launchActivity"));return activity==null?null:new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(new ComponentName(pkg,activity)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
  private static void cleanEnvironment(Map<String,String> env){
   for(String key:new ArrayList<String>(env.keySet()))if(key.startsWith("SHIRAZ_LIVE_")||key.equals("SHIRAZ_PRESENT_SNAPSHOT")||key.equals("SHIRAZ_INPUT_SCRIPT")||key.startsWith("APPIMAGE")||key.equals("APPDIR")||key.equals("OWD")||key.equals("LD_LIBRARY_PATH")||key.equals("LD_PRELOAD")||key.equals("PYTHONPATH")||key.equals("PYTHONHOME"))env.remove(key);
   for(String key:new String[]{"XDG_DATA_HOME","XDG_CACHE_HOME","XDG_STATE_HOME"}){String value=env.get("SHIRAZ_HOST_"+key);if(value!=null)env.put(key,value);}
@@ -30,7 +30,7 @@ public final class HostAppInstaller {
  public static boolean open(Intent intent,String ownPackage){
   ComponentName component=intent.getComponent();if(component==null||component.getPackageName().equals(ownPackage))return false;
   Properties facts=metadata(component.getPackageName());if(facts==null)return false;
-  if(!component.getClassName().equals(facts.getProperty("launchActivity")))throw new android.content.ActivityNotFoundException("Only installed launch activities are supported");
+  if(!component.getClassName().equals(facts.getProperty("launchComponent",facts.getProperty("launchActivity"))))throw new android.content.ActivityNotFoundException("Only installed launch activities are supported");
   if(LauncherInbox.active()){try{LauncherInbox.launch(component.getPackageName(),ownPackage);return true;}catch(IOException e){throw new android.content.ActivityNotFoundException("Cannot open "+component.getPackageName()+": "+e.getMessage());}}
   File file=new File(new File(registry(),component.getPackageName()),"application.AppImage");
   try{File state=new File(base("XDG_STATE_HOME",".local/state"),"shiraz");state.mkdirs();

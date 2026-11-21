@@ -54,25 +54,27 @@ public final class AnimatorSet extends Animator {
  }
  private boolean event(int kind,int token){for(AnimatorListener listener:new ArrayList<AnimatorListener>(listeners)){if(kind==0)listener.onAnimationStart(this);else if(kind==1)listener.onAnimationEnd(this);else listener.onAnimationCancel(this);if(token!=generation)return false;}return true;}
  private void detach(){for(Animator child:new ArrayList<Animator>(observers.keySet()))child.removeListener(observers.get(child));observers.clear();if(delayAnimator!=null){delayAnimator.removeAllListeners();delayAnimator.cancel();delayAnimator=null;}}
- private void cleanup(){detach();started=running=false;}
+ private void cleanup(){detach();started=running=false;paused=false;}
  private void abort(){cleanup();for(Animator child:children)if(child.isStarted())try{child.cancel();}catch(RuntimeException ignored){}}
  private void drain(final int token){
-  if(draining||!started||token!=generation)return;draining=true;
-  try{boolean changed;do{changed=false;for(final Group group:groups){if(token!=generation||!started)return;if(group.launched)continue;boolean ready=true;for(Animator predecessor:group.before)if(!finished.containsKey(predecessor))ready=false;if(!ready)continue;
+  if(draining||!started||paused||token!=generation)return;draining=true;
+  try{boolean changed;do{changed=false;for(final Group group:groups){if(token!=generation||!started||paused)return;if(group.launched)continue;boolean ready=true;for(Animator predecessor:group.before)if(!finished.containsKey(predecessor))ready=false;if(!ready)continue;
     group.launched=true;group.remaining=group.items.size();changed=true;
-    for(final Animator child:group.items){if(token!=generation||!started)return;AnimatorListener observer=new AnimatorListenerAdapter(){public void onAnimationEnd(Animator animation){if(token!=generation||!started)return;AnimatorListener self=observers.remove(child);if(self==null)return;child.removeListener(self);group.completed.add(child);finished.put(child,Boolean.TRUE);if(--group.remaining==0)group.done=true;drain(token);}};observers.put(child,observer);child.addListener(observer);child.start();}
-   }}while(changed&&started&&token==generation);
+    for(final Animator child:group.items){if(token!=generation||!started||paused)return;AnimatorListener observer=new AnimatorListenerAdapter(){public void onAnimationEnd(Animator animation){if(token!=generation||!started)return;AnimatorListener self=observers.remove(child);if(self==null)return;child.removeListener(self);group.completed.add(child);finished.put(child,Boolean.TRUE);if(--group.remaining==0)group.done=true;drain(token);}};observers.put(child,observer);child.addListener(observer);child.start();}
+   }}while(changed&&started&&!paused&&token==generation);
    for(Group group:groups)if(!group.done)return;
    cleanup();event(1,token);
-  }catch(RuntimeException|Error failure){if(token==generation)abort();throw failure;}finally{draining=false;if(token!=generation&&started&&running)drain(generation);}
+  }catch(RuntimeException|Error failure){if(token==generation)abort();throw failure;}finally{draining=false;if(token!=generation&&started&&running&&!paused)drain(generation);}
  }
  public void start(){
   thread();if(Looper.myLooper()==null)throw new IllegalStateException("AnimatorSet requires a Looper");if(started)cancel();editable();groups=graph();finished.clear();owner=Looper.myLooper();
   for(Animator child:children){if(child.isStarted())throw new IllegalStateException("AnimatorSet child already running");if(duration>=0)child.setDuration(duration);if(hasInterpolator)child.setInterpolator(interpolator);}
-  final int token=++generation;started=true;running=false;terminating=false;
+  final int token=++generation;started=true;paused=false;running=false;terminating=false;
   try{if(!event(0,token)||!started)return;if(delay==0){running=true;drain(token);}else{delayAnimator=ValueAnimator.ofFloat(0,1);delayAnimator.setStartDelay(delay);delayAnimator.setDuration(0);delayAnimator.addListener(new AnimatorListenerAdapter(){public void onAnimationEnd(Animator animation){if(token==generation&&started){delayAnimator=null;running=true;drain(token);}}});delayAnimator.start();}}
   catch(RuntimeException|Error failure){if(token==generation)abort();throw failure;}
  }
+ @Override public void pause(){thread();boolean wasPaused=paused;super.pause();if(!wasPaused&&paused){if(delayAnimator!=null)delayAnimator.pause();for(Animator child:children)if(child.isStarted())child.pause();}}
+ @Override public void resume(){thread();if(!paused)return;super.resume();if(delayAnimator!=null)delayAnimator.resume();for(Animator child:children)if(child.isPaused())child.resume();if(started&&running&&!paused)drain(generation);}
  public void cancel(){thread();if(!started||terminating)return;terminating=true;int token=generation;try{if(!event(2,token))return;detach();for(Animator child:children){if(token!=generation)return;if(child.isStarted())child.cancel();}if(token==generation){cleanup();event(1,++generation);}}catch(RuntimeException|Error failure){if(token==generation)abort();throw failure;}finally{if(token==generation||!started)terminating=false;}}
  public void end(){thread();if(terminating)return;if(!started)start();if(!started)return;terminating=true;int token=generation;try{detach();for(Group group:groups)for(Animator child:group.items){if(token!=generation)return;if(!group.completed.contains(child))child.end();}cleanup();event(1,++generation);}catch(RuntimeException|Error failure){if(token==generation)abort();throw failure;}finally{if(token==generation||!started)terminating=false;}}
  private static long sum(long a,long b){if(a<0||b<0)return DURATION_INFINITE;return a>Long.MAX_VALUE-b?Long.MAX_VALUE:a+b;}
@@ -87,5 +89,5 @@ public final class AnimatorSet extends Animator {
    }
   }return sum(delay,maximum);
  }
- public AnimatorSet clone(){AnimatorSet copy=new AnimatorSet();copy.duration=duration;copy.delay=delay;copy.interpolator=interpolator;copy.hasInterpolator=hasInterpolator;copy.listeners=new ArrayList<AnimatorListener>(listeners);for(Animator child:children){Animator next=child.clone();AnimatorListener internal=observers.get(child);if(internal!=null)next.removeListener(internal);copy.children.add(next);}for(int[] edge:relations)copy.relations.add(edge.clone());return copy;}
+ public AnimatorSet clone(){AnimatorSet copy=new AnimatorSet();copy.duration=duration;copy.delay=delay;copy.interpolator=interpolator;copy.hasInterpolator=hasInterpolator;copy.listeners=new ArrayList<AnimatorListener>(listeners);copy.pauseListeners=new ArrayList<AnimatorPauseListener>(pauseListeners);for(Animator child:children){Animator next=child.clone();AnimatorListener internal=observers.get(child);if(internal!=null)next.removeListener(internal);copy.children.add(next);}for(int[] edge:relations)copy.relations.add(edge.clone());return copy;}
 }

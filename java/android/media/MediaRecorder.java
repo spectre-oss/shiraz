@@ -1,35 +1,96 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package android.media;
 import java.io.*;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.Executor;
+import android.content.Context;
+import android.media.metrics.LogSessionId;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PersistableBundle;
 import shiraz.runtime.NativeCapture;
 /** Foreground-consent audio recording through the host PCM/AAC bridges. */
-public class MediaRecorder {
- public static final int MEDIA_RECORDER_ERROR_UNKNOWN=1,MEDIA_RECORDER_INFO_MAX_DURATION_REACHED=800,MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED=801;
- public static final class AudioSource {public static final int DEFAULT=0,MIC=1,VOICE_RECOGNITION=6,VOICE_COMMUNICATION=7;private AudioSource(){}}
- public static final class AudioEncoder {public static final int DEFAULT=0,AMR_NB=1,AMR_WB=2,AAC=3;private AudioEncoder(){}}
- public static final class OutputFormat {public static final int DEFAULT=0,THREE_GPP=1,MPEG_4=2,AAC_ADTS=6;private OutputFormat(){}}
+public class MediaRecorder implements AudioRouting, AudioRecordingMonitor, MicrophoneDirection {
+ public static final int MEDIA_RECORDER_ERROR_UNKNOWN=1,MEDIA_ERROR_SERVER_DIED=100;
+ public static final int MEDIA_RECORDER_INFO_UNKNOWN=1,MEDIA_RECORDER_INFO_MAX_DURATION_REACHED=800,
+  MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED=801,MEDIA_RECORDER_INFO_MAX_FILESIZE_APPROACHING=802,
+  MEDIA_RECORDER_INFO_NEXT_OUTPUT_FILE_STARTED=803;
+ public static final class AudioSource {
+  public static final int DEFAULT=0,MIC=1,VOICE_UPLINK=2,VOICE_DOWNLINK=3,VOICE_CALL=4,CAMCORDER=5,
+   VOICE_RECOGNITION=6,VOICE_COMMUNICATION=7,REMOTE_SUBMIX=8,UNPROCESSED=9,VOICE_PERFORMANCE=10;
+  private AudioSource(){}
+ }
+ public static final class AudioEncoder {
+  public static final int DEFAULT=0,AMR_NB=1,AMR_WB=2,AAC=3,HE_AAC=4,AAC_ELD=5,VORBIS=6,OPUS=7;
+  private AudioEncoder(){}
+ }
+ public static final class OutputFormat {
+  public static final int DEFAULT=0,THREE_GPP=1,MPEG_4=2,RAW_AMR=3,AMR_NB=3,AMR_WB=4,AAC_ADTS=6,
+   MPEG_2_TS=8,WEBM=9,OGG=11;
+  private OutputFormat(){}
+ }
  public static final class VideoSource {public static final int DEFAULT=0,CAMERA=1,SURFACE=2;private VideoSource(){}}
- public static final class VideoEncoder {public static final int DEFAULT=0,H263=1,H264=2;private VideoEncoder(){}}
+ public static final class VideoEncoder {
+  public static final int DEFAULT=0,H263=1,H264=2,MPEG_4_SP=3,VP8=4,HEVC=5,VP9=6,DOLBY_VISION=7,AV1=8;
+  private VideoEncoder(){}
+ }
+ public static final class MetricsConstants {
+  public static final String AUDIO_BITRATE = "android.media.mediarecorder.audio-bitrate";
+  public static final String AUDIO_CHANNELS = "android.media.mediarecorder.audio-channels";
+  public static final String AUDIO_SAMPLERATE = "android.media.mediarecorder.audio-samplerate";
+  public static final String AUDIO_TIMESCALE = "android.media.mediarecorder.audio-timescale";
+  public static final String CAPTURE_FPS = "android.media.mediarecorder.capture-fps";
+  public static final String CAPTURE_FPS_ENABLE = "android.media.mediarecorder.capture-fpsenable";
+  public static final String FRAMERATE = "android.media.mediarecorder.frame-rate";
+  public static final String HEIGHT = "android.media.mediarecorder.height";
+  public static final String MOVIE_TIMESCALE = "android.media.mediarecorder.movie-timescale";
+  public static final String ROTATION = "android.media.mediarecorder.rotation";
+  public static final String VIDEO_BITRATE = "android.media.mediarecorder.video-bitrate";
+  public static final String VIDEO_IFRAME_INTERVAL = "android.media.mediarecorder.video-iframe-interval";
+  public static final String VIDEO_LEVEL = "android.media.mediarecorder.video-encoder-level";
+  public static final String VIDEO_PROFILE = "android.media.mediarecorder.video-encoder-profile";
+  public static final String VIDEO_TIMESCALE = "android.media.mediarecorder.video-timescale";
+  public static final String WIDTH = "android.media.mediarecorder.width";
+  private MetricsConstants() {}
+ }
  public interface OnErrorListener {void onError(MediaRecorder recorder,int what,int extra);}
  public interface OnInfoListener {void onInfo(MediaRecorder recorder,int what,int extra);}
  private final Handler handler;
  private int source=-1,format=-1,encoder=-1,rate=44100,channels=1,bitrate=64000,maxDuration;
- private long maxFileSize=256L*1024*1024;private String path;private boolean prepared,hasRun;private volatile boolean released;private volatile boolean recording;
+ private long maxFileSize=256L*1024*1024;private String path;private boolean prepared,hasRun,privacySensitive;private volatile boolean released;private volatile boolean recording;
  private volatile int amplitude;private volatile RuntimeException failure;private volatile long packets;private Thread worker;private AudioRecord audio;
  private OnErrorListener errors;private OnInfoListener information;
+ private LogSessionId logSessionId=LogSessionId.LOG_SESSION_ID_NONE;
+ private AudioDeviceInfo preferredDevice;
  public MediaRecorder(){Looper looper=Looper.myLooper();if(looper==null)looper=Looper.getMainLooper();handler=looper==null?null:new Handler(looper);}
+ public MediaRecorder(Context context){this();Objects.requireNonNull(context,"context");}
  private void configurable(){if(released||prepared||hasRun)throw new IllegalStateException("Recorder is not configurable");}
+ public static final int getAudioSourceMax(){return AudioSource.VOICE_PERFORMANCE;}
+ public void setLogSessionId(LogSessionId id){logSessionId=Objects.requireNonNull(id,"id");}
+ public LogSessionId getLogSessionId(){return logSessionId;}
+ public synchronized void setPrivacySensitive(boolean privacySensitive){configurable();this.privacySensitive=privacySensitive;}
+ public synchronized boolean isPrivacySensitive(){return privacySensitive;}
  public synchronized void setAudioSource(int value){configurable();if(value<0||value>10)throw new IllegalArgumentException("Audio source");source=value;}
  public synchronized void setOutputFormat(int value){configurable();if(value!=OutputFormat.MPEG_4&&value!=OutputFormat.AAC_ADTS)throw new UnsupportedOperationException("Only AAC MPEG-4 and ADTS recording are supported");format=value;}
  public synchronized void setAudioEncoder(int value){configurable();if(value!=AudioEncoder.AAC&&value!=AudioEncoder.DEFAULT)throw new UnsupportedOperationException("Only AAC-LC recording is supported");encoder=value;}
  public synchronized void setAudioSamplingRate(int value){configurable();int[] supported={8000,11025,12000,16000,22050,24000,32000,44100,48000};boolean found=false;for(int n:supported)if(n==value)found=true;if(!found)throw new IllegalArgumentException("AAC sample rate");rate=value;}
  public synchronized void setAudioChannels(int value){configurable();if(value<1||value>2)throw new IllegalArgumentException("Audio channels");channels=value;}
  public synchronized void setAudioEncodingBitRate(int value){configurable();if(value<8000||value>320000)throw new IllegalArgumentException("AAC bit rate");bitrate=value;}
+ public synchronized void setAudioProfile(EncoderProfiles.AudioProfile profile){
+  Objects.requireNonNull(profile,"profile");
+  setAudioEncoder(profile.getCodec());
+  setAudioChannels(profile.getChannels());
+  setAudioSamplingRate(profile.getSampleRate());
+  setAudioEncodingBitRate(profile.getBitrate());
+ }
+ public void setVideoProfile(EncoderProfiles.VideoProfile profile){throw new UnsupportedOperationException("Host video recording is not implemented");}
  public synchronized void setOutputFile(String value){configurable();if(value==null||value.length()==0)throw new IllegalArgumentException("Output path");path=value;}
  public void setOutputFile(File file){setOutputFile(file==null?null:file.getPath());}
  public void setOutputFile(FileDescriptor descriptor){throw new UnsupportedOperationException("Recorder file descriptor output unavailable");}
+ public void setNextOutputFile(FileDescriptor fd) throws IOException {throw new UnsupportedOperationException("Next output file rotation unavailable");}
+ public void setNextOutputFile(File file) throws IOException {throw new UnsupportedOperationException("Next output file rotation unavailable");}
  public synchronized void setMaxDuration(int milliseconds){configurable();if(milliseconds<0)throw new IllegalArgumentException("Duration");maxDuration=milliseconds;}
  public synchronized void setMaxFileSize(long bytes){configurable();if(bytes<0)throw new IllegalArgumentException("File size");maxFileSize=bytes==0?256L*1024*1024:Math.min(bytes,256L*1024*1024);}
  public synchronized void setOnErrorListener(OnErrorListener listener){errors=listener;}public synchronized void setOnInfoListener(OnInfoListener listener){information=listener;}
@@ -39,7 +100,14 @@ public class MediaRecorder {
  public void setVideoSize(int width,int height){throw new UnsupportedOperationException("Host video recording is not implemented");}
  public void setVideoFrameRate(int rate){throw new UnsupportedOperationException("Host video recording is not implemented");}
  public void setVideoEncodingBitRate(int rate){throw new UnsupportedOperationException("Host video recording is not implemented");}
+ public void setVideoEncodingProfileLevel(int profile,int level){throw new UnsupportedOperationException("Host video recording is not implemented");}
+ public void setCaptureRate(double fps){if(fps<=0)throw new IllegalArgumentException("fps");throw new UnsupportedOperationException("Host video recording is not implemented");}
+ public void setLocation(float latitude,float longitude){
+  if(latitude<-90.0f||latitude>90.0f||longitude<-180.0f||longitude>180.0f)throw new IllegalArgumentException("Invalid coordinates");
+ }
  public void setCamera(android.hardware.Camera camera){throw new UnsupportedOperationException("Host video recording is not implemented");}
+ public android.view.Surface getSurface(){throw new UnsupportedOperationException("Host video recording is not implemented");}
+ public void setInputSurface(android.view.Surface surface){throw new UnsupportedOperationException("Host video recording is not implemented");}
  public void setPreviewDisplay(android.view.Surface surface){throw new UnsupportedOperationException("Host video recording is not implemented");}
  public void setOrientationHint(int degrees){if(degrees!=0&&degrees!=90&&degrees!=180&&degrees!=270)throw new IllegalArgumentException("Orientation");}
  public synchronized void prepare()throws IOException{configurable();if(source<0||format<0||encoder<0||path==null)throw new IllegalStateException("Incomplete audio recording configuration");File parent=new File(path).getAbsoluteFile().getParentFile();if(parent==null||!parent.isDirectory())throw new IOException("Recording output directory unavailable");prepared=true;}
@@ -47,6 +115,8 @@ public class MediaRecorder {
   AudioRecord opened=new AudioRecord(source,rate,channels==1?AudioFormat.CHANNEL_IN_MONO:AudioFormat.CHANNEL_IN_STEREO,AudioFormat.ENCODING_PCM_16BIT,Math.max(8192,AudioRecord.getMinBufferSize(rate,channels==1?16:12,2)));
   try{opened.startRecording();}catch(RuntimeException e){opened.release();throw e;}audio=opened;recording=true;hasRun=true;packets=0;failure=null;worker=new Thread(new Runnable(){public void run(){capture();}},"Shiraz audio recorder");worker.start();
  }
+ public void pause(){if(!recording)throw new IllegalStateException("Recorder not started");throw new UnsupportedOperationException("Audio recorder pause is not supported");}
+ public void resume(){if(!recording)throw new IllegalStateException("Recorder not started");throw new UnsupportedOperationException("Audio recorder resume is not supported");}
  private void notifyInfo(final int code){final OnInfoListener target; synchronized(this){target=information;}if(target!=null&&handler!=null)handler.post(new Runnable(){public void run(){if(!released)target.onInfo(MediaRecorder.this,code,0);}});}
  private void capture(){long codec=0;MediaMuxer muxer=null;OutputStream adts=null;boolean muxerStarted=false;int reason=0;long total=0;try{
   codec=NativeCapture.aacOpen(rate,channels,bitrate);MediaFormat config=MediaFormat.createAudioFormat("audio/mp4a-latm",rate,channels);int index=0;int[] rates={96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000};while(rates[index]!=rate)index++;config.setByteBuffer("csd-0",java.nio.ByteBuffer.wrap(new byte[]{(byte)(16|(index>>1)),(byte)((index&1)<<7|channels<<3)}));
@@ -62,4 +132,23 @@ public class MediaRecorder {
  public int getMaxAmplitude(){if(released)throw new IllegalStateException("Recorder released");int value=amplitude;amplitude=0;return value;}
  public void reset(){if(worker!=null){try{stop();}catch(RuntimeException ignored){if(worker!=null)throw ignored;}}synchronized(this){if(released)throw new IllegalStateException("Recorder released");prepared=false;hasRun=false;source=format=encoder=-1;path=null;rate=44100;channels=1;bitrate=64000;maxDuration=0;maxFileSize=256L*1024*1024;amplitude=0;failure=null;}}
  public void release(){if(released)return;if(worker!=null){try{stop();}catch(RuntimeException failure){if(worker!=null)throw failure;}}synchronized(this){released=true;prepared=false;}}
+ @Override protected void finalize(){release();}
+ public synchronized PersistableBundle getMetrics(){
+  PersistableBundle b=new PersistableBundle();
+  b.putInt(MetricsConstants.AUDIO_BITRATE,bitrate);
+  b.putInt(MetricsConstants.AUDIO_CHANNELS,channels);
+  b.putInt(MetricsConstants.AUDIO_SAMPLERATE,rate);
+  return b;
+ }
+ @Override public synchronized boolean setPreferredDevice(AudioDeviceInfo device){preferredDevice=device;return true;}
+ @Override public synchronized AudioDeviceInfo getPreferredDevice(){return preferredDevice;}
+ @Override public synchronized AudioDeviceInfo getRoutedDevice(){return preferredDevice;}
+ @Override public void addOnRoutingChangedListener(AudioRouting.OnRoutingChangedListener listener, Handler handler){}
+ @Override public void removeOnRoutingChangedListener(AudioRouting.OnRoutingChangedListener listener){}
+ public List<MicrophoneInfo> getActiveMicrophones() throws IOException { return Collections.emptyList(); }
+ @Override public boolean setPreferredMicrophoneDirection(int direction){return false;}
+ @Override public boolean setPreferredMicrophoneFieldDimension(float zoom){return false;}
+ @Override public void registerAudioRecordingCallback(Executor executor, AudioManager.AudioRecordingCallback cb){}
+ @Override public void unregisterAudioRecordingCallback(AudioManager.AudioRecordingCallback cb){}
+ @Override public AudioRecordingConfiguration getActiveRecordingConfiguration(){return null;}
 }

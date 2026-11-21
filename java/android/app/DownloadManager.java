@@ -28,7 +28,7 @@ public class DownloadManager {
  public void shirazClose(){closed=true;queue.close();}
  public static class Request {
   public static final int NETWORK_MOBILE=1,NETWORK_WIFI=2,VISIBILITY_VISIBLE=0,VISIBILITY_VISIBLE_NOTIFY_COMPLETED=1,VISIBILITY_HIDDEN=2,VISIBILITY_VISIBLE_NOTIFY_ONLY_COMPLETION=3;
-  private final Uri uri;private File destination;private String title="",description="",mime="";private int visibility=0,networks=-1;private boolean charging,idle;
+  private final Uri uri;private File destination;private String title="",description="",mime="";private int visibility=0,networks=-1;private boolean charging,idle,allowRoaming=true,allowMetered=true;
   private final Map<String,String> headers=new LinkedHashMap<String,String>();
   public Request(Uri uri){if(uri==null)throw new NullPointerException("uri");if(!"http".equals(uri.getScheme())&&!"https".equals(uri.getScheme()))throw new IllegalArgumentException("HTTP(S) URI required");this.uri=uri;}
   public Request setDestinationUri(Uri value){if(value==null||!"file".equals(value.getScheme())||value.getPath()==null||value.getAuthority()!=null&&!value.getAuthority().isEmpty())throw new IllegalArgumentException("Local file URI required");destination=new File(value.getPath());return this;}
@@ -41,9 +41,8 @@ public class DownloadManager {
   public Request setNotificationVisibility(int value){if(value<0||value>3)throw new IllegalArgumentException("Visibility");visibility=value;return this;}
   public Request addRequestHeader(String name,String value){if(name==null)throw new NullPointerException("header");if(name.indexOf(':')>=0)throw new IllegalArgumentException("Header name");String old=headers.get(name);headers.put(name,old==null?(value==null?"":value):old+", "+(value==null?"":value));return this;}
   public Request setAllowedNetworkTypes(int value){networks=value;return this;}
-  // The host connection is represented as non-roaming and non-metered by ConnectivityManager.
-  public Request setAllowedOverRoaming(boolean value){return this;}
-  public Request setAllowedOverMetered(boolean value){return this;}
+  public Request setAllowedOverRoaming(boolean value){allowRoaming=value;return this;}
+  public Request setAllowedOverMetered(boolean value){allowMetered=value;return this;}
   public Request setRequiresCharging(boolean value){charging=value;return this;}
   public Request setRequiresDeviceIdle(boolean value){idle=value;return this;}
  }
@@ -56,9 +55,9 @@ public class DownloadManager {
   public Query orderBy(String column,int direction){if(!COLUMN_LAST_MODIFIED_TIMESTAMP.equals(column)&&!COLUMN_TOTAL_SIZE_BYTES.equals(column))throw new IllegalArgumentException("Download sort column");if(direction!=1&&direction!=2)throw new IllegalArgumentException("Download sort direction");order=column;this.direction=direction;return this;}
   boolean accepts(HostDownloads.Record record){if(status!=0&&(status&record.status)==0)return false;if(ids==null)return true;for(long id:ids)if(id==record.id)return true;return false;}
  }
- public long enqueue(Request request){live();if(request==null)throw new NullPointerException("request");if(request.charging||request.idle||(request.networks&Request.NETWORK_WIFI)==0)throw new UnsupportedOperationException("Requested download scheduling constraint is unavailable on this host");
+ public long enqueue(Request request){live();if(request==null)throw new NullPointerException("request");if(request.charging||request.idle)throw new UnsupportedOperationException("Requested download scheduling constraint is unavailable on this host");
   File target=request.destination==null?new File(new File(context.getCacheDir(),"downloads"),UUID.randomUUID().toString()):request.destination;
-  try{long id=queue.enqueue(request.uri.toString(),target,request.title,request.mime,new LinkedHashMap<String,String>(request.headers),request.description,request.visibility);HostDownloads.Record record=queue.get(id);if(record!=null)notice(record);return id;}catch(IOException error){throw new IllegalStateException("Cannot enqueue download",error);}
+  try{long id=queue.enqueue(request.uri.toString(),target,request.title,request.mime,new LinkedHashMap<String,String>(request.headers),request.description,request.visibility,new shiraz.runtime.DownloadNetworkPolicy(request.networks,request.allowMetered,request.allowRoaming));HostDownloads.Record record=queue.get(id);if(record!=null)notice(record);return id;}catch(IOException error){throw new IllegalStateException("Cannot enqueue download",error);}
  }
  private void notice(HostDownloads.Record record){
   NotificationManager manager=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);if(manager==null)return;

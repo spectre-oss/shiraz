@@ -8,15 +8,79 @@ import java.util.Properties;
 
 /** Immutable manifest facts with fresh mutable Android metadata snapshots. */
 public final class HostPackageManager extends PackageManager {
+    @Override public String[] getSystemSharedLibraryNames(){return bool("runtime.library.apacheHttpLegacy",false)?new String[]{"org.apache.http.legacy"}:null;}
+    @Override public int checkSignatures(String first,String second){
+        ServiceBrokerClient broker=RuntimeBroker.client();if(broker==null)throw new UnsupportedOperationException("Verified package registry required");
+        try{return broker.compareSignatures(first,second);}catch(java.io.IOException error){throw new IllegalStateException("Verified signature comparison unavailable",error);}
+    }
+    @Override public int checkSignatures(int first,int second){
+        ServiceBrokerClient broker=RuntimeBroker.client();if(broker==null)throw new UnsupportedOperationException("Verified package registry required");
+        try{return broker.compareSignatures(first,second);}catch(java.io.IOException error){throw new IllegalStateException("Verified signature comparison unavailable",error);}
+    }
+    @Override public String[] getPackagesForUid(int uid){
+        if(uid<0)return null;ServiceBrokerClient broker=RuntimeBroker.client();
+        if(broker==null)return uid==Process.myUid()?new String[]{context.getPackageName()}:null;
+        try{ServiceBrokerClient.PackageIdentity identity=broker.lookupUid(uid);return identity==null?null:new String[]{identity.packageName};}
+        catch(java.io.IOException error){throw new IllegalStateException("Registered package lookup unavailable",error);}
+    }
+    @Override public int getPackageUid(String packageName,int flags)throws NameNotFoundException{
+        ServiceBrokerClient broker=RuntimeBroker.client();
+        if(broker==null)return super.getPackageUid(packageName,flags);
+        if(flags!=0)throw new UnsupportedOperationException("Registered package UID lookup flags");
+        try{ServiceBrokerClient.PackageIdentity identity=broker.lookupPackage(packageName);if(identity==null)throw new NameNotFoundException(packageName);return identity.uid;}
+        catch(java.io.IOException error){throw new IllegalStateException("Registered package lookup unavailable",error);}
+    }
     @Override public int checkPermission(String permission,String packageName){
+        if(permission==null||packageName==null)throw new IllegalArgumentException("Permission/package name");
+        ServiceBrokerClient broker=RuntimeBroker.client();
+        if(broker!=null&&!permission.startsWith("android.")){
+            try{return broker.checkPermission(permission,"package",packageName);}
+            catch(java.io.IOException error){throw new IllegalStateException("Registered permission query unavailable",error);}
+        }
         return name.equals(packageName)&&name.equals(context.getPackageName())
                 ? context.checkSelfPermission(permission) : PERMISSION_DENIED;
     }
-    @Override public java.util.List<PackageInfo> getInstalledPackages(int flags){java.util.ArrayList<PackageInfo> result=new java.util.ArrayList<>();try{result.add(getPackageInfo(name,flags));for(String pkg:HostAppInstaller.packages())if(!name.equals(pkg))result.add(getPackageInfo(pkg,flags));}catch(NameNotFoundException e){throw new IllegalStateException(e);}return result;}
-    @Override public android.content.Intent getLaunchIntentForPackage(String pkg){if(!name.equals(pkg))return HostAppInstaller.launchIntent(pkg);android.content.Intent intent=new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER).setPackage(pkg);android.content.pm.ResolveInfo info=resolveActivity(intent,0);if(info!=null)return intent.setComponent(new android.content.ComponentName(pkg,info.activityInfo.name)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-        // Launcher aliases are resolved to their declared target by the APK parser.
-        int count=integer("launcher.count",0);if(count<0||count>256)throw new IllegalArgumentException("Launcher count");
-        for(int i=0;i<count;i++){android.content.ComponentName component=new android.content.ComponentName(pkg,required("launcher."+i+".target"));try{getActivityInfo(component,0);return intent.setComponent(component).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);}catch(NameNotFoundException disabled){}}
+    @Override public java.util.List<PackageInfo> getInstalledPackages(int flags){
+        if((flags&~PACKAGE_QUERY_FLAGS)!=0)throw new UnsupportedOperationException("Package query flags are not implemented: "+flags);
+        java.util.ArrayList<String> packages=new java.util.ArrayList<String>();
+        ServiceBrokerClient broker=RuntimeBroker.client();
+        if(broker!=null){
+            try{for(ServiceBrokerClient.PackageIdentity identity:broker.installedPackages())packages.add(identity.packageName);}
+            catch(java.io.IOException error){throw new IllegalStateException("Installed package enumeration unavailable",error);}
+        }else{packages.add(name);for(String pkg:HostAppInstaller.packages())if(!name.equals(pkg))packages.add(pkg);}
+        java.util.ArrayList<PackageInfo> result=new java.util.ArrayList<PackageInfo>();
+        for(String pkg:packages)try{result.add(getPackageInfo(pkg,flags));}catch(NameNotFoundException removed){/* Package removed after enumeration. */}
+        return result;
+    }
+    @Override public android.content.Intent getLaunchIntentForPackage(String pkg){
+        if(pkg==null)throw new NullPointerException("packageName");
+        if(!name.equals(pkg)){
+            if(RuntimeBroker.client()==null)return HostAppInstaller.launchIntent(pkg);
+            Properties facts=installedMetadata(pkg);if(facts==null)return null;
+            return new HostPackageManager(facts,context).getLaunchIntentForPackage(pkg);
+        }
+        android.content.Intent intent=new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER).setPackage(pkg);
+        if(!bool("enabled",true))return null;
+        int count=integer("launcher.count",0),aliases=integer("alias.count",0);
+        if(count<0||count>256||aliases<0||aliases>256)throw new IllegalArgumentException("Launcher declaration count");
+        for(int i=0;i<count;i++){
+            String target=required("launcher."+i+".target"),component=values.getProperty("launcher."+i+".name",target);
+            boolean alias=!component.equals(target),enabled=!alias;
+            if(alias){
+                int matches=0;
+                for(int j=0;j<aliases;j++){
+                    String prefix="alias."+j+".";
+                    if(component.equals(values.getProperty(prefix+"name"))&&target.equals(values.getProperty(prefix+"target"))){matches++;enabled=bool(prefix+"enabled",true);}
+                }
+                if(matches!=1)throw new UnsupportedOperationException("Launcher alias policy unavailable");
+            }
+            if(!enabled)continue;
+            try{
+                getActivityInfo(new android.content.ComponentName(pkg,target),alias?MATCH_DISABLED_COMPONENTS:0);
+                return intent.setComponent(new android.content.ComponentName(pkg,component)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            }catch(NameNotFoundException disabled){}
+        }
+        if(count==0){android.content.pm.ResolveInfo info=resolveActivity(intent,0);if(info!=null)return intent.setComponent(new android.content.ComponentName(pkg,info.activityInfo.name)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);}
         return null;}
     @Override public String getInstallerPackageName(String pkg){Properties facts=HostAppInstaller.metadata(pkg);return facts==null?null:facts.getProperty("installer");}
     private android.content.pm.PackageInstaller installer;
@@ -40,7 +104,8 @@ public final class HostPackageManager extends PackageManager {
         if (value == null || value.isEmpty()) throw new IllegalArgumentException("Missing package metadata: " + key);
         return value;
     }
-    private static final int PACKAGE_QUERY_FLAGS=MATCH_DIRECT_BOOT_AUTO|GET_GIDS|GET_SIGNING_CERTIFICATES|GET_SIGNATURES|GET_META_DATA|GET_PERMISSIONS|GET_DISABLED_COMPONENTS|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|0x1|0x2|0x4|0x8|0x10|0x20|0x2000|0x4000|0x8000;
+    // API 27, single user 0: MATCH_ANY_USER cannot expand this registry to another user.
+    private static final int PACKAGE_QUERY_FLAGS=MATCH_ANY_USER|MATCH_DIRECT_BOOT_AUTO|GET_GIDS|GET_SIGNING_CERTIFICATES|GET_SIGNATURES|GET_META_DATA|GET_PERMISSIONS|GET_DISABLED_COMPONENTS|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|0x1|0x2|0x4|0x8|0x10|0x20|0x2000|0x4000|0x8000;
     private void query(String packageName, int flags) throws NameNotFoundException {
         if (!name.equals(packageName)) throw new NameNotFoundException(packageName);
         if ((flags&~PACKAGE_QUERY_FLAGS)!=0) throw new UnsupportedOperationException("Package query flags are not implemented: " + flags);
@@ -95,7 +160,9 @@ public final class HostPackageManager extends PackageManager {
         }
         return result;
     }
-    @Override public java.util.List<android.content.pm.ResolveInfo> queryIntentActivities(android.content.Intent intent,int flags){
+    @Override public java.util.List<android.content.pm.ResolveInfo> queryIntentActivities(android.content.Intent intent,int flags){return queryActivityComponents(intent,flags,false);}
+    @Override public java.util.List<android.content.pm.ResolveInfo> queryBroadcastReceivers(android.content.Intent intent,int flags){return queryActivityComponents(intent,flags,true);}
+    private java.util.List<android.content.pm.ResolveInfo> queryActivityComponents(android.content.Intent intent,int flags,boolean receiver){
         if(intent==null)throw new NullPointerException("intent");
         int selectorDepth=0;while(intent.getComponent()==null&&intent.getSelector()!=null){if(++selectorDepth>32)throw new IllegalArgumentException("Intent selector depth");intent=intent.getSelector();}
         int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_DEFAULT_ONLY|GET_RESOLVED_FILTER|MATCH_ALL|MATCH_SYSTEM_ONLY|MATCH_UNINSTALLED_PACKAGES;
@@ -103,14 +170,17 @@ public final class HostPackageManager extends PackageManager {
         java.util.ArrayList<android.content.pm.ResolveInfo> result=new java.util.ArrayList<android.content.pm.ResolveInfo>();
         // Packaged APKs and the in-app camera adapter are not Android system packages.
         if((flags&MATCH_SYSTEM_ONLY)!=0)return result;
-        android.content.pm.ResolveInfo capture=HostCameraCapture.resolve(context,intent);if(capture!=null){result.add(capture);return result;}
-        android.content.pm.ResolveInfo picker=HostDocumentPicker.resolve(context,intent);if(picker!=null){result.add(picker);return result;}
+        if(!receiver){android.content.pm.ResolveInfo capture=HostCameraCapture.resolve(context,intent);if(capture!=null){result.add(capture);return result;}
+        android.content.pm.ResolveInfo picker=HostDocumentPicker.resolve(context,intent);if(picker!=null){result.add(picker);return result;}}
         if(intent.getPackage()!=null&&!name.equals(intent.getPackage()))return result;
-        int count=integer("activity.count",0);if(count<0||count>256)throw new IllegalArgumentException("Activity count");
-        for(int i=0;i<count;i++){
-            String prefix="activity."+i+".";android.content.ComponentName component=new android.content.ComponentName(name,required(prefix+"name"));
+        String componentKind=receiver?"receiver":"activity";
+        int count=integer(componentKind+".count",0),aliases=receiver?0:integer("alias.count",0);
+        if(count<0||count>(receiver?256:512)||aliases<0||aliases>256)throw new IllegalArgumentException("Activity declaration count");
+        for(int i=0;i<count+aliases;i++){
+            String prefix=i<count?componentKind+"."+i+".":"alias."+(i-count)+".";
+            android.content.ComponentName component=new android.content.ComponentName(name,required(prefix+"name"));
             if(intent.getComponent()!=null&&!component.equals(intent.getComponent()))continue;
-            android.content.pm.ActivityInfo info;try{info=getActivityInfo(component,flags&~(MATCH_DEFAULT_ONLY|GET_RESOLVED_FILTER|MATCH_ALL|MATCH_SYSTEM_ONLY));}catch(NameNotFoundException absent){continue;}
+            android.content.pm.ActivityInfo info;try{int componentFlags=flags&~(MATCH_DEFAULT_ONLY|GET_RESOLVED_FILTER|MATCH_ALL|MATCH_SYSTEM_ONLY);info=receiver?getReceiverInfo(component,componentFlags):getActivityInfo(component,componentFlags);}catch(NameNotFoundException absent){continue;}
             android.content.pm.ResolveInfo best=null;
             if(intent.getComponent()!=null){best=new android.content.pm.ResolveInfo();}
             else {int filters=integer(prefix+"filter.count",0);if(filters<0||filters>128)throw new IllegalArgumentException("Filter count");
@@ -163,25 +233,54 @@ public final class HostPackageManager extends PackageManager {
     }
     @Override public java.util.List<android.content.pm.ResolveInfo> queryIntentServices(android.content.Intent intent,int flags){
         if(intent==null)throw new NullPointerException("intent");
-        int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|GET_RESOLVED_FILTER;
+        int allowed=MATCH_DEFAULT_ONLY|MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|GET_RESOLVED_FILTER;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Service resolution flags: "+flags);
         java.util.ArrayList<android.content.pm.ResolveInfo> result=new java.util.ArrayList<android.content.pm.ResolveInfo>();
-        if(intent.getPackage()!=null&&!name.equals(intent.getPackage()))return result;
-        int count=integer("service.count",0);if(count<0||count>256)throw new IllegalArgumentException("Service count");
+        String target=intent.getComponent()!=null?intent.getComponent().getPackageName():intent.getPackage();
+        if(target==null&&RuntimeBroker.client()!=null){
+            try{
+                for(ServiceBrokerClient.PackageIdentity identity:RuntimeBroker.client().installedPackages()){
+                    android.content.Intent scoped=new android.content.Intent(intent).setPackage(identity.packageName);
+                    result.addAll(queryIntentServices(scoped,flags));
+                    if(result.size()>10000)throw new UnsupportedOperationException("Service discovery result limit");
+                }
+            }catch(java.io.IOException error){throw new IllegalStateException("Installed service discovery unavailable",error);}
+            java.util.Collections.sort(result,new java.util.Comparator<android.content.pm.ResolveInfo>(){public int compare(android.content.pm.ResolveInfo a,android.content.pm.ResolveInfo b){return Integer.compare(b.priority,a.priority);}});
+            return result;
+        }
+        if(target!=null&&!name.equals(target)){
+            if(intent.getPackage()!=null&&!target.equals(intent.getPackage()))return result;
+            Properties facts=installedMetadata(target);if(facts==null)return result;
+            return new HostPackageManager(facts,context).queryIntentServices(intent,flags);
+        }
+        int count=integer("service.count",0);if(count<0||count>512)throw new IllegalArgumentException("Service count");
         for(int i=0;i<count;i++){
             String prefix="service."+i+".";android.content.ComponentName component=new android.content.ComponentName(name,required(prefix+"name"));
             if(intent.getComponent()!=null&&!component.equals(intent.getComponent()))continue;
-            android.content.pm.ServiceInfo info;try{info=getServiceInfo(component,flags&~GET_RESOLVED_FILTER);}catch(NameNotFoundException absent){continue;}
+            android.content.pm.ServiceInfo info;try{info=getServiceInfo(component,flags&~(GET_RESOLVED_FILTER|MATCH_DEFAULT_ONLY));}catch(NameNotFoundException absent){continue;}
             android.content.pm.ResolveInfo best=null;
             if(intent.getComponent()!=null)best=new android.content.pm.ResolveInfo();
             else{int filters=integer(prefix+"filter.count",0);if(filters<0||filters>128)throw new IllegalArgumentException("Filter count");
                 for(int j=0;j<filters;j++){
                     String key=prefix+"filter."+j+".";android.content.IntentFilter filter=new android.content.IntentFilter();
-                    int n=integer(key+"action.count",0);if(n<0||n>128)throw new IllegalArgumentException("Filter entries");
-                    for(int k=0;k<n;k++)filter.addAction(required(key+"action."+k));
-                    if(intent.getAction()==null||!filter.hasAction(intent.getAction()))continue;
+                    for(String kind:new String[]{"action","category","scheme","mime"}){
+                        int n=integer(key+kind+".count",0);if(n<0||n>128)throw new IllegalArgumentException("Filter entries");
+                        for(int k=0;k<n;k++){
+                            String value=required(key+kind+"."+k);if(value.length()>4096)throw new IllegalArgumentException("Filter value");
+                            if(kind.equals("action"))filter.addAction(value);
+                            else if(kind.equals("category"))filter.addCategory(value);
+                            else if(kind.equals("scheme"))filter.addDataScheme(value);
+                            else try{filter.addDataType(value);}catch(android.content.IntentFilter.MalformedMimeTypeException bad){throw new IllegalArgumentException(bad);}
+                        }
+                    }
+                    if(intent.getAction()!=null&&!filter.hasAction(intent.getAction()))continue;
+                    boolean defaultCategory=filter.hasCategory(android.content.Intent.CATEGORY_DEFAULT);
+                    if((flags&MATCH_DEFAULT_ONLY)!=0&&!defaultCategory)continue;
+                    int match=filter.match(intent.getAction(),intent.getType(),intent.getScheme(),intent.getData(),intent.getCategories(),"Shiraz");
+                    if(match<0)continue;
+                    if(bool(key+"unsupported",false))throw new UnsupportedOperationException("Service authority/path matching");
                     filter.setPriority(integer(key+"priority",0));
-                    if(best==null||filter.getPriority()>best.priority){best=new android.content.pm.ResolveInfo();best.priority=filter.getPriority();if((flags&GET_RESOLVED_FILTER)!=0)best.filter=filter;}
+                    if(best==null||filter.getPriority()>best.priority){best=new android.content.pm.ResolveInfo();best.priority=filter.getPriority();best.match=match;best.isDefault=defaultCategory;if((flags&GET_RESOLVED_FILTER)!=0)best.filter=filter;}
                 }
             }
             if(best!=null){best.serviceInfo=info;result.add(best);}
@@ -226,20 +325,30 @@ public final class HostPackageManager extends PackageManager {
         if(!name.equals(component.getPackageName()))throw new NameNotFoundException(component.flattenToString());
         int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_UNINSTALLED_PACKAGES;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Activity query flags are not implemented: "+flags);
+        String target=component.getClassName(),aliasPrefix=null;
+        int aliases=integer("alias.count",0);if(aliases<0||aliases>256)throw new IllegalArgumentException("Alias count");
+        for(int i=0;i<aliases;i++){
+            String prefix="alias."+i+".";
+            if(component.getClassName().equals(values.getProperty(prefix+"name"))){
+                if(aliasPrefix!=null)throw new IllegalArgumentException("Duplicate alias");
+                aliasPrefix=prefix;target=required(prefix+"target");
+            }
+        }
         int count=integer("activity.count",0);
-        if(count<0||count>256)throw new IllegalArgumentException("Activity declaration count");
+        if(count<0||count>512)throw new IllegalArgumentException("Activity declaration count");
         for(int i=0;i<count;i++) {
             String prefix="activity."+i+".";
-            if(!component.getClassName().equals(values.getProperty(prefix+"name")))continue;
+            if(!target.equals(values.getProperty(prefix+"name")))continue;
             android.content.pm.ActivityInfo info=new android.content.pm.ActivityInfo();
             info.name=component.getClassName();info.packageName=name;info.applicationInfo=getApplicationInfo(name,0);
             info.enabled=bool(prefix+"enabled",true);info.exported=bool(prefix+"exported",false);info.directBootAware=bool(prefix+"directBootAware",false);
+            if(aliasPrefix!=null){info.targetActivity=target;info.enabled=bool(aliasPrefix+"enabled",true);info.exported=bool(aliasPrefix+"exported",false);}
             if(!info.isEnabled()&&(flags&MATCH_DISABLED_COMPONENTS)==0)break;
             int boot=flags&(MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE);
             if(boot!=0&&(boot&(info.directBootAware?MATCH_DIRECT_BOOT_AWARE:MATCH_DIRECT_BOOT_UNAWARE))==0)break;
             info.processName=values.getProperty(prefix+"process",name);
             if(info.processName.startsWith(":"))info.processName=name+info.processName;
-            info.permission=values.getProperty(prefix+"permission");if("".equals(info.permission))info.permission=null;
+            info.permission=values.getProperty((aliasPrefix==null?prefix:aliasPrefix)+"permission");if("".equals(info.permission))info.permission=null;
             info.parentActivityName=values.getProperty(prefix+"parentActivityName");
             info.labelRes=resourceId(prefix+"labelRes");if(info.labelRes==0)info.nonLocalizedLabel=values.getProperty(prefix+"label");
             info.launchMode=integer(prefix+"launch_mode",0);
@@ -253,11 +362,19 @@ public final class HostPackageManager extends PackageManager {
         }
         throw new NameNotFoundException(component.flattenToString());
     }
+    private Properties installedMetadata(String target){
+        ServiceBrokerClient broker=RuntimeBroker.client();
+        if(broker==null)return HostAppInstaller.metadata(target);
+        try{return broker.packageMetadata(target);}catch(java.io.IOException error){throw new IllegalStateException("Installed package metadata unavailable",error);}
+    }
     @Override public android.content.pm.ServiceInfo getServiceInfo(android.content.ComponentName component,int flags) throws NameNotFoundException {
-        if(component==null)throw new NullPointerException("component");if(!name.equals(component.getPackageName()))throw new NameNotFoundException(component.flattenToString());
+        if(component==null)throw new NullPointerException("component");if(!name.equals(component.getPackageName())){
+            Properties facts=installedMetadata(component.getPackageName());if(facts==null)throw new NameNotFoundException(component.flattenToString());
+            return new HostPackageManager(facts,context).getServiceInfo(component,flags);
+        }
         int allowed=MATCH_DIRECT_BOOT_AUTO|GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE|MATCH_UNINSTALLED_PACKAGES;
         if((flags&~allowed)!=0)throw new UnsupportedOperationException("Service query flags are not implemented: "+flags);
-        int count=integer("service.count",0);if(count<0||count>256)throw new IllegalArgumentException("Service declaration count");
+        int count=integer("service.count",0);if(count<0||count>512)throw new IllegalArgumentException("Service declaration count");
         for(int i=0;i<count;i++) {
             String prefix="service."+i+".";if(!component.getClassName().equals(values.getProperty(prefix+"name")))continue;
             android.content.pm.ServiceInfo info=new android.content.pm.ServiceInfo();info.name=component.getClassName();info.packageName=name;info.applicationInfo=getApplicationInfo(name,0);
@@ -266,6 +383,7 @@ public final class HostPackageManager extends PackageManager {
             int boot=flags&(MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE);
             if(boot!=0&&(boot&(info.directBootAware?MATCH_DIRECT_BOOT_AWARE:MATCH_DIRECT_BOOT_UNAWARE))==0)break;
             info.processName=values.getProperty(prefix+"process",name);if(info.processName.startsWith(":"))info.processName=name+info.processName;
+            info.foregroundServiceType=integer(prefix+"foregroundServiceType",0);if(info.foregroundServiceType<0)throw new IllegalArgumentException("Invalid declared foreground service type");
             info.permission=values.getProperty(prefix+"permission");if("".equals(info.permission))info.permission=null;
             String[] attributes={"stopWithTask","isolated","externalService","useAppZygote","allowSharedIsolatedProcess","singleUser"};int[] bits={1,2,4,8,16,0x40000000};
             for(int j=0;j<attributes.length;j++)if(bool(prefix+attributes[j],false))info.flags|=bits[j];
@@ -288,6 +406,8 @@ public final class HostPackageManager extends PackageManager {
         android.content.pm.ProviderInfo info=new android.content.pm.ProviderInfo();info.name=required(prefix+"name");info.packageName=name;info.applicationInfo=getApplicationInfo(name,0);
         info.enabled=bool(prefix+"enabled",true);info.exported=bool(prefix+"exported",info.applicationInfo.targetSdkVersion<17);info.authority=values.getProperty(prefix+"authorities");
         info.grantUriPermissions=bool(prefix+"grantUriPermissions",false);info.multiprocess=bool(prefix+"multiprocess",false);
+        info.readPermission=values.getProperty(prefix+"readPermission");info.writePermission=values.getProperty(prefix+"writePermission");
+        info.initOrder=integer(prefix+"initOrder",0);
         info.processName=values.getProperty(prefix+"process",name);if(info.processName.startsWith(":"))info.processName=name+info.processName;
         if((flags&GET_META_DATA)!=0)info.metaData=componentMetadata(prefix);
         return info;
@@ -328,16 +448,18 @@ public final class HostPackageManager extends PackageManager {
     }
     private android.content.pm.ActivityInfo[] packageActivities(boolean receiver,int flags)throws NameNotFoundException{
         String kind=receiver?"receiver":"activity";int count=integer(kind+".count",0);
-        if(count<0||count>256)throw new IllegalArgumentException("Package component count");
+        int aliases=receiver?0:integer("alias.count",0);
+        if(count<0||count>(receiver?256:512)||aliases<0||aliases>256)throw new IllegalArgumentException("Package component count");
         java.util.ArrayList<android.content.pm.ActivityInfo> result=new java.util.ArrayList<>();
-        for(int i=0;i<count;i++)try{
-            android.content.ComponentName component=new android.content.ComponentName(name,required(kind+"."+i+".name"));
+        for(int i=0;i<count+aliases;i++)try{
+            String prefix=i<count?kind+"."+i+".":"alias."+(i-count)+".";
+            android.content.ComponentName component=new android.content.ComponentName(name,required(prefix+"name"));
             result.add(receiver?getReceiverInfo(component,flags):getActivityInfo(component,flags));
         }catch(NameNotFoundException excluded){}
         return result.isEmpty()?null:result.toArray(new android.content.pm.ActivityInfo[result.size()]);
     }
     @Override public PackageInfo getPackageInfo(String packageName, int flags) throws NameNotFoundException {
-        if(!name.equals(packageName)){Properties facts=HostAppInstaller.metadata(packageName);if(facts==null)throw new NameNotFoundException(packageName);return new HostPackageManager(facts,context).getPackageInfo(packageName,flags);}
+        if(!name.equals(packageName)){Properties facts=installedMetadata(packageName);if(facts==null)throw new NameNotFoundException(packageName);return new HostPackageManager(facts,context).getPackageInfo(packageName,flags);}
         query(packageName, flags);
         PackageInfo info = new PackageInfo();
         info.packageName = name;
@@ -414,7 +536,7 @@ public final class HostPackageManager extends PackageManager {
             }
         }
         if((flags&GET_SERVICES)!=0){
-            int count=integer("service.count",0);if(count<0||count>256)throw new IllegalArgumentException("Service declaration count");
+            int count=integer("service.count",0);if(count<0||count>512)throw new IllegalArgumentException("Service declaration count");
             java.util.ArrayList<android.content.pm.ServiceInfo> services=new java.util.ArrayList<android.content.pm.ServiceInfo>();
             for(int i=0;i<count;i++)try{services.add(getServiceInfo(new android.content.ComponentName(name,required("service."+i+".name")),flags&(GET_META_DATA|MATCH_DISABLED_COMPONENTS|MATCH_DIRECT_BOOT_AWARE|MATCH_DIRECT_BOOT_UNAWARE)));}catch(NameNotFoundException excluded){}
             info.services=services.isEmpty()?null:services.toArray(new android.content.pm.ServiceInfo[services.size()]);
@@ -424,13 +546,13 @@ public final class HostPackageManager extends PackageManager {
         return info;
     }
     @Override public ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException {
-        if(!name.equals(packageName)){Properties facts=HostAppInstaller.metadata(packageName);if(facts==null)throw new NameNotFoundException(packageName);return new HostPackageManager(facts,context).getApplicationInfo(packageName,flags);}
+        if(!name.equals(packageName)){Properties facts=installedMetadata(packageName);if(facts==null)throw new NameNotFoundException(packageName);return new HostPackageManager(facts,context).getApplicationInfo(packageName,flags);}
         query(packageName, flags);
         ApplicationInfo info = new ApplicationInfo();
         info.packageName = name;
         if((flags&GET_META_DATA)!=0)info.metaData=componentMetadata("application.");
         info.className = values.getProperty("applicationClass"); info.name = info.className;
-        info.processName = values.getProperty("applicationInfo.processName",name); info.uid = Process.myUid();
+        info.processName = values.getProperty("applicationInfo.processName",name); info.uid = integer("uid",Process.myUid());
         info.backupAgentName=values.getProperty("applicationInfo.backupAgent");
         info.manageSpaceActivityName=values.getProperty("applicationInfo.manageSpaceActivity");
         info.appComponentFactory=values.getProperty("applicationInfo.appComponentFactory");
@@ -438,6 +560,7 @@ public final class HostPackageManager extends PackageManager {
         info.taskAffinity=values.getProperty("applicationInfo.taskAffinity",name);
         info.descriptionRes=resourceId("applicationInfo.descriptionRes");
         info.uiOptions=integer("applicationInfo.uiOptions",0);info.category=integer("applicationInfo.category",-1);
+        info.targetSandboxVersion=integer("applicationInfo.targetSandboxVersion",1);
         info.compileSdkVersion=integer("applicationInfo.compileSdkVersion",0);
         info.compileSdkVersionCodename=values.getProperty("applicationInfo.compileSdkVersionCodename");
         info.requiresSmallestWidthDp=integer("applicationInfo.requiresSmallestWidthDp",0);
@@ -473,7 +596,7 @@ public final class HostPackageManager extends PackageManager {
     }
     @Override public CharSequence getApplicationLabel(ApplicationInfo info) {
         if(info==null)throw new NullPointerException("application");
-        if(!name.equals(info.packageName)){Properties facts=HostAppInstaller.metadata(info.packageName);if(facts==null)throw new IllegalArgumentException("Unknown application");return new HostPackageManager(facts,context).getApplicationLabel(info);}
+        if(!name.equals(info.packageName)){Properties facts=installedMetadata(info.packageName);if(facts==null)throw new IllegalArgumentException("Unknown application");return new HostPackageManager(facts,context).getApplicationLabel(info);}
         if (info.nonLocalizedLabel != null) return info.nonLocalizedLabel;
         if (info.labelRes != 0) return packageString(info.labelRes);
         return name;

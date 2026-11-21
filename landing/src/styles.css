@@ -587,6 +587,8 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
 }
 @media (max-width: 360px) {
   .site-header nav a, .compat-header nav a { padding-inline: 7px; font-size: 13px; }
+  .site-header nav .github-link, .compat-header nav .github-link { margin-left: 2px; padding-inline: 7px; gap: 5px; }
+  .github-stars { padding-left: 5px; gap: 3px; }
   .brand { gap: 4px; font-size: 21px; }
   .brand img { width: 32px; height: 32px; }
 }

@@ -2,8 +2,38 @@
 package android.webkit;
 /** Settings for the placeholder WebView; values are retained but no engine is present. */
 public class WebSettings {
+ public enum LayoutAlgorithm { NORMAL, SINGLE_COLUMN, NARROW_COLUMNS, TEXT_AUTOSIZING }
+ @Deprecated public enum TextSize {
+  SMALLEST(50), SMALLER(75), NORMAL(100), LARGER(150), LARGEST(200);
+  final int value;
+  TextSize(int size) { this.value = size; }
+ }
+ public enum ZoomDensity {
+  FAR(150), MEDIUM(100), CLOSE(75);
+  final int value;
+  ZoomDensity(int size) { this.value = size; }
+  public int getValue() { return value; }
+ }
  public enum PluginState { ON, ON_DEMAND, OFF }
  public enum RenderPriority { NORMAL, HIGH, LOW }
+ private LayoutAlgorithm layoutAlgorithm = LayoutAlgorithm.NARROW_COLUMNS;
+ private ZoomDensity defaultZoom = ZoomDensity.MEDIUM;
+ private int textZoom = 100;
+ public void setLayoutAlgorithm(LayoutAlgorithm l) { if (l != null) layoutAlgorithm = l; }
+ public LayoutAlgorithm getLayoutAlgorithm() { return layoutAlgorithm; }
+ @Deprecated public synchronized void setTextSize(TextSize t) { if (t != null) textZoom = t.value; }
+ @Deprecated public synchronized TextSize getTextSize() {
+  TextSize closest = TextSize.NORMAL;
+  int smallestDelta = Integer.MAX_VALUE;
+  for (TextSize size : TextSize.values()) {
+   int delta = Math.abs(textZoom - size.value);
+   if (delta == 0) return size;
+   if (delta < smallestDelta) { smallestDelta = delta; closest = size; }
+  }
+  return closest;
+ }
+ @Deprecated public void setDefaultZoom(ZoomDensity zoom) { if (zoom != null) defaultZoom = zoom; }
+ @Deprecated public ZoomDensity getDefaultZoom() { return defaultZoom; }
  private PluginState pluginState=PluginState.OFF;
  private boolean savePassword=true,saveFormData=true,lightTouch,smoothTransition;
  private String databasePath="";

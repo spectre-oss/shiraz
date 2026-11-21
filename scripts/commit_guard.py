@@ -29,6 +29,7 @@ PUBLIC_DOCS = {
     'docs/tested.md',
     'docs/others/droidloom.md',
     'docs/macos_final_goal.md',
+    'docs/framework_final_goal.md',
     'docs/MISSING_ANDROID_LIBRARIES.md',
     'docs/experiments/README.md',
     'docs/experiments/flutter/README.md',
@@ -86,8 +87,12 @@ def unsafe(path, data, mode='100644'):
     p = PurePosixPath(path)
     if mode not in ('100644', '100755'):
         return 'symlink/submodule or non-regular entry'
+    dirs = [part.lower() for part in p.parts]
+    if p.parts[0] in ('java', 'optional-java'):
+        # Android API packages such as android.credentials and android.telephony.data are source.
+        dirs = [part for part in dirs if part not in ('credentials', 'data')]
     if (
-        path not in PUBLIC_DOCS and any(part.lower() in FORBIDDEN_DIRS for part in p.parts)
+        path not in PUBLIC_DOCS and any(part in FORBIDDEN_DIRS for part in dirs)
     ) or p.name.startswith('.env'):
         return 'private/local-only path'
     if p.suffix.lower() in FORBIDDEN_SUFFIXES or '.so.' in p.name:

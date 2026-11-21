@@ -9,5 +9,5 @@ public abstract class JobService extends Service {
  @Override public final IBinder onBind(Intent intent){return null;}
  public abstract boolean onStartJob(JobParameters params);
  public abstract boolean onStopJob(JobParameters params);
- public final void jobFinished(JobParameters params,boolean wantsReschedule){}
+ public final void jobFinished(JobParameters params,boolean wantsReschedule){params.shirazFinish(wantsReschedule);}
 }

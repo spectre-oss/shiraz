@@ -109,5 +109,52 @@ public final class Configuration implements Parcelable {
         return java.util.Objects.hash(mcc,mnc,keyboard,keyboardHidden,hardKeyboardHidden,navigation,navigationHidden,touchscreen,fontScale, getLocales(), orientation, screenWidthDp, screenHeightDp, smallestScreenWidthDp, densityDpi, screenLayout, uiMode);
     }
     public int describeContents() { return 0; }
-    public void writeToParcel(Parcel out, int flags) { throw new UnsupportedOperationException("Configuration parcel transport is not implemented"); }
+    public void writeToParcel(Parcel out, int flags) {
+        out.writeFloat(fontScale);
+        out.writeInt(mcc);
+        out.writeInt(mnc);
+        getLocales().writeToParcel(out, flags);
+        out.writeInt(touchscreen);
+        out.writeInt(keyboard);
+        out.writeInt(keyboardHidden);
+        out.writeInt(hardKeyboardHidden);
+        out.writeInt(navigation);
+        out.writeInt(navigationHidden);
+        out.writeInt(orientation);
+        out.writeInt(screenLayout);
+        out.writeInt(uiMode);
+        out.writeInt(screenWidthDp);
+        out.writeInt(screenHeightDp);
+        out.writeInt(smallestScreenWidthDp);
+        out.writeInt(densityDpi);
+    }
+    public void readFromParcel(Parcel source) {
+        fontScale = source.readFloat();
+        mcc = source.readInt();
+        mnc = source.readInt();
+        LocaleList ll = LocaleList.CREATOR.createFromParcel(source);
+        locales = ll;
+        locale = ll.isEmpty() ? null : ll.get(0);
+        touchscreen = source.readInt();
+        keyboard = source.readInt();
+        keyboardHidden = source.readInt();
+        hardKeyboardHidden = source.readInt();
+        navigation = source.readInt();
+        navigationHidden = source.readInt();
+        orientation = source.readInt();
+        screenLayout = source.readInt();
+        uiMode = source.readInt();
+        screenWidthDp = source.readInt();
+        screenHeightDp = source.readInt();
+        smallestScreenWidthDp = source.readInt();
+        densityDpi = source.readInt();
+    }
+    public static final Parcelable.Creator<Configuration> CREATOR = new Parcelable.Creator<Configuration>() {
+        @Override public Configuration createFromParcel(Parcel source) {
+            Configuration c = new Configuration();
+            c.readFromParcel(source);
+            return c;
+        }
+        @Override public Configuration[] newArray(int size) { return new Configuration[size]; }
+    };
 }

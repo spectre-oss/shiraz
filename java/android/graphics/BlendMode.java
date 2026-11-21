@@ -16,6 +16,7 @@ public enum BlendMode {
             default:return PorterDuff.Mode.valueOf(name());
         }
     }
+    public PorterDuff.Mode shirazPorterDuff(){return legacy();}
     static BlendMode fromLegacy(PorterDuff.Mode mode){
         if(mode==PorterDuff.Mode.ADD)return PLUS;
         if(mode==PorterDuff.Mode.MULTIPLY)return MODULATE;

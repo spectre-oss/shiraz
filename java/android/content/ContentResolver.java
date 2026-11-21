@@ -8,7 +8,42 @@ import java.io.*;
 import java.util.List;
 /** Host file/resource reads plus in-process content providers for the loaded package. */
 public class ContentResolver {
+ public static final int NOTIFY_SYNC_TO_NETWORK=1,NOTIFY_SKIP_NOTIFY_FOR_DESCENDANTS=2,NOTIFY_INSERT=4,NOTIFY_UPDATE=8,NOTIFY_DELETE=16;
+ public static final String SYNC_EXTRAS_EXPEDITED="expedited",SYNC_EXTRAS_MANUAL="force",SYNC_EXTRAS_IGNORE_SETTINGS="ignore_settings",
+  SYNC_EXTRAS_IGNORE_BACKOFF="ignore_backoff",SYNC_EXTRAS_DO_NOT_RETRY="do_not_retry",SYNC_EXTRAS_UPLOAD="upload",
+  SYNC_EXTRAS_OVERRIDE_TOO_MANY_DELETIONS="deletions_override",SYNC_EXTRAS_DISCARD_LOCAL_DELETIONS="discard_deletions",
+  SYNC_EXTRAS_INITIALIZE="initialize",SYNC_EXTRAS_REQUIRE_CHARGING="require_charging";
+ public static final String SCHEME_CONTENT="content",SCHEME_FILE="file",SCHEME_ANDROID_RESOURCE="android.resource";
+ public static final String CURSOR_ITEM_BASE_TYPE="vnd.android.cursor.item",CURSOR_DIR_BASE_TYPE="vnd.android.cursor.dir",ANY_CURSOR_ITEM_TYPE="vnd.android.cursor.item/*";
+ public static final class MimeTypeInfo {
+  private final android.graphics.drawable.Icon mIcon;private final CharSequence mLabel;private final CharSequence mContentDescription;
+  public MimeTypeInfo(android.graphics.drawable.Icon icon,CharSequence label,CharSequence contentDescription){
+   mIcon=java.util.Objects.requireNonNull(icon);mLabel=java.util.Objects.requireNonNull(label);mContentDescription=java.util.Objects.requireNonNull(contentDescription);
+  }
+  public android.graphics.drawable.Icon getIcon(){return mIcon;}
+  public CharSequence getLabel(){return mLabel;}
+  public CharSequence getContentDescription(){return mContentDescription;}
+ }
+ public final MimeTypeInfo getTypeInfo(String mimeType){
+  java.util.Objects.requireNonNull(mimeType);
+  String label=mimeType.isEmpty()?"File":mimeType;
+  android.graphics.Bitmap bmp=android.graphics.Bitmap.createBitmap(1,1,android.graphics.Bitmap.Config.ARGB_8888);
+  return new MimeTypeInfo(android.graphics.drawable.Icon.createWithBitmap(bmp),label,label);
+ }
  private final Context context;
+ public static SyncAdapterType[] getSyncAdapterTypes(){return shiraz.runtime.SyncAdapterDiscovery.getSyncAdapterTypes();}
+ public static void requestSync(android.accounts.Account account,String authority,android.os.Bundle extras){shiraz.runtime.SyncRequests.request(account,authority,extras);}
+ public static void validateSyncExtrasBundle(android.os.Bundle extras){
+  try{
+   for(String key:extras.keySet()){
+    Object value=extras.get(key);
+    if(value!=null&&!(value instanceof Integer||value instanceof Long||value instanceof Boolean
+      ||value instanceof Float||value instanceof Double||value instanceof String||value instanceof android.accounts.Account))
+     throw new IllegalArgumentException("Unsupported sync extra type: "+value.getClass().getName());
+   }
+  }catch(IllegalArgumentException invalid){throw invalid;}
+  catch(RuntimeException malformed){throw new IllegalArgumentException("Unable to read sync extras",malformed);}
+ }
  public ContentResolver(Context context){if(context==null)throw new NullPointerException("context");this.context=context;}
  public java.util.List<UriPermission> getPersistedUriPermissions(){return shiraz.runtime.HostDocuments.forContext(context).persisted();}
  public java.util.List<UriPermission> getOutgoingPersistedUriPermissions(){return new java.util.ArrayList<UriPermission>();}
@@ -74,16 +109,24 @@ public class ContentResolver {
   }
  }
  public final ParcelFileDescriptor openFileDescriptor(Uri uri,String mode)throws FileNotFoundException{
+  return openFileDescriptor(uri,mode,null);
+ }
+ public final ParcelFileDescriptor openFileDescriptor(Uri uri,String mode,android.os.CancellationSignal signal)throws FileNotFoundException{
   if(uri==null)throw new NullPointerException("uri");if(mode==null)throw new NullPointerException("mode");
+  if(signal!=null)signal.throwIfCanceled();
   if("file".equals(uri.getScheme()))return ParcelFileDescriptor.open(localFile(uri),descriptorMode(mode));
   if(!"content".equals(uri.getScheme()))throw new FileNotFoundException("No content provider for "+uri);
-  ParcelFileDescriptor fd=localProvider(uri).openFile(uri,mode);if(fd==null)throw new FileNotFoundException("No entry for "+uri);return fd;
+  return localProvider(uri).openFile(uri,mode,signal);
  }
  public final AssetFileDescriptor openAssetFileDescriptor(Uri uri,String mode)throws FileNotFoundException{
+  return openAssetFileDescriptor(uri,mode,null);
+ }
+ public final AssetFileDescriptor openAssetFileDescriptor(Uri uri,String mode,android.os.CancellationSignal signal)throws FileNotFoundException{
   if(uri==null)throw new NullPointerException("uri");if(mode==null)throw new NullPointerException("mode");
+  if(signal!=null)signal.throwIfCanceled();
   if("file".equals(uri.getScheme()))return new AssetFileDescriptor(openFileDescriptor(uri,mode),0,AssetFileDescriptor.UNKNOWN_LENGTH);
   if(!"content".equals(uri.getScheme()))throw new FileNotFoundException("No content provider for "+uri);
-  AssetFileDescriptor asset=localProvider(uri).openAssetFile(uri,mode);if(asset==null)throw new FileNotFoundException("No entry for "+uri);return asset;
+  return localProvider(uri).openAssetFile(uri,mode,signal);
  }
  private static File localFile(Uri uri)throws FileNotFoundException{
   String authority=uri.getAuthority(),path=uri.getPath();
@@ -147,10 +190,11 @@ public class ContentResolver {
   ContentProvider provider=ContentProvider.shirazLocal(uri.getAuthority());
   return provider==null?0:provider.update(uri,values,where,selectionArgs);
  }
- public final void registerContentObserver(Uri uri,boolean notifyForDescendants,android.database.ContentObserver observer){}
- public final void unregisterContentObserver(android.database.ContentObserver observer){}
- public void notifyChange(Uri uri,android.database.ContentObserver observer){}
- public void notifyChange(Uri uri,android.database.ContentObserver observer,boolean syncToNetwork){}
+ public final void registerContentObserver(Uri uri,boolean notifyForDescendants,android.database.ContentObserver observer){context.shirazContentObservers().register(uri,notifyForDescendants,observer);}
+ public final void unregisterContentObserver(android.database.ContentObserver observer){context.shirazContentObservers().unregister(observer);}
+ public void notifyChange(Uri uri,android.database.ContentObserver observer){notifyChange(uri,observer,true);}
+ public void notifyChange(Uri uri,android.database.ContentObserver observer,boolean syncToNetwork){notifyChange(uri,observer,syncToNetwork?NOTIFY_SYNC_TO_NETWORK:0);}
+ public void notifyChange(Uri uri,android.database.ContentObserver observer,int flags){context.shirazContentObservers().notifyChange(uri,observer,flags);}
  /** No Android settings provider is installed. Absence is distinct from a value of zero. */
  public String shirazReadSetting(String table,String name){if(name==null)throw new NullPointerException("name");if(!"global".equals(table)&&!"system".equals(table)&&!"secure".equals(table))throw new IllegalArgumentException("Settings table");if(shiraz.runtime.DeviceProfile.selected()){if("secure".equals(table)&&"android_id".equals(name)){shiraz.runtime.HostAppInstaller.recordAccess("settings:secure:android_id");return shiraz.runtime.DeviceProfile.get("settings.androidId",null);}if("system".equals(table)&&"screen_brightness".equals(name)){shiraz.runtime.HostAppInstaller.recordAccess("settings:system:screen_brightness");return shiraz.runtime.DeviceProfile.get("settings.screenBrightness",null);}}return null;}
 }

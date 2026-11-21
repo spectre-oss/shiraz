@@ -3,6 +3,25 @@ package android.os;
 /** Ordered in-process queue. Binder and synchronization barriers are not implemented. */
 public final class MessageQueue {
     public interface IdleHandler { boolean queueIdle(); }
+    public interface OnFileDescriptorEventListener {
+        int EVENT_INPUT = 1;
+        int EVENT_OUTPUT = 2;
+        int EVENT_ERROR = 4;
+        int onFileDescriptorEvents(java.io.FileDescriptor fd, int events);
+    }
+    private final java.util.HashMap<java.io.FileDescriptor, OnFileDescriptorEventListener> fdListeners =
+        new java.util.HashMap<java.io.FileDescriptor, OnFileDescriptorEventListener>();
+    public synchronized void addOnFileDescriptorEventListener(
+            java.io.FileDescriptor fd, int events, OnFileDescriptorEventListener listener) {
+        if (fd == null) throw new IllegalArgumentException("fd must not be null");
+        if (listener == null) throw new IllegalArgumentException("listener must not be null");
+        if (events == 0) fdListeners.remove(fd);
+        else fdListeners.put(fd, listener);
+    }
+    public synchronized void removeOnFileDescriptorEventListener(java.io.FileDescriptor fd) {
+        if (fd == null) throw new IllegalArgumentException("fd must not be null");
+        fdListeners.remove(fd);
+    }
     private final java.util.ArrayList<IdleHandler> idleHandlers = new java.util.ArrayList<IdleHandler>();
     private boolean idleDispatched;
     public synchronized void addIdleHandler(IdleHandler handler) {
@@ -84,6 +103,7 @@ public final class MessageQueue {
         }
         notifyAll();
     }
+    synchronized boolean shirazIsQuitting() { return quitting; }
     synchronized void quit(boolean safely, boolean internal) {
         if (!quitAllowed && !internal) throw new IllegalStateException("The main Looper cannot quit");
         if (quitting) return;

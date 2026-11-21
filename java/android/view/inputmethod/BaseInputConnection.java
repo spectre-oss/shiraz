@@ -800,8 +800,102 @@ public class BaseInputConnection implements InputConnection {
         endBatchEdit();
     }
 
-    /**
-     * The default implementation does nothing.
-     */
+    @Override
+    public boolean commitCompletion(CompletionInfo text) {
+        return false;
+    }
+
+    @Override
+    public boolean commitCorrection(CorrectionInfo correctionInfo) {
+        return false;
+    }
+
+    @Override
+    public SurroundingText getSurroundingText(int beforeLength, int afterLength, int flags) {
+        if (beforeLength < 0 || afterLength < 0) {
+            throw new IllegalArgumentException();
+        }
+        Editable content = getEditable();
+        if (content == null || mEditable == content) {
+            return InputConnection.super.getSurroundingText(beforeLength, afterLength, flags);
+        }
+        int selStart = Selection.getSelectionStart(content);
+        int selEnd = Selection.getSelectionEnd(content);
+        if (selStart < 0 || selEnd < 0) {
+            return null;
+        }
+        if (selStart > selEnd) {
+            int tmp = selStart;
+            selStart = selEnd;
+            selEnd = tmp;
+        }
+        int start = Math.max(0, selStart - beforeLength);
+        int end = Math.min(content.length(), selEnd + afterLength);
+        CharSequence seq = (flags & GET_TEXT_WITH_STYLES) != 0
+                ? content.subSequence(start, end)
+                : TextUtils.substring(content, start, end);
+        return new SurroundingText(seq, selStart - start, selEnd - start, start);
+    }
+
+    @Override
+    public boolean replaceText(int start, int end, CharSequence text, int newCursorPosition, TextAttribute textAttribute) {
+        if (start < 0 || end < 0) {
+            throw new IllegalArgumentException();
+        }
+        Editable content = getEditable();
+        if (content == null) {
+            return false;
+        }
+        beginBatchEdit();
+        removeComposingSpans(content);
+        int len = content.length();
+        int a = Math.min(start, len);
+        int b = Math.min(end, len);
+        if (b < a) {
+            int tmp = a;
+            a = b;
+            b = tmp;
+        }
+        content.replace(a, b, text);
+        int cursor = newCursorPosition > 0 ? a + text.length() + newCursorPosition - 1 : a + newCursorPosition;
+        cursor = Math.max(0, Math.min(content.length(), cursor));
+        Selection.setSelection(content, cursor);
+        endBatchEdit();
+        return true;
+    }
+
+    @Override
+    public boolean commitContent(InputContentInfo inputContentInfo, int flags, Bundle opts) {
+        if (mTargetView == null || inputContentInfo == null) {
+            return false;
+        }
+        android.content.ClipDescription desc = inputContentInfo.getDescription();
+        android.content.ClipData clip = new android.content.ClipData(desc, new android.content.ClipData.Item(inputContentInfo.getContentUri()));
+        android.view.ContentInfo payload = new android.view.ContentInfo.Builder(clip, android.view.ContentInfo.SOURCE_INPUT_METHOD)
+                .setLinkUri(inputContentInfo.getLinkUri())
+                .setExtras(opts)
+                .build();
+        return mTargetView.performReceiveContent(payload) == null;
+    }
+
+    @Override
+    public TextSnapshot takeSnapshot() {
+        Editable content = getEditable();
+        if (content == null) {
+            return null;
+        }
+        SurroundingText surrounding = getSurroundingText(1024, 1024, GET_TEXT_WITH_STYLES);
+        if (surrounding == null) {
+            return null;
+        }
+        int compStart = getComposingSpanStart(content);
+        int compEnd = getComposingSpanEnd(content);
+        if (compEnd < compStart) {
+            int tmp = compStart;
+            compStart = compEnd;
+            compEnd = tmp;
+        }
+        return new TextSnapshot(surrounding, compStart, compEnd, getCursorCapsMode(TextUtils.CAP_MODE_CHARACTERS | TextUtils.CAP_MODE_WORDS | TextUtils.CAP_MODE_SENTENCES));
+    }
 
 }

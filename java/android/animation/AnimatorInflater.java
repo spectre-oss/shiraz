@@ -13,7 +13,7 @@ public final class AnimatorInflater {
  private static final class Loader {
   final Context context;int count;
   Loader(Context c){context=c;}
-  void attributes(CompiledXmlParser parser,String names){for(BinaryXml.Attribute attr:parser.shirazNode().attributes)if(!BinaryXml.ANDROID.equals(attr.namespace)||!(" "+names+" ").contains(" "+attr.name+" "))throw new UnsupportedOperationException("Animator XML attribute "+attr.name);}
+  void attributes(CompiledXmlParser parser,String names){java.util.Set<String> allowed=XmlAttributeNames.compile(names);for(BinaryXml.Attribute attr:parser.shirazNode().attributes)if(!BinaryXml.ANDROID.equals(attr.namespace)||!allowed.contains(attr.name))throw new UnsupportedOperationException("Animator XML attribute "+attr.name);}
   void limit(int depth){if(depth>32||++count>1024)throw new IllegalArgumentException("Animator XML graph limit");}
   CompiledXmlParser open(int id)throws Exception{XmlResourceParser source=context.getResources().getAnimation(id);if(!(source instanceof CompiledXmlParser)){source.close();throw new UnsupportedOperationException("Compiled animator XML required");}CompiledXmlParser p=(CompiledXmlParser)source;try{while(p.next()!=XmlPullParser.START_TAG){if(p.getEventType()==XmlPullParser.END_DOCUMENT)throw new IllegalArgumentException("Missing animator root");}return p;}catch(Exception e){p.close();throw e;}}
   Animator load(int id,int depth)throws Exception{try(CompiledXmlParser p=open(id)){return animation(p,depth);}}

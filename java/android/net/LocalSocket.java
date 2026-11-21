@@ -197,14 +197,18 @@ public class LocalSocket implements Closeable {
         try { Libcore.os.shutdown(descriptor(), how); }
         catch (ErrnoException error) { throw error.rethrowAsIOException(); }
     }
+    @Override
+    public String toString() {
+        return super.toString() + " impl:" + fd;
+    }
     public synchronized boolean isConnected() { return connected; }
     public synchronized boolean isBound() { return bound; }
-    public synchronized boolean isClosed() { return closed; }
-    public synchronized boolean isInputShutdown() { return inputShutdown; }
-    public synchronized boolean isOutputShutdown() { return outputShutdown; }
-    public synchronized LocalSocketAddress getLocalSocketAddress() { return local; }
-    public synchronized LocalSocketAddress getRemoteSocketAddress() { return remote; }
-    public synchronized FileDescriptor getFileDescriptor() { return fd; }
+    public boolean isClosed() { synchronized (this) { return closed; } }
+    public boolean isInputShutdown() { synchronized (this) { return inputShutdown; } }
+    public boolean isOutputShutdown() { synchronized (this) { return outputShutdown; } }
+    public LocalSocketAddress getLocalSocketAddress() { synchronized (this) { return local; } }
+    public LocalSocketAddress getRemoteSocketAddress() { synchronized (this) { return remote; } }
+    public FileDescriptor getFileDescriptor() { synchronized (this) { return fd; } }
     public FileDescriptor[] getAncillaryFileDescriptors() throws IOException { throw new UnsupportedOperationException("Local socket descriptor passing is not implemented"); }
     public void setFileDescriptorsForSend(FileDescriptor[] descriptors) { throw new UnsupportedOperationException("Local socket descriptor passing is not implemented"); }
     public void close() throws IOException {

@@ -109,7 +109,19 @@ def probe_snapshot(report_path, source):
     }
 
 
-def class_inventory(jar, classes):
+BOOT_JAR_NAMES = ("core-oj", "core-libart", "okhttp", "bouncycastle", "wolfssljni")
+
+
+def default_boot_jars():
+    base = ROOT / "context/art_standalone/out/host/common/obj/JAVA_LIBRARIES"
+    return [
+        jar
+        for name in BOOT_JAR_NAMES
+        if (jar := base / f"{name}-hostdex_intermediates/classes.jar").is_file()
+    ]
+
+
+def class_inventory(jar, classes, boot_jars=()):
     if not classes.is_dir():
         raise ValueError("Build the framework before generating its class inventory")
     with zipfile.ZipFile(jar) as archive:
@@ -124,6 +136,13 @@ def class_inventory(jar, classes):
     ours = {path.relative_to(classes).as_posix() for path in (classes / "android").rglob("*.class")}
     if not ours:
         raise ValueError("Built Android framework class directory is empty")
+    for boot_jar in boot_jars:
+        with zipfile.ZipFile(boot_jar) as archive:
+            ours |= {
+                name
+                for name in archive.namelist()
+                if name.startswith("android/") and name.endswith(".class")
+            }
     rows = {}
     for name in reference:
         group = "android." + name.split("/")[1] if name.count("/") > 1 else "android"
@@ -135,7 +154,7 @@ def class_inventory(jar, classes):
         "androidVersion": "15",
         "referenceArchive": "platform-35_r02.zip",
         "referenceJarSha256": hashlib.sha256(jar.read_bytes()).hexdigest(),
-        "definition": "Matching android.* class names in the built Java framework versus the pinned Android API 35 SDK jar. android.R resource classes excluded. No method, signature, behavior or CTS compatibility is implied.",
+        "definition": "Matching android.* class names in the built Java framework and ART boot classpath jars versus the pinned Android API 35 SDK jar. android.R resource classes excluded. No method, signature, behavior or CTS compatibility is implied.",
         "present": len(reference & ours),
         "reference": len(reference),
         "packages": sorted(rows.values(), key=lambda row: row["package"]),
@@ -146,6 +165,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--android-jar", type=Path, default=ROOT / ".deps/android-sdk/android.jar")
     parser.add_argument("--classes", type=Path, default=ROOT / "build/framework/classes")
+    parser.add_argument(
+        "--boot-jar",
+        dest="boot_jars",
+        action="append",
+        type=Path,
+        help="Additional ART boot classpath jar to include (defaults to local art_standalone boot jars)",
+    )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "landing/src/lib/android-inventory.json"
     )
@@ -183,6 +209,7 @@ def main():
         )
         row[case["mode"]] += 1
     previous = json.loads(args.output.read_bytes()) if args.output.exists() else {}
+    boot_jars = args.boot_jars if args.boot_jars is not None else default_boot_jars()
     result = {
         "schemaVersion": 1,
         "updated": datetime.datetime.now(datetime.timezone.utc).date().isoformat(),  # noqa: UP017 - Python 3.10
@@ -191,7 +218,7 @@ def main():
             ["git", "rev-parse", "--verify", args.source_ref + "^{commit}"], cwd=ROOT, text=True
         ).strip(),
         "scope": "Development snapshot; includes local framework changes. Android 8.1 / API 27 is the runtime's advertised level, not a certification.",
-        "inventory": class_inventory(args.android_jar, args.classes),
+        "inventory": class_inventory(args.android_jar, args.classes, boot_jars),
         "probeCatalog": {
             "total": len(cases),
             "categories": sorted(groups.values(), key=lambda row: row["name"]),

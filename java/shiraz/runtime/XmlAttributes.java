@@ -37,6 +37,18 @@ public final class XmlAttributes {
     public boolean bool(String name,boolean fallback){return integer(name,fallback?1:0)!=0;}
     public float number(String name,float fallback){BinaryXml.Value v=resolve(raw(name));if(v==null||v.type==0)return fallback;float result=v.type==4?Float.intBitsToFloat(v.data):v.type>=16&&v.type<=31?v.data:Float.NaN;if(!Float.isFinite(result))throw new IllegalArgumentException("XML number "+name);return result;}
     public float dimensionFloat(String name,float fallback){BinaryXml.Value v=resolve(raw(name));if(v==null||v.type==0)return fallback;if(v.type==5){float pixels=TypedValue.complexToDimension(v.data,context.getResources().getDisplayMetrics());if(!Float.isFinite(pixels)||Math.abs(pixels)>8192)throw new IllegalArgumentException("XML dimension bound");return pixels;}if(v.type>=16&&v.type<=31&&v.data==0)return 0;throw new IllegalArgumentException("XML dimension "+name);}
+    /** A maximum is a constraint, not a requested allocation; large values mean effectively unbounded. */
+    public int maximumDimension(String name,int fallback){
+        BinaryXml.Value value=resolve(raw(name));if(value==null||value.type==0)return fallback;
+        if(value.type==5){
+            float pixels=TypedValue.complexToDimension(value.data,context.getResources().getDisplayMetrics());
+            if(!Float.isFinite(pixels)||pixels<0)throw new IllegalArgumentException("XML maximum dimension "+name);
+            if((double)pixels>=Integer.MAX_VALUE)return Integer.MAX_VALUE;
+            return TypedValue.complexToDimensionPixelSize(value.data,context.getResources().getDisplayMetrics());
+        }
+        if(value.type>=16&&value.type<=31&&value.data==0)return 0;
+        throw new IllegalArgumentException("XML maximum dimension "+name);
+    }
     public int dimension(String name,int fallback,boolean layout){BinaryXml.Value v=resolve(raw(name));if(v==null||v.type==0)return fallback;if(v.type==5){float pixels=TypedValue.complexToDimension(v.data,context.getResources().getDisplayMetrics());if(!Float.isFinite(pixels)||Math.abs(pixels)>8192)throw new IllegalArgumentException("XML dimension bound");return TypedValue.complexToDimensionPixelSize(v.data,context.getResources().getDisplayMetrics());}if(v.type>=16&&v.type<=31&&(v.data==0||layout&&(v.data==-1||v.data==-2)))return v.data;throw new IllegalArgumentException("XML dimension "+name);}
     public int reference(String name,int fallback){TypedValue value=selected(name);if(value==null||value.type==0)return fallback;if(value.resourceId!=0)return value.resourceId;if(value.type==1)return value.data;throw new IllegalArgumentException("XML resource reference "+name);}
     public String text(String name){BinaryXml.Value value=resolve(raw(name));return value==null||value.type==0?null:value.type==3?value.text:TypedValue.coerceToString(value.type,value.data);}

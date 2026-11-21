@@ -28,7 +28,7 @@
       id: 'shiraz', name: 'Shiraz', family: 'app', url: 'https://github.com/spectre-oss/shiraz', tagline: 'This project',
       host: ['Linux x86-64 and ARM64. Experimental Apple Silicon macOS port.'],
       code: ['Standalone ART.'],
-      framework: ['Own Android™ API subset in Java with C++ JNI, plus some AOSP-derived code.'],
+      framework: ['All 4,445 Android™ API 35 class surfaces in Java + C++ JNI (bounded behavior), plus attributed AOSP code.'],
       native: ['Host-ABI libraries load directly. On macOS, its own ELF loader and bionic adapters.'],
       arm: ['Optional Digitalis bridge for ARM64. Developer runs only, not yet in AppImages.', 'warn'],
       graphics: ['EGL/GLES with software composition. No Vulkan rendering yet.', 'warn'],
@@ -38,7 +38,7 @@
       isolation: ['No app sandbox. Optional --no-internet seccomp policy.', 'bad'],
       dist: ['Browser Builder makes a per-app AppImage; Web streams over WebRTC; CLI.', 'good'],
       license: ['GPL-3.0-only.'],
-      repo: ['spectre-oss/shiraz, version 0.348.0.'],
+      repo: [`spectre-oss/shiraz, version ${__SHIRAZ_VERSION__}.`],
       apps: ['Obtainium, Joplin, Unciv, Mindustry, SuperTux, Tiny Crate and 2048, with limits recorded. OsmAnd reached maps and routes; full flows still unverified.']
     },
     {
@@ -290,7 +290,7 @@
 
   <section class="block wrap sources" aria-labelledby="sources-title">
     <h2 id="sources-title">Sources and method</h2>
-    <p>Shiraz facts come from its README and tested-apps list at version 0.348.0. Other projects’ facts come from their READMEs and wikis, read on 21 November 2026. We did not build or run them, so their compatibility figures are their own claims. Corrections are welcome as <a href="https://github.com/spectre-oss/shiraz/issues">issues</a>.</p>
+    <p>Shiraz facts come from its README and tested-apps list at version {__SHIRAZ_VERSION__}. Other projects’ facts come from their READMEs and wikis, read on 21 November 2026. We did not build or run them, so their compatibility figures are their own claims. Corrections are welcome as <a href="https://github.com/spectre-oss/shiraz/issues">issues</a>.</p>
     <ul>{#each projects as p}<li><a href={p.url}>{p.name}</a></li>{/each}<li><a href="https://github.com/kksimp/Mac.apk/wiki/How-Mac.apk-Works">How Mac.apk works</a></li></ul>
   </section>
 </main>

@@ -14,7 +14,7 @@ public final class DrawableXml {
         if(root.name.equals("vector"))return VectorDrawable.shirazInflate(r,theme,xml);
         DrawableXml loader=new DrawableXml(r,theme);Drawable d=loader.node(root,0);d.setChangingConfigurations(d.getChangingConfigurations()|loader.flags);return d;
     }
-    private void attrs(BinaryXml.Node node,String allowed){for(BinaryXml.Attribute a:node.attributes)if(!BinaryXml.ANDROID.equals(a.namespace)||!Arrays.asList(allowed.split(" ")).contains(a.name))throw new UnsupportedOperationException("Drawable XML attribute "+a.name);}
+    private void attrs(BinaryXml.Node node,String allowed){java.util.Set<String> names=XmlAttributeNames.compile(allowed);for(BinaryXml.Attribute a:node.attributes)if(!BinaryXml.ANDROID.equals(a.namespace)||!names.contains(a.name))throw new UnsupportedOperationException("Drawable XML attribute "+a.name);}
     private BinaryXml.Value resolve(BinaryXml.Value v){
         if(v==null)return null;
         for(int n=0;n<32&&(v.type==1||v.type==2);n++){
@@ -212,13 +212,13 @@ public final class DrawableXml {
         }
         boolean ripple=n.name.equals("ripple"),transition=n.name.equals("transition");
         if(!ripple&&!transition&&!n.name.equals("layer-list"))throw new UnsupportedOperationException("Drawable XML element "+n.name);
-        attrs(n,ripple?"paddingMode color radius":"paddingMode");if(n.children.size()>256)throw new IllegalArgumentException("Layer count");Drawable[] children=new Drawable[n.children.size()];
+        attrs(n,ripple?"paddingMode color radius opacity":"paddingMode opacity");if(n.children.size()>256)throw new IllegalArgumentException("Layer count");Drawable[] children=new Drawable[n.children.size()];
         for(int i=0;i<children.length;i++){
             BinaryXml.Node item=n.children.get(i);if(!item.name.equals("item")||!item.namespace.isEmpty())throw new IllegalArgumentException("Layer item");// Layer items read layout/drawable attributes only; selector state flags are ignored by Android.
             attrs(item,"id drawable left top right bottom start end width height gravity scaleType state_enabled state_pressed state_checked state_focused state_selected state_activated state_window_focused state_checkable state_hovered state_drag_can_accept state_drag_hovered");
             BinaryXml.Value ref=item.android("drawable");if(ref!=null){if(!item.children.isEmpty())throw new IllegalArgumentException("Duplicate layer drawable");children[i]=reference(ref);}else{if(item.children.size()!=1)throw new IllegalArgumentException("Layer requires one drawable");children[i]=node(item.children.get(0),depth+1);}
         }
-        LayerDrawable result=ripple?RippleDrawable.shirazCreate(colors(n.android("color")),children):transition?new TransitionDrawable(children):new LayerDrawable(children);result.setPaddingMode(integer(n,"paddingMode",ripple?1:0));if(ripple)((RippleDrawable)result).setRadius(pixels(n,"radius",-1));
+        LayerDrawable result=ripple?RippleDrawable.shirazCreate(colors(n.android("color")),children):transition?new TransitionDrawable(children):new LayerDrawable(children);result.setPaddingMode(integer(n,"paddingMode",ripple?1:0));result.setOpacity(integer(n,"opacity",android.graphics.PixelFormat.UNKNOWN));if(ripple)((RippleDrawable)result).setRadius(pixels(n,"radius",-1));
         for(int i=0;i<children.length;i++){
             BinaryXml.Node item=n.children.get(i);BinaryXml.Value id=item.android("id");if(id!=null){if(id.type!=1)throw new IllegalArgumentException("Layer ID");result.setId(i,id.data);}
             result.setLayerInset(i,pixels(item,"left",0),pixels(item,"top",0),pixels(item,"right",0),pixels(item,"bottom",0));

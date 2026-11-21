@@ -14,7 +14,17 @@ public interface Cursor extends Closeable {
     void copyStringToBuffer(int column, CharArrayBuffer buffer);
     void deactivate(); boolean requery(); void close(); boolean isClosed();
     void registerDataSetObserver(DataSetObserver observer); void unregisterDataSetObserver(DataSetObserver observer);
-    /** Observers are kept until unregistered or close; Shiraz has no content-change source, so they are not notified. */
     void registerContentObserver(ContentObserver observer); void unregisterContentObserver(ContentObserver observer);
+    void setNotificationUri(android.content.ContentResolver resolver,android.net.Uri uri);
+    default void setNotificationUris(android.content.ContentResolver cr, java.util.List<android.net.Uri> uris) {
+        if (uris != null && !uris.isEmpty()) setNotificationUri(cr, uris.get(0));
+    }
+    android.net.Uri getNotificationUri();
+    default java.util.List<android.net.Uri> getNotificationUris() {
+        android.net.Uri single = getNotificationUri();
+        return single == null ? null : java.util.Collections.singletonList(single);
+    }
+    default boolean getWantsAllOnMoveCalls() { return false; }
+    default void setExtras(Bundle extras) {}
     Bundle getExtras(); Bundle respond(Bundle extras);
 }

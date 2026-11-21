@@ -17,15 +17,14 @@ public class TypedValue {
     public static float complexToFloat(int value) { return (value & 0xffffff00)*RADIX_SCALE[(value >>> 4)&3]; }
     public int getComplexUnit() { return data & COMPLEX_UNIT_MASK; }
     public static float applyDimension(int unit,float value,DisplayMetrics metrics) {
-        if (metrics == null) throw new NullPointerException("display metrics");
         switch (unit) {
             case COMPLEX_UNIT_PX: return value;
             case COMPLEX_UNIT_DIP: return value*metrics.density;
             case COMPLEX_UNIT_SP: return value*metrics.scaledDensity;
-            case COMPLEX_UNIT_PT: return value*metrics.xdpi/72;
+            case COMPLEX_UNIT_PT: return value*metrics.xdpi*(1.0f/72);
             case COMPLEX_UNIT_IN: return value*metrics.xdpi;
-            case COMPLEX_UNIT_MM: return value*metrics.xdpi/25.4f;
-            default: throw new IllegalArgumentException("Invalid dimension unit");
+            case COMPLEX_UNIT_MM: return value*metrics.xdpi*(1.0f/25.4f);
+            default: return 0;
         }
     }
     public static float complexToDimension(int value,DisplayMetrics metrics) { return applyDimension(value&15,complexToFloat(value),metrics); }
@@ -37,8 +36,10 @@ public class TypedValue {
     }
     public float getDimension(DisplayMetrics metrics) { return complexToDimension(data,metrics); }
     public static float complexToFraction(int value,float base,float parentBase) {
-        int unit=value&15; if (unit != COMPLEX_UNIT_FRACTION && unit != COMPLEX_UNIT_FRACTION_PARENT) throw new IllegalArgumentException("Invalid fraction unit");
-        return complexToFloat(value)*(unit == COMPLEX_UNIT_FRACTION ? base : parentBase);
+        int unit=value&15;
+        if (unit == COMPLEX_UNIT_FRACTION) return complexToFloat(value)*base;
+        if (unit == COMPLEX_UNIT_FRACTION_PARENT) return complexToFloat(value)*parentBase;
+        return 0;
     }
     public float getFraction(float base,float parentBase) { return complexToFraction(data,base,parentBase); }
     public float getFloat() { return Float.intBitsToFloat(data); }

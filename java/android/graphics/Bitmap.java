@@ -2,7 +2,39 @@
 package android.graphics;
 import java.util.Arrays;
 
-public final class Bitmap {
+public final class Bitmap implements android.os.Parcelable {
+    private Gainmap gainmap;
+    public boolean hasGainmap() { requireLive(); return gainmap != null; }
+    public Gainmap getGainmap() { requireLive(); return gainmap; }
+    public void setGainmap(Gainmap gainmap) { requireLive(); this.gainmap = gainmap; changed(); }
+    @Override public int describeContents() { return 0; }
+    @Override public void writeToParcel(android.os.Parcel p, int flags) {
+        requireLive(); cpuRead();
+        p.writeInt(width); p.writeInt(height); p.writeInt(config.ordinal());
+        p.writeInt(hasAlpha ? 1 : 0); p.writeInt(mutable ? 1 : 0); p.writeInt(density);
+        p.writeIntArray(pixels);
+        p.writeByteArray(ninePatchChunk);
+        if (gainmap != null) { p.writeInt(1); gainmap.writeToParcel(p, flags); } else { p.writeInt(0); }
+    }
+    public static final android.os.Parcelable.Creator<Bitmap> CREATOR = new android.os.Parcelable.Creator<Bitmap>() {
+        @Override public Bitmap createFromParcel(android.os.Parcel p) {
+            int w = p.readInt(), h = p.readInt(), cfgOrd = p.readInt();
+            boolean alpha = p.readInt() != 0, mut = p.readInt() != 0;
+            int dens = p.readInt();
+            int[] px = p.createIntArray();
+            byte[] chunk = p.createByteArray();
+            Config[] cfgs = Config.values();
+            Config cfg = (cfgOrd >= 0 && cfgOrd < cfgs.length) ? cfgs[cfgOrd] : Config.ARGB_8888;
+            Bitmap bmp = createBitmap(w, h, cfg);
+            bmp.setHasAlpha(alpha); bmp.setDensity(dens);
+            System.arraycopy(px, 0, bmp.pixels, 0, bmp.pixels.length);
+            bmp.ninePatchChunk = chunk;
+            if (p.readInt() != 0) bmp.gainmap = Gainmap.CREATOR.createFromParcel(p);
+            if (!mut) bmp.freeze();
+            return bmp;
+        }
+        @Override public Bitmap[] newArray(int size) { return new Bitmap[size]; }
+    };
     public enum Config { ALPHA_8, RGB_565, ARGB_4444, ARGB_8888, RGBA_F16, HARDWARE }
     public enum CompressFormat { JPEG, PNG, WEBP, WEBP_LOSSY, WEBP_LOSSLESS }
     public boolean compress(CompressFormat format, int quality, java.io.OutputStream stream) {
@@ -227,7 +259,7 @@ public final class Bitmap {
         copy.config=config;copy.hasAlpha=config!=Config.RGB_565&&hasAlpha;
         if(this.config==Config.ALPHA_8||config==Config.ALPHA_8)for(int i=0;i<copy.pixels.length;i++)copy.pixels[i]&=0xff000000;
         else if(this.config==Config.RGB_565||config==Config.RGB_565)for(int i=0;i<copy.pixels.length;i++)copy.pixels[i]=copy.logicalColor(logicalColor(copy.pixels[i]));
-        copy.mutable=mutable;copy.density=density;copy.ninePatchChunk=getNinePatchChunk();return copy;
+        copy.mutable=mutable;copy.density=density;copy.ninePatchChunk=getNinePatchChunk();copy.gainmap=gainmap==null?null:new Gainmap(gainmap,gainmap.getGainmapContents());return copy;
     }
     /** Internal surface-buffer transfer; no conversion or allocation. */
     public void shirazCopyPixelsInto(Bitmap destination) {

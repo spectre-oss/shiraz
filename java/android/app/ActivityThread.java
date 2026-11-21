@@ -22,7 +22,7 @@ public final class ActivityThread {
             sCurrentActivityThread=new ActivityThread(app,packageName);
         else thread.mInitialApplication=app;
     }
-    public static void shirazClear(){sCurrentActivityThread=null;}
+    public static void shirazClear(){sCurrentActivityThread=null;ActivityManager.shirazClear();}
     public static ActivityThread currentActivityThread(){return sCurrentActivityThread;}
     public static Application currentApplication(){ActivityThread thread=sCurrentActivityThread;return thread==null?null:thread.mInitialApplication;}
     public static String currentPackageName(){ActivityThread thread=sCurrentActivityThread;return thread==null?null:thread.packageName;}

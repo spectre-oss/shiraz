@@ -39,41 +39,42 @@ public abstract class LayoutInflater {
  protected View onCreateView(Context viewContext,String name,AttributeSet attrs)throws ClassNotFoundException{for(String prefix:new String[]{"android.widget.","android.view.","android.webkit."})try{return createView(viewContext,name,prefix,attrs);}catch(ClassNotFoundException missing){}throw new ClassNotFoundException(name);}
  protected View onCreateView(View parent,String name,AttributeSet attrs)throws ClassNotFoundException{return onCreateView(name,attrs);}
  protected View onCreateView(View parent,Context viewContext,String name,AttributeSet attrs)throws ClassNotFoundException{return onCreateView(viewContext,name,attrs);}
- private View create(View parent,XmlResourceParser parser){
+ private View create(View parent,XmlResourceParser parser,Context inheritedContext){
   String name=parser.getName();if(name.equals("view")){name=parser.getClassAttribute();if(name==null)name=parser.getAttributeValue("","class");if(name==null)throw new InflateException("view requires class");}
-  Context viewContext=context;
-  android.content.res.TypedArray themeAttrs=context.obtainStyledAttributes(parser,new int[]{0x01010000});
-  try{int themeResId=themeAttrs.getResourceId(0,0);if(themeResId!=0)viewContext=new ContextThemeWrapper(context,themeResId);}finally{themeAttrs.recycle();}
+  Context viewContext=inheritedContext;
+  android.content.res.TypedArray themeAttrs=inheritedContext.obtainStyledAttributes(parser,new int[]{0x01010000});
+  try{int themeResId=themeAttrs.getResourceId(0,0);if(themeResId!=0)viewContext=new ContextThemeWrapper(inheritedContext,themeResId);}finally{themeAttrs.recycle();}
   View result=mFactory==null?null:invoke(mFactory,mFactory2,parent,name,viewContext,parser);if(result==null&&privateFactory!=null)result=privateFactory.onCreateView(parent,name,viewContext,parser);if(result!=null)return result;
   try{return name.indexOf('.')>=0?createView(viewContext,name,null,parser):onCreateView(parent,viewContext,name,parser);}catch(ClassNotFoundException failure){throw new InflateException("Unknown view "+name+" at "+parser.getPositionDescription(),failure);}
  }
  public View inflate(int resource,ViewGroup root){return inflate(resource,root,root!=null);}
  public View inflate(int resource,ViewGroup root,boolean attach){if(includes.size()>=32||includes.contains(resource))throw new InflateException("Layout include cycle/depth");includes.add(resource);try(XmlResourceParser parser=context.getResources().getLayout(resource)){return inflate(parser,root,attach);}finally{includes.remove(includes.size()-1);}}
  public View inflate(XmlPullParser source,ViewGroup root){return inflate(source,root,root!=null);}
- public View inflate(XmlPullParser source,ViewGroup root,boolean attach){
+ public View inflate(XmlPullParser source,ViewGroup root,boolean attach){return inflate(source,root,attach,context);}
+ private View inflate(XmlPullParser source,ViewGroup root,boolean attach,Context inheritedContext){
   if(!(source instanceof XmlResourceParser))throw new UnsupportedOperationException("Only compiled resource layout parsers are implemented");XmlResourceParser parser=(XmlResourceParser)source;if(active>=64)throw new InflateException("Inflation recursion limit");if(active++==0){nodes=0;treeDepth=0;encodedBytes=0;}
-  try{if(parser instanceof shiraz.runtime.CompiledXmlParser){encodedBytes+=((shiraz.runtime.CompiledXmlParser)parser).shirazEncodedSize();if(encodedBytes>16L*1024*1024)throw new InflateException("Inflation XML byte budget");}int type=parser.getEventType();while(type!=XmlPullParser.START_TAG&&type!=XmlPullParser.END_DOCUMENT)type=parser.next();if(type!=XmlPullParser.START_TAG)throw new InflateException("Layout has no root element");if(parser.getName().equals("merge")){if(root==null||!attach)throw new InflateException("merge requires an attached parent");children(parser,root,0);return root;}
-   View result=create(root,parser);if(++nodes>4096)throw new InflateException("Inflation view budget");ViewGroup.LayoutParams params=root==null?null:root.generateLayoutParams(parser);if(params!=null)result.setLayoutParams(params);children(parser,result,0);result.onFinishInflate();if(root!=null&&attach){root.addView(result,params);return root;}return result;
+  try{if(parser instanceof shiraz.runtime.CompiledXmlParser){encodedBytes+=((shiraz.runtime.CompiledXmlParser)parser).shirazEncodedSize();if(encodedBytes>16L*1024*1024)throw new InflateException("Inflation XML byte budget");}int type=parser.getEventType();while(type!=XmlPullParser.START_TAG&&type!=XmlPullParser.END_DOCUMENT)type=parser.next();if(type!=XmlPullParser.START_TAG)throw new InflateException("Layout has no root element");if(parser.getName().equals("merge")){if(root==null||!attach)throw new InflateException("merge requires an attached parent");children(parser,root,0,inheritedContext);return root;}
+   View result=create(root,parser,inheritedContext);if(++nodes>4096)throw new InflateException("Inflation view budget");ViewGroup.LayoutParams params=root==null?null:root.generateLayoutParams(parser);if(params!=null)result.setLayoutParams(params);children(parser,result,0,result.getContext());result.onFinishInflate();if(root!=null&&attach){root.addView(result,params);return root;}return result;
   }catch(XmlPullParserException|java.io.IOException failure){throw new InflateException("Layout parsing at "+parser.getPositionDescription(),failure);}finally{active--;}
  }
- private void children(XmlResourceParser parser,View parent,int depth)throws XmlPullParserException,java.io.IOException{
+ private void children(XmlResourceParser parser,View parent,int depth,Context inheritedContext)throws XmlPullParserException,java.io.IOException{
   if(treeDepth>=64)throw new InflateException("Layout tree depth limit");treeDepth++;try{int start=parser.getDepth(),type;
   while((type=parser.next())!=XmlPullParser.END_DOCUMENT&&(type!=XmlPullParser.END_TAG||parser.getDepth()>start))if(type==XmlPullParser.START_TAG){
    if(parser.getName().equals("requestFocus")){parent.requestFocus();skip(parser);continue;}
    if(!(parent instanceof ViewGroup))throw new InflateException("Child tag in non-container "+parent.getClass().getName());ViewGroup group=(ViewGroup)parent;
-   if(parser.getName().equals("include")){include(parser,group);skip(parser);continue;}
+   if(parser.getName().equals("include")){include(parser,group,inheritedContext);skip(parser);continue;}
    if(parser.getName().equals("merge"))throw new InflateException("merge is only legal at the layout root");
-   View child=create(group,parser);if(++nodes>4096)throw new InflateException("Inflation view budget");ViewGroup.LayoutParams params=group.generateLayoutParams(parser);child.setLayoutParams(params);children(parser,child,depth+1);child.onFinishInflate();group.addView(child,params);
+   View child=create(group,parser,inheritedContext);if(++nodes>4096)throw new InflateException("Inflation view budget");ViewGroup.LayoutParams params=group.generateLayoutParams(parser);child.setLayoutParams(params);children(parser,child,depth+1,child.getContext());child.onFinishInflate();group.addView(child,params);
   }
  }finally{treeDepth--;}
  }
- private void include(XmlResourceParser attrs,ViewGroup parent)throws XmlPullParserException,java.io.IOException{
+ private void include(XmlResourceParser attrs,ViewGroup parent,Context inheritedContext)throws XmlPullParserException,java.io.IOException{
   String android="http://schemas.android.com/apk/res/android";
   int id=attrs.getAttributeResourceValue("","layout",0);if(id==0)throw new InflateException("include requires layout reference");if(includes.size()>=32||includes.contains(id))throw new InflateException("Layout include cycle/depth");includes.add(id);
-  try(XmlResourceParser parser=context.getResources().getLayout(id)){
+  try(XmlResourceParser parser=inheritedContext.getResources().getLayout(id)){
    int type=parser.getEventType();while(type!=XmlPullParser.START_TAG&&type!=XmlPullParser.END_DOCUMENT)type=parser.next();if(type!=XmlPullParser.START_TAG)throw new InflateException("Included layout has no root");
-   if(parser.getName().equals("merge")){if(parser instanceof shiraz.runtime.CompiledXmlParser){encodedBytes+=((shiraz.runtime.CompiledXmlParser)parser).shirazEncodedSize();if(encodedBytes>16L*1024*1024)throw new InflateException("Inflation XML byte budget");}children(parser,parent,0);}
-   else{View child=inflate(parser,parent,false);ViewGroup.LayoutParams params=child.getLayoutParams();if(attrs.getAttributeValue(android,"layout_width")!=null&&attrs.getAttributeValue(android,"layout_height")!=null)params=parent.generateLayoutParams(attrs);int override=attrs.getAttributeResourceValue(android,"id",View.NO_ID);if(override!=View.NO_ID)child.setId(override);if(attrs.getAttributeValue(android,"visibility")!=null)child.setVisibility(View.shirazVisibilityFromXml(attrs.getAttributeIntValue(android,"visibility",0)));parent.addView(child,params);}
+   if(parser.getName().equals("merge")){if(parser instanceof shiraz.runtime.CompiledXmlParser){encodedBytes+=((shiraz.runtime.CompiledXmlParser)parser).shirazEncodedSize();if(encodedBytes>16L*1024*1024)throw new InflateException("Inflation XML byte budget");}children(parser,parent,0,inheritedContext);}
+   else{View child=inflate(parser,parent,false,inheritedContext);ViewGroup.LayoutParams params=child.getLayoutParams();if(attrs.getAttributeValue(android,"layout_width")!=null&&attrs.getAttributeValue(android,"layout_height")!=null)params=parent.generateLayoutParams(attrs);int override=attrs.getAttributeResourceValue(android,"id",View.NO_ID);if(override!=View.NO_ID)child.setId(override);if(attrs.getAttributeValue(android,"visibility")!=null)child.setVisibility(View.shirazVisibilityFromXml(attrs.getAttributeIntValue(android,"visibility",0)));parent.addView(child,params);}
   }finally{includes.remove(includes.size()-1);}
  }
  private static void skip(XmlResourceParser parser)throws XmlPullParserException,java.io.IOException{int depth=parser.getDepth(),type;while((type=parser.next())!=XmlPullParser.END_DOCUMENT&&(type!=XmlPullParser.END_TAG||parser.getDepth()>depth)){} }

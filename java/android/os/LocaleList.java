@@ -68,5 +68,9 @@ public final class LocaleList implements Parcelable {
     @Override public int hashCode() { return Arrays.hashCode(locales); }
     @Override public String toString() { return Arrays.toString(locales); }
     public int describeContents() { return 0; }
-    public void writeToParcel(Parcel out, int flags) { throw new UnsupportedOperationException("LocaleList parcel transport is not implemented"); }
+    public void writeToParcel(Parcel out, int flags) { out.writeString(toLanguageTags()); }
+    public static final Parcelable.Creator<LocaleList> CREATOR = new Parcelable.Creator<LocaleList>() {
+        @Override public LocaleList createFromParcel(Parcel source) { return forLanguageTags(source.readString()); }
+        @Override public LocaleList[] newArray(int size) { return new LocaleList[size]; }
+    };
 }

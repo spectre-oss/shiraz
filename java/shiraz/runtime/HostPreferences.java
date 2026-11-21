@@ -14,7 +14,9 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** One application/session owns the cache and serial writer; no cross-process access. */
+/** Session cache and serial writer; MODE_MULTI_PROCESS refreshes on acquisition.
+ * Like Android's legacy mode, concurrent edits are not merged across processes.
+ */
 public final class HostPreferences implements AutoCloseable {
     private static final int MAX_BYTES = 4 * 1024 * 1024, MAX_ITEMS = 65536, MAGIC = 0x53505231;
     private final File directory;
@@ -49,10 +51,12 @@ public final class HostPreferences implements AutoCloseable {
                                 java.nio.file.StandardCopyOption.ATOMIC_MOVE);
                         synchronized (to) {
                             to.values = read(to.file);
+                            to.observedDisk = to.values;
                             to.encodedValues = to.durableBytes = null;
                         }
                         synchronized (from) {
                             from.values = new HashMap<String, Object>();
+                            from.observedDisk = from.values;
                             from.encodedValues = from.durableBytes = null;
                         }
                         return true;
@@ -67,7 +71,8 @@ public final class HostPreferences implements AutoCloseable {
     }
     public synchronized SharedPreferences get(String name, int mode) {
         if (closed) throw new IllegalStateException("Preference session is closed");
-        if (mode != 0) throw new UnsupportedOperationException("Only MODE_PRIVATE preferences are supported");
+        if ((mode & ~android.content.Context.MODE_MULTI_PROCESS) != 0)
+            throw new UnsupportedOperationException("Unsupported shared preference mode: " + mode);
         if (name == null) throw new NullPointerException("Preference name");
         if (name.length() > 512) throw new IllegalArgumentException("Preference name too long");
         Store store = stores.get(name);
@@ -79,8 +84,32 @@ public final class HostPreferences implements AutoCloseable {
                 Files.setPosixFilePermissions(directory.toPath(), PosixFilePermissions.fromString("rwx------"));
             } catch (IOException error) { throw new IllegalStateException("Cannot create private preference directory", error); }
             store = new Store(file); stores.put(name, store);
-        }
+        } else if ((mode & android.content.Context.MODE_MULTI_PROCESS) != 0) store.reload();
         return store;
+    }
+    public synchronized boolean delete(String name) {
+        if (closed) throw new IllegalStateException("Preference session is closed");
+        if (name == null) throw new NullPointerException("Preference name");
+        if (name.length() > 512) throw new IllegalArgumentException("Preference name too long");
+        final File file = new File(directory, filename(name));
+        final Store removed = stores.remove(name);
+        // Serialize deletion after pending apply/commit writes. The owner lock
+        // prevents new submissions and cache reloads until deletion completes.
+        Future<Boolean> done = writer.submit(new Callable<Boolean>() { public Boolean call() {
+            if (removed != null) removed.durableBytes = null;
+            boolean success = true;
+            for (File candidate : new File[]{file, new File(file.getPath() + ".tmp")}) {
+                try { Files.deleteIfExists(candidate.toPath()); }
+                catch (IOException error) { success = false; }
+            }
+            return success;
+        }});
+        boolean interrupted = false;
+        try {
+            while (true) try { return done.get(); }
+            catch (InterruptedException error) { interrupted = true; }
+            catch (ExecutionException error) { throw new IllegalStateException("Preference deletion failed", error.getCause()); }
+        } finally { if (interrupted) Thread.currentThread().interrupt(); }
     }
     private static String filename(String name) {
         // Lossless UTF-16 hex, bounded path components, no traversal or crypto-provider dependency.
@@ -197,11 +226,23 @@ public final class HostPreferences implements AutoCloseable {
         HostPreferences owner() { return HostPreferences.this; }
         private final File file;
         private Map<String, Object> values;
+        private Map<String, Object> observedDisk;
+        private int pendingWrites;
         // Encoded current memory state (Store lock), and last durable state
         // (single writer thread only). Failed writes never advance durability.
         private byte[] encodedValues, durableBytes;
         private final Map<OnSharedPreferenceChangeListener, Boolean> listeners = new WeakHashMap<OnSharedPreferenceChangeListener, Boolean>();
-        Store(File file) { this.file = file; values = read(file); }
+        Store(File file) { this.file = file; values = read(file); observedDisk = values; }
+        synchronized void reload() {
+            // Do not replace in-memory apply() state while its write is queued.
+            if (pendingWrites != 0) return;
+            Map<String, Object> disk = read(file);
+            if (!disk.equals(observedDisk)) {
+                values = disk;
+                encodedValues = durableBytes = null;
+            }
+            observedDisk = disk;
+        }
         public synchronized Map<String, ?> getAll() {
             Map<String, Object> result = new HashMap<String, Object>();
             for (Map.Entry<String, Object> entry : values.entrySet()) result.put(entry.getKey(), copy(entry.getValue()));
@@ -220,14 +261,16 @@ public final class HostPreferences implements AutoCloseable {
         public Editor edit() { return new Edit(); }
         public synchronized void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener listener) { listeners.put(Objects.requireNonNull(listener), true); }
         public synchronized void unregisterOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener listener) { listeners.remove(listener); }
-        private boolean write(byte[] bytes) {
-            if (java.util.Arrays.equals(bytes,durableBytes)) return true;
+        private boolean write(byte[] bytes, Map<String, Object> snapshot) {
+            // Another process may have replaced the file since our last write.
+            if (java.util.Arrays.equals(bytes,durableBytes) && file.isFile()
+                    && read(file).equals(snapshot)) return true;
             durableBytes=null;
-            File temporary = new File(file.getPath() + ".tmp");
+            File temporary = null;
             try {
-                Files.deleteIfExists(temporary.toPath());
-                try (FileChannel stream = FileChannel.open(temporary.toPath(), EnumSet.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))) {
+                temporary = Files.createTempFile(file.getParentFile().toPath(), ".preferences-", ".tmp",
+                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))).toFile();
+                try (FileChannel stream = FileChannel.open(temporary.toPath(), StandardOpenOption.WRITE)) {
                     ByteBuffer buffer = ByteBuffer.wrap(bytes);
                     while (buffer.hasRemaining()) stream.write(buffer);
                     stream.force(true);
@@ -235,9 +278,10 @@ public final class HostPreferences implements AutoCloseable {
                 if (!temporary.renameTo(file)) throw new IOException("Cannot replace preference file");
                 try (FileChannel parent = FileChannel.open(file.getParentFile().toPath(), StandardOpenOption.READ)) { parent.force(true); }
                 durableBytes=bytes;
+                synchronized (this) { observedDisk = snapshot; }
                 return true;
             } catch (IOException error) { Log.w("SharedPreferences", "Preference write failed", error); return false; }
-            finally { if (temporary.exists()) temporary.delete(); }
+            finally { if (temporary != null && temporary.exists()) temporary.delete(); }
         }
         private final class Edit implements Editor {
             private final Map<String, Object> changes = new LinkedHashMap<String, Object>();
@@ -276,7 +320,14 @@ public final class HostPreferences implements AutoCloseable {
                                 else if (!next.containsKey(key) || !v.equals(next.get(key))) { next.put(key, v); changed.add(key); }
                             }
                             final byte[] bytes = encodedValues!=null && next.equals(values) ? encodedValues : encode(next);
-                            done = writer.submit(new Callable<Boolean>() { public Boolean call() { return write(bytes); } });
+                            final Map<String, Object> snapshot = next;
+                            pendingWrites++;
+                            try {
+                                done = writer.submit(new Callable<Boolean>() { public Boolean call() {
+                                    try { return write(bytes, snapshot); }
+                                    finally { synchronized (Store.this) { pendingWrites--; } }
+                                }});
+                            } catch (RejectedExecutionException error) { pendingWrites--; throw error; }
                             values = next; encodedValues=bytes; changes.clear(); clear = false;
                         }
                         notify = new ArrayList<OnSharedPreferenceChangeListener>(listeners.keySet());

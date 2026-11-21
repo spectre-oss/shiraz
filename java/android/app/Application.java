@@ -91,6 +91,20 @@ public class Application extends ContextWrapper implements android.content.Compo
             }
         }
     }
+    public interface OnProvideAssistDataListener {
+        void onProvideAssistData(Activity activity, android.os.Bundle data);
+    }
+    private final java.util.ArrayList<OnProvideAssistDataListener> assistDataListeners = new java.util.ArrayList<OnProvideAssistDataListener>();
+    public void registerOnProvideAssistDataListener(OnProvideAssistDataListener callback) {
+        if (callback == null) throw new NullPointerException("callback");
+        synchronized (assistDataListeners) {
+            if (assistDataListeners.size() >= 1024) throw new IllegalStateException("Assist data listener limit");
+            assistDataListeners.add(callback);
+        }
+    }
+    public void unregisterOnProvideAssistDataListener(OnProvideAssistDataListener callback) {
+        synchronized (assistDataListeners) { assistDataListeners.remove(callback); }
+    }
     private final LifecycleCallbacks lifecycleCallbacks=new LifecycleCallbacks();
     public void registerActivityLifecycleCallbacks(ActivityLifecycleCallbacks callback){lifecycleCallbacks.add(callback);}
     public void unregisterActivityLifecycleCallbacks(ActivityLifecycleCallbacks callback){lifecycleCallbacks.remove(callback);}
@@ -101,5 +115,7 @@ public class Application extends ContextWrapper implements android.content.Compo
     public static void shirazSetProcessName(String name){if(name==null||name.isEmpty())throw new IllegalArgumentException("Process name");processName=name;}
     public Application() { super(null); }
     public void onCreate() { }
+    /** Emulator-only callback in AOSP; real processes are killed without it, so Shiraz never calls it either. */
+    public void onTerminate() { }
     @Override public Context getApplicationContext() { return this; }
 }

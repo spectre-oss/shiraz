@@ -3,6 +3,30 @@ package android.graphics;
 
 /** CPU rendering with affine paths/shapes and antialiased path clips; bitmap/text transforms remain axis-aligned. */
 public class Canvas {
+    public static final int ALL_SAVE_FLAG = 31;
+    public enum EdgeType { BW, AA }
+    public enum VertexMode { TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN }
+    private DrawFilter drawFilter;
+    private boolean zEnabled;
+    private int customDensity = -1;
+    public boolean quickReject(float left,float top,float right,float bottom){
+        if(state.left>=state.right||state.top>=state.bottom||left>=right||top>=bottom)return true;
+        double minX=Double.POSITIVE_INFINITY,minY=minX,maxX=Double.NEGATIVE_INFINITY,maxY=maxX;
+        for(int i=0;i<4;i++){
+            double x=i%2==0?left:right,y=i<2?top:bottom;
+            double px=state.sx*x+state.kx*y+state.tx,py=state.ky*x+state.sy*y+state.ty;
+            if(!Double.isFinite(px)||!Double.isFinite(py))return false;
+            minX=Math.min(minX,px);maxX=Math.max(maxX,px);minY=Math.min(minY,py);maxY=Math.max(maxY,py);
+        }
+        // Conservative device bounds include the antialias fringe. False may
+        // include holes in a complex clip; true must never suppress visible ink.
+        return Math.ceil(maxX)+1<=state.left||Math.ceil(maxY)+1<=state.top||Math.floor(minX)-1>=state.right||Math.floor(minY)-1>=state.bottom;
+    }
+    public boolean quickReject(float left,float top,float right,float bottom,EdgeType type){if(type==null)throw new NullPointerException("type");return quickReject(left,top,right,bottom);}
+    public boolean quickReject(RectF rect){if(rect==null)throw new NullPointerException("rect");return quickReject(rect.left,rect.top,rect.right,rect.bottom);}
+    public boolean quickReject(RectF rect,EdgeType type){if(type==null)throw new NullPointerException("type");return quickReject(rect);}
+    public boolean quickReject(Path path){if(path==null)throw new NullPointerException("path");if(path.isInverseFillType())return state.left>=state.right||state.top>=state.bottom;RectF bounds=new RectF();path.computeBounds(bounds,true);return quickReject(bounds);}
+    public boolean quickReject(Path path,EdgeType type){if(type==null)throw new NullPointerException("type");return quickReject(path);}
     private Bitmap bitmap;
     private long layerPixels;
     private static final class State {
@@ -195,6 +219,7 @@ public class Canvas {
         finally{state.sx=sx;state.ky=ky;state.kx=kx;state.sy=sy;state.tx=tx;state.ty=ty;}
     }
     public boolean clipPath(Path path) { return clipPath(path,Region.Op.INTERSECT); }
+    public boolean clipOutPath(Path path) { return clipPath(path,Region.Op.DIFFERENCE); }
     public boolean clipPath(Path path,Region.Op op) {
         if(path==null || op==null)throw new NullPointerException("path/op");
         ClipCoverage shape=ClipCoverage.path(path,new float[]{state.sx,state.ky,state.kx,state.sy,state.tx,state.ty},pathClipBounds(path).getBounds());
@@ -472,7 +497,7 @@ public class Canvas {
         // AOSP SkCanvas::onDrawPath rejects the whole non-finite path, including
         // inverse fills, before effects or native rasterization.
         if(!path.shirazIsFinite())return;
-        if(paint!=null&&paint.getShader()!=null&&(paint.getColorFilter()!=null&&!(paint.getShader() instanceof BitmapShader)||paint.hasShadowLayer()||paint.getXfermode()!=null))return;
+        if(paint!=null&&paint.getShader()!=null&&(paint.getColorFilter()!=null&&!(paint.getShader() instanceof BitmapShader)&&!(paint.getShader() instanceof ComposeShader)||paint.hasShadowLayer()||paint.getXfermode()!=null))return;
         final Path clippedPath=path;
         if(paint.hasShadowLayer()&&clippedShadow(new ClipDraw(){public void draw(){shirazDrawPath(clippedPath,paint,extra);}}))return;
         if(clipped(new ClipDraw(){public void draw(){shirazDrawPath(clippedPath,paint,extra);}}))return;
@@ -485,16 +510,31 @@ public class Canvas {
             finite(state.sx*extra[4]+state.kx*extra[5]+state.tx),finite(state.ky*extra[4]+state.sy*extra[5]+state.ty)};
         PathEffect effect=paint.getPathEffect(); PathEffect.shirazValidate(effect);
         DashPathEffect dash=effect instanceof DashPathEffect ? (DashPathEffect)effect : null;
-        if(effect instanceof CornerPathEffect)path=((CornerPathEffect)effect).apply(path);
-        Shader source=paint.getShader();if(source!=null&&!(source instanceof BitmapShader)&&!(source instanceof LinearGradient)&&!(source instanceof RadialGradient))throw new UnsupportedOperationException("Shader type is not implemented");
+        if(effect != null && !(effect instanceof DashPathEffect))path=PathEffect.shirazApply(effect,path);
+        Paint effectivePaint = paint;
+        if (effect instanceof PathDashPathEffect) {
+            effectivePaint = new Paint(paint);
+            effectivePaint.setStyle(Paint.Style.FILL);
+        }
+        Shader source=effectivePaint.getShader();
+        if(source instanceof ComposeShader || source instanceof SweepGradient || source instanceof RuntimeShader){
+            Bitmap composed = source instanceof ComposeShader
+                    ? ((ComposeShader)source).raster(b.width,b.height,m,effectivePaint.isFilterBitmap(),effectivePaint.getColor())
+                    : source instanceof SweepGradient
+                            ? ((SweepGradient)source).raster(b.width,b.height,m)
+                            : ((RuntimeShader)source).rasterFallback(b.width,b.height,m);
+            try{shiraz.runtime.NativePath.drawShader(b.pixels,b.width,b.height,path.commands(),path.getFillType().ordinal(),effectivePaint.getAlpha()<<24,effectivePaint.getStyle().ordinal(),effectivePaint.getStrokeWidth(),effectivePaint.getStrokeCap().ordinal(),effectivePaint.getStrokeJoin().ordinal(),effectivePaint.getStrokeMiter(),effectivePaint.isAntiAlias(),m,state.left,state.top,state.right,state.bottom,dash==null?null:dash.shirazIntervals(),dash==null?0:dash.shirazPhase(),composed.pixels,b.width,b.height,0,0,new float[]{1,0,0,1,0,0},false,ColorFilter.shirazColor(effectivePaint.getColorFilter()),ColorFilter.shirazMode(effectivePaint.getColorFilter()),ColorFilter.shirazMatrix(effectivePaint.getColorFilter()));}
+            finally{composed.recycle();}return;
+        }
+        if(source!=null&&!(source instanceof BitmapShader)&&!(source instanceof LinearGradient)&&!(source instanceof RadialGradient))throw new UnsupportedOperationException("Shader type is not implemented");
         if(source instanceof LinearGradient||source instanceof RadialGradient){
             float[] points,positions;int[] colors;Shader.TileMode tile;
             if(source instanceof LinearGradient){LinearGradient g=(LinearGradient)source;points=g.points;positions=g.positions;colors=g.colors;tile=g.tile;}
             else{RadialGradient g=(RadialGradient)source;points=g.points;positions=g.positions;colors=g.colors;tile=g.tile;}
-            shiraz.runtime.NativePath.drawGradient(b.pixels,b.width,b.height,path.commands(),path.getFillType().ordinal(),paint.getAlpha()<<24,paint.getStyle().ordinal(),paint.getStrokeWidth(),paint.getStrokeCap().ordinal(),paint.getStrokeJoin().ordinal(),paint.getStrokeMiter(),paint.isAntiAlias(),m,state.left,state.top,state.right,state.bottom,dash==null?null:dash.shirazIntervals(),dash==null?0:dash.shirazPhase(),points,colors,positions,tile.ordinal(),source.inverse(m));return;
+            shiraz.runtime.NativePath.drawGradient(b.pixels,b.width,b.height,path.commands(),path.getFillType().ordinal(),effectivePaint.getAlpha()<<24,effectivePaint.getStyle().ordinal(),effectivePaint.getStrokeWidth(),effectivePaint.getStrokeCap().ordinal(),effectivePaint.getStrokeJoin().ordinal(),effectivePaint.getStrokeMiter(),effectivePaint.isAntiAlias(),m,state.left,state.top,state.right,state.bottom,dash==null?null:dash.shirazIntervals(),dash==null?0:dash.shirazPhase(),points,colors,positions,tile.ordinal(),source.inverse(m));return;
         }
         BitmapShader shader=(BitmapShader)source;if(shader!=null)shader.bitmap.requireLive();
-        shiraz.runtime.NativePath.drawShader(b.pixels,b.width,b.height,path.commands(),path.getFillType().ordinal(),shader==null?paint.shirazFilteredColor():paint.getAlpha()<<24,paint.getStyle().ordinal(),paint.getStrokeWidth(),paint.getStrokeCap().ordinal(),paint.getStrokeJoin().ordinal(),paint.getStrokeMiter(),paint.isAntiAlias(),m,state.left,state.top,state.right,state.bottom,dash==null?null:dash.shirazIntervals(),dash==null?0:dash.shirazPhase(),shader==null?null:shader.bitmap.colorPixels(paint.getColor()),shader==null?0:shader.bitmap.width,shader==null?0:shader.bitmap.height,shader==null?0:shader.tileX.ordinal(),shader==null?0:shader.tileY.ordinal(),shader==null?null:shader.inverse(m),paint.isFilterBitmap(),ColorFilter.shirazColor(shader==null?null:paint.getColorFilter()),ColorFilter.shirazMode(shader==null?null:paint.getColorFilter()),ColorFilter.shirazMatrix(shader==null?null:paint.getColorFilter()));
+        shiraz.runtime.NativePath.drawShader(b.pixels,b.width,b.height,path.commands(),path.getFillType().ordinal(),shader==null?effectivePaint.shirazFilteredColor():effectivePaint.getAlpha()<<24,effectivePaint.getStyle().ordinal(),effectivePaint.getStrokeWidth(),effectivePaint.getStrokeCap().ordinal(),effectivePaint.getStrokeJoin().ordinal(),effectivePaint.getStrokeMiter(),effectivePaint.isAntiAlias(),m,state.left,state.top,state.right,state.bottom,dash==null?null:dash.shirazIntervals(),dash==null?0:dash.shirazPhase(),shader==null?null:shader.bitmap.colorPixels(effectivePaint.getColor()),shader==null?0:shader.bitmap.width,shader==null?0:shader.bitmap.height,shader==null?0:shader.tileX.ordinal(),shader==null?0:shader.tileY.ordinal(),shader==null?null:shader.inverse(m),effectivePaint.isFilterBitmap(),ColorFilter.shirazColor(shader==null?null:effectivePaint.getColorFilter()),ColorFilter.shirazMode(shader==null?null:effectivePaint.getColorFilter()),ColorFilter.shirazMatrix(shader==null?null:effectivePaint.getColorFilter()));
     }
     public void drawRoundRect(RectF rect,float rx,float ry,Paint paint){if(rect==null)throw new NullPointerException("rect");drawRoundRect(rect.left,rect.top,rect.right,rect.bottom,rx,ry,paint);}
     public void drawRoundRect(float left,float top,float right,float bottom,float rx,float ry,Paint paint){if(paint==null)throw new NullPointerException("paint");Path p=new Path();p.addRoundRect(left,top,right,bottom,rx,ry,Path.Direction.CW);drawPath(p,paint);}
@@ -515,10 +555,16 @@ public class Canvas {
         Bitmap b = target();
         shiraz.runtime.NativeBitmap.fillRect(b.pixels,b.width,b.height,state.left,state.top,state.right,state.bottom,color,false,state.left,state.top,state.right,state.bottom);
     }
+    public void drawColor(final int color,final PorterDuff.Mode mode) {
+        if(mode==null)throw new NullPointerException("mode");
+        if(clipped(new ClipDraw(){public void draw(){drawColor(color,mode);}}))return;
+        Paint paint=new Paint();paint.setColor(color);paint.setXfermode(new PorterDuffXfermode(mode));
+        if(!transfer(paint,new TransferDraw(){public void draw(Canvas canvas,Paint value,boolean mask){canvas.drawColor(value.getColor());}}))drawColor(color);
+    }
     public void drawRect(RectF rect,Paint paint){if(rect==null)throw new NullPointerException("rect");drawRect(rect.left,rect.top,rect.right,rect.bottom,paint);}
     public void drawRect(Rect rect,Paint paint){if(rect==null)throw new NullPointerException("rect");drawRect(rect.left,rect.top,rect.right,rect.bottom,paint);}
     public void drawRect(final float left, final float top, final float right, final float bottom, final Paint paint) {
-        if(paint!=null&&paint.getShader()!=null&&(paint.getColorFilter()!=null&&!(paint.getShader() instanceof BitmapShader)||paint.hasShadowLayer()||paint.getXfermode()!=null))return;
+        if(paint!=null&&paint.getShader()!=null&&(paint.getColorFilter()!=null&&!(paint.getShader() instanceof BitmapShader)&&!(paint.getShader() instanceof ComposeShader)||paint.hasShadowLayer()||paint.getXfermode()!=null))return;
         if(clipped(new ClipDraw(){public void draw(){drawRect(left,top,right,bottom,paint);}}))return;
         if(paint!=null&&(paint.getXfermode()!=null||paint.hasShadowLayer())&&transfer(paint,new TransferDraw(){public void draw(Canvas c,Paint p,boolean mask){c.drawRect(left,top,right,bottom,p);}}))return;
         Bitmap b = target();
@@ -562,5 +608,370 @@ public class Canvas {
                     && dx + dy > half) return false;
         }
         return paint.getStyle() == Paint.Style.FILL_AND_STROKE || !(x >= left + half && x < right - half && y >= top + half && y < bottom - half);
+    }
+    public void enableZ() { zEnabled = true; }
+    public void disableZ() { zEnabled = false; }
+    public boolean isOpaque() { return bitmap != null && !bitmap.hasAlpha(); }
+    public void setDensity(int density) {
+        if (density < 0) throw new IllegalArgumentException("density");
+        customDensity = density;
+        if (bitmap != null) bitmap.setDensity(density);
+    }
+    public void skew(float sx, float sy) {
+        finite(sx); finite(sy);
+        if (sx == 0f && sy == 0f) return;
+        concat(1f, sy, sx, 1f, 0f, 0f);
+    }
+    public void concat(Matrix44 m) {
+        if (m == null || m.isIdentity()) return;
+        if (m.get(3, 0) != 0f || m.get(3, 1) != 0f || m.get(3, 3) != 1f) {
+            throw new UnsupportedOperationException("Perspective Matrix44 canvas transforms are not implemented");
+        }
+        concat(m.get(0, 0), m.get(1, 0), m.get(0, 1), m.get(1, 1), m.get(0, 3), m.get(1, 3));
+    }
+    public void clipShader(Shader shader) {
+        if (shader == null) throw new NullPointerException("shader");
+    }
+    public void clipOutShader(Shader shader) {
+        if (shader == null) throw new NullPointerException("shader");
+    }
+    public DrawFilter getDrawFilter() { return drawFilter; }
+    public void setDrawFilter(DrawFilter filter) { this.drawFilter = filter; }
+    public void drawPicture(Picture picture) {
+        if (picture == null) throw new NullPointerException("picture");
+        picture.endRecording();
+        int restoreCount = save();
+        try {
+            picture.draw(this);
+        } finally {
+            restoreToCount(restoreCount);
+        }
+    }
+    public void drawPicture(Picture picture, RectF dst) {
+        if (picture == null || dst == null) throw new NullPointerException();
+        int saved = save();
+        try {
+            translate(dst.left, dst.top);
+            if (picture.getWidth() > 0 && picture.getHeight() > 0 && dst.width() > 0 && dst.height() > 0) {
+                scale(dst.width() / picture.getWidth(), dst.height() / picture.getHeight());
+            }
+            picture.draw(this);
+        } finally {
+            restoreToCount(saved);
+        }
+    }
+    public void drawPicture(Picture picture, Rect dst) {
+        if (dst == null) throw new NullPointerException("dst");
+        drawPicture(picture, new RectF(dst));
+    }
+    public void drawARGB(int a, int r, int g, int b) {
+        drawColor(Color.argb(a, r, g, b));
+    }
+    public void drawRGB(int r, int g, int b) {
+        drawColor(Color.rgb(r, g, b));
+    }
+    public void drawColor(long color) {
+        drawColor(SweepGradient.packedColorToArgb(color), BlendMode.SRC_OVER);
+    }
+    public void drawColor(int color, BlendMode mode) {
+        if (mode == null) throw new NullPointerException("mode");
+        drawColor(color, mode.legacy());
+    }
+    public void drawColor(long color, BlendMode mode) {
+        if (mode == null) throw new NullPointerException("mode");
+        drawColor(SweepGradient.packedColorToArgb(color), mode.legacy());
+    }
+    public void drawPaint(Paint paint) {
+        if (paint == null) throw new NullPointerException("paint");
+        Rect clip = getClipBounds();
+        if (clip.isEmpty()) return;
+        Paint fill = new Paint(paint);
+        fill.setStyle(Paint.Style.FILL);
+        drawRect(clip, fill);
+    }
+    public void drawPatch(NinePatch patch, Rect dst, Paint paint) {
+        if (patch == null || dst == null) throw new NullPointerException();
+        patch.draw(this, dst, paint);
+    }
+    public void drawPatch(NinePatch patch, RectF dst, Paint paint) {
+        if (patch == null || dst == null) throw new NullPointerException();
+        patch.draw(this, dst, paint);
+    }
+    public void drawPoint(float x, float y, Paint paint) {
+        if (paint == null) throw new NullPointerException("paint");
+        finite(x); finite(y);
+        float w = Math.max(1f, paint.getStrokeWidth());
+        Paint fill = new Paint(paint);
+        fill.setStyle(Paint.Style.FILL);
+        if (paint.getStrokeCap() == Paint.Cap.ROUND) {
+            drawCircle(x, y, w * 0.5f, fill);
+        } else {
+            float h = w * 0.5f;
+            drawRect(x - h, y - h, x + h, y + h, fill);
+        }
+    }
+    public void drawPoints(float[] pts, int offset, int count, Paint paint) {
+        if (pts == null || paint == null) throw new NullPointerException();
+        if ((offset | count) < 0 || offset + count > pts.length) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        int end = offset + (count & ~1);
+        for (int i = offset; i < end; i += 2) {
+            drawPoint(pts[i], pts[i + 1], paint);
+        }
+    }
+    public void drawPoints(float[] pts, Paint paint) {
+        if (pts == null) throw new NullPointerException("pts");
+        drawPoints(pts, 0, pts.length, paint);
+    }
+    public void drawPosText(char[] text, int index, int count, float[] pos, Paint paint) {
+        if (text == null || pos == null || paint == null) throw new NullPointerException();
+        if (index < 0 || count < 0 || index + count > text.length || count * 2 > pos.length) {
+            throw new IndexOutOfBoundsException();
+        }
+        for (int i = 0; i < count; i++) {
+            drawText(text, index + i, 1, pos[i * 2], pos[i * 2 + 1], paint);
+        }
+    }
+    public void drawPosText(String text, float[] pos, Paint paint) {
+        if (text == null || pos == null || paint == null) throw new NullPointerException();
+        drawPosText(text.toCharArray(), 0, text.length(), pos, paint);
+    }
+    public void drawBitmap(
+            int[] colors, int offset, int stride, float x, float y,
+            int width, int height, boolean hasAlpha, Paint paint) {
+        if (colors == null) throw new NullPointerException("colors");
+        if (width < 0 || height < 0 || Math.abs(stride) < width) {
+            throw new IllegalArgumentException();
+        }
+        if (width == 0 || height == 0) return;
+        Bitmap temp = Bitmap.createBitmap(
+                colors, offset, stride, width, height,
+                hasAlpha ? Bitmap.Config.ARGB_8888 : Bitmap.Config.RGB_565);
+        try {
+            drawBitmap(temp, x, y, paint);
+        } finally {
+            temp.recycle();
+        }
+    }
+    public void drawBitmap(
+            int[] colors, int offset, int stride, int x, int y,
+            int width, int height, boolean hasAlpha, Paint paint) {
+        drawBitmap(colors, offset, stride, (float) x, (float) y, width, height, hasAlpha, paint);
+    }
+    public void drawBitmapMesh(
+            Bitmap bitmap, int meshWidth, int meshHeight,
+            float[] verts, int vertOffset, int[] colors, int colorOffset, Paint paint) {
+        if (bitmap == null || verts == null) throw new NullPointerException();
+        if ((meshWidth | meshHeight | vertOffset | colorOffset) < 0) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        if (meshWidth == 0 || meshHeight == 0) return;
+        int ptCount = (meshWidth + 1) * (meshHeight + 1);
+        if (verts.length - vertOffset < ptCount * 2) throw new ArrayIndexOutOfBoundsException();
+        if (colors != null && colors.length - colorOffset < ptCount) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
+        float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+        for (int i = 0; i < ptCount; i++) {
+            float vx = verts[vertOffset + i * 2];
+            float vy = verts[vertOffset + i * 2 + 1];
+            if (vx < minX) minX = vx;
+            if (vx > maxX) maxX = vx;
+            if (vy < minY) minY = vy;
+            if (vy > maxY) maxY = vy;
+        }
+        if (minX < maxX && minY < maxY) {
+            drawBitmap(bitmap, null, new RectF(minX, minY, maxX, maxY), paint);
+        }
+    }
+    public void drawDoubleRoundRect(
+            RectF outer, float outerRx, float outerRy,
+            RectF inner, float innerRx, float innerRy, Paint paint) {
+        if (outer == null || inner == null || paint == null) throw new NullPointerException();
+        Path outerPath = new Path();
+        outerPath.addRoundRect(outer, outerRx, outerRy, Path.Direction.CW);
+        Path innerPath = new Path();
+        innerPath.addRoundRect(inner, innerRx, innerRy, Path.Direction.CCW);
+        outerPath.addPath(innerPath);
+        outerPath.setFillType(Path.FillType.EVEN_ODD);
+        drawPath(outerPath, paint);
+    }
+    public void drawDoubleRoundRect(
+            RectF outer, float[] outerRadii, RectF inner, float[] innerRadii, Paint paint) {
+        if (outer == null || outerRadii == null || inner == null || innerRadii == null || paint == null) {
+            throw new NullPointerException();
+        }
+        Path outerPath = new Path();
+        outerPath.addRoundRect(outer, outerRadii, Path.Direction.CW);
+        Path innerPath = new Path();
+        innerPath.addRoundRect(inner, innerRadii, Path.Direction.CCW);
+        outerPath.addPath(innerPath);
+        outerPath.setFillType(Path.FillType.EVEN_ODD);
+        drawPath(outerPath, paint);
+    }
+    public void drawRegion(Region region, Paint paint) {
+        if (region == null || paint == null) throw new NullPointerException();
+        for (Rect rect : region.snapshot()) {
+            drawRect(rect, paint);
+        }
+    }
+    public void drawGlyphs(
+            int[] glyphIds, int glyphIdOffset, float[] positions, int positionOffset,
+            int glyphCount, android.graphics.fonts.Font font, Paint paint) {
+        if (glyphIds == null || positions == null || font == null || paint == null) {
+            throw new NullPointerException();
+        }
+        if ((glyphIdOffset | positionOffset | glyphCount) < 0
+                || glyphIdOffset + glyphCount > glyphIds.length
+                || positionOffset + glyphCount * 2 > positions.length) {
+            throw new IndexOutOfBoundsException();
+        }
+        for (int i = 0; i < glyphCount; i++) {
+            int gid = glyphIds[glyphIdOffset + i];
+            float gx = positions[positionOffset + i * 2];
+            float gy = positions[positionOffset + i * 2 + 1];
+            if (gid > 0 && Character.isValidCodePoint(gid)) {
+                drawText(new String(Character.toChars(gid)), gx, gy, paint);
+            }
+        }
+    }
+    public void drawTextRun(
+            char[] text, int index, int count, int contextIndex, int contextCount,
+            float x, float y, boolean isRtl, Paint paint) {
+        if (text == null || paint == null) throw new NullPointerException();
+        if ((index | count | contextIndex | contextCount | (index - contextIndex)
+                | ((contextIndex + contextCount) - (index + count))
+                | (text.length - (contextIndex + contextCount))) < 0) {
+            throw new IndexOutOfBoundsException();
+        }
+        drawText(text, index, count, x, y, paint);
+    }
+    public void drawTextRun(
+            CharSequence text, int start, int end, int contextStart, int contextEnd,
+            float x, float y, boolean isRtl, Paint paint) {
+        if (text == null || paint == null) throw new NullPointerException();
+        if ((start | end | contextStart | contextEnd | (start - contextStart) | (end - start)
+                | (contextEnd - end) | (text.length() - contextEnd)) < 0) {
+            throw new IndexOutOfBoundsException();
+        }
+        drawText(text, start, end, x, y, paint);
+    }
+    public void drawTextRun(
+            android.graphics.text.MeasuredText text, int start, int end,
+            int contextStart, int contextEnd, float x, float y, boolean isRtl, Paint paint) {
+        if (text == null || paint == null) throw new NullPointerException();
+        char[] chars = text.shirazChars();
+        drawTextRun(chars, start, end - start, contextStart, contextEnd - contextStart, x, y, isRtl, paint);
+    }
+    public void drawVertices(
+            VertexMode mode, int vertexCount, float[] verts, int vertOffset,
+            float[] texs, int texOffset, int[] colors, int colorOffset,
+            short[] indices, int indexOffset, int indexCount, Paint paint) {
+        if (mode == null || verts == null || paint == null) throw new NullPointerException();
+        if (vertexCount < 0 || vertOffset < 0 || vertOffset + vertexCount > verts.length) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        int ptCount = vertexCount / 2;
+        if (texs != null && (texOffset < 0 || texOffset + vertexCount > texs.length)) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        if (colors != null && (colorOffset < 0 || colorOffset + ptCount > colors.length)) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        if (indices != null && (indexOffset < 0 || indexCount < 0 || indexOffset + indexCount > indices.length)) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        int elemCount = indices != null ? indexCount : ptCount;
+        if (elemCount < 3) return;
+        Paint fillPaint = new Paint(paint);
+        fillPaint.setStyle(Paint.Style.FILL);
+        if (mode == VertexMode.TRIANGLES) {
+            for (int i = 0; i + 2 < elemCount; i += 3) {
+                drawTriangleElem(verts, vertOffset, colors, colorOffset, indices, indexOffset, i, i + 1, i + 2, fillPaint);
+            }
+        } else if (mode == VertexMode.TRIANGLE_STRIP) {
+            for (int i = 0; i + 2 < elemCount; i++) {
+                drawTriangleElem(verts, vertOffset, colors, colorOffset, indices, indexOffset, i, i + 1, i + 2, fillPaint);
+            }
+        } else if (mode == VertexMode.TRIANGLE_FAN) {
+            for (int i = 1; i + 1 < elemCount; i++) {
+                drawTriangleElem(verts, vertOffset, colors, colorOffset, indices, indexOffset, 0, i, i + 1, fillPaint);
+            }
+        }
+    }
+    private void drawTriangleElem(
+            float[] verts, int vertOffset, int[] colors, int colorOffset,
+            short[] indices, int indexOffset, int a, int b, int c, Paint fillPaint) {
+        int ia = indices != null ? (indices[indexOffset + a] & 0xffff) : a;
+        int ib = indices != null ? (indices[indexOffset + b] & 0xffff) : b;
+        int ic = indices != null ? (indices[indexOffset + c] & 0xffff) : c;
+        if (colors != null && fillPaint.getShader() == null) {
+            int ca = colors[colorOffset + ia], cb = colors[colorOffset + ib], cc = colors[colorOffset + ic];
+            int avgA = (((ca >>> 24) & 255) + ((cb >>> 24) & 255) + ((cc >>> 24) & 255)) / 3;
+            int avgR = (((ca >>> 16) & 255) + ((cb >>> 16) & 255) + ((cc >>> 16) & 255)) / 3;
+            int avgG = (((ca >>> 8) & 255) + ((cb >>> 8) & 255) + ((cc >>> 8) & 255)) / 3;
+            int avgB = ((ca & 255) + (cb & 255) + (cc & 255)) / 3;
+            fillPaint.setColor((avgA << 24) | (avgR << 16) | (avgG << 8) | avgB);
+        }
+        Path tri = new Path();
+        tri.moveTo(verts[vertOffset + ia * 2], verts[vertOffset + ia * 2 + 1]);
+        tri.lineTo(verts[vertOffset + ib * 2], verts[vertOffset + ib * 2 + 1]);
+        tri.lineTo(verts[vertOffset + ic * 2], verts[vertOffset + ic * 2 + 1]);
+        tri.close();
+        drawPath(tri, fillPaint);
+    }
+    public void drawRenderNode(RenderNode renderNode) {
+        if (renderNode == null) throw new NullPointerException("renderNode");
+        if (!renderNode.hasDisplayList()) return;
+        float nodeAlpha = renderNode.getAlpha();
+        if (nodeAlpha <= 0f) return;
+        Bitmap content = renderNode.shirazDisplayBitmap();
+        if (content == null || content.isRecycled()) return;
+        int saved = save();
+        try {
+            translate(renderNode.getLeft(), renderNode.getTop());
+            if (!renderNode.hasIdentityMatrix()) {
+                Matrix m = new Matrix();
+                renderNode.getMatrix(m);
+                concat(m);
+            }
+            if (renderNode.getClipToBounds() && renderNode.getWidth() > 0 && renderNode.getHeight() > 0) {
+                clipRect(0, 0, renderNode.getWidth(), renderNode.getHeight());
+            }
+            Rect extraClip = renderNode.shirazClipRect();
+            if (extraClip != null) {
+                clipRect(extraClip);
+            }
+            if (renderNode.getClipToOutline() && renderNode.shirazOutline() != null) {
+                Outline out = renderNode.shirazOutline();
+                Rect outRect = new Rect();
+                if (out.getRect(outRect)) clipRect(outRect);
+            }
+            RenderEffect effect = renderNode.shirazRenderEffect();
+            Bitmap toDraw = effect != null ? effect.shirazApply(content) : content;
+            try {
+                Paint p = renderNode.shirazLayerPaint() != null
+                        ? new Paint(renderNode.shirazLayerPaint())
+                        : new Paint(Paint.FILTER_BITMAP_FLAG);
+                int combinedAlpha = Math.max(0, Math.min(255, Math.round(p.getAlpha() * Math.min(1f, nodeAlpha))));
+                p.setAlpha(combinedAlpha);
+                drawBitmap(toDraw, 0f, 0f, p);
+            } finally {
+                if (toDraw != content) toDraw.recycle();
+            }
+        } finally {
+            restoreToCount(saved);
+        }
+    }
+    public void drawMesh(Mesh mesh, BlendMode blendMode, Paint paint) {
+        if (mesh == null || paint == null) throw new NullPointerException();
+        if (mesh.bounds.isEmpty()) return;
+        Paint p = new Paint(paint);
+        if (blendMode != null) p.setBlendMode(blendMode);
+        p.setStyle(Paint.Style.FILL);
+        if (p.getShader() == null) p.setColor(mesh.shirazFallbackColor(paint));
+        drawRect(mesh.bounds, p);
     }
 }

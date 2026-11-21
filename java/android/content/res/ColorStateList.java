@@ -74,5 +74,26 @@ public class ColorStateList implements Parcelable {
         return new ColorStateList(states, modified);
     }
     public int describeContents() { return 0; }
-    public void writeToParcel(Parcel out, int flags) { throw new UnsupportedOperationException("ColorStateList parcel transport is not implemented"); }
+    public void writeToParcel(Parcel out, int flags) {
+        out.writeInt(states.length);
+        for (int i = 0; i < states.length; i++) {
+            out.writeIntArray(states[i]);
+        }
+        out.writeIntArray(colors);
+    }
+    public static final Parcelable.Creator<ColorStateList> CREATOR =
+            new Parcelable.Creator<ColorStateList>() {
+                public ColorStateList createFromParcel(Parcel in) {
+                    int n = in.readInt();
+                    int[][] st = new int[n][];
+                    for (int i = 0; i < n; i++) {
+                        st[i] = in.createIntArray();
+                    }
+                    int[] cols = in.createIntArray();
+                    return new ColorStateList(st, cols);
+                }
+                public ColorStateList[] newArray(int size) {
+                    return new ColorStateList[size];
+                }
+            };
 }

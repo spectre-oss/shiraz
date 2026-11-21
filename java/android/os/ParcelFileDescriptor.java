@@ -76,8 +76,118 @@ public final class ParcelFileDescriptor implements Closeable, Parcelable {
             }
         }
     }
+    private Handler closeHandler;
+    private OnCloseListener closeListener;
+    private boolean closeNotified;
+
+    public interface OnCloseListener {
+        void onClose(IOException e);
+    }
+
+    public static class FileDescriptorDetachedException extends IOException {
+        public FileDescriptorDetachedException() {
+            super("Remote side is detached");
+        }
+    }
+
+    public static int parseMode(String mode) {
+        if ("r".equals(mode)) {
+            return MODE_READ_ONLY;
+        } else if ("w".equals(mode) || "wt".equals(mode)) {
+            return MODE_WRITE_ONLY | MODE_CREATE | MODE_TRUNCATE;
+        } else if ("wa".equals(mode)) {
+            return MODE_WRITE_ONLY | MODE_CREATE | MODE_APPEND;
+        } else if ("rw".equals(mode)) {
+            return MODE_READ_WRITE | MODE_CREATE;
+        } else if ("rwt".equals(mode)) {
+            return MODE_READ_WRITE | MODE_CREATE | MODE_TRUNCATE;
+        }
+        throw new IllegalArgumentException("Bad mode '" + mode + "'");
+    }
+
+    public static ParcelFileDescriptor open(
+            File file, int mode, Handler handler, final OnCloseListener listener) throws IOException {
+        if (handler == null) {
+            throw new IllegalArgumentException("Handler must not be null");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("Listener must not be null");
+        }
+        ParcelFileDescriptor pfd = open(file, mode);
+        pfd.closeHandler = handler;
+        pfd.closeListener = listener;
+        return pfd;
+    }
+
+    public static ParcelFileDescriptor wrap(
+            ParcelFileDescriptor pfd, Handler handler, OnCloseListener listener) throws IOException {
+        if (pfd == null) {
+            throw new NullPointerException("pfd");
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("Handler must not be null");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("Listener must not be null");
+        }
+        ParcelFileDescriptor wrapped = pfd.dup();
+        pfd.close();
+        wrapped.closeHandler = handler;
+        wrapped.closeListener = listener;
+        return wrapped;
+    }
+
+    public static ParcelFileDescriptor[] createPipe() throws IOException {
+        try {
+            FileDescriptor[] raw = android.system.Os.pipe();
+            ParcelFileDescriptor readEnd = null;
+            ParcelFileDescriptor writeEnd = null;
+            try {
+                readEnd = dup(raw[0]);
+                writeEnd = dup(raw[1]);
+                return new ParcelFileDescriptor[] { readEnd, writeEnd };
+            } catch (IOException e) {
+                if (readEnd != null) {
+                    try { readEnd.close(); } catch (IOException ignored) {}
+                }
+                if (writeEnd != null) {
+                    try { writeEnd.close(); } catch (IOException ignored) {}
+                }
+                throw e;
+            } finally {
+                try { android.system.Os.close(raw[0]); } catch (Throwable ignored) {}
+                try { android.system.Os.close(raw[1]); } catch (Throwable ignored) {}
+            }
+        } catch (android.system.ErrnoException e) {
+            throw new IOException("Failed to create pipe", e);
+        } catch (LinkageError | RuntimeException e) {
+            throw new IOException("Pipe creation requires ART OS bridge", e);
+        }
+    }
+
+    public static ParcelFileDescriptor[] createReliablePipe() throws IOException {
+        return createPipe();
+    }
+
     @Override public void close() throws IOException {
-        synchronized (fd) { try { NativeFd.close(fd); } finally { if (guard != null) guard.close(); } }
+        final Handler h;
+        final OnCloseListener l;
+        synchronized (fd) {
+            try { NativeFd.close(fd); } finally { if (guard != null) guard.close(); }
+            if (!closeNotified && closeListener != null) {
+                closeNotified = true;
+                h = closeHandler;
+                l = closeListener;
+            } else {
+                h = null;
+                l = null;
+            }
+        }
+        if (h != null && l != null) {
+            h.post(new Runnable() {
+                @Override public void run() { l.onClose(null); }
+            });
+        }
     }
     @Override protected void finalize() throws Throwable {
         try { if (guard != null && fd != null && fd.valid()) guard.warnIfOpen(); }

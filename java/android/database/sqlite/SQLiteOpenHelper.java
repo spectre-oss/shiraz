@@ -12,6 +12,13 @@ public abstract class SQLiteOpenHelper implements Closeable {
     private final DatabaseErrorHandler handler;
     private SQLiteDatabase database;
     private boolean initializing, wal;
+    private long idleTimeout = Long.MAX_VALUE;
+    public synchronized void setIdleConnectionTimeout(long timeoutMs) {
+        if (initializing || database != null && database.isOpen())
+            throw new IllegalStateException("Connection timeout cannot change after opening the database");
+        if (timeoutMs < 0) throw new IllegalArgumentException("Negative idle connection timeout");
+        idleTimeout = timeoutMs;
+    }
     public SQLiteOpenHelper(Context context, String name, SQLiteDatabase.CursorFactory factory, int version) { this(context, name, factory, version, null); }
     public SQLiteOpenHelper(Context context, String name, SQLiteDatabase.CursorFactory factory, int version, DatabaseErrorHandler handler) {
         if (context == null) throw new NullPointerException("context"); if (version < 1) throw new IllegalArgumentException("Version must be positive");
@@ -48,6 +55,7 @@ public abstract class SQLiteOpenHelper implements Closeable {
                 } finally { opened.endTransaction(); }
             }
             onOpen(opened);
+            opened.setIdleTimeout(idleTimeout);
             if (database != null) database.close(); database = opened; return opened;
         } finally { initializing = false; if (opened != null && opened != database) opened.close(); }
     }

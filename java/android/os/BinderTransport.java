@@ -12,6 +12,7 @@ import shiraz.runtime.NativeIpc;
 public final class BinderTransport implements Closeable {
  private static final int REQUEST=1,REPLY=2,MAX_PENDING=128,MAX_OBJECTS=4096;
  private final ParcelFileDescriptor socket;
+ private final int registeredPeerUid;
  private final Object writer=new Object();
  private final Map<Long,IBinder> local=new HashMap<Long,IBinder>();
  private final IdentityHashMap<IBinder,Long> exported=new IdentityHashMap<IBinder,Long>();
@@ -24,8 +25,12 @@ public final class BinderTransport implements Closeable {
  private final ThreadPoolExecutor oneWay;
  private final Thread reader;
  private static ThreadFactory threads(final String name){return new ThreadFactory(){public Thread newThread(Runnable run){Thread t=new Thread(run,name);t.setDaemon(true);return t;}};}
- public BinderTransport(int ownedSocket,IBinder root)throws IOException{
+ public BinderTransport(int ownedSocket,IBinder root)throws IOException{this(ownedSocket,root,-1);}
+ /** Peer UID is assigned by the trusted broker connection, never by a Binder message. */
+ public BinderTransport(int ownedSocket,IBinder root,int peerUid)throws IOException{
   socket=ParcelFileDescriptor.adoptFd(ownedSocket);
+  if(peerUid!=-1&&(peerUid<10000||peerUid>19999)){socket.close();throw new IllegalArgumentException("Registered peer UID");}
+  registeredPeerUid=peerUid;
   if(root!=null){local.put(1L,root);exported.put(root,1L);}
   calls=new ThreadPoolExecutor(0,16,30,TimeUnit.SECONDS,new SynchronousQueue<Runnable>(),threads("shiraz-binder-call"));
   oneWay=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(128),threads("shiraz-binder-oneway"));
@@ -34,6 +39,11 @@ public final class BinderTransport implements Closeable {
  public synchronized IBinder remoteRoot()throws RemoteException{return proxy(1);}
  public synchronized boolean isAlive(){return !closed;}
  public synchronized void awaitClosed()throws InterruptedException{while(!closed)wait();}
+ public synchronized boolean awaitClosed(long timeout,TimeUnit unit)throws InterruptedException{
+  long remaining=unit.toNanos(timeout),started=System.nanoTime();
+  while(!closed&&remaining>0){TimeUnit.NANOSECONDS.timedWait(this,remaining);remaining=unit.toNanos(timeout)-(System.nanoTime()-started);}
+  return closed;
+ }
  private void live()throws DeadObjectException{if(closed)throw new DeadObjectException("Binder channel is closed");}
  private synchronized Proxy proxy(long id)throws RemoteException{
   live();if(id<=0)throw new RemoteException("Invalid Binder object ID");
@@ -92,7 +102,7 @@ public final class BinderTransport implements Closeable {
     }else throw new IOException("Unknown Binder attachment");
    }
    if(fdCount!=packet.descriptorCount())throw new IOException("Unused Binder descriptors");
-   success=true;return new Message(this,request,target,kind,code,flags,status,packet.senderPid,packet.senderUid,data);
+   success=true;return new Message(this,request,target,kind,code,flags,status,packet.senderPid,registeredPeerUid>=0?registeredPeerUid:packet.senderUid,data);
   }finally{if(!success)data.recycle();}
  }
  private void readLoop(){

@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package android.view;
 
+import android.os.Parcel;
+import android.os.Parcelable;
+import android.util.AndroidRuntimeException;
+
 /** Logical desktop/virtual key map. Locale text is delivered separately by SDL text input. */
-public final class KeyCharacterMap {
+public class KeyCharacterMap implements Parcelable {
  public static final int BUILT_IN_KEYBOARD=0,VIRTUAL_KEYBOARD=-1,NUMERIC=1,PREDICTIVE=2,ALPHA=3,FULL=4,SPECIAL_FUNCTION=5;
  public static final int MODIFIER_BEHAVIOR_CHORDED=0,MODIFIER_BEHAVIOR_CHORDED_OR_TOGGLED=1;
  public static final int COMBINING_ACCENT=0x80000000,COMBINING_ACCENT_MASK=0x7fffffff;
- private static final KeyCharacterMap DESKTOP=new KeyCharacterMap();
- private KeyCharacterMap(){}
+ public static final char HEX_INPUT='\uef00';
+ public static final char PICKER_DIALOG_INPUT='\uef01';
+ private static final KeyCharacterMap DESKTOP=new KeyCharacterMap(VIRTUAL_KEYBOARD);
+ private final int mDeviceId;
+ private KeyCharacterMap(int deviceId){mDeviceId=deviceId;}
+ @Override protected void finalize() throws Throwable { super.finalize(); }
  public static int getDeadChar(int accent,int character){
   if(character==accent||character==' ')return accent;
   if(!Character.isValidCodePoint(accent)||!Character.isValidCodePoint(character))return 0;
@@ -27,7 +35,7 @@ public final class KeyCharacterMap {
   return composed.codePointCount(0,composed.length())==1?composed.codePointAt(0):0;
  }
  /** Missing physical devices fall back to the virtual keyboard, as on Android. */
- public static KeyCharacterMap load(int deviceId){return DESKTOP;}
+ public static KeyCharacterMap load(int deviceId){return deviceId==VIRTUAL_KEYBOARD?DESKTOP:new KeyCharacterMap(deviceId);}
  public int getKeyboardType(){return FULL;}
  public int getModifierBehavior(){return MODIFIER_BEHAVIOR_CHORDED;}
  private static char base(int key){
@@ -70,6 +78,37 @@ public final class KeyCharacterMap {
  public boolean isPrintingKey(int key){char c=base(key);return c!=0&&!Character.isISOControl(c)&&!Character.isWhitespace(c);}
  public char getMatch(int key,char[] chars){return getMatch(key,chars,0);}
  public char getMatch(int key,char[] chars,int meta){if(chars==null)throw new NullPointerException("chars");if(chars.length>65536)throw new IllegalArgumentException("Character candidates limit");int preferred=get(key,meta);for(char c:chars)if(c!=0&&c==preferred)return c;int lower=get(key,0),upper=get(key,KeyEvent.META_SHIFT_ON);for(char c:chars)if(c!=0&&(c==lower||c==upper))return c;return 0;}
- @Deprecated public static class KeyData {public static final int META_LENGTH=4;public char displayLabel,number;public char[] meta=new char[META_LENGTH];}
+ public static boolean deviceHasKey(int keyCode){
+  return base(keyCode)!=0||keyCode==KeyEvent.KEYCODE_DEL||keyCode==KeyEvent.KEYCODE_FORWARD_DEL
+   ||keyCode==KeyEvent.KEYCODE_ESCAPE||keyCode==KeyEvent.KEYCODE_BACK
+   ||(keyCode>=KeyEvent.KEYCODE_DPAD_UP&&keyCode<=KeyEvent.KEYCODE_DPAD_CENTER);
+ }
+ public static boolean[] deviceHasKeys(int[] keyCodes){
+  if(keyCodes==null)throw new NullPointerException("keyCodes");
+  boolean[] ret=new boolean[keyCodes.length];
+  for(int i=0;i<keyCodes.length;i++)ret[i]=deviceHasKey(keyCodes[i]);
+  return ret;
+ }
+ @Override public void writeToParcel(Parcel out,int flags){out.writeInt(mDeviceId);}
+ @Override public int describeContents(){return 0;}
+ @Override public boolean equals(Object obj){
+  if(this==obj)return true;
+  if(!(obj instanceof KeyCharacterMap))return false;
+  return mDeviceId==((KeyCharacterMap)obj).mDeviceId;
+ }
+ @Override public int hashCode(){return mDeviceId;}
+ public static final Parcelable.Creator<KeyCharacterMap> CREATOR=new Parcelable.Creator<KeyCharacterMap>(){
+  @Override public KeyCharacterMap createFromParcel(Parcel in){return load(in.readInt());}
+  @Override public KeyCharacterMap[] newArray(int size){return new KeyCharacterMap[size];}
+ };
+ @Deprecated public static class KeyData {
+  public static final int META_LENGTH=4;
+  public char displayLabel,number;
+  public char[] meta=new char[META_LENGTH];
+  public KeyData(){}
+ }
  @Deprecated public boolean getKeyData(int key,KeyData out){if(out==null)throw new NullPointerException("results");if(out.meta==null||out.meta.length<4)throw new IndexOutOfBoundsException("KeyData meta capacity");if(base(key)==0)return false;out.displayLabel=getDisplayLabel(key);out.number=getNumber(key);out.meta[0]=(char)get(key,0);out.meta[1]=(char)get(key,KeyEvent.META_SHIFT_ON);out.meta[2]=(char)get(key,KeyEvent.META_ALT_ON);out.meta[3]=(char)get(key,KeyEvent.META_ALT_ON|KeyEvent.META_SHIFT_ON);return true;}
+ public static class UnavailableException extends AndroidRuntimeException {
+  public UnavailableException(String msg){super(msg);}
+ }
 }

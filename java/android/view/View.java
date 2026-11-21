@@ -4,7 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.view.accessibility.*;
 
-public class View implements KeyEvent.Callback, android.graphics.drawable.Drawable.Callback {
+public class View implements KeyEvent.Callback, android.graphics.drawable.Drawable.Callback, AccessibilityEventSource {
     public static final int NO_ID = -1, VISIBLE = 0, INVISIBLE = 4, GONE = 8;
     public static final int SYSTEM_UI_FLAG_VISIBLE=0,SYSTEM_UI_FLAG_LOW_PROFILE=1,SYSTEM_UI_FLAG_HIDE_NAVIGATION=2,SYSTEM_UI_FLAG_FULLSCREEN=4,SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR=16,SYSTEM_UI_FLAG_LAYOUT_STABLE=256,SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION=512,SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN=1024,SYSTEM_UI_FLAG_IMMERSIVE=2048,SYSTEM_UI_FLAG_IMMERSIVE_STICKY=4096,SYSTEM_UI_FLAG_LIGHT_STATUS_BAR=8192;
     public interface OnSystemUiVisibilityChangeListener {void onSystemUiVisibilityChange(int visibility);}
@@ -120,8 +120,8 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public boolean isAccessibilityFocused(){return false;}
     private boolean hovered;
     public boolean isHovered(){return hovered;}
-    public void setHovered(boolean value){if(hovered!=value){hovered=value;refreshDrawableState();invalidate();}}
-    public void setSelected(boolean value){if(selected!=value){selected=value;refreshDrawableState();invalidate();}}
+    public void setHovered(boolean value){if(hovered!=value){hovered=value;onHoverChanged(value);refreshDrawableState();invalidate();}}
+    public void setSelected(boolean value){if(selected!=value){selected=value;invalidate();refreshDrawableState();dispatchSetSelected(value);}}
     public boolean isSelected(){return selected;}
     public void setActivated(boolean value){if(activated!=value){activated=value;invalidate();refreshDrawableState();dispatchSetActivated(value);}}
     public boolean isActivated(){return activated;}
@@ -314,8 +314,10 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     }
     public boolean dispatchNestedFling(float x,float y,boolean consumed){return nestedScrollingEnabled&&nestedScrollingParent!=null&&nestedScrollingParent.onNestedFling(this,x,y,consumed);}
     public boolean dispatchNestedPreFling(float x,float y){return nestedScrollingEnabled&&nestedScrollingParent!=null&&nestedScrollingParent.onNestedPreFling(this,x,y);}
-    // TextView currently positions text through its gravity; report that mode to widgets.
-    public int getTextAlignment() { return 1; } // TEXT_ALIGNMENT_GRAVITY
+    public static final int TEXT_ALIGNMENT_INHERIT=0,TEXT_ALIGNMENT_GRAVITY=1,TEXT_ALIGNMENT_TEXT_START=2,TEXT_ALIGNMENT_TEXT_END=3,TEXT_ALIGNMENT_CENTER=4,TEXT_ALIGNMENT_VIEW_START=5,TEXT_ALIGNMENT_VIEW_END=6;
+    private int textAlignment=TEXT_ALIGNMENT_INHERIT;
+    public int getTextAlignment(){return textAlignment==TEXT_ALIGNMENT_INHERIT?(parent==null?TEXT_ALIGNMENT_GRAVITY:parent.getTextAlignment()):textAlignment;}
+    public void setTextAlignment(int value){if(value<0||value>6)throw new IllegalArgumentException("text alignment");if(textAlignment!=value){textAlignment=value;requestLayout();invalidate();}}
     public int getLayoutDirection() { if(layoutDirection==LAYOUT_DIRECTION_LOCALE)return android.text.TextUtils.getLayoutDirectionFromLocale(java.util.Locale.getDefault());return layoutDirection == LAYOUT_DIRECTION_INHERIT ? parent == null ? LAYOUT_DIRECTION_LTR : parent.getLayoutDirection() : layoutDirection; }
     /** Direction is evaluated eagerly; inherited values need a resolved ancestor. */
     public boolean isLayoutDirectionResolved(){return layoutDirection!=LAYOUT_DIRECTION_INHERIT||(parent!=null&&parent.isLayoutDirectionResolved());}
@@ -353,7 +355,25 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     private OnGenericMotionListener genericMotionListener;
     public void setOnGenericMotionListener(OnGenericMotionListener listener) { genericMotionListener=listener; }
     public interface OnTouchListener { boolean onTouch(View view, MotionEvent event); }
-    public interface OnLongClickListener { boolean onLongClick(View view); }
+    public interface OnLongClickListener {
+        boolean onLongClick(View view);
+        default boolean onLongClickUseDefaultHapticFeedback(View view) { return true; }
+    }
+    public interface OnCapturedPointerListener { boolean onCapturedPointer(View view, MotionEvent event); }
+    public interface OnContextClickListener { boolean onContextClick(View view); }
+    public interface OnHoverListener { boolean onHover(View view, MotionEvent event); }
+    public interface OnUnhandledKeyEventListener { boolean onUnhandledKeyEvent(View view, KeyEvent event); }
+    public static class DragShadowBuilder {
+        private final java.lang.ref.WeakReference<View> viewRef;
+        public DragShadowBuilder(View view) { this.viewRef = new java.lang.ref.WeakReference<View>(view); }
+        public DragShadowBuilder() { this.viewRef = new java.lang.ref.WeakReference<View>(null); }
+        public final View getView() { return viewRef.get(); }
+        public void onProvideShadowMetrics(android.graphics.Point outShadowSize, android.graphics.Point outShadowTouchPoint) {
+            View v = viewRef.get();
+            if (v != null) { outShadowSize.set(v.getWidth(), v.getHeight()); outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 2); }
+        }
+        public void onDrawShadow(Canvas canvas) { View v = viewRef.get(); if (v != null) v.draw(canvas); }
+    }
     public interface OnFocusChangeListener {void onFocusChange(View view,boolean hasFocus);}
     private OnFocusChangeListener focusChangeListener;
     public void setOnFocusChangeListener(OnFocusChangeListener listener){focusChangeListener=listener;}
@@ -400,7 +420,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public boolean isClickable() { return clickable; }
     public void setEnabled(boolean value) { enabled = value; if (!value) { tracking = false; clearFocus(); } refreshDrawableState(); invalidate(); }
     public boolean isEnabled() { return enabled; }
-    public void setPressed(boolean value) { if(!value)cancelLongPress();if (pressed != value) { pressed = value; refreshDrawableState(); invalidate(); } }
+    public void setPressed(boolean value) { if(!value)cancelLongPress();boolean needsRefresh = pressed != value; pressed = value; if (needsRefresh) refreshDrawableState(); dispatchSetPressed(value); if (needsRefresh) invalidate(); }
     public boolean isPressed() { return pressed; }
     public boolean hasOnClickListeners(){return clickListener!=null;}
     public boolean performClick() { shiraz.runtime.ViewDiagnostics.input(this,-1,true); if (clickListener == null) return false; shiraz.runtime.ViewDiagnostics.clickListener(clickListener);try{clickListener.onClick(this);}catch(RuntimeException|Error error){if("1".equals(System.getenv("SHIRAZ_TRACE_INPUT")))error.printStackTrace();throw error;} return true; }
@@ -454,6 +474,18 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     private boolean focused, focusableInTouchMode;
     private boolean keyboardNavigationCluster,focusedByDefault;
     private int nextClusterForwardId=NO_ID;
+    private int nextFocusLeftId=NO_ID,nextFocusRightId=NO_ID,nextFocusUpId=NO_ID,nextFocusDownId=NO_ID,nextFocusForwardId=NO_ID;
+    public int getNextFocusLeftId(){return nextFocusLeftId;}
+    public void setNextFocusLeftId(int id){nextFocusLeftId=id;}
+    public int getNextFocusRightId(){return nextFocusRightId;}
+    public void setNextFocusRightId(int id){nextFocusRightId=id;}
+    public int getNextFocusUpId(){return nextFocusUpId;}
+    public void setNextFocusUpId(int id){nextFocusUpId=id;}
+    public int getNextFocusDownId(){return nextFocusDownId;}
+    public void setNextFocusDownId(int id){nextFocusDownId=id;}
+    public int getNextFocusForwardId(){return nextFocusForwardId;}
+    public void setNextFocusForwardId(int id){nextFocusForwardId=id;}
+
     public void setKeyboardNavigationCluster(boolean value){keyboardNavigationCluster=value;}
     public final boolean isKeyboardNavigationCluster(){return keyboardNavigationCluster;}
     public void setNextClusterForwardId(int value){nextClusterForwardId=value;}
@@ -545,7 +577,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         else if (handler == null) handler = new android.os.Handler(android.os.Looper.getMainLooper());
         return handler;
     }
-    private static final String[] CONSTRUCTOR_ATTRIBUTES={"accessibilityLiveRegion","alpha","autofillHints","background","backgroundTint","backgroundTintMode","clickable","clipToOutline","contentDescription","defaultFocusHighlightEnabled","duplicateParentState","elevation","enabled","fadingEdge","fitsSystemWindows","focusable","focusableInTouchMode","focusedByDefault","foreground","foregroundGravity","foregroundInsidePadding","foregroundTint","foregroundTintMode","hapticFeedbackEnabled","id","importantForAccessibility","importantForAutofill","isScrollContainer","keepScreenOn","keyboardNavigationCluster","layoutDirection","longClickable","minHeight","minWidth","nextClusterForward","onClick","outlineProvider","overScrollMode","padding","paddingBottom","paddingEnd","paddingLeft","paddingRight","paddingStart","paddingTop","requiresFadingEdge","rotation","rotationX","rotationY","saveEnabled","scaleX","scaleY","scrollX","scrollY","scrollbars","soundEffectsEnabled","stateListAnimator","tag","tooltipText","transitionName","translationX","translationY","translationZ","visibility"};
+    private static final String[] CONSTRUCTOR_ATTRIBUTES={"accessibilityLiveRegion","alpha","autofillHints","background","backgroundTint","backgroundTintMode","clickable","clipToOutline","contentDescription","defaultFocusHighlightEnabled","duplicateParentState","elevation","enabled","fadingEdge","fitsSystemWindows","focusable","focusableInTouchMode","focusedByDefault","foreground","foregroundGravity","foregroundInsidePadding","foregroundTint","foregroundTintMode","hapticFeedbackEnabled","id","importantForAccessibility","importantForAutofill","isScrollContainer","keepScreenOn","keyboardNavigationCluster","layoutDirection","longClickable","minHeight","minWidth","nextClusterForward","nextFocusDown","nextFocusForward","nextFocusLeft","nextFocusRight","nextFocusUp","onClick","outlineProvider","overScrollMode","padding","paddingBottom","paddingEnd","paddingLeft","paddingRight","paddingStart","paddingTop","requiresFadingEdge","rotation","rotationX","rotationY","saveEnabled","scaleX","scaleY","scrollX","scrollY","scrollbars","soundEffectsEnabled","stateListAnimator","tag","textAlignment","tooltipText","transitionName","translationX","translationY","translationZ","visibility"};
     public View(Context context) {
         if (context == null) throw new NullPointerException("context");
         this.context = context;
@@ -594,7 +626,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
             if(a.has("id"))id=a.reference("id",NO_ID);if(a.has("background"))setBackground(a.drawable("background"));
             if(a.has("backgroundTint")||a.has("backgroundTintMode")){android.content.res.TypedArray tint=context.obtainStyledAttributes(attrs,new int[]{0x0101046b,0x0101046c},style,resource);try{if(a.has("backgroundTint"))setBackgroundTintList(tint.getColorStateList(0));if(a.has("backgroundTintMode")){android.graphics.PorterDuff.Mode mode;switch(tint.getInt(1,-1)){case -1:mode=null;break;case 3:mode=android.graphics.PorterDuff.Mode.SRC_OVER;break;case 5:mode=android.graphics.PorterDuff.Mode.SRC_IN;break;case 9:mode=android.graphics.PorterDuff.Mode.SRC_ATOP;break;case 14:mode=android.graphics.PorterDuff.Mode.MULTIPLY;break;case 15:mode=android.graphics.PorterDuff.Mode.SCREEN;break;case 16:mode=android.graphics.PorterDuff.Mode.ADD;break;default:throw new IllegalArgumentException("Background tint mode");}setBackgroundTintMode(mode);}}finally{tint.recycle();}}
             if(a.has("foregroundTint")||a.has("foregroundTintMode")){android.content.res.TypedArray tint=context.obtainStyledAttributes(attrs,new int[]{0x0101046d,0x0101046e},style,resource);try{if(a.has("foregroundTint"))setForegroundTintList(tint.getColorStateList(0));if(a.has("foregroundTintMode")){android.graphics.PorterDuff.Mode mode;switch(tint.getInt(1,-1)){case -1:mode=null;break;case 3:mode=android.graphics.PorterDuff.Mode.SRC_OVER;break;case 5:mode=android.graphics.PorterDuff.Mode.SRC_IN;break;case 9:mode=android.graphics.PorterDuff.Mode.SRC_ATOP;break;case 14:mode=android.graphics.PorterDuff.Mode.MULTIPLY;break;case 15:mode=android.graphics.PorterDuff.Mode.SCREEN;break;case 16:mode=android.graphics.PorterDuff.Mode.ADD;break;default:throw new IllegalArgumentException("Foreground tint mode");}setForegroundTintMode(mode);}}finally{tint.recycle();}}
-            setAccessibilityLiveRegion(a.integer("accessibilityLiveRegion",ACCESSIBILITY_LIVE_REGION_NONE));setImportantForAccessibility(a.integer("importantForAccessibility",IMPORTANT_FOR_ACCESSIBILITY_AUTO));fitsSystemWindows=a.bool("fitsSystemWindows",false);foregroundInsidePadding=a.bool("foregroundInsidePadding",true);setForegroundGravity(a.integer("foregroundGravity",Gravity.FILL));if(a.has("foreground"))setForeground(a.drawable("foreground"));
+            textAlignment=a.integer("textAlignment",TEXT_ALIGNMENT_INHERIT);if(textAlignment<0||textAlignment>6)throw new IllegalArgumentException("text alignment");setAccessibilityLiveRegion(a.integer("accessibilityLiveRegion",ACCESSIBILITY_LIVE_REGION_NONE));setImportantForAccessibility(a.integer("importantForAccessibility",IMPORTANT_FOR_ACCESSIBILITY_AUTO));fitsSystemWindows=a.bool("fitsSystemWindows",false);foregroundInsidePadding=a.bool("foregroundInsidePadding",true);setForegroundGravity(a.integer("foregroundGravity",Gravity.FILL));if(a.has("foreground"))setForeground(a.drawable("foreground"));
             int padding=a.dimension("padding",-1,false);setPadding(a.dimension("paddingLeft",padding>=0?padding:paddingLeft,false),a.dimension("paddingTop",padding>=0?padding:paddingTop,false),a.dimension("paddingRight",padding>=0?padding:paddingRight,false),a.dimension("paddingBottom",padding>=0?padding:paddingBottom,false));
             if(a.has("paddingStart")&&a.raw("paddingStart").type!=0)paddingStart=a.dimension("paddingStart",0,false);if(a.has("paddingEnd")&&a.raw("paddingEnd").type!=0)paddingEnd=a.dimension("paddingEnd",0,false);
             setMinimumWidth(a.dimension("minWidth",0,false));setMinimumHeight(a.dimension("minHeight",0,false));
@@ -604,6 +636,11 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
             setHapticFeedbackEnabled(a.bool("hapticFeedbackEnabled",true));
             setSoundEffectsEnabled(a.bool("soundEffectsEnabled",true));
             keyboardNavigationCluster=a.bool("keyboardNavigationCluster",false);focusedByDefault=a.bool("focusedByDefault",false);nextClusterForwardId=a.reference("nextClusterForward",NO_ID);
+            nextFocusLeftId=a.reference("nextFocusLeft",NO_ID);
+            nextFocusRightId=a.reference("nextFocusRight",NO_ID);
+            nextFocusUpId=a.reference("nextFocusUp",NO_ID);
+            nextFocusDownId=a.reference("nextFocusDown",NO_ID);
+            nextFocusForwardId=a.reference("nextFocusForward",NO_ID);
             keepScreenOn=a.bool("keepScreenOn",false);
             focusableInTouchMode=a.bool("focusableInTouchMode",false);if(focusableInTouchMode)focusability=FOCUSABLE;
             if(a.has("layoutDirection")){layoutDirection=a.integer("layoutDirection",LAYOUT_DIRECTION_INHERIT);if(layoutDirection<0||layoutDirection>3)throw new IllegalArgumentException("XML layout direction");}
@@ -618,11 +655,17 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public static final int MEASURED_SIZE_MASK=0x00ffffff, MEASURED_STATE_MASK=0xff000000, MEASURED_HEIGHT_STATE_SHIFT=16, MEASURED_STATE_TOO_SMALL=0x01000000;
     public static class MeasureSpec {
         public static final int UNSPECIFIED=0, EXACTLY=0x40000000, AT_MOST=0x80000000;
+        public MeasureSpec() {}
         public static int makeMeasureSpec(int size,int mode) {
             return (size & 0x3fffffff) | (mode & 0xc0000000);
         }
         public static int getMode(int spec) { return spec & 0xc0000000; }
         public static int getSize(int spec) { return spec & 0x3fffffff; }
+        public static String toString(int measureSpec) {
+            int mode = getMode(measureSpec), size = getSize(measureSpec);
+            String modeStr = mode == UNSPECIFIED ? "UNSPECIFIED" : (mode == EXACTLY ? "EXACTLY" : (mode == AT_MOST ? "AT_MOST" : Integer.toString(mode)));
+            return "MeasureSpec: " + modeStr + " " + size;
+        }
     }
     public void setPadding(int left,int top,int right,int bottom) {
         if(paddingStart==null&&paddingEnd==null&&paddingLeft==left&&paddingTop==top&&paddingRight==right&&paddingBottom==bottom)return;
@@ -673,7 +716,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
             if(this instanceof ViewGroup){ViewGroup group=(ViewGroup)this;for(int i=0;i<group.getChildCount();i++){View child=group.getChildAt(i);ViewGroup.LayoutParams params=child.getLayoutParams();if(params!=null)params.resolveLayoutDirection(child.getLayoutDirection());}}
             Long cached=layoutRequested||measureCache==null?null:measureCache.get(key);
             measured=false;
-            if(cached==null){onMeasure(widthSpec,heightSpec);measureBeforeLayout=false;}
+            if(cached==null){long started=shiraz.runtime.ViewDiagnostics.measureStart();onMeasure(widthSpec,heightSpec);if(started!=0)shiraz.runtime.ViewDiagnostics.measureEnd(this,started,widthSpec,heightSpec);measureBeforeLayout=false;}
             else{setMeasuredDimension((int)(cached>>>32),(int)(long)cached);measureBeforeLayout=true;}
             if(!measured)throw new IllegalStateException("onMeasure did not set measured dimensions");
             layoutRequired=true;
@@ -731,9 +774,15 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     protected android.os.Parcelable onSaveInstanceState(){stateSuperCalled=true;return BaseSavedState.EMPTY_STATE;}
     protected void onRestoreInstanceState(android.os.Parcelable state){stateSuperCalled=true;if(state!=null&&state!=BaseSavedState.EMPTY_STATE)throw new IllegalArgumentException("Wrong state class for View");}
     public static class BaseSavedState extends AbsSavedState {
+        public static final android.os.Parcelable.Creator<BaseSavedState> CREATOR = new android.os.Parcelable.ClassLoaderCreator<BaseSavedState>() {
+            public BaseSavedState createFromParcel(android.os.Parcel in) { return new BaseSavedState(in); }
+            public BaseSavedState createFromParcel(android.os.Parcel in, ClassLoader loader) { return new BaseSavedState(in, loader); }
+            public BaseSavedState[] newArray(int size) { return new BaseSavedState[size]; }
+        };
         public BaseSavedState(android.os.Parcelable state){super(state);}
         public BaseSavedState(android.os.Parcel source){super(source);}
         public BaseSavedState(android.os.Parcel source,ClassLoader loader){super(source,loader);}
+        @Override public void writeToParcel(android.os.Parcel out, int flags) { super.writeToParcel(out, flags); }
     }
     public void bringToFront(){if(parent!=null)parent.bringChildToFront(this);}
     public void setId(int id) { this.id = id; }
@@ -781,6 +830,15 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public android.graphics.PorterDuff.Mode getForegroundTintMode(){return foregroundTintMode;}
     private void applyForegroundTint(){if(foregroundDrawable==null||!hasForegroundTint&&!hasForegroundTintMode)return;foregroundDrawable=foregroundDrawable.mutate();if(hasForegroundTint)foregroundDrawable.setTintList(foregroundTint);if(hasForegroundTintMode)foregroundDrawable.setTintMode(foregroundTintMode);if(foregroundDrawable.isStateful())foregroundDrawable.setState(getDrawableState());invalidate();}
     private int foregroundGravity=Gravity.FILL;private boolean foregroundInsidePadding=true;
+    private android.graphics.Rect foregroundLayoutPadding;
+    private int foregroundMinimumWidth,foregroundMinimumHeight;
+    private boolean updateForegroundLayoutMetrics(){
+        android.graphics.Rect padding=new android.graphics.Rect();
+        int width=0,height=0;
+        if(foregroundDrawable!=null){foregroundDrawable.getPadding(padding);width=foregroundDrawable.getMinimumWidth();height=foregroundDrawable.getMinimumHeight();}
+        boolean changed=foregroundLayoutPadding==null||!foregroundLayoutPadding.equals(padding)||width!=foregroundMinimumWidth||height!=foregroundMinimumHeight;
+        foregroundLayoutPadding=padding;foregroundMinimumWidth=width;foregroundMinimumHeight=height;return changed;
+    }
     public android.graphics.drawable.Drawable getForeground(){return foregroundDrawable;}
     public boolean isForegroundInsidePadding(){return foregroundInsidePadding;}
     public int getForegroundGravity(){return foregroundGravity;}
@@ -794,6 +852,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
         if(foregroundDrawable!=null&&foregroundDrawable!=backgroundDrawable){foregroundDrawable.setCallback(null);unscheduleDrawable(foregroundDrawable);}
         foregroundDrawable=drawable;
         if(drawable!=null){drawable.setCallback(this);drawable.setLayoutDirection(getLayoutDirection());drawable.setVisible(visibility==VISIBLE,false);drawable.setState(getDrawableState());applyForegroundTint();}
+        updateForegroundLayoutMetrics();
         requestLayout();invalidate();
     }
     public static final int SCROLL_INDICATOR_TOP=1,SCROLL_INDICATOR_BOTTOM=2,SCROLL_INDICATOR_LEFT=4,SCROLL_INDICATOR_RIGHT=8,SCROLL_INDICATOR_START=16,SCROLL_INDICATOR_END=32;
@@ -822,11 +881,23 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void jumpDrawablesToCurrentState(){if(stateListAnimator!=null)stateListAnimator.jumpToCurrentState();if(backgroundDrawable!=null)backgroundDrawable.jumpToCurrentState();if(foregroundDrawable!=null)foregroundDrawable.jumpToCurrentState();}
     public android.graphics.drawable.Drawable getBackground() { return backgroundDrawable; }
     protected boolean verifyDrawable(android.graphics.drawable.Drawable who) { return who == backgroundDrawable || who == foregroundDrawable || who==defaultFocusHighlight || overlay!=null&&overlay.contains(who); }
-    public void invalidateDrawable(android.graphics.drawable.Drawable who) { if (verifyDrawable(who)) {if(who==foregroundDrawable)requestLayout();android.graphics.Rect dirty=who.getDirtyBounds();invalidate(dirty.left+scrollX,dirty.top+scrollY,dirty.right+scrollX,dirty.bottom+scrollY);} }
+    public void invalidateDrawable(android.graphics.drawable.Drawable who) { if (verifyDrawable(who)) {if(who==foregroundDrawable&&updateForegroundLayoutMetrics())requestLayout();android.graphics.Rect dirty=who.getDirtyBounds();invalidate(dirty.left+scrollX,dirty.top+scrollY,dirty.right+scrollX,dirty.bottom+scrollY);} }
     public void scheduleDrawable(android.graphics.drawable.Drawable who, Runnable what, long when) { if (verifyDrawable(who)) handler().postAtTime(what,who,when); }
     public void unscheduleDrawable(android.graphics.drawable.Drawable who, Runnable what) { handler().removeCallbacks(what,who); }
     public void unscheduleDrawable(android.graphics.drawable.Drawable who) { if (handler != null) handler.removeCallbacksAndMessages(who); }
-    protected static final int[] EMPTY_STATE_SET={},ENABLED_STATE_SET={16842910},FOCUSED_STATE_SET={16842908},SELECTED_STATE_SET={16842913},PRESSED_STATE_SET={16842919},WINDOW_FOCUSED_STATE_SET={16842909};
+    protected static final int[] EMPTY_STATE_SET={},ENABLED_STATE_SET={16842910},FOCUSED_STATE_SET={16842908},SELECTED_STATE_SET={16842913},PRESSED_STATE_SET={16842919},WINDOW_FOCUSED_STATE_SET={16842909},
+        ENABLED_FOCUSED_STATE_SET={16842910,16842908},ENABLED_SELECTED_STATE_SET={16842910,16842913},ENABLED_WINDOW_FOCUSED_STATE_SET={16842910,16842909},
+        FOCUSED_SELECTED_STATE_SET={16842908,16842913},FOCUSED_WINDOW_FOCUSED_STATE_SET={16842908,16842909},SELECTED_WINDOW_FOCUSED_STATE_SET={16842913,16842909},
+        ENABLED_FOCUSED_SELECTED_STATE_SET={16842910,16842908,16842913},ENABLED_FOCUSED_WINDOW_FOCUSED_STATE_SET={16842910,16842908,16842909},
+        ENABLED_SELECTED_WINDOW_FOCUSED_STATE_SET={16842910,16842913,16842909},FOCUSED_SELECTED_WINDOW_FOCUSED_STATE_SET={16842908,16842913,16842909},
+        ENABLED_FOCUSED_SELECTED_WINDOW_FOCUSED_STATE_SET={16842910,16842908,16842913,16842909},
+        PRESSED_WINDOW_FOCUSED_STATE_SET={16842909,16842919},PRESSED_SELECTED_STATE_SET={16842913,16842919},PRESSED_SELECTED_WINDOW_FOCUSED_STATE_SET={16842909,16842913,16842919},
+        PRESSED_FOCUSED_STATE_SET={16842908,16842919},PRESSED_FOCUSED_WINDOW_FOCUSED_STATE_SET={16842909,16842908,16842919},
+        PRESSED_FOCUSED_SELECTED_STATE_SET={16842908,16842913,16842919},PRESSED_FOCUSED_SELECTED_WINDOW_FOCUSED_STATE_SET={16842909,16842908,16842913,16842919},
+        PRESSED_ENABLED_STATE_SET={16842910,16842919},PRESSED_ENABLED_WINDOW_FOCUSED_STATE_SET={16842909,16842910,16842919},
+        PRESSED_ENABLED_SELECTED_STATE_SET={16842910,16842913,16842919},PRESSED_ENABLED_SELECTED_WINDOW_FOCUSED_STATE_SET={16842909,16842910,16842913,16842919},
+        PRESSED_ENABLED_FOCUSED_STATE_SET={16842910,16842908,16842919},PRESSED_ENABLED_FOCUSED_WINDOW_FOCUSED_STATE_SET={16842909,16842910,16842908,16842919},
+        PRESSED_ENABLED_FOCUSED_SELECTED_STATE_SET={16842910,16842908,16842913,16842919},PRESSED_ENABLED_FOCUSED_SELECTED_WINDOW_FOCUSED_STATE_SET={16842909,16842910,16842908,16842913,16842919};
     private boolean duplicateParentState;
     public boolean isDuplicateParentStateEnabled(){return duplicateParentState;}
     public void setDuplicateParentStateEnabled(boolean enabled){if(duplicateParentState!=enabled){duplicateParentState=enabled;refreshDrawableState();invalidate();}}
@@ -932,6 +1003,10 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public interface OnScrollChangeListener{void onScrollChange(View view,int x,int y,int oldX,int oldY);}
     public static final int SCROLLBARS_INSIDE_OVERLAY=0,SCROLLBARS_INSIDE_INSET=0x01000000,SCROLLBARS_OUTSIDE_OVERLAY=0x02000000,SCROLLBARS_OUTSIDE_INSET=0x03000000;
     public static final int SCROLLBAR_POSITION_DEFAULT=0,SCROLLBAR_POSITION_LEFT=1,SCROLLBAR_POSITION_RIGHT=2;
+    // Fading edges are explicitly unsupported above, so neither axis has an
+    // active fading edge. Android reports zero length when an edge is disabled.
+    public int getVerticalFadingEdgeLength(){return 0;}
+    public int getHorizontalFadingEdgeLength(){return 0;}
     private ScrollBars scrollBars;
     private ScrollBars bars(){if(scrollBars==null)scrollBars=new ScrollBars(this);return scrollBars;}
     public boolean isVerticalScrollBarEnabled(){return scrollBars!=null&&scrollBars.vertical;}public boolean isHorizontalScrollBarEnabled(){return scrollBars!=null&&scrollBars.horizontal;}
@@ -967,9 +1042,17 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     protected void onOverScrolled(int x,int y,boolean clampedX,boolean clampedY){}
     private static final java.util.concurrent.atomic.AtomicLong nextAutofillId=new java.util.concurrent.atomic.AtomicLong(1);
     private android.view.autofill.AutofillId autofillId;
-    public final synchronized android.view.autofill.AutofillId getAutofillId(){
-        if(autofillId==null){long id=nextAutofillId.getAndIncrement();if(id>Integer.MAX_VALUE)throw new IllegalStateException("Autofill view ID space exhausted");autofillId=new android.view.autofill.AutofillId((int)id);}return autofillId;
+    public final android.view.autofill.AutofillId getAutofillId(){
+        synchronized (this) {
+            if(autofillId==null){long id=nextAutofillId.getAndIncrement();if(id>Integer.MAX_VALUE)throw new IllegalStateException("Autofill view ID space exhausted");autofillId=new android.view.autofill.AutofillId((int)id);}
+            return autofillId;
+        }
     }
+    public void setAutofillId(android.view.autofill.AutofillId id){synchronized(this){if(isAttachedToWindow())throw new IllegalStateException("Cannot set autofill id when view is attached to window");autofillId=id;}}
+    public int getAutofillType(){return AUTOFILL_TYPE_NONE;}
+    public android.view.autofill.AutofillValue getAutofillValue(){return null;}
+    public void autofill(android.view.autofill.AutofillValue value){}
+    public void autofill(android.util.SparseArray<android.view.autofill.AutofillValue> values){}
     public static final int IMPORTANT_FOR_AUTOFILL_AUTO=0,IMPORTANT_FOR_AUTOFILL_YES=1,IMPORTANT_FOR_AUTOFILL_NO=2,IMPORTANT_FOR_AUTOFILL_YES_EXCLUDE_DESCENDANTS=4,IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS=8;
     private int autofillImportance;
     private String[] autofillHints;
@@ -1163,7 +1246,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void postInvalidate() { postInvalidateDelayed(0); }
     public void postInvalidate(int left,int top,int right,int bottom){postInvalidateDelayed(0,left,top,right,bottom);}
     private final Runnable delayedInvalidation=new Runnable(){public void run(){synchronized(View.this){if(windowObserver!=null)invalidate();}}};
-    public synchronized void postInvalidateDelayed(long delay){ViewTreeObserver observer=windowObserver;if(observer!=null&&!shirazIsDetaching())observer.windowHandler().postDelayed(delayedInvalidation,Math.max(0,delay));}
+    public void postInvalidateDelayed(long delay){synchronized(this){ViewTreeObserver observer=windowObserver;if(observer!=null&&!shirazIsDetaching())observer.windowHandler().postDelayed(delayedInvalidation,Math.max(0,delay));}}
     // Composition currently redraws the view tree; a dirty rectangle safely widens to the whole view.
     public void postInvalidateDelayed(long delay,int left,int top,int right,int bottom){postInvalidateDelayed(delay);}
     private static final class PendingAction {final Runnable action;final long delay;PendingAction(Runnable action,long delay){this.action=action;this.delay=delay;}}
@@ -1179,13 +1262,15 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public boolean postDelayed(Runnable runnable,long delay) { return enqueueAction(runnable,delay,false); }
     public void postOnAnimation(Runnable runnable){enqueueAction(runnable,0,true);}
     public void postOnAnimationDelayed(Runnable runnable,long delay){enqueueAction(runnable,delay,true);}
-    public synchronized boolean removeCallbacks(Runnable runnable){
-        if(runnable==null)return true;if(handler!=null)handler.removeCallbacks(runnable);ViewTreeObserver observer=windowObserver;if(observer!=null)observer.windowHandler().removeCallbacks(runnable);if(observer!=null&&observer.choreographer!=null)observer.choreographer.removeCallbacks(Choreographer.CALLBACK_ANIMATION,runnable,null);
-        if(pendingActions!=null)for(int i=pendingActions.size()-1;i>=0;i--)if(pendingActions.get(i).action==runnable)pendingActions.remove(i);return true;
+    public boolean removeCallbacks(Runnable runnable){
+        synchronized (this) {
+            if(runnable==null)return true;if(handler!=null)handler.removeCallbacks(runnable);ViewTreeObserver observer=windowObserver;if(observer!=null)observer.windowHandler().removeCallbacks(runnable);if(observer!=null&&observer.choreographer!=null)observer.choreographer.removeCallbacks(Choreographer.CALLBACK_ANIMATION,runnable,null);
+            if(pendingActions!=null)for(int i=pendingActions.size()-1;i>=0;i--)if(pendingActions.get(i).action==runnable)pendingActions.remove(i);return true;
+        }
     }
     private boolean frameInvalidationPending;
     private final Runnable frameInvalidation=new Runnable(){public void run(){synchronized(View.this){frameInvalidationPending=false;if(windowObserver!=null)invalidate();}}};
-    public synchronized void postInvalidateOnAnimation(){ViewTreeObserver observer=windowObserver;if(observer==null||frameInvalidationPending)return;if(observer.choreographer==null)throw new IllegalStateException("Attached view has no frame scheduler");observer.choreographer.postCallback(Choreographer.CALLBACK_ANIMATION,frameInvalidation,null);frameInvalidationPending=true;}
+    public void postInvalidateOnAnimation(){synchronized(this){ViewTreeObserver observer=windowObserver;if(observer==null||frameInvalidationPending)return;if(observer.choreographer==null)throw new IllegalStateException("Attached view has no frame scheduler");observer.choreographer.postCallback(Choreographer.CALLBACK_ANIMATION,frameInvalidation,null);frameInvalidationPending=true;}}
     public void postInvalidateOnAnimation(int left,int top,int right,int bottom){postInvalidateOnAnimation();}
     private synchronized void cancelFrameInvalidation(){ViewTreeObserver observer=windowObserver;if(observer!=null)observer.windowHandler().removeCallbacks(delayedInvalidation);if(observer!=null&&observer.choreographer!=null)observer.choreographer.removeCallbacks(Choreographer.CALLBACK_ANIMATION,frameInvalidation,null);frameInvalidationPending=false;}
 
@@ -1201,6 +1286,7 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public void setBottom(int value){setFrame(left,top,right,value);}
     public void getHitRect(android.graphics.Rect outRect){outRect.set(left,top,right,bottom);}
     public void getDrawingRect(android.graphics.Rect outRect){outRect.set(getScrollX(),getScrollY(),getScrollX()+getWidth(),getScrollY()+getHeight());}
+    public void getFocusedRect(android.graphics.Rect r){getDrawingRect(r);}
     public boolean getLocalVisibleRect(android.graphics.Rect r){r.set(0,0,getWidth(),getHeight());return getWidth()>0&&getHeight()>0&&isShown();}
     public boolean getGlobalVisibleRect(android.graphics.Rect r){return getGlobalVisibleRect(r,null);}
     public boolean getGlobalVisibleRect(android.graphics.Rect r,android.graphics.Point globalOffset){
@@ -1212,7 +1298,13 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public boolean requestFocusFromTouch(){return requestFocus();}
     public boolean onTrackballEvent(MotionEvent event){return false;}
     public boolean onHoverEvent(MotionEvent event){return false;}
-    public boolean dispatchHoverEvent(MotionEvent event){return onHoverEvent(event);}
+    private OnHoverListener hoverListener;
+    public void setOnHoverListener(OnHoverListener listener){hoverListener=listener;}
+    public void onHoverChanged(boolean hovered){}
+    public boolean dispatchHoverEvent(MotionEvent event){
+        if(hoverListener!=null&&isEnabled()&&hoverListener.onHover(this,event))return true;
+        return onHoverEvent(event);
+    }
     public boolean onGenericMotionEvent(MotionEvent event){return false;}
     public boolean dispatchGenericMotionEvent(MotionEvent event){
         if(genericMotionListener!=null&&isEnabled()&&genericMotionListener.onGenericMotion(this,event))return true;
@@ -1229,4 +1321,547 @@ public class View implements KeyEvent.Callback, android.graphics.drawable.Drawab
     public boolean isOpaque(){return false;}
     public boolean isInLayout(){return false;}
     public android.os.IBinder getApplicationWindowToken(){return getWindowToken();}
+
+    // --- API 35 constants ---
+    public static final int ACCESSIBILITY_DATA_SENSITIVE_AUTO = 0;
+    public static final int ACCESSIBILITY_DATA_SENSITIVE_YES = 1;
+    public static final int ACCESSIBILITY_DATA_SENSITIVE_NO = 2;
+    public static final int AUTOFILL_FLAG_INCLUDE_NOT_IMPORTANT_VIEWS = 1;
+    public static final String AUTOFILL_HINT_CREDIT_CARD_EXPIRATION_DATE = "creditCardExpirationDate";
+    public static final String AUTOFILL_HINT_CREDIT_CARD_EXPIRATION_DAY = "creditCardExpirationDay";
+    public static final String AUTOFILL_HINT_CREDIT_CARD_EXPIRATION_MONTH = "creditCardExpirationMonth";
+    public static final String AUTOFILL_HINT_CREDIT_CARD_EXPIRATION_YEAR = "creditCardExpirationYear";
+    public static final String AUTOFILL_HINT_CREDIT_CARD_NUMBER = "creditCardNumber";
+    public static final String AUTOFILL_HINT_CREDIT_CARD_SECURITY_CODE = "creditCardSecurityCode";
+    public static final String AUTOFILL_HINT_EMAIL_ADDRESS = "emailAddress";
+    public static final String AUTOFILL_HINT_NAME = "name";
+    public static final String AUTOFILL_HINT_PASSWORD = "password";
+    public static final String AUTOFILL_HINT_PHONE = "phone";
+    public static final String AUTOFILL_HINT_POSTAL_ADDRESS = "postalAddress";
+    public static final String AUTOFILL_HINT_POSTAL_CODE = "postalCode";
+    public static final String AUTOFILL_HINT_USERNAME = "username";
+    public static final int AUTOFILL_TYPE_NONE = 0;
+    public static final int AUTOFILL_TYPE_TEXT = 1;
+    public static final int AUTOFILL_TYPE_TOGGLE = 2;
+    public static final int AUTOFILL_TYPE_LIST = 3;
+    public static final int AUTOFILL_TYPE_DATE = 4;
+    public static final int CONTENT_SENSITIVITY_AUTO = 0;
+    public static final int CONTENT_SENSITIVITY_SENSITIVE = 1;
+    public static final int CONTENT_SENSITIVITY_NOT_SENSITIVE = 2;
+    public static final int DRAG_FLAG_GLOBAL_URI_READ = 1;
+    public static final int DRAG_FLAG_GLOBAL_URI_WRITE = 2;
+    public static final int DRAG_FLAG_GLOBAL_PERSISTABLE_URI_PERMISSION = 64;
+    public static final int DRAG_FLAG_GLOBAL_PREFIX_URI_PERMISSION = 128;
+    public static final int DRAG_FLAG_GLOBAL = 256;
+    public static final int DRAG_FLAG_OPAQUE = 512;
+    public static final int DRAG_FLAG_ACCESSIBILITY_ACTION = 1024;
+    public static final int DRAG_FLAG_GLOBAL_SAME_APPLICATION = 4096;
+    public static final int DRAG_FLAG_START_INTENT_SENDER_ON_UNHANDLED_DRAG = 8192;
+    public static final int DRAWING_CACHE_QUALITY_AUTO = 0;
+    public static final int DRAWING_CACHE_QUALITY_LOW = 524288;
+    public static final int DRAWING_CACHE_QUALITY_HIGH = 1048576;
+    public static final int FIND_VIEWS_WITH_TEXT = 1;
+    public static final int FIND_VIEWS_WITH_CONTENT_DESCRIPTION = 2;
+    public static final int FOCUSABLES_ALL = 0;
+    public static final int FOCUSABLES_TOUCH_MODE = 1;
+    public static final int KEEP_SCREEN_ON = 67108864;
+    public static final int SOUND_EFFECTS_ENABLED = 134217728;
+    public static final int HAPTIC_FEEDBACK_ENABLED = 268435456;
+    public static final int IMPORTANT_FOR_CONTENT_CAPTURE_AUTO = 0;
+    public static final int IMPORTANT_FOR_CONTENT_CAPTURE_YES = 1;
+    public static final int IMPORTANT_FOR_CONTENT_CAPTURE_NO = 2;
+    public static final int IMPORTANT_FOR_CONTENT_CAPTURE_YES_EXCLUDE_DESCENDANTS = 4;
+    public static final int IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS = 8;
+    public static final float REQUESTED_FRAME_RATE_CATEGORY_DEFAULT = Float.NaN;
+    public static final float REQUESTED_FRAME_RATE_CATEGORY_NO_PREFERENCE = -1.0f;
+    public static final float REQUESTED_FRAME_RATE_CATEGORY_LOW = -2.0f;
+    public static final float REQUESTED_FRAME_RATE_CATEGORY_NORMAL = -3.0f;
+    public static final float REQUESTED_FRAME_RATE_CATEGORY_HIGH = -4.0f;
+    public static final int SCREEN_STATE_OFF = 0;
+    public static final int SCREEN_STATE_ON = 1;
+    public static final int SCROLL_CAPTURE_HINT_AUTO = 0;
+    public static final int SCROLL_CAPTURE_HINT_EXCLUDE = 1;
+    public static final int SCROLL_CAPTURE_HINT_INCLUDE = 2;
+    public static final int SCROLL_CAPTURE_HINT_EXCLUDE_DESCENDANTS = 4;
+    public static final int STATUS_BAR_VISIBLE = 0;
+    public static final int STATUS_BAR_HIDDEN = 1;
+    public static final int SYSTEM_UI_LAYOUT_FLAGS = 1536;
+    public static final int TEXT_DIRECTION_INHERIT = 0;
+    public static final int TEXT_DIRECTION_FIRST_STRONG = 1;
+    public static final int TEXT_DIRECTION_ANY_RTL = 2;
+    public static final int TEXT_DIRECTION_LTR = 3;
+    public static final int TEXT_DIRECTION_RTL = 4;
+    public static final int TEXT_DIRECTION_LOCALE = 5;
+    public static final int TEXT_DIRECTION_FIRST_STRONG_LTR = 6;
+    public static final int TEXT_DIRECTION_FIRST_STRONG_RTL = 7;
+    protected static final String VIEW_LOG_TAG = "View";
+
+    // --- Focus search, focusables, touchables, findViewsWithText, requireViewById ---
+    public View focusSearch(int direction) {
+        if (parent != null) {
+            return parent.focusSearch(this, direction);
+        }
+        return FocusFinder.getInstance().findNextFocus(this instanceof ViewGroup ? (ViewGroup) this : null, this, direction);
+    }
+    public boolean dispatchUnhandledMove(View focused, int direction) { return false; }
+    public java.util.ArrayList<View> getFocusables(int direction) {
+        java.util.ArrayList<View> result = new java.util.ArrayList<View>(24);
+        addFocusables(result, direction);
+        return result;
+    }
+    public void addFocusables(java.util.ArrayList<View> views, int direction) {
+        addFocusables(views, direction, isInTouchMode() ? FOCUSABLES_TOUCH_MODE : FOCUSABLES_ALL);
+    }
+    public void addFocusables(java.util.ArrayList<View> views, int direction, int focusableMode) {
+        if (views == null) return;
+        if (!isFocusable()) return;
+        if ((focusableMode & FOCUSABLES_TOUCH_MODE) == FOCUSABLES_TOUCH_MODE && isInTouchMode() && !isFocusableInTouchMode()) return;
+        if (!enabled || visibility != VISIBLE) return;
+        views.add(this);
+    }
+    public void findViewsWithText(java.util.ArrayList<View> outViews, CharSequence searched, int flags) {
+        if (outViews == null || searched == null) return;
+        if ((flags & FIND_VIEWS_WITH_CONTENT_DESCRIPTION) != 0 && description != null
+                && description.toString().toLowerCase(java.util.Locale.ROOT).contains(searched.toString().toLowerCase(java.util.Locale.ROOT))) {
+            outViews.add(this);
+        }
+    }
+    public java.util.ArrayList<View> getTouchables() {
+        java.util.ArrayList<View> result = new java.util.ArrayList<View>();
+        addTouchables(result);
+        return result;
+    }
+    public void addTouchables(java.util.ArrayList<View> views) {
+        if (views == null) return;
+        if (visibility == VISIBLE && enabled && (clickable || longClickable || contextClickable)) {
+            views.add(this);
+        }
+    }
+    public void addChildrenForAccessibility(java.util.ArrayList<View> outChildren) {}
+    public final <T extends View> T requireViewById(int id) {
+        T view = findViewById(id);
+        if (view == null) throw new IllegalArgumentException("ID does not reference a View inside this View");
+        return view;
+    }
+
+    // --- ContentInfo / OnReceiveContentListener ---
+    private String[] receiveContentMimeTypes;
+    private OnReceiveContentListener receiveContentListener;
+    public void setOnReceiveContentListener(String[] mimeTypes, OnReceiveContentListener listener) {
+        if (listener == null) {
+            this.receiveContentMimeTypes = null;
+            this.receiveContentListener = null;
+            return;
+        }
+        if (mimeTypes == null || mimeTypes.length == 0) {
+            throw new IllegalArgumentException("When the listener is set, MIME types must also be set");
+        }
+        for (int i = 0; i < mimeTypes.length; i++) {
+            if (mimeTypes[i] == null || mimeTypes[i].startsWith("*")) {
+                throw new IllegalArgumentException("A MIME type set here must not start with *: " + mimeTypes[i]);
+            }
+        }
+        this.receiveContentMimeTypes = mimeTypes.clone();
+        this.receiveContentListener = listener;
+    }
+    public String[] getReceiveContentMimeTypes() {
+        return receiveContentMimeTypes == null ? null : receiveContentMimeTypes.clone();
+    }
+    public ContentInfo performReceiveContent(ContentInfo payload) {
+        if (payload == null) throw new NullPointerException("payload");
+        if (receiveContentListener != null) {
+            return receiveContentListener.onReceiveContent(this, payload);
+        }
+        return onReceiveContent(payload);
+    }
+    public ContentInfo onReceiveContent(ContentInfo payload) {
+        return payload;
+    }
+
+    // --- Context click, action mode, click-when-disabled, long-click query ---
+    private OnContextClickListener contextClickListener;
+    private boolean contextClickable;
+    private boolean allowClickWhenDisabled;
+    public boolean hasOnLongClickListeners() { return longClickListener != null; }
+    public void setOnContextClickListener(OnContextClickListener l) { contextClickListener = l; if (l != null) setContextClickable(true); }
+    public boolean isContextClickable() { return contextClickable; }
+    public void setContextClickable(boolean contextClickable) { this.contextClickable = contextClickable; }
+    public boolean performContextClick(float x, float y) { return performContextClick(); }
+    public boolean performContextClick() { return contextClickListener != null && contextClickListener.onContextClick(this); }
+    public void setAllowClickWhenDisabled(boolean clickableWhenDisabled) { this.allowClickWhenDisabled = clickableWhenDisabled; }
+    public ActionMode startActionMode(ActionMode.Callback callback) { return startActionMode(callback, ActionMode.TYPE_PRIMARY); }
+    public ActionMode startActionMode(ActionMode.Callback callback, int type) {
+        return parent != null ? parent.startActionModeForChild(this, callback, type) : null;
+    }
+    protected void dispatchSetPressed(boolean pressed) {}
+    protected void dispatchSetSelected(boolean selected) {}
+
+    // --- Scrollbar drawables & fading edges ---
+    public void setVerticalScrollbarThumbDrawable(android.graphics.drawable.Drawable drawable) { bars().verticalThumb = drawable; invalidate(); }
+    public void setVerticalScrollbarTrackDrawable(android.graphics.drawable.Drawable drawable) { bars().verticalTrack = drawable; invalidate(); }
+    public void setHorizontalScrollbarThumbDrawable(android.graphics.drawable.Drawable drawable) { bars().horizontalThumb = drawable; invalidate(); }
+    public void setHorizontalScrollbarTrackDrawable(android.graphics.drawable.Drawable drawable) { bars().horizontalTrack = drawable; invalidate(); }
+    public android.graphics.drawable.Drawable getVerticalScrollbarThumbDrawable() { return bars().verticalThumb; }
+    public android.graphics.drawable.Drawable getVerticalScrollbarTrackDrawable() { return bars().verticalTrack; }
+    public android.graphics.drawable.Drawable getHorizontalScrollbarThumbDrawable() { return bars().horizontalThumb; }
+    public android.graphics.drawable.Drawable getHorizontalScrollbarTrackDrawable() { return bars().horizontalTrack; }
+    private boolean horizontalFadingEdgeEnabled, verticalFadingEdgeEnabled;
+    public void setFadingEdgeLength(int length) {}
+    public boolean isHorizontalFadingEdgeEnabled() { return horizontalFadingEdgeEnabled; }
+    public void setHorizontalFadingEdgeEnabled(boolean enabled) { horizontalFadingEdgeEnabled = enabled; }
+    public boolean isVerticalFadingEdgeEnabled() { return verticalFadingEdgeEnabled; }
+    public void setVerticalFadingEdgeEnabled(boolean enabled) { verticalFadingEdgeEnabled = enabled; }
+    protected float getTopFadingEdgeStrength() { return 0.0f; }
+    protected float getBottomFadingEdgeStrength() { return 0.0f; }
+    protected float getLeftFadingEdgeStrength() { return 0.0f; }
+    protected float getRightFadingEdgeStrength() { return 0.0f; }
+    protected final void onDrawScrollBars(Canvas canvas) { if (scrollBars != null) scrollBars.draw(canvas); }
+
+    // --- Text direction & alignment resolution ---
+    private int textDirection = TEXT_DIRECTION_INHERIT;
+    public void setTextDirection(int textDirection) {
+        if (this.textDirection != textDirection) {
+            this.textDirection = textDirection;
+            requestLayout();
+            invalidate();
+        }
+    }
+    public int getTextDirection() {
+        if (textDirection == TEXT_DIRECTION_INHERIT) {
+            return parent != null ? parent.getTextDirection() : TEXT_DIRECTION_FIRST_STRONG;
+        }
+        return textDirection;
+    }
+    public boolean canResolveLayoutDirection() { return layoutDirection != LAYOUT_DIRECTION_INHERIT || (parent != null && parent.canResolveLayoutDirection()); }
+    public boolean canResolveTextDirection() { return textDirection != TEXT_DIRECTION_INHERIT || (parent != null && parent.canResolveTextDirection()); }
+    public boolean isTextDirectionResolved() { return canResolveTextDirection(); }
+    public boolean canResolveTextAlignment() { return textAlignment != TEXT_ALIGNMENT_INHERIT || (parent != null && parent.canResolveTextAlignment()); }
+    public boolean isTextAlignmentResolved() { return canResolveTextAlignment(); }
+
+    // --- Accessibility, Structure, Autofill, ContentCapture, Credentials ---
+    private boolean revealOnFocusHint = true;
+    private CharSequence accessibilityPaneTitle;
+    private CharSequence stateDescription;
+    private int accessibilityTraversalBefore = NO_ID;
+    private int accessibilityTraversalAfter = NO_ID;
+    private int labelFor = NO_ID;
+    private boolean screenReaderFocusable;
+    private boolean accessibilityHeading;
+    private int accessibilityDataSensitive = ACCESSIBILITY_DATA_SENSITIVE_AUTO;
+    private int contentSensitivity = CONTENT_SENSITIVITY_AUTO;
+    private int importantForContentCapture = IMPORTANT_FOR_CONTENT_CAPTURE_AUTO;
+    private android.view.contentcapture.ContentCaptureSession contentCaptureSession;
+    private boolean isCredentialFlag;
+    private android.credentials.GetCredentialRequest pendingCredentialRequest;
+    private android.os.OutcomeReceiver<android.credentials.GetCredentialResponse, android.credentials.GetCredentialException> pendingCredentialCallback;
+
+    public final void setRevealOnFocusHint(boolean revealOnFocus) { this.revealOnFocusHint = revealOnFocus; }
+    public final boolean getRevealOnFocusHint() { return revealOnFocusHint; }
+    public boolean hasExplicitFocusable() { return focusability == FOCUSABLE; }
+    public void setAccessibilityPaneTitle(CharSequence accessibilityPaneTitle) { this.accessibilityPaneTitle = accessibilityPaneTitle; }
+    public CharSequence getAccessibilityPaneTitle() { return accessibilityPaneTitle; }
+    public final CharSequence getStateDescription() { return stateDescription; }
+    public void setStateDescription(CharSequence stateDescription) { this.stateDescription = stateDescription; }
+    public void setAccessibilityTraversalBefore(int beforeId) { this.accessibilityTraversalBefore = beforeId; }
+    public int getAccessibilityTraversalBefore() { return accessibilityTraversalBefore; }
+    public void setAccessibilityTraversalAfter(int afterId) { this.accessibilityTraversalAfter = afterId; }
+    public int getAccessibilityTraversalAfter() { return accessibilityTraversalAfter; }
+    public int getLabelFor() { return labelFor; }
+    public void setLabelFor(int id) { this.labelFor = id; }
+    public boolean isScreenReaderFocusable() { return screenReaderFocusable; }
+    public void setScreenReaderFocusable(boolean screenReaderFocusable) { this.screenReaderFocusable = screenReaderFocusable; }
+    public boolean isAccessibilityHeading() { return accessibilityHeading; }
+    public void setAccessibilityHeading(boolean isHeading) { this.accessibilityHeading = isHeading; }
+    public boolean isAccessibilityDataSensitive() { return accessibilityDataSensitive == ACCESSIBILITY_DATA_SENSITIVE_YES; }
+    public void setAccessibilityDataSensitive(int accessibilityDataSensitive) { this.accessibilityDataSensitive = accessibilityDataSensitive; }
+    public boolean dispatchNestedPrePerformAccessibilityAction(int action, android.os.Bundle arguments) {
+        for (ViewParent p = getParent(); p != null; p = p.getParent()) {
+            if (p.onNestedPrePerformAccessibilityAction(this, action, arguments)) return true;
+        }
+        return false;
+    }
+    public void onProvideStructure(ViewStructure structure) {}
+    public void onProvideAutofillStructure(ViewStructure structure, int flags) { onProvideStructure(structure); }
+    public void onProvideContentCaptureStructure(ViewStructure structure, int flags) { onProvideStructure(structure); }
+    public void onProvideVirtualStructure(ViewStructure structure) {}
+    public void onProvideAutofillVirtualStructure(ViewStructure structure, int flags) { onProvideVirtualStructure(structure); }
+    public void dispatchProvideStructure(ViewStructure structure) { onProvideStructure(structure); }
+    public void dispatchProvideAutofillStructure(ViewStructure structure, int flags) { onProvideAutofillStructure(structure, flags); }
+    public boolean isVisibleToUserForAutofill(int virtualId) { return isShown(); }
+    public final void setContentSensitivity(int sensitivity) { this.contentSensitivity = sensitivity; }
+    public final int getContentSensitivity() { return contentSensitivity; }
+    public final boolean isContentSensitive() { return contentSensitivity == CONTENT_SENSITIVITY_SENSITIVE; }
+    public int getImportantForContentCapture() { return importantForContentCapture; }
+    public void setImportantForContentCapture(int mode) { this.importantForContentCapture = mode; }
+    public final boolean isImportantForContentCapture() {
+        return importantForContentCapture == IMPORTANT_FOR_CONTENT_CAPTURE_YES || importantForContentCapture == IMPORTANT_FOR_CONTENT_CAPTURE_YES_EXCLUDE_DESCENDANTS;
+    }
+    public void setContentCaptureSession(android.view.contentcapture.ContentCaptureSession contentCaptureSession) { this.contentCaptureSession = contentCaptureSession; }
+    public final android.view.contentcapture.ContentCaptureSession getContentCaptureSession() {
+        if (contentCaptureSession != null) return contentCaptureSession;
+        return parent != null ? parent.getContentCaptureSession() : null;
+    }
+    public void setIsCredential(boolean isCredential) { this.isCredentialFlag = isCredential; }
+    public boolean isCredential() { return isCredentialFlag; }
+    public void setPendingCredentialRequest(
+            android.credentials.GetCredentialRequest request,
+            android.os.OutcomeReceiver<android.credentials.GetCredentialResponse, android.credentials.GetCredentialException> callback) {
+        if (request == null || callback == null) throw new NullPointerException();
+        this.pendingCredentialRequest = request;
+        this.pendingCredentialCallback = callback;
+    }
+    public void clearPendingCredentialRequest() {
+        this.pendingCredentialRequest = null;
+        this.pendingCredentialCallback = null;
+    }
+    public final android.credentials.GetCredentialRequest getPendingCredentialRequest() { return pendingCredentialRequest; }
+    public final android.os.OutcomeReceiver<android.credentials.GetCredentialResponse, android.credentials.GetCredentialException> getPendingCredentialCallback() { return pendingCredentialCallback; }
+
+    // --- Input dispatch, Pointer capture, Unhandled key listeners ---
+    private java.util.ArrayList<OnUnhandledKeyEventListener> unhandledKeyListeners;
+    private OnCapturedPointerListener capturedPointerListener;
+    private boolean pointerCaptured;
+    public void addOnUnhandledKeyEventListener(OnUnhandledKeyEventListener listener) {
+        if (listener == null) throw new NullPointerException("listener");
+        if (unhandledKeyListeners == null) unhandledKeyListeners = new java.util.ArrayList<OnUnhandledKeyEventListener>();
+        if (!unhandledKeyListeners.contains(listener)) unhandledKeyListeners.add(listener);
+    }
+    public void removeOnUnhandledKeyEventListener(OnUnhandledKeyEventListener listener) {
+        if (unhandledKeyListeners != null) unhandledKeyListeners.remove(listener);
+    }
+    public boolean dispatchKeyEventPreIme(KeyEvent event) { return onKeyPreIme(event.getKeyCode(), event); }
+    public boolean dispatchKeyShortcutEvent(KeyEvent event) { return onKeyShortcut(event.getKeyCode(), event); }
+    public boolean dispatchTrackballEvent(MotionEvent event) { return onTrackballEvent(event); }
+    public boolean dispatchCapturedPointerEvent(MotionEvent event) {
+        if (capturedPointerListener != null && isEnabled() && capturedPointerListener.onCapturedPointer(this, event)) return true;
+        return onCapturedPointerEvent(event);
+    }
+    protected boolean dispatchGenericPointerEvent(MotionEvent event) { return dispatchGenericMotionEvent(event); }
+    protected boolean dispatchGenericFocusedEvent(MotionEvent event) { return dispatchGenericMotionEvent(event); }
+    public void dispatchDisplayHint(int hint) { onDisplayHint(hint); }
+    protected void onDisplayHint(int hint) {}
+    public void onVisibilityAggregated(boolean isVisible) {}
+    public boolean onKeyPreIme(int keyCode, KeyEvent event) { return false; }
+    public boolean onKeyShortcut(int keyCode, KeyEvent event) { return false; }
+    public boolean checkInputConnectionProxy(View view) { return false; }
+    public final void requestUnbufferedDispatch(int source) {}
+    public boolean hasPointerCapture() { return pointerCaptured; }
+    public void requestPointerCapture() {
+        if (!pointerCaptured && hasWindowFocus()) {
+            pointerCaptured = true;
+            dispatchPointerCaptureChanged(true);
+        }
+    }
+    public void releasePointerCapture() {
+        if (pointerCaptured) {
+            pointerCaptured = false;
+            dispatchPointerCaptureChanged(false);
+        }
+    }
+    public void onPointerCaptureChange(boolean hasCapture) {}
+    public void dispatchPointerCaptureChanged(boolean hasCapture) { onPointerCaptureChange(hasCapture); }
+    public boolean onCapturedPointerEvent(MotionEvent event) { return false; }
+    public void setOnCapturedPointerListener(OnCapturedPointerListener l) { capturedPointerListener = l; }
+
+    // --- WindowInsetsAnimation, WindowInsetsController, SystemGestureExclusion, KeepClear ---
+    private WindowInsetsAnimation.Callback windowInsetsAnimationCallback;
+    private java.util.List<android.graphics.Rect> systemGestureExclusionRects = java.util.Collections.emptyList();
+    private boolean preferKeepClear;
+    private java.util.List<android.graphics.Rect> preferKeepClearRects = java.util.Collections.emptyList();
+    public void setWindowInsetsAnimationCallback(WindowInsetsAnimation.Callback callback) { this.windowInsetsAnimationCallback = callback; }
+    public void dispatchWindowInsetsAnimationPrepare(WindowInsetsAnimation animation) {
+        if (windowInsetsAnimationCallback != null) windowInsetsAnimationCallback.onPrepare(animation);
+    }
+    public WindowInsetsAnimation.Bounds dispatchWindowInsetsAnimationStart(WindowInsetsAnimation animation, WindowInsetsAnimation.Bounds bounds) {
+        return windowInsetsAnimationCallback != null ? windowInsetsAnimationCallback.onStart(animation, bounds) : bounds;
+    }
+    public WindowInsets dispatchWindowInsetsAnimationProgress(WindowInsets insets, java.util.List<WindowInsetsAnimation> runningAnimations) {
+        return windowInsetsAnimationCallback != null ? windowInsetsAnimationCallback.onProgress(insets, runningAnimations) : insets;
+    }
+    public void dispatchWindowInsetsAnimationEnd(WindowInsetsAnimation animation) {
+        if (windowInsetsAnimationCallback != null) windowInsetsAnimationCallback.onEnd(animation);
+    }
+    public void setSystemGestureExclusionRects(java.util.List<android.graphics.Rect> rects) {
+        if (rects == null) throw new NullPointerException("rects");
+        this.systemGestureExclusionRects = new java.util.ArrayList<android.graphics.Rect>(rects);
+    }
+    public java.util.List<android.graphics.Rect> getSystemGestureExclusionRects() {
+        return java.util.Collections.unmodifiableList(systemGestureExclusionRects);
+    }
+    public final void setPreferKeepClear(boolean preferKeepClear) { this.preferKeepClear = preferKeepClear; }
+    public final boolean isPreferKeepClear() { return preferKeepClear; }
+    public final void setPreferKeepClearRects(java.util.List<android.graphics.Rect> rects) {
+        if (rects == null) throw new NullPointerException("rects");
+        this.preferKeepClearRects = new java.util.ArrayList<android.graphics.Rect>(rects);
+    }
+    public final java.util.List<android.graphics.Rect> getPreferKeepClearRects() {
+        return java.util.Collections.unmodifiableList(preferKeepClearRects);
+    }
+    public WindowInsetsController getWindowInsetsController() { return null; }
+    public final android.window.OnBackInvokedDispatcher findOnBackInvokedDispatcher() { return null; }
+    public void getLocationInSurface(int[] location) { getLocationInWindow(location); }
+
+    // --- Handwriting delegation ---
+    private float hwOffsetLeft, hwOffsetTop, hwOffsetRight, hwOffsetBottom;
+    private Runnable handwritingDelegatorCallback;
+    private String allowedHandwritingDelegatePackage;
+    private boolean handwritingDelegate;
+    private String allowedHandwritingDelegatorPackage;
+    private int handwritingDelegateFlags;
+    private boolean autoHandwritingEnabled = true;
+    public void setHandwritingBoundsOffsets(float offsetLeft, float offsetTop, float offsetRight, float offsetBottom) {
+        this.hwOffsetLeft = offsetLeft; this.hwOffsetTop = offsetTop; this.hwOffsetRight = offsetRight; this.hwOffsetBottom = offsetBottom;
+    }
+    public float getHandwritingBoundsOffsetLeft() { return hwOffsetLeft; }
+    public float getHandwritingBoundsOffsetTop() { return hwOffsetTop; }
+    public float getHandwritingBoundsOffsetRight() { return hwOffsetRight; }
+    public float getHandwritingBoundsOffsetBottom() { return hwOffsetBottom; }
+    public void setHandwritingDelegatorCallback(Runnable callback) { this.handwritingDelegatorCallback = callback; }
+    public Runnable getHandwritingDelegatorCallback() { return handwritingDelegatorCallback; }
+    public void setAllowedHandwritingDelegatePackage(String allowedPackageName) { this.allowedHandwritingDelegatePackage = allowedPackageName; }
+    public String getAllowedHandwritingDelegatePackageName() { return allowedHandwritingDelegatePackage; }
+    public void setIsHandwritingDelegate(boolean isHandwritingDelegate) { this.handwritingDelegate = isHandwritingDelegate; }
+    public boolean isHandwritingDelegate() { return handwritingDelegate; }
+    public void setAllowedHandwritingDelegatorPackage(String allowedPackageName) { this.allowedHandwritingDelegatorPackage = allowedPackageName; }
+    public String getAllowedHandwritingDelegatorPackageName() { return allowedHandwritingDelegatorPackage; }
+    public void setHandwritingDelegateFlags(int flags) { this.handwritingDelegateFlags = flags; }
+    public int getHandwritingDelegateFlags() { return handwritingDelegateFlags; }
+    public void setAutoHandwritingEnabled(boolean enabled) { this.autoHandwritingEnabled = enabled; }
+    public boolean isAutoHandwritingEnabled() { return autoHandwritingEnabled; }
+
+    // --- Rendering, Drawing cache, BlendMode, Shadows, Pivot, Matrix, Drag & Drop ---
+    private boolean hasOverlappingRenderingForced = true;
+    private boolean forceDarkAllowed = true;
+    private android.graphics.Matrix animationMatrix;
+    private int outlineSpotShadowColor = 0xff000000;
+    private int outlineAmbientShadowColor = 0xff000000;
+    private int drawingCacheQuality = DRAWING_CACHE_QUALITY_AUTO;
+    private boolean drawingCacheEnabled;
+    private int drawingCacheBackgroundColor;
+    private android.graphics.BlendMode backgroundTintBlendMode;
+    private android.graphics.BlendMode foregroundTintBlendMode;
+    private android.graphics.RenderEffect renderEffect;
+    private float frameContentVelocity;
+    private float requestedFrameRate = REQUESTED_FRAME_RATE_CATEGORY_NO_PREFERENCE;
+    private static final java.util.concurrent.atomic.AtomicLong nextUniqueDrawingId = new java.util.concurrent.atomic.AtomicLong(1);
+    private final long uniqueDrawingId = nextUniqueDrawingId.getAndIncrement();
+
+    public boolean isPivotSet() { return pivotXSet && pivotYSet; }
+    public void resetPivot() { if (pivotXSet || pivotYSet) { pivotXSet = false; pivotYSet = false; invalidate(); } }
+    public void forceHasOverlappingRendering(boolean hasOverlappingRendering) { this.hasOverlappingRenderingForced = hasOverlappingRendering; }
+    public final boolean getHasOverlappingRendering() { return hasOverlappingRenderingForced && hasOverlappingRendering(); }
+    public void setForceDarkAllowed(boolean allow) { this.forceDarkAllowed = allow; }
+    public boolean isForceDarkAllowed() { return forceDarkAllowed; }
+    public boolean isDirty() { return invalidated; }
+    public void setAnimationMatrix(android.graphics.Matrix matrix) {
+        this.animationMatrix = matrix == null ? null : new android.graphics.Matrix(matrix);
+        invalidate();
+    }
+    public android.graphics.Matrix getAnimationMatrix() { return animationMatrix; }
+    public void setOutlineSpotShadowColor(int color) { this.outlineSpotShadowColor = color; invalidate(); }
+    public int getOutlineSpotShadowColor() { return outlineSpotShadowColor; }
+    public void setOutlineAmbientShadowColor(int color) { this.outlineAmbientShadowColor = color; invalidate(); }
+    public int getOutlineAmbientShadowColor() { return outlineAmbientShadowColor; }
+    public void onScreenStateChanged(int screenState) {}
+    protected int getWindowAttachCount() { return (int) (attachmentGeneration & 0x7fffffffL); }
+    public void setRenderEffect(android.graphics.RenderEffect renderEffect) { this.renderEffect = renderEffect; invalidate(); }
+    public void buildLayer() {}
+    public int getDrawingCacheQuality() { return drawingCacheQuality; }
+    public void setDrawingCacheQuality(int quality) { this.drawingCacheQuality = quality; }
+    public void setDrawingCacheEnabled(boolean enabled) { this.drawingCacheEnabled = enabled; }
+    public boolean isDrawingCacheEnabled() { return drawingCacheEnabled; }
+    public android.graphics.Bitmap getDrawingCache() { return getDrawingCache(false); }
+    public android.graphics.Bitmap getDrawingCache(boolean autoScale) { return null; }
+    public void destroyDrawingCache() {}
+    public void setDrawingCacheBackgroundColor(int color) { this.drawingCacheBackgroundColor = color; }
+    public int getDrawingCacheBackgroundColor() { return drawingCacheBackgroundColor; }
+    public void buildDrawingCache() {}
+    public void buildDrawingCache(boolean autoScale) {}
+    protected boolean isPaddingOffsetRequired() { return false; }
+    protected int getLeftPaddingOffset() { return 0; }
+    protected int getRightPaddingOffset() { return 0; }
+    protected int getTopPaddingOffset() { return 0; }
+    protected int getBottomPaddingOffset() { return 0; }
+    public int getSolidColor() { return 0; }
+    public void dispatchDrawableHotspotChanged(float x, float y) {}
+    public void setBackgroundTintBlendMode(android.graphics.BlendMode blendMode) { this.backgroundTintBlendMode = blendMode; }
+    public android.graphics.BlendMode getBackgroundTintBlendMode() { return backgroundTintBlendMode; }
+    public void setForegroundTintBlendMode(android.graphics.BlendMode blendMode) { this.foregroundTintBlendMode = blendMode; }
+    public android.graphics.BlendMode getForegroundTintBlendMode() { return foregroundTintBlendMode; }
+    public int getSourceLayoutResId() { return 0; }
+    public void transformMatrixToGlobal(android.graphics.Matrix matrix) {
+        if (matrix == null) return;
+        int[] loc = new int[2];
+        getLocationOnScreen(loc);
+        matrix.postTranslate(loc[0], loc[1]);
+    }
+    public void transformMatrixToLocal(android.graphics.Matrix matrix) {
+        if (matrix == null) return;
+        int[] loc = new int[2];
+        getLocationOnScreen(loc);
+        matrix.postTranslate(-loc[0], -loc[1]);
+    }
+    public long getUniqueDrawingId() { return uniqueDrawingId; }
+    protected boolean onSetAlpha(int alpha) { return false; }
+    public boolean gatherTransparentRegion(android.graphics.Region region) { return true; }
+    public final boolean startDrag(android.content.ClipData data, DragShadowBuilder shadowBuilder, Object myLocalState, int flags) {
+        return startDragAndDrop(data, shadowBuilder, myLocalState, flags);
+    }
+    public final boolean startDragAndDrop(android.content.ClipData data, DragShadowBuilder shadowBuilder, Object myLocalState, int flags) {
+        return false;
+    }
+    public final void cancelDragAndDrop() {}
+    public final void updateDragShadow(DragShadowBuilder shadowBuilder) {}
+
+    // --- ScrollCapture, ViewTranslation, DisplayHash, SurfaceControl, Inspector, FrameRate ---
+    private int scrollCaptureHint = SCROLL_CAPTURE_HINT_AUTO;
+    private ScrollCaptureCallback scrollCaptureCallback;
+    private android.view.translation.ViewTranslationCallback viewTranslationCallback;
+    private android.view.translation.ViewTranslationResponse viewTranslationResponse;
+    public int getScrollCaptureHint() { return scrollCaptureHint; }
+    public void setScrollCaptureHint(int hint) { this.scrollCaptureHint = hint; }
+    public final void setScrollCaptureCallback(ScrollCaptureCallback callback) { this.scrollCaptureCallback = callback; }
+    public void dispatchScrollCaptureSearch(android.graphics.Rect localVisibleRect, android.graphics.Point windowOffset, java.util.function.Consumer<ScrollCaptureTarget> targets) {
+        onScrollCaptureSearch(localVisibleRect, windowOffset, targets);
+    }
+    public void onScrollCaptureSearch(android.graphics.Rect localVisibleRect, android.graphics.Point windowOffset, java.util.function.Consumer<ScrollCaptureTarget> targets) {
+        if (scrollCaptureCallback != null && targets != null) {
+            targets.accept(new ScrollCaptureTarget(this, localVisibleRect, windowOffset, scrollCaptureCallback));
+        }
+    }
+    public void onCreateViewTranslationRequest(int[] supportedFormats, java.util.function.Consumer<android.view.translation.ViewTranslationRequest> requestsCollector) {}
+    public void onCreateVirtualViewTranslationRequests(long[] virtualIds, int[] supportedFormats, java.util.function.Consumer<android.view.translation.ViewTranslationRequest> requestsCollector) {}
+    public void setViewTranslationCallback(android.view.translation.ViewTranslationCallback callback) { this.viewTranslationCallback = callback; }
+    public void clearViewTranslationCallback() { this.viewTranslationCallback = null; }
+    public android.view.translation.ViewTranslationResponse getViewTranslationResponse() { return viewTranslationResponse; }
+    public void onViewTranslationResponse(android.view.translation.ViewTranslationResponse response) { this.viewTranslationResponse = response; }
+    public void onVirtualViewTranslationResponses(android.util.LongSparseArray<android.view.translation.ViewTranslationResponse> response) {}
+    public void dispatchCreateViewTranslationRequest(
+            java.util.Map<android.view.autofill.AutofillId, long[]> viewIds,
+            int[] supportedFormats,
+            android.view.translation.TranslationCapability capability,
+            java.util.List<android.view.translation.ViewTranslationRequest> requests) {}
+    public void generateDisplayHash(String hashAlgorithm, android.graphics.Rect bounds, java.util.concurrent.Executor executor, final android.view.displayhash.DisplayHashResultCallback callback) {
+        if (executor != null && callback != null) {
+            executor.execute(new Runnable() {
+                public void run() {
+                    callback.onDisplayHashError(android.view.displayhash.DisplayHashResultCallback.DISPLAY_HASH_ERROR_UNKNOWN);
+                }
+            });
+        }
+    }
+    public AttachedSurfaceControl getRootSurfaceControl() { return null; }
+    public void setFrameContentVelocity(float pixelsPerSecond) { this.frameContentVelocity = pixelsPerSecond; }
+    public float getFrameContentVelocity() { return frameContentVelocity; }
+    public void setRequestedFrameRate(float frameRate) { this.requestedFrameRate = frameRate; }
+    public float getRequestedFrameRate() { return requestedFrameRate; }
+    public int[] getAttributeResolutionStack(int attribute) { return new int[0]; }
+    public java.util.Map<Integer, Integer> getAttributeSourceResourceMap() { return java.util.Collections.emptyMap(); }
+    public int getExplicitStyle() { return 0; }
+    public final boolean isShowingLayoutBounds() { return false; }
+    @Override public String toString() {
+        return getClass().getName() + "{" + Integer.toHexString(System.identityHashCode(this))
+                + " " + left + "," + top + "-" + right + "," + bottom
+                + (id != NO_ID ? " #" + Integer.toHexString(id) : "") + "}";
+    }
 }

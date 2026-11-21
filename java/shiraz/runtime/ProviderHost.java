@@ -26,7 +26,7 @@ final class ProviderHost {
    if(!process.equals(current))continue;
    Entry entry=new Entry();entry.name=name;entry.prefix=prefix;entry.authority=metadata.getProperty(prefix+"authorities");
    String order=metadata.getProperty(prefix+"initOrder");
-   try{entry.order=order==null?0:Integer.parseInt(order);}catch(NumberFormatException error){entry.order=0;}
+   try{entry.order=order==null?0:Integer.parseInt(order);}catch(NumberFormatException error){throw new IllegalArgumentException("Invalid provider initOrder: "+name,error);}
    entries.add(entry);
   }
   Collections.sort(entries,new Comparator<Entry>(){public int compare(Entry a,Entry b){return b.order<a.order?-1:b.order==a.order?0:1;}});

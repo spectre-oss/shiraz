@@ -86,7 +86,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
     public static class MarginLayoutParams extends LayoutParams {
         public int leftMargin,topMargin,rightMargin,bottomMargin;
         private int start=Integer.MIN_VALUE,end=Integer.MIN_VALUE,direction,baseLeft,baseRight,resolvedLeft,resolvedRight;
-        private boolean resolved;
+        private boolean resolved,needsResolution=true;
         public MarginLayoutParams(int width,int height) { super(width,height); }
         public MarginLayoutParams(Context context,AttributeSet attrs) {super(context,attrs);shiraz.runtime.XmlAttributes a=new shiraz.runtime.XmlAttributes(context,attrs);int all=a.dimension("layout_margin",0,false);setMargins(a.dimension("layout_marginLeft",all,false),a.dimension("layout_marginTop",all,false),a.dimension("layout_marginRight",all,false),a.dimension("layout_marginBottom",all,false));if(a.has("layout_marginStart"))setMarginStart(a.dimension("layout_marginStart",0,false));if(a.has("layout_marginEnd"))setMarginEnd(a.dimension("layout_marginEnd",0,false));}
         public MarginLayoutParams(LayoutParams other) { super(other); if (other instanceof MarginLayoutParams) copy((MarginLayoutParams)other); }
@@ -94,24 +94,26 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
         private void copy(MarginLayoutParams other) {
             leftMargin=other.leftMargin; topMargin=other.topMargin; rightMargin=other.rightMargin; bottomMargin=other.bottomMargin;
             start=other.start; end=other.end; direction=other.direction; baseLeft=other.baseLeft; baseRight=other.baseRight;
-            resolved=other.resolved; resolvedLeft=other.resolvedLeft; resolvedRight=other.resolvedRight;
+            resolved=other.resolved; needsResolution=other.needsResolution; resolvedLeft=other.resolvedLeft; resolvedRight=other.resolvedRight;
         }
-        public void setMargins(int left,int top,int right,int bottom) { leftMargin=left; topMargin=top; rightMargin=right; bottomMargin=bottom; baseLeft=left; baseRight=right; resolved=false; }
-        public void setMarginStart(int value) { start=value; }
-        public void setMarginEnd(int value) { end=value; }
+        public void setMargins(int left,int top,int right,int bottom) { leftMargin=left; topMargin=top; rightMargin=right; bottomMargin=bottom; baseLeft=left; baseRight=right; resolved=false; needsResolution=true; }
+        public void setMarginStart(int value) { start=value; needsResolution=true; }
+        public void setMarginEnd(int value) { end=value; needsResolution=true; }
         public int getMarginStart() { return start == Integer.MIN_VALUE ? leftMargin : start; }
         public int getMarginEnd() { return end == Integer.MIN_VALUE ? rightMargin : end; }
         public boolean isMarginRelative() { return start != Integer.MIN_VALUE || end != Integer.MIN_VALUE; }
-        public void setLayoutDirection(int value) { if (value != LAYOUT_DIRECTION_LTR && value != LAYOUT_DIRECTION_RTL) throw new IllegalArgumentException("margin direction"); direction=value; }
+        public void setLayoutDirection(int value) { if (value != LAYOUT_DIRECTION_LTR && value != LAYOUT_DIRECTION_RTL) throw new IllegalArgumentException("margin direction"); if(direction!=value)needsResolution=true; direction=value; }
         public int getLayoutDirection() { return direction; }
         public void resolveLayoutDirection(int value) {
             setLayoutDirection(value);
+            // Direct physical margin updates survive repeated resolution in the same direction.
+            if (!needsResolution) return;
             if (!resolved || leftMargin != resolvedLeft) baseLeft=leftMargin;
             if (!resolved || rightMargin != resolvedRight) baseRight=rightMargin;
             leftMargin=baseLeft; rightMargin=baseRight;
             if (start != Integer.MIN_VALUE) { if (value == LAYOUT_DIRECTION_RTL) rightMargin=start; else leftMargin=start; }
             if (end != Integer.MIN_VALUE) { if (value == LAYOUT_DIRECTION_RTL) leftMargin=end; else rightMargin=end; }
-            resolvedLeft=leftMargin; resolvedRight=rightMargin; resolved=true;
+            resolvedLeft=leftMargin; resolvedRight=rightMargin; resolved=true; needsResolution=false;
         }
     }
     private final ArrayList<View> children=new ArrayList<View>();
@@ -203,6 +205,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
         if(old!=this&&children.size()+disappearing.size()+detached.size()>=4096)throw new IllegalStateException("ViewGroup child limit exceeded");
         if(old!=null&&!old.detached.contains(child))throw new IllegalStateException("Temporary child ownership mismatch");
         if(aggregateChildStates&&child.isDuplicateParentStateEnabled())throw new IllegalStateException("Cyclic parent/child drawable states");
+        if(old!=null&&old!=this)old.shirazChildHidden(child);
         child.shirazAssignLayoutParams(params);children.add(index,child);if(old!=null)old.detached.remove(child);child.temporaryParent=null;
         try{child.shirazSetParent(this);}catch(RuntimeException|Error failure){if(child.getParent()!=this){children.remove(child);child.temporaryParent=old;if(old!=null)old.detached.add(child);}throw failure;}
         if(child.getParent()==this){if(aggregateChildStates)refreshDrawableState();if(child.hasFocus())shirazRequestChildFocus(child);child.invalidate();invalidate();}
@@ -211,7 +214,9 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
     protected void detachViewFromParent(int index){
         if(shirazIsDetaching())throw new IllegalStateException("Window is detaching");View child=children.get(index);
         if(transitioning.contains(child)||disappearing.contains(child))throw new UnsupportedOperationException("Finish a child's view transition before temporarily detaching it");
-        children.remove(index);detached.add(child);child.temporaryParent=this;child.shirazAssignParent(null);invalidate();shirazChildHidden(child);if(aggregateChildStates)refreshDrawableState();
+        // RecyclerView detaches and reattaches rows during layout within one frame.
+        // Keep the touch target until reattachment, actual removal, or the next event.
+        children.remove(index);detached.add(child);child.temporaryParent=this;child.shirazAssignParent(null);invalidate();if(aggregateChildStates)refreshDrawableState();
     }
     @Override public void dispatchWindowVisibilityChanged(int visibility){super.dispatchWindowVisibilityChanged(visibility);for(View child:shirazWindowChildren())if(shirazSameWindow(child))child.dispatchWindowVisibilityChanged(visibility);}
     @Override public void dispatchWindowFocusChanged(boolean value){super.dispatchWindowFocusChanged(value);for(View child:new ArrayList<View>(children))if(child.getParent()==this)child.dispatchWindowFocusChanged(value);}
@@ -220,6 +225,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager 
     protected void detachAllViewsFromParent(){detachViewsFromParent(0,children.size());}
     protected void removeDetachedView(View child,boolean animate){
         if(child==null)throw new NullPointerException("child");
+        shirazChildHidden(child);
         detached.remove(child);if(child.temporaryParent==this)child.temporaryParent=null;
         try{try{child.clearFocus();}finally{child.shirazDetachTree();}}finally{invalidate();dispatchViewRemoved(child);}
     }
@@ -484,6 +490,39 @@ java.util.Collections.sort(order,new java.util.Comparator<View>(){public int com
     protected void dispatchFreezeSelfOnly(android.util.SparseArray<android.os.Parcelable> state){super.dispatchSaveInstanceState(state);}
     protected void dispatchThawSelfOnly(android.util.SparseArray<android.os.Parcelable> state){super.dispatchRestoreInstanceState(state);}
 
+    private ViewGroupOverlay groupOverlay;
+    @Override public ViewGroupOverlay getOverlay(){if(groupOverlay==null)groupOverlay=new ViewGroupOverlay(this);return groupOverlay;}
+    public View focusSearch(View focused,int direction){
+        if(getParent() instanceof ViewGroup)return ((ViewGroup)getParent()).focusSearch(focused,direction);
+        return FocusFinder.getInstance().findNextFocus(this,focused,direction);
+    }
+    @Override public void addFocusables(ArrayList<View> views,int direction,int focusableMode){
+        int focusableCount=views.size();
+        int descendantFocusability=getDescendantFocusability();
+        if(descendantFocusability!=FOCUS_BLOCK_DESCENDANTS){
+            if(shirazShouldBlockFocusForTouchscreen())focusableMode|=FOCUSABLES_TOUCH_MODE;
+            for(int i=0;i<children.size();i++){
+                View child=children.get(i);
+                if(child.getVisibility()==VISIBLE){
+                    child.addFocusables(views,direction,focusableMode);
+                }
+            }
+        }
+        if(descendantFocusability!=FOCUS_AFTER_DESCENDANTS||focusableCount==views.size()){
+            if(!shirazShouldBlockFocusForTouchscreen()||(focusableMode&FOCUSABLES_TOUCH_MODE)!=0){
+                super.addFocusables(views,direction,focusableMode);
+            }
+        }
+    }
+    @Override public void addTouchables(ArrayList<View> views){
+        super.addTouchables(views);
+        for(int i=0;i<children.size();i++){
+            View child=children.get(i);
+            if(child.getVisibility()==VISIBLE){
+                child.addTouchables(views);
+            }
+        }
+    }
     @Override public void dispatchWindowSystemUiVisiblityChanged(int flags){super.dispatchWindowSystemUiVisiblityChanged(flags);for(View child:new ArrayList<View>(children))child.dispatchWindowSystemUiVisiblityChanged(flags);}
     @Override public void dispatchSystemUiVisibilityChanged(int flags){super.dispatchSystemUiVisibilityChanged(flags);for(View child:new ArrayList<View>(children))child.dispatchSystemUiVisibilityChanged(flags);}
 

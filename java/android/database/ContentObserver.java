@@ -14,9 +14,12 @@ public abstract class ContentObserver {
     public final void dispatchChange(boolean selfChange) { dispatchChange(selfChange, null); }
 
     public final void dispatchChange(boolean selfChange, android.net.Uri uri) {
-        if (handler == null) onChange(selfChange, uri);
+        dispatchChange(selfChange,uri,0);
+    }
+    public final void dispatchChange(final boolean selfChange,final android.net.Uri uri,final int flags) {
+        if (handler == null) onChange(selfChange, uri,flags);
         else handler.post(new Runnable() {
-            public void run() { onChange(selfChange, uri); }
+            public void run() { onChange(selfChange, uri,flags); }
         });
     }
 
@@ -25,4 +28,18 @@ public abstract class ContentObserver {
     public void onChange(boolean selfChange, android.net.Uri uri) { onChange(selfChange); }
 
     public void onChange(boolean selfChange, android.net.Uri uri, int flags) { onChange(selfChange, uri); }
+
+    /** Owner guard prevents queued local notifications after registration teardown. */
+    public final void shirazDispatchChange(final boolean selfChange,final android.net.Uri uri,final java.util.concurrent.Callable<Boolean> active){
+        shirazDispatchChange(selfChange,uri,0,active);
+    }
+    public final void shirazDispatchChange(final boolean selfChange,final android.net.Uri uri,final int flags,final java.util.concurrent.Callable<Boolean> active){
+        Runnable delivery=new Runnable(){public void run(){
+            final boolean deliver;
+            try{deliver=active.call();}catch(Exception failure){throw new IllegalStateException("Content observer lifetime check",failure);}
+            if(deliver)onChange(selfChange,uri,flags);
+        }};
+        if(handler==null)delivery.run();
+        else if(!handler.post(delivery))throw new IllegalStateException("Content observer handler stopped");
+    }
 }

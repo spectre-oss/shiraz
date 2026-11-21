@@ -43,22 +43,31 @@ public class FrameLayout extends ViewGroup {
     protected int getSuggestedMinimumWidth(){return Math.max(super.getSuggestedMinimumWidth(),getForeground()==null?0:getForeground().getMinimumWidth());}
     protected int getSuggestedMinimumHeight(){return Math.max(super.getSuggestedMinimumHeight(),getForeground()==null?0:getForeground().getMinimumHeight());}
     private int desired(long value) { if (value > MEASURED_SIZE_MASK) throw new IllegalArgumentException("Frame measured size exceeds 24 bits"); return (int)Math.max(0,value); }
+    @Override protected void measureChildWithMargins(View child,int widthSpec,int widthUsed,int heightSpec,int heightUsed) {
+        LayoutParams params=(LayoutParams)child.getLayoutParams();params.resolveLayoutDirection(getLayoutDirection());
+        int horizontal=extent((long)framePaddingLeft()+framePaddingRight()+params.leftMargin+params.rightMargin+widthUsed);
+        int vertical=extent((long)framePaddingTop()+framePaddingBottom()+params.topMargin+params.bottomMargin+heightUsed);
+        child.measure(getChildMeasureSpec(widthSpec,horizontal,params.width),getChildMeasureSpec(heightSpec,vertical,params.height));
+    }
     protected void onMeasure(int widthSpec,int heightSpec) {
         long width=0,height=0; int state=0;
+        boolean resolveMatchParent=MeasureSpec.getMode(widthSpec)!=MeasureSpec.EXACTLY||MeasureSpec.getMode(heightSpec)!=MeasureSpec.EXACTLY;
+        java.util.ArrayList<View> matching=new java.util.ArrayList<View>();
         for (int i=0;i<getChildCount();i++) {
             View child=getChildAt(i); if (!measureAll && child.getVisibility() == GONE) continue;
             LayoutParams params=(LayoutParams)child.getLayoutParams();params.resolveLayoutDirection(getLayoutDirection());
-            child.measure(getChildMeasureSpec(widthSpec,extent((long)framePaddingLeft()+framePaddingRight()+params.leftMargin+params.rightMargin),params.width),getChildMeasureSpec(heightSpec,extent((long)framePaddingTop()+framePaddingBottom()+params.topMargin+params.bottomMargin),params.height));
+            measureChildWithMargins(child,widthSpec,0,heightSpec,0);
             width=Math.max(width,(long)child.getMeasuredWidth()+params.leftMargin+params.rightMargin);
             height=Math.max(height,(long)child.getMeasuredHeight()+params.topMargin+params.bottomMargin);
             state=combineMeasuredStates(state,child.getMeasuredState());
+            if(resolveMatchParent&&(params.width==LayoutParams.MATCH_PARENT||params.height==LayoutParams.MATCH_PARENT))matching.add(child);
         }
         setMeasuredDimension(resolveSizeAndState(Math.max(desired(width+framePaddingLeft()+framePaddingRight()),getSuggestedMinimumWidth()),widthSpec,state),resolveSizeAndState(Math.max(desired(height+framePaddingTop()+framePaddingBottom()),getSuggestedMinimumHeight()),heightSpec,state << MEASURED_HEIGHT_STATE_SHIFT));
-        if (MeasureSpec.getMode(widthSpec) != MeasureSpec.EXACTLY || MeasureSpec.getMode(heightSpec) != MeasureSpec.EXACTLY) {
-            for (int i=0;i<getChildCount();i++) {
-                View child=getChildAt(i); if (!measureAll && child.getVisibility() == GONE) continue;
+        // Android only repeats the pass when multiple children request MATCH_PARENT.
+        // A sole matching child retains its first-pass dimensions.
+        if (matching.size()>1) {
+            for (View child:matching) {
                 LayoutParams params=(LayoutParams)child.getLayoutParams();
-                if (params.width != LayoutParams.MATCH_PARENT && params.height != LayoutParams.MATCH_PARENT) continue;
                 int w=params.width == LayoutParams.MATCH_PARENT ? MeasureSpec.makeMeasureSpec((int)Math.max(0L,(long)getMeasuredWidth()-framePaddingLeft()-framePaddingRight()-params.leftMargin-params.rightMargin),MeasureSpec.EXACTLY) : getChildMeasureSpec(widthSpec,extent((long)framePaddingLeft()+framePaddingRight()+params.leftMargin+params.rightMargin),params.width);
                 int h=params.height == LayoutParams.MATCH_PARENT ? MeasureSpec.makeMeasureSpec((int)Math.max(0L,(long)getMeasuredHeight()-framePaddingTop()-framePaddingBottom()-params.topMargin-params.bottomMargin),MeasureSpec.EXACTLY) : getChildMeasureSpec(heightSpec,extent((long)framePaddingTop()+framePaddingBottom()+params.topMargin+params.bottomMargin),params.height);
                 child.measure(w,h);

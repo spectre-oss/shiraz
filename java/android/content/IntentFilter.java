@@ -76,6 +76,40 @@ public class IntentFilter implements Parcelable {
         int result = matchData(type, scheme, data); if (result < 0) return result;
         return matchCategories(intentCategories) == null ? result : NO_MATCH_CATEGORY;
     }
+    public static final class AuthorityEntry {
+        private final String mOrigHost;
+        private final String mHost;
+        private final boolean mWild;
+        private final int mPort;
+        public AuthorityEntry(String host, String port) {
+            mOrigHost = host;
+            mWild = host != null && host.length() > 0 && host.charAt(0) == '*';
+            mHost = mWild ? host.substring(1).intern() : (host != null ? host.intern() : null);
+            mPort = port != null ? Integer.parseInt(port) : -1;
+        }
+        public String getHost() { return mOrigHost; }
+        public int getPort() { return mPort; }
+        @Override public boolean equals(Object obj) {
+            if (!(obj instanceof AuthorityEntry)) return false;
+            AuthorityEntry other = (AuthorityEntry) obj;
+            return Objects.equals(mOrigHost, other.mOrigHost) && mPort == other.mPort;
+        }
+        public int match(Uri data) {
+            if (data == null) return NO_MATCH_DATA;
+            String host = data.getHost();
+            if (host == null) return NO_MATCH_DATA;
+            if (mWild) {
+                if (host.length() < mHost.length()) return NO_MATCH_DATA;
+                host = host.substring(host.length() - mHost.length());
+            }
+            if (mHost == null || !host.equalsIgnoreCase(mHost)) return NO_MATCH_DATA;
+            if (mPort >= 0) {
+                if (mPort != data.getPort()) return NO_MATCH_DATA;
+                return MATCH_CATEGORY_PORT;
+            }
+            return MATCH_CATEGORY_HOST;
+        }
+    }
     public int describeContents() { return 0; }
     public void writeToParcel(Parcel out, int flags) { throw new UnsupportedOperationException("IntentFilter IPC is not implemented"); }
     public static final Parcelable.Creator<IntentFilter> CREATOR = new Parcelable.Creator<IntentFilter>() {

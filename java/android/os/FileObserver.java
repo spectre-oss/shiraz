@@ -8,7 +8,10 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/** Linux filesystem notifications, delivered on a shared daemon thread. */
+/** Filesystem notifications, delivered on a shared daemon thread.
+ * Linux uses inotify. The macOS kqueue adapter rejects access/open/close
+ * masks and only supplies move pairs for renames within a watched directory.
+ */
 public abstract class FileObserver {
  public static final int ACCESS=1, MODIFY=2, ATTRIB=4, CLOSE_WRITE=8, CLOSE_NOWRITE=16,
   OPEN=32, MOVED_FROM=64, MOVED_TO=128, CREATE=256, DELETE=512, DELETE_SELF=1024,

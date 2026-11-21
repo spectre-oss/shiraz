@@ -10,7 +10,7 @@ import java.util.*;
 
 /** App-owned persistent HTTP download queue. Files are published only after a complete response. */
 public final class HostDownloads implements AutoCloseable {
- public static final int PENDING=1,RUNNING=2,SUCCESSFUL=8,FAILED=16;
+ public static final int PENDING=1,RUNNING=2,PAUSED=4,SUCCESSFUL=8,FAILED=16;
  public static final int ERROR_UNKNOWN=1000,ERROR_FILE=1001,ERROR_HTTP=1004,ERROR_TOO_MANY_REDIRECTS=1005,ERROR_EXISTS=1009;
  private static final long MAX_BYTES=8L*1024*1024*1024;
  public interface Listener {void finished(Record record);}
@@ -19,13 +19,23 @@ public final class HostDownloads implements AutoCloseable {
   public final int status,reason,visibility;public final long bytes,total,modified;
   private Record(long id,Properties p){this.id=id;url=p.getProperty("url");title=p.getProperty("title","");mime=p.getProperty("mime","");description=p.getProperty("description","");visibility=Integer.parseInt(p.getProperty("visibility","0"));destination=new File(p.getProperty("destination"));status=Integer.parseInt(p.getProperty("status"));reason=Integer.parseInt(p.getProperty("reason","0"));bytes=Long.parseLong(p.getProperty("bytes","0"));total=Long.parseLong(p.getProperty("total","-1"));modified=Long.parseLong(p.getProperty("modified","0"));}
  }
- private final File directory,allowedRoot;private final Listener listener;private final Thread worker;
+ private final File directory,allowedRoot;private final Listener listener;private final Thread worker,cancellationWorker;
  private volatile boolean closed;private volatile HttpURLConnection active;
+ private long activeId;
+ private DownloadNetworkPolicy activePolicy;
+ private volatile int activePauseReason;
+ private final DownloadNetworkPolicy.Source network;
  public HostDownloads(File directory,File allowedRoot,Listener listener)throws IOException{
+  this(directory,allowedRoot,listener,DownloadNetworkPolicy.HOST);
+ }
+ public HostDownloads(File directory,File allowedRoot,Listener listener,DownloadNetworkPolicy.Source network)throws IOException{
+  this.network=Objects.requireNonNull(network);
   this.directory=directory.getCanonicalFile();this.allowedRoot=allowedRoot.getCanonicalFile();this.listener=listener;
   Files.createDirectories(this.directory.toPath(),PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
   Files.setPosixFilePermissions(this.directory.toPath(),PosixFilePermissions.fromString("rwx------"));
-  worker=new Thread(new Runnable(){public void run(){work();}},"Shiraz downloads");worker.setDaemon(true);worker.start();
+  worker=new Thread(new Runnable(){public void run(){work();}},"Shiraz downloads");worker.setDaemon(true);
+  cancellationWorker=new Thread(new Runnable(){public void run(){watchCancellation();}},"Shiraz download cancellation");cancellationWorker.setDaemon(true);
+  worker.start();cancellationWorker.start();
  }
  private File metadata(long id){if(id<=0)throw new IllegalArgumentException("Download id");return new File(directory,id+".properties");}
  private File cancelled(long id){return new File(directory,id+".cancel");}
@@ -56,10 +66,14 @@ public final class HostDownloads implements AutoCloseable {
   return enqueue(url,destination,title,mime,headers,"",0);
  }
  public long enqueue(String url,File destination,String title,String mime,Map<String,String> headers,String description,int visibility)throws IOException{
+  return enqueue(url,destination,title,mime,headers,description,visibility,DownloadNetworkPolicy.ANY);
+ }
+ public long enqueue(String url,File destination,String title,String mime,Map<String,String> headers,String description,int visibility,DownloadNetworkPolicy policy)throws IOException{
   if(description==null||description.length()>4096||visibility<0||visibility>3)throw new IllegalArgumentException("Download presentation");
   address(url);File target=destination(destination);
   if(url.length()>16384||title!=null&&title.length()>4096||mime!=null&&mime.length()>1024||headers.size()>64)throw new IllegalArgumentException("Download request limit");
   Properties p=new Properties();p.setProperty("description",description);p.setProperty("visibility",Integer.toString(visibility));p.setProperty("url",url);p.setProperty("destination",target.getPath());p.setProperty("title",title==null?"":title);p.setProperty("mime",mime==null?"":mime);p.setProperty("status",Integer.toString(PENDING));
+  Objects.requireNonNull(policy).write(p);
   int headerBytes=0;int index=0;for(Map.Entry<String,String> entry:headers.entrySet()){
    String key=entry.getKey(),value=entry.getValue();if(key==null||value==null||!key.matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+")||value.indexOf('\r')>=0||value.indexOf('\n')>=0||key.length()>256||value.length()>4096)throw new IllegalArgumentException("Download header");
    headerBytes+=key.length()+value.length();if(headerBytes>60000)throw new IllegalArgumentException("Download header limit");
@@ -86,6 +100,25 @@ public final class HostDownloads implements AutoCloseable {
   synchronized(this){notifyAll();}return true;
  }
  private void check(long id)throws IOException{if(closed||cancelled(id).exists())throw new InterruptedIOException("Download cancelled or queue closed");}
+ private void watchCancellation(){
+  while(true){
+   HttpURLConnection connection;DownloadNetworkPolicy policy;boolean interrupt;
+   synchronized(this){
+    if(active==null){if(closed)return;try{wait(250);}catch(InterruptedException ignored){}continue;}
+    connection=active;policy=activePolicy;interrupt=closed||cancelled(activeId).exists();
+   }
+   int pause=interrupt?0:policy.pauseReason(network);
+   synchronized(this){
+    if(active!=connection)continue;
+    if(pause!=0&&activePauseReason==0)activePauseReason=pause;
+    interrupt=interrupt||activePauseReason!=0;
+   }
+   // Never hold queue state or an application thread while a transport closes.
+   // The transfer worker retains ownership of publication and partial cleanup.
+   if(interrupt)try{connection.disconnect();}catch(RuntimeException error){System.err.println("SHIRAZ_DOWNLOAD_CANCEL_ERROR "+error.getClass().getSimpleName());}
+   synchronized(this){if(active==connection)try{wait(250);}catch(InterruptedException ignored){}}
+  }
+ }
  private void work(){
   while(!closed){
    try(RandomAccessFile file=new RandomAccessFile(new File(directory,"worker.lock"),"rw");FileChannel channel=file.getChannel()){
@@ -94,7 +127,7 @@ public final class HostDownloads implements AutoCloseable {
      String[] files=directory.list();if(files==null)throw new IOException("Download queue unavailable");
      for(String name:files){if(closed)break;if(!name.matches("[0-9]+\\.properties"))continue;long id=Long.parseLong(name.substring(0,name.indexOf('.')));Properties p=load(id);if(p==null)continue;
       if(cancelled(id).exists()){cleanup(id,p);continue;}
-      int status=Integer.parseInt(p.getProperty("status"));if(status==PENDING||status==RUNNING)download(id,p);
+      int status=Integer.parseInt(p.getProperty("status"));if(status==PENDING||status==RUNNING||status==PAUSED)download(id,p);
      }
     }finally{lock.release();}
    }catch(IOException|RuntimeException error){System.err.println("SHIRAZ_DOWNLOAD_QUEUE_ERROR "+error.getClass().getSimpleName());}
@@ -124,38 +157,46 @@ public final class HostDownloads implements AutoCloseable {
     Files.delete(previous);
    }
    if(target.exists()){reason=ERROR_EXISTS;throw new IOException("Destination exists");}
+   checkNetwork(p);
    Files.createDirectories(target.getParentFile().toPath());target=destination(target);
    part=Files.createTempFile(target.getParentFile().toPath(),".shiraz-download-",".part",PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
    p.setProperty("partial",part.toString());
-   p.setProperty("status",Integer.toString(RUNNING));p.setProperty("bytes","0");save(id,p);audit(id,"started");
+   p.setProperty("status",Integer.toString(RUNNING));p.setProperty("reason","0");p.setProperty("bytes","0");save(id,p);audit(id,"started");
    URL initial=address(p.getProperty("url")),current=initial;
    for(int redirects=0;;redirects++){
-    check(id);connection=(HttpURLConnection)current.openConnection();active=connection;connection.setConnectTimeout(15000);connection.setReadTimeout(15000);connection.setInstanceFollowRedirects(false);
+    check(id);checkNetwork(p);connection=(HttpURLConnection)current.openConnection();DownloadNetworkPolicy policy=DownloadNetworkPolicy.read(p);synchronized(this){check(id);if(activePauseReason!=0)throw new NetworkPaused(activePauseReason);activeId=id;activePolicy=policy;active=connection;notifyAll();}connection.setConnectTimeout(15000);connection.setReadTimeout(15000);connection.setInstanceFollowRedirects(false);
     connection.setRequestProperty("Accept-Encoding","identity");
     if(initial.getProtocol().equals(current.getProtocol())&&initial.getAuthority().equals(current.getAuthority()))for(int i=0;i<Integer.parseInt(p.getProperty("headers","0"));i++)connection.setRequestProperty(p.getProperty("header."+i+".name"),p.getProperty("header."+i+".value"));
-    int status=connection.getResponseCode();
+    int status;try{status=connection.getResponseCode();}catch(IOException error){checkNetwork(p);throw error;}
     if(status==301||status==302||status==303||status==307||status==308){String location=connection.getHeaderField("Location");connection.disconnect();if(redirects>=5||location==null){reason=ERROR_TOO_MANY_REDIRECTS;throw new IOException("Redirect limit");}URL next=address(new URL(current,location).toString());if("https".equals(current.getProtocol())&&!"https".equals(next.getProtocol()))throw new IOException("Insecure redirect");current=next;continue;}
     if(status!=200){reason=status>=400&&status<=599?status:ERROR_HTTP;throw new IOException("HTTP response");}break;
    }
    long total=connection.getContentLengthLong();if(total>MAX_BYTES){reason=ERROR_HTTP;throw new IOException("Download size limit");}p.setProperty("total",Long.toString(total));
    if(p.getProperty("mime","").isEmpty()&&connection.getContentType()!=null)p.setProperty("mime",connection.getContentType());
    long count=0,last=0;byte[] buffer=new byte[65536];
-   try(InputStream in=connection.getInputStream();FileOutputStream out=new FileOutputStream(part.toFile())){
-    for(int n;(n=in.read(buffer))!=-1;){check(id);count+=n;if(count>MAX_BYTES){reason=ERROR_HTTP;throw new IOException("Download size limit");}out.write(buffer,0,n);p.setProperty("bytes",Long.toString(count));long now=System.currentTimeMillis();if(now-last>=500){save(id,p);last=now;}}
+   InputStream input;try{input=connection.getInputStream();}catch(IOException error){checkNetwork(p);throw error;}
+   try(InputStream in=input;FileOutputStream out=new FileOutputStream(part.toFile())){
+    while(true){check(id);checkNetwork(p);int n;try{n=in.read(buffer);}catch(IOException error){checkNetwork(p);throw error;}if(n==-1){checkNetwork(p);break;}check(id);count+=n;if(count>MAX_BYTES){reason=ERROR_HTTP;throw new IOException("Download size limit");}out.write(buffer,0,n);p.setProperty("bytes",Long.toString(count));long now=System.currentTimeMillis();if(now-last>=500){save(id,p);last=now;}}
     out.getFD().sync();
    }
-   if(total>=0&&count!=total){reason=ERROR_HTTP;throw new IOException("Truncated response");}check(id);
+   if(total>=0&&count!=total){reason=ERROR_HTTP;throw new IOException("Truncated response");}check(id);checkNetwork(p);
    // Hard-link publication is atomic, stays on the destination filesystem, and cannot overwrite another file.
    Files.createLink(target.toPath(),part);
    p.setProperty("status",Integer.toString(SUCCESSFUL));p.setProperty("reason","0");save(id,p);Files.delete(part);part=null;audit(id,"completed");
   }catch(IOException|RuntimeException error){
    if(cancelled(id).exists()){cleanup(id,p);return;}
    if(closed){p.setProperty("status",Integer.toString(PENDING));p.setProperty("bytes","0");save(id,p);return;}
+   if(error instanceof NetworkPaused){int paused=((NetworkPaused)error).reason;
+    if(!Integer.toString(PAUSED).equals(p.getProperty("status"))||!Integer.toString(paused).equals(p.getProperty("reason"))){p.setProperty("status",Integer.toString(PAUSED));p.setProperty("reason",Integer.toString(paused));p.setProperty("bytes","0");save(id,p);}
+    return;
+   }
    if(error instanceof FileAlreadyExistsException)reason=ERROR_EXISTS;
    p.setProperty("status",Integer.toString(FAILED));p.setProperty("reason",Integer.toString(reason));save(id,p);audit(id,"failed");
-  }finally{active=null;if(connection!=null)connection.disconnect();if(part!=null)Files.deleteIfExists(part);}
+  }finally{synchronized(this){active=null;activeId=0;activePolicy=null;activePauseReason=0;notifyAll();}if(connection!=null)connection.disconnect();if(part!=null)Files.deleteIfExists(part);}
   if(cancelled(id).exists()){cleanup(id,p);return;}
   if(listener!=null)try{listener.finished(new Record(id,p));}catch(RuntimeException error){System.err.println("SHIRAZ_DOWNLOAD_COMPLETION_ERROR "+error.getClass().getSimpleName());}
  }
- public void close(){closed=true;HttpURLConnection connection=active;if(connection!=null)connection.disconnect();synchronized(this){notifyAll();}if(Thread.currentThread()!=worker)try{worker.join(20000);}catch(InterruptedException error){Thread.currentThread().interrupt();}}
+ private static final class NetworkPaused extends IOException{final int reason;NetworkPaused(int reason){this.reason=reason;}}
+ private void checkNetwork(Properties p)throws NetworkPaused{int reason=activePauseReason;if(reason==0)reason=DownloadNetworkPolicy.read(p).pauseReason(network);if(reason!=0)throw new NetworkPaused(reason);}
+ public void close(){closed=true;synchronized(this){notifyAll();}if(Thread.currentThread()!=worker)try{worker.join(20000);cancellationWorker.join(1000);}catch(InterruptedException error){Thread.currentThread().interrupt();}}
 }

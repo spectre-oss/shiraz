@@ -7,6 +7,7 @@ import android.graphics.drawable.*;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.animation.*;
+import android.view.animation.Interpolator;
 import android.animation.ValueAnimator;
 
 /** Drawable-backed progress with bounded host-frame indeterminate animation. */

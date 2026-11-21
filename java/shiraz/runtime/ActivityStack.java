@@ -11,13 +11,17 @@ public final class ActivityStack implements AutoCloseable {
  private final Thread owner=Thread.currentThread();
  private final Factory factory;
  private final ArrayList<ActivityLifecycle> entries=new ArrayList<ActivityLifecycle>();
- private boolean closed,transition;
+ private boolean closed,transition,visible=true;
  public ActivityStack(Factory factory){this(factory,new Activation(){public void prepare(ActivityLifecycle lifecycle){}});}
  public ActivityStack(Factory factory,Activation activation){if(activation==null)throw new NullPointerException("activation");this.activation=activation;if(factory==null)throw new NullPointerException("factory");this.factory=factory;}
  private void thread(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Activity stack requires its owner thread");}
  private void enter(){thread();if(closed||transition)throw new IllegalStateException("Activity stack is closed or transitioning");transition=true;}
  public Activity current(){thread();return entries.isEmpty()?null:entries.get(entries.size()-1).current();}
  public ActivityLifecycle currentLifecycle(){thread();if(entries.isEmpty())throw new IllegalStateException("Empty activity stack");return entries.get(entries.size()-1);}
+ public void setVisible(boolean value){
+  enter();try{if(visible==value)return;visible=value;if(!entries.isEmpty()){ActivityLifecycle top=currentLifecycle();top.setVisible(value);if(value&&!top.current().isFinishing())top.resumeFromBackStack();}}finally{transition=false;}
+ }
+ private void prepare(ActivityLifecycle life){activation.prepare(life);life.setVisible(visible);}
  public int size(){thread();return entries.size();}
  public void launch(Intent intent){launch(intent,android.content.pm.ActivityInfo.LAUNCH_MULTIPLE);}
  public void launch(Intent intent,int mode){
@@ -31,6 +35,10 @@ public final class ActivityStack implements AutoCloseable {
    // Reject non-root forwarding until result ownership is tracked per launch.
    if((snapshot.getFlags()&Intent.FLAG_ACTIVITY_FORWARD_RESULT)!=0&&entries.size()>1)
     throw new UnsupportedOperationException("Forwarding a non-root activity result is not implemented");
+   // CLEAR_TASK takes effect only with NEW_TASK. Clear even a retained root;
+   // the incoming activity becomes a new root rather than receiving onNewIntent.
+   int clearFlags=Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK;
+   if((snapshot.getFlags()&clearFlags)==clearFlags)clearEntries();
    boolean reorder=(snapshot.getFlags()&Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)!=0&&mode!=2;
    if(reorder&&snapshot.getComponent()==null)throw new IllegalArgumentException("Reordering requires a resolved component");
    boolean clearTop=(snapshot.getFlags()&Intent.FLAG_ACTIVITY_CLEAR_TOP)!=0&&!reorder&&snapshot.getComponent()!=null;
@@ -46,9 +54,9 @@ public final class ActivityStack implements AutoCloseable {
    }
    if(reuse>=0){
     ActivityLifecycle target=entries.get(reuse),oldTop=currentLifecycle();oldTop.pauseForLaunch();
-    if(reorder){entries.remove(reuse);entries.add(target);target.newIntent(snapshot);activation.prepare(target);target.resumeFromBackStack();if(oldTop!=target)oldTop.stopCovered();return;}
+    if(reorder){entries.remove(reuse);entries.add(target);target.newIntent(snapshot);prepare(target);target.resumeFromBackStack();if(oldTop!=target)oldTop.stopCovered();return;}
     while(entries.size()>reuse+1){ActivityLifecycle removed=entries.remove(entries.size()-1);removed.close();}
-    target.newIntent(snapshot);activation.prepare(target);target.resumeFromBackStack();return;
+    target.newIntent(snapshot);prepare(target);target.resumeFromBackStack();return;
    }
    if(entries.size()>=32)throw new IllegalStateException("Activity stack limit");
    ActivityLifecycle old=entries.isEmpty()?null:entries.get(entries.size()-1),next=null;
@@ -57,7 +65,7 @@ public final class ActivityStack implements AutoCloseable {
     next=factory.create(snapshot);if(next==null)throw new IllegalStateException("Activity factory returned null lifecycle");
     final ActivityLifecycle candidate=next;
     next.setTaskRootQuery(new java.util.function.BooleanSupplier(){public boolean getAsBoolean(){return !closed&&(entries.isEmpty()||entries.get(0)==candidate);}});
-    next.start();
+    next.start(visible);
    }catch(RuntimeException|Error failure){
     if(next!=null)try{next.close();}catch(RuntimeException|Error cleanup){if(cleanup!=failure)failure.addSuppressed(cleanup);}
     if(old!=null&&!old.current().isFinishing())try{old.resumeFromBackStack();}catch(RuntimeException|Error restore){if(restore!=failure)failure.addSuppressed(restore);}
@@ -77,10 +85,18 @@ public final class ActivityStack implements AutoCloseable {
     while(!entries.isEmpty()&&current().isFinishing()){
      ActivityLifecycle finished=entries.remove(entries.size()-1);finished.close();
     }
-    if(!entries.isEmpty()){activation.prepare(currentLifecycle());currentLifecycle().current().shirazDeliverResult(resultCode,resultData);currentLifecycle().resumeFromBackStack();}
+    if(!entries.isEmpty()){prepare(currentLifecycle());currentLifecycle().current().shirazDeliverResult(resultCode,resultData);currentLifecycle().resumeFromBackStack();}
    }finally{top.close();}
    return true;
   }finally{transition=false;}
+ }
+ private void clearEntries(){
+  Throwable first=null;
+  while(!entries.isEmpty()){
+   ActivityLifecycle life=entries.remove(entries.size()-1);
+   try{life.close();}catch(RuntimeException|Error failure){if(first==null)first=failure;else if(first!=failure)first.addSuppressed(failure);}
+  }
+  if(first instanceof Error)throw (Error)first;if(first!=null)throw (RuntimeException)first;
  }
  public void close(){
   thread();if(closed)return;if(transition)throw new IllegalStateException("Activity stack is transitioning");closed=true;transition=true;Throwable first=null;

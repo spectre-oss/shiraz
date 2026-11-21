@@ -8,7 +8,7 @@ import shiraz.runtime.DialogOverlay;
 public class Dialog implements DialogInterface,KeyEvent.Callback,Window.Callback {
  private final Context context;private final Handler handler;private final Window window;private View content;private ViewGroup.LayoutParams params=new ViewGroup.LayoutParams(-2,-2);
  private boolean created,started,hidden,canceled,cancelable=true,outside,contentGesture;private Activity owner;
- private OnCancelListener cancelListener;private OnDismissListener dismissListener;private OnShowListener showListener;private OnKeyListener keyListener;
+ private OnCancelListener cancelListener;private OnDismissListener dismissListener;private Message cancelMessage,dismissMessage;private OnShowListener showListener;private OnKeyListener keyListener;
  private final KeyEvent.DispatcherState keyState=new KeyEvent.DispatcherState();
  public Dialog(Context context){this(context,0);}
  static int defaultTheme(Context context,int theme,int attribute){
@@ -53,10 +53,12 @@ public class Dialog implements DialogInterface,KeyEvent.Callback,Window.Callback
  /** Host-owned consent windows opt into Android dialog entrance motion. */
  public boolean shirazAnimateEntrance(){return false;}
  public boolean isShowing(){return started&&!hidden;}
- public void dismiss(){if(Looper.myLooper()!=Looper.getMainLooper()){handler.post(new Runnable(){public void run(){dismiss();}});return;}DialogOverlay.requireMain();if(!started)return;try{DialogOverlay.remove(this);}finally{started=false;hidden=false;keyState.reset();try{onStop();}finally{final OnDismissListener listener=dismissListener;if(listener!=null)handler.post(new Runnable(){public void run(){listener.onDismiss(Dialog.this);}});}}}
- public void cancel(){if(Looper.myLooper()!=Looper.getMainLooper()){handler.post(new Runnable(){public void run(){cancel();}});return;}DialogOverlay.requireMain();if(!canceled){canceled=true;final OnCancelListener listener=cancelListener;if(listener!=null)handler.post(new Runnable(){public void run(){listener.onCancel(Dialog.this);}});}dismiss();}
+ public void dismiss(){if(Looper.myLooper()!=Looper.getMainLooper()){handler.post(new Runnable(){public void run(){dismiss();}});return;}DialogOverlay.requireMain();if(!started)return;try{DialogOverlay.remove(this);}finally{started=false;hidden=false;keyState.reset();try{onStop();}finally{final OnDismissListener listener=dismissListener;if(listener!=null)handler.post(new Runnable(){public void run(){listener.onDismiss(Dialog.this);}});else if(dismissMessage!=null)Message.obtain(dismissMessage).sendToTarget();}}}
+ public void cancel(){if(Looper.myLooper()!=Looper.getMainLooper()){handler.post(new Runnable(){public void run(){cancel();}});return;}DialogOverlay.requireMain();if(!canceled){canceled=true;final OnCancelListener listener=cancelListener;if(listener!=null)handler.post(new Runnable(){public void run(){listener.onCancel(Dialog.this);}});else if(cancelMessage!=null)Message.obtain(cancelMessage).sendToTarget();}dismiss();}
  public void setCancelable(boolean value){cancelable=value;}public void setCanceledOnTouchOutside(boolean value){outside=value;if(value)cancelable=true;}
- public void setOnCancelListener(OnCancelListener listener){cancelListener=listener;}public void setOnDismissListener(OnDismissListener listener){dismissListener=listener;}public void setOnShowListener(OnShowListener listener){showListener=listener;}public void setOnKeyListener(OnKeyListener listener){keyListener=listener;}
+ public void setOnCancelListener(OnCancelListener listener){cancelListener=listener;cancelMessage=null;}public void setOnDismissListener(OnDismissListener listener){dismissListener=listener;dismissMessage=null;}
+ /** As in AOSP, a message replaces the listener slot: a copy is sent to its target on cancel/dismiss; null clears both. */
+ public void setCancelMessage(Message msg){cancelMessage=msg;cancelListener=null;}public void setDismissMessage(Message msg){dismissMessage=msg;dismissListener=null;}public void setOnShowListener(OnShowListener listener){showListener=listener;}public void setOnKeyListener(OnKeyListener listener){keyListener=listener;}
  public boolean dispatchTouchEvent(MotionEvent event){
   if(event==null)throw new NullPointerException("event");int action=event.getActionMasked();
   if(action==MotionEvent.ACTION_DOWN)contentGesture=content!=null&&event.getX()>=0&&event.getY()>=0&&event.getX()<content.getWidth()&&event.getY()<content.getHeight();

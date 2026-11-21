@@ -4,11 +4,65 @@ import android.os.Looper;
 import android.os.SystemClock;
 import java.util.ArrayList;
 
-/** API 27 callback phases driven by the host presentation loop, not Android display vsync. */
+/** API 35 callback phases driven by the host presentation loop, not Android display vsync. */
 public final class Choreographer {
-    public interface FrameCallback {void doFrame(long frameTimeNanos);}
+    public interface FrameCallback { void doFrame(long frameTimeNanos); }
+    public interface VsyncCallback { void onVsync(FrameData data); }
+
+    public static class FrameTimeline {
+        private final long mVsyncId;
+        private final long mExpectedPresentationTimeNanos;
+        private final long mDeadlineNanos;
+
+        FrameTimeline(long vsyncId, long expectedPresentationTimeNanos, long deadlineNanos) {
+            mVsyncId = vsyncId;
+            mExpectedPresentationTimeNanos = expectedPresentationTimeNanos;
+            mDeadlineNanos = deadlineNanos;
+        }
+
+        public long getVsyncId() {
+            return mVsyncId;
+        }
+
+        public long getExpectedPresentationTimeNanos() {
+            return mExpectedPresentationTimeNanos;
+        }
+
+        public long getDeadlineNanos() {
+            return mDeadlineNanos;
+        }
+    }
+
+    public static class FrameData {
+        private final long mFrameTimeNanos;
+        private final FrameTimeline[] mFrameTimelines;
+        private final int mPreferredFrameTimelineIndex;
+
+        FrameData(long frameTimeNanos, FrameTimeline[] timelines, int preferredIndex) {
+            mFrameTimeNanos = frameTimeNanos;
+            mFrameTimelines = timelines;
+            mPreferredFrameTimelineIndex = preferredIndex;
+        }
+
+        public long getFrameTimeNanos() {
+            return mFrameTimeNanos;
+        }
+
+        public FrameTimeline[] getFrameTimelines() {
+            return mFrameTimelines;
+        }
+
+        public FrameTimeline getPreferredFrameTimeline() {
+            return mFrameTimelines[mPreferredFrameTimelineIndex];
+        }
+    }
+
     public static final int CALLBACK_INPUT=0,CALLBACK_ANIMATION=1,CALLBACK_TRAVERSAL=2,CALLBACK_COMMIT=3;
     private static final Object FRAME_TOKEN=new Object();
+    private static final Object VSYNC_TOKEN=new Object();
+    private static final long DEFAULT_FRAME_INTERVAL_NANOS = 16666667L;
+    private static final java.util.concurrent.atomic.AtomicLong NEXT_VSYNC_ID =
+            new java.util.concurrent.atomic.AtomicLong(1L);
     private static final ThreadLocal<Choreographer> LOCAL=new ThreadLocal<Choreographer>();
     private final Looper looper;
     private final ArrayList<Entry> queue=new ArrayList<Entry>();
@@ -38,6 +92,14 @@ public final class Choreographer {
         if(timerPending)timer.removeCallbacks(pulse);
         timerDue=due;timerPending=timer.postAtTime(pulse,due);
     }
+    public void postVsyncCallback(VsyncCallback callback){
+        if(callback==null)throw new IllegalArgumentException("callback must not be null");
+        add(CALLBACK_ANIMATION,callback,VSYNC_TOKEN,0);
+    }
+    public void removeVsyncCallback(VsyncCallback callback){
+        if(callback==null)throw new IllegalArgumentException("callback must not be null");
+        removeCallbacks(CALLBACK_ANIMATION,callback,VSYNC_TOKEN);
+    }
     public void postFrameCallback(FrameCallback callback){postFrameCallbackDelayed(callback,0);}
     public void postFrameCallbackDelayed(FrameCallback callback,long delayMillis){add(CALLBACK_ANIMATION,callback,FRAME_TOKEN,delayMillis);}
     public void removeFrameCallback(FrameCallback callback){if(callback==null)throw new IllegalArgumentException("callback");removeCallbacks(CALLBACK_ANIMATION,callback,FRAME_TOKEN);}
@@ -51,7 +113,24 @@ public final class Choreographer {
     private void dispatch(int type){
         ArrayList<Entry> batch=null;synchronized(this){long now=SystemClock.uptimeMillis();for(int i=0;i<queue.size();){Entry e=queue.get(i);if(e.due>now)break;if(e.phase==type){if(batch==null)batch=new ArrayList<Entry>();batch.add(e);queue.remove(i);}else i++;}}
         if(batch==null)return;
-        for(Entry e:batch){synchronized(this){if(closed)return;}if(e.token==FRAME_TOKEN)((FrameCallback)e.action).doFrame(mLastFrameTimeNanos);else ((Runnable)e.action).run();}
+        FrameData frameData=null;
+        for(Entry e:batch){
+            synchronized(this){if(closed)return;}
+            if(e.token==FRAME_TOKEN){
+                ((FrameCallback)e.action).doFrame(mLastFrameTimeNanos);
+            }else if(e.token==VSYNC_TOKEN){
+                if(frameData==null){
+                    FrameTimeline timeline=new FrameTimeline(
+                            NEXT_VSYNC_ID.getAndIncrement(),
+                            mLastFrameTimeNanos+DEFAULT_FRAME_INTERVAL_NANOS,
+                            mLastFrameTimeNanos+DEFAULT_FRAME_INTERVAL_NANOS);
+                    frameData=new FrameData(mLastFrameTimeNanos,new FrameTimeline[]{timeline},0);
+                }
+                ((VsyncCallback)e.action).onVsync(frameData);
+            }else{
+                ((Runnable)e.action).run();
+            }
+        }
     }
     public void shirazDoFrame(long timeNanos,Runnable traversal){
         if(!looper.isCurrentThread())throw new IllegalStateException("Frame must run on its owning thread");

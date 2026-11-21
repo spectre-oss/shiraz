@@ -52,15 +52,59 @@ public final class PlaybackState implements Parcelable {
  public CharSequence getErrorMessage(){return b.error;}
  public Bundle getExtras(){return b.extras==null?null:new Bundle(b.extras);}
  public List<CustomAction> getCustomActions(){return Collections.unmodifiableList(b.custom);}
+ public boolean isActive(){
+  switch(b.state){
+   case STATE_PLAYING:
+   case STATE_FAST_FORWARDING:
+   case STATE_REWINDING:
+   case STATE_BUFFERING:
+   case STATE_SKIPPING_TO_PREVIOUS:
+   case STATE_SKIPPING_TO_NEXT:
+   case STATE_SKIPPING_TO_QUEUE_ITEM:
+   case STATE_CONNECTING:
+    return true;
+   default:
+    return false;
+  }
+ }
+ @Override public String toString(){
+  return "PlaybackState {state="+b.state+", position="+b.position+", buffered position="+b.buffered+", speed="+b.speed+", updated="+b.updated+", actions="+b.actions+", custom actions="+b.custom+", active item id="+b.queueId+", error="+b.error+"}";
+ }
  public int describeContents(){return 0;}
- public void writeToParcel(Parcel out,int flags){throw new UnsupportedOperationException("PlaybackState IPC");}
+ public void writeToParcel(Parcel out,int flags){
+  out.writeInt(b.state);
+  out.writeLong(b.position);
+  out.writeFloat(b.speed);
+  out.writeLong(b.updated);
+  out.writeLong(b.buffered);
+  out.writeLong(b.actions);
+  out.writeInt(b.custom.size());
+  for(int i=0;i<b.custom.size();i++) b.custom.get(i).writeToParcel(out,flags);
+  out.writeLong(b.queueId);
+  out.writeString(b.error);
+  out.writeBundle(b.extras);
+ }
  public static final Parcelable.Creator<PlaybackState> CREATOR=new Parcelable.Creator<PlaybackState>(){
-  public PlaybackState createFromParcel(Parcel in){throw new UnsupportedOperationException("PlaybackState IPC");}
+  public PlaybackState createFromParcel(Parcel in){
+   Builder builder=new Builder();
+   builder.state=in.readInt();
+   builder.position=in.readLong();
+   builder.speed=in.readFloat();
+   builder.updated=in.readLong();
+   builder.buffered=in.readLong();
+   builder.actions=in.readLong();
+   int count=Math.max(0,in.readInt());
+   for(int i=0;i<count;i++) builder.custom.add(CustomAction.CREATOR.createFromParcel(in));
+   builder.queueId=in.readLong();
+   builder.error=in.readString();
+   builder.extras=in.readBundle();
+   return new PlaybackState(builder);
+  }
   public PlaybackState[] newArray(int n){return new PlaybackState[n];}
  };
  public static final class Builder {
   int state;long position,updated,buffered,actions,queueId=-1;float speed;String error;Bundle extras;
-  final ArrayList<CustomAction> custom=new ArrayList<>();
+  final ArrayList<CustomAction> custom=new ArrayList<CustomAction>();
   public Builder(){}
   public Builder(PlaybackState source){this(source.b);}
   private Builder(Builder source){state=source.state;position=source.position;updated=source.updated;buffered=source.buffered;actions=source.actions;queueId=source.queueId;speed=source.speed;error=source.error;extras=source.extras==null?null:new Bundle(source.extras);custom.addAll(source.custom);}
@@ -78,9 +122,12 @@ public final class PlaybackState implements Parcelable {
  public static final class CustomAction implements Parcelable {
   private final String action,name;private final int icon;private final Bundle extras;
   private CustomAction(Builder b){action=b.action;name=b.name;icon=b.icon;extras=b.extras==null?null:new Bundle(b.extras);}
+  private CustomAction(String action,String name,int icon,Bundle extras){this.action=action;this.name=name;this.icon=icon;this.extras=extras;}
   public String getAction(){return action;}public CharSequence getName(){return name;}public int getIcon(){return icon;}public Bundle getExtras(){return extras==null?null:new Bundle(extras);}
-  public int describeContents(){return 0;}public void writeToParcel(Parcel p,int flags){throw new UnsupportedOperationException("CustomAction IPC");}
-  public static final Parcelable.Creator<CustomAction> CREATOR=new Parcelable.Creator<CustomAction>(){public CustomAction createFromParcel(Parcel p){throw new UnsupportedOperationException("CustomAction IPC");}public CustomAction[] newArray(int n){return new CustomAction[n];}};
+  @Override public String toString(){return "Action:mName='"+name+", mIcon="+icon+", mExtras="+extras;}
+  public int describeContents(){return 0;}
+  public void writeToParcel(Parcel p,int flags){p.writeString(action);p.writeString(name);p.writeInt(icon);p.writeBundle(extras);}
+  public static final Parcelable.Creator<CustomAction> CREATOR=new Parcelable.Creator<CustomAction>(){public CustomAction createFromParcel(Parcel p){return new CustomAction(p.readString(),p.readString(),p.readInt(),p.readBundle());}public CustomAction[] newArray(int n){return new CustomAction[n];}};
   public static final class Builder {
    final String action,name;final int icon;Bundle extras;
    public Builder(String action,CharSequence name,int icon){if(action==null||action.isEmpty()||name==null||name.length()==0||icon==0)throw new IllegalArgumentException("custom action");this.action=action;this.name=name.toString();this.icon=icon;}

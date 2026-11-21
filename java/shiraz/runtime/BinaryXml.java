@@ -97,10 +97,19 @@ public final class BinaryXml {
                     if (first < 20 || stride < 20 || count > 64 || (attributes+=count) > 65536) throw bad();
                     range(at+16+first,(long)stride*count,end);
                     for (int i=0;i<count;i++) {
-                        int pos=at+16+first+i*stride;int nameIndex=i32(pos+4,end); String ns=string(i32(pos,end)),key=name(nameIndex); int raw=i32(pos+8,end); string(raw);
+                        int pos=at+16+first+i*stride;int nameIndex=i32(pos+4,end);
+                        if(nameIndex<0)throw bad();
+                        String ns=string(i32(pos,end)),key=string(nameIndex);
+                        if(key.indexOf('\0')>=0)throw bad();
+                        int ident=resourceIds!=null&&nameIndex<resourceIds.length?resourceIds[nameIndex]:0;
+                        // Android consumers identify compiled attributes by resource ID even
+                        // when optimizers remove their name and namespace strings.
+                        if((ident>>>24)==1){String known=FrameworkAttributeNames.name(ident);ns=ANDROID;if(known!=null)key=known;}
+                        if(key.isEmpty()){if(ident==0)throw bad();key="@0x"+Integer.toHexString(ident);}
+                        int raw=i32(pos+8,end); string(raw);
                         if (u16(pos+12,end) != 8 || bytes[pos+14] != 0) throw bad(); int type=bytes[pos+15]&255,data=i32(pos+16,end);
-                        for (Attribute old:node.attributes) if (old.namespace.equals(ns) && old.name.equals(key)) throw bad();
-                        node.attributes.add(new Attribute(ns,key,new Value(type,data,type == 3 ? string(data) : raw == -1 ? null : string(raw)),resourceIds!=null&&nameIndex<resourceIds.length?resourceIds[nameIndex]:0));
+                        for (Attribute old:node.attributes) if ((ident!=0&&old.resourceId==ident)||(old.namespace.equals(ns) && old.name.equals(key))) throw bad();
+                        node.attributes.add(new Attribute(ns,key,new Value(type,data,type == 3 ? string(data) : raw == -1 ? null : string(raw)),ident));
                     }
                     if (stack.isEmpty()) { if (root != null) throw bad(); root=node; } else { Node parent=stack.get(stack.size()-1);parent.children.add(node);parent.content.add(node); } stack.add(node);
                 } else if (kind == 0x103) {

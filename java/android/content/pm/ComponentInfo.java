@@ -4,6 +4,7 @@ package android.content.pm;
 public class ComponentInfo extends PackageItemInfo {
  public ApplicationInfo applicationInfo;
  public String processName;
+ public int descriptionRes;
  public boolean enabled=true,exported,directBootAware;
  public boolean isEnabled(){return enabled&&applicationInfo!=null&&applicationInfo.enabled;}
  @Override protected ApplicationInfo getApplicationInfo(){return applicationInfo;}

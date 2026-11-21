@@ -11,9 +11,27 @@ public final class ViewDiagnostics {
  private static final boolean TRACE="1".equals(System.getenv("SHIRAZ_TRACE_INPUT"));
  private static final boolean DRAW_TRACE="1".equals(System.getenv("SHIRAZ_TRACE_FRAMES"));
  private static int draws,layoutRequests;
+ private static final boolean MEASURE_TRACE="1".equals(System.getenv("SHIRAZ_TRACE_PREDRAW"));
+ private static int measures;
+ public static long measureStart(){return MEASURE_TRACE?System.nanoTime():0;}
+ public static synchronized void measureEnd(View view,long start,int widthSpec,int heightSpec){
+  if(!MEASURE_TRACE||measures>=256)return;
+  long elapsed=System.nanoTime()-start;if(elapsed<10000000)return;
+  measures++;System.err.println("SHIRAZ_VIEW_MEASURE class="+view.getClass().getName()+" id="+Integer.toHexString(view.getId())+" widthSpec="+widthSpec+" heightSpec="+heightSpec+" elapsed_us="+elapsed/1000);
+ }
+
+ private static final boolean LAYOUT_TRACE="1".equals(System.getenv("SHIRAZ_TRACE_LAYOUT_REQUESTS"));
+ private static int tracedLayoutRequests;
  private static boolean layoutPass;
  public static void layoutPass(boolean active){if(DRAW_TRACE)layoutPass=active;}
  public static void layoutRequest(View view){
+  if(LAYOUT_TRACE&&events>0&&tracedLayoutRequests<256&&view.isAttachedToWindow()){
+   StackTraceElement[] callers=new Throwable().getStackTrace();
+   if(callers.length>2&&!(callers[2].getClassName().equals("android.view.View")&&callers[2].getMethodName().equals("requestLayout"))){
+    tracedLayoutRequests++;StringBuilder trace=new StringBuilder();for(int i=2;i<Math.min(10,callers.length);i++)trace.append(" <- ").append(callers[i]);
+    System.err.println("SHIRAZ_LAYOUT_ORIGIN uptime="+android.os.SystemClock.uptimeMillis()+" class="+view.getClass().getName()+" id="+Integer.toHexString(view.getId())+trace);
+   }
+  }
   if(!DRAW_TRACE||!layoutPass||layoutRequests>=64||!view.isAttachedToWindow())return;
   StackTraceElement[] stack=new Throwable().getStackTrace();
   if(stack.length<3||stack[2].getClassName().equals("android.view.View")&&stack[2].getMethodName().equals("requestLayout"))return;
@@ -54,7 +72,7 @@ public final class ViewDiagnostics {
   if(seen.containsKey(view)){out.println("SHIRAZ_VIEW_TREE_REPEATED");return;}
   int index=seen.size();seen.put(view,index);String name=view.getClass().getName();if(name.length()>256)name=name.substring(0,256);
   out.println("SHIRAZ_VIEW "+index+" parent="+parent+" class="+name+" id="+Integer.toHexString(view.getId())+
-   " bounds="+view.getLeft()+","+view.getTop()+","+view.getRight()+","+view.getBottom()+" visibility="+view.getVisibility()+
+   " bounds="+view.getLeft()+","+view.getTop()+","+view.getRight()+","+view.getBottom()+" padding="+view.getPaddingLeft()+","+view.getPaddingTop()+","+view.getPaddingRight()+","+view.getPaddingBottom()+" visibility="+view.getVisibility()+
    " overlayDrawables="+view.shirazOverlayDrawableCount()+" alpha="+view.getAlpha()+" translation="+view.getTranslationX()+","+view.getTranslationY()+" scroll="+view.getScrollX()+","+view.getScrollY()+
    " clickable="+view.isClickable()+" enabled="+view.isEnabled()+
    " focused="+view.isFocused()+" focusable="+view.isFocusable()+" touchFocusable="+view.isFocusableInTouchMode()+

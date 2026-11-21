@@ -12,8 +12,11 @@ public abstract class Service extends ContextWrapper implements ComponentCallbac
  public void onCreate(){}public void onStart(Intent intent,int startId){}
  public int onStartCommand(Intent intent,int flags,int startId){onStart(intent,startId);return getApplicationInfo().targetSdkVersion<5?START_STICKY_COMPATIBILITY:START_STICKY;}
  public void onDestroy(){}public abstract IBinder onBind(Intent intent);public boolean onUnbind(Intent intent){return false;}public void onRebind(Intent intent){}public void onTaskRemoved(Intent rootIntent){}
+ protected void dump(java.io.FileDescriptor fd,java.io.PrintWriter writer,String[] args){}
  public void onConfigurationChanged(android.content.res.Configuration config){}public void onLowMemory(){}public void onTrimMemory(int level){}
  public final void startForeground(int id,Notification notification){requireHost().promote(this,id,notification);}
+ public final void startForeground(int id,Notification notification,int foregroundServiceType){requireHost().promote(this,id,notification,foregroundServiceType);}
+ public final int getForegroundServiceType(){return requireHost().foregroundType(this);}
  public final void stopForeground(boolean remove){stopForeground(remove?STOP_FOREGROUND_REMOVE:STOP_FOREGROUND_LEGACY);}
  public final void stopForeground(int flags){requireHost().demote(this,flags);}
  public final void stopSelf(){stopSelf(-1);}public final void stopSelf(int startId){requireHost().stopSelf(this,startId);}public final boolean stopSelfResult(int startId){return requireHost().stopSelf(this,startId);}

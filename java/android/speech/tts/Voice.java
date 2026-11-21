@@ -2,7 +2,7 @@
 package android.speech.tts;
 import java.util.*;
 import android.os.*;
-public final class Voice implements Parcelable {
+public class Voice implements Parcelable {
  public static final int QUALITY_VERY_LOW=100,QUALITY_LOW=200,QUALITY_NORMAL=300,QUALITY_HIGH=400,QUALITY_VERY_HIGH=500;
  public static final int LATENCY_VERY_LOW=100,LATENCY_LOW=200,LATENCY_NORMAL=300,LATENCY_HIGH=400,LATENCY_VERY_HIGH=500;
  private final String name;private final Locale locale;private final int quality,latency;private final boolean network;private final Set<String> features;
@@ -11,6 +11,14 @@ public final class Voice implements Parcelable {
  public boolean equals(Object other){if(!(other instanceof Voice))return false;Voice v=(Voice)other;return name.equals(v.name)&&locale.equals(v.locale)&&quality==v.quality&&latency==v.latency&&network==v.network&&features.equals(v.features);}
  public int hashCode(){return Objects.hash(name,locale,quality,latency,network,features);}
  public String toString(){return "Voice{name="+name+", locale="+locale+", quality="+quality+", latency="+latency+", network="+network+", features="+features+"}";}
- public int describeContents(){return 0;}public void writeToParcel(Parcel out,int flags){throw new UnsupportedOperationException("Voice parcel transport is unavailable");}
- public static final Parcelable.Creator<Voice> CREATOR=new Parcelable.Creator<Voice>(){public Voice createFromParcel(Parcel source){throw new UnsupportedOperationException("Voice parcel transport is unavailable");}public Voice[] newArray(int size){return new Voice[size];}};
+ public int describeContents(){return 0;}
+ public void writeToParcel(Parcel out,int flags){out.writeString(name);out.writeString(locale.toLanguageTag());out.writeInt(quality);out.writeInt(latency);out.writeBoolean(network);out.writeStringArray(features.toArray(new String[features.size()]));}
+ public static final Parcelable.Creator<Voice> CREATOR=new Parcelable.Creator<Voice>(){
+  public Voice createFromParcel(Parcel source){
+   String n=source.readString();String tag=source.readString();int q=source.readInt();int l=source.readInt();boolean net=source.readBoolean();String[] feats=source.createStringArray();
+   Set<String> set=feats==null?Collections.<String>emptySet():new HashSet<String>(Arrays.asList(feats));
+   return new Voice(n,tag==null?Locale.ROOT:Locale.forLanguageTag(tag),q,l,net,set);
+  }
+  public Voice[] newArray(int size){return new Voice[size];}
+ };
 }

@@ -12,14 +12,21 @@ public abstract class Context {
     public static final String UI_MODE_SERVICE="uimode";
     public static final String AUDIO_SERVICE="audio",MEDIA_ROUTER_SERVICE="media_router";
     public static final String STORAGE_SERVICE="storage";
+    public static final String STORAGE_STATS_SERVICE="storagestats";
+    private shiraz.runtime.HostSyncAdapters syncAdapters;
+    public synchronized shiraz.runtime.HostSyncAdapters shirazSyncAdapters(){if(syncAdapters==null)syncAdapters=new shiraz.runtime.HostSyncAdapters();return syncAdapters;}
     private ContentResolver contentResolver;
+    private shiraz.runtime.HostContentObservers contentObservers;
+    public synchronized shiraz.runtime.HostContentObservers shirazContentObservers(){if(contentObservers==null)contentObservers=new shiraz.runtime.HostContentObservers();return contentObservers;}
     public synchronized ContentResolver getContentResolver(){if(contentResolver==null)contentResolver=new ContentResolver(this);return contentResolver;}
     public static final int MODE_PRIVATE = 0, MODE_ENABLE_WRITE_AHEAD_LOGGING = 8, MODE_NO_LOCALIZED_COLLATORS = 16;
-    // No Android permission grants or remote Binder callers are registered yet.
+    @Deprecated public static final int MODE_MULTI_PROCESS = 4;
+    public static final String PERSISTENT_DATA_BLOCK_SERVICE = "persistent_data_block";
+    // Base contexts grant nothing; runtime contexts supply verified grants.
     public int checkPermission(String permission,int pid,int uid){if(permission==null)throw new IllegalArgumentException("permission");return PackageManager.PERMISSION_DENIED;}
     public int checkSelfPermission(String permission){return checkPermission(permission,android.os.Process.myPid(),android.os.Process.myUid());}
-    public int checkCallingPermission(String permission){if(permission==null)throw new IllegalArgumentException("permission");return PackageManager.PERMISSION_DENIED;}
-    public int checkCallingOrSelfPermission(String permission){return checkSelfPermission(permission);}
+    public int checkCallingPermission(String permission){if(permission==null)throw new IllegalArgumentException("permission");return android.os.Binder.getCallingPid()==android.os.Process.myPid()?PackageManager.PERMISSION_DENIED:checkPermission(permission,android.os.Binder.getCallingPid(),android.os.Binder.getCallingUid());}
+    public int checkCallingOrSelfPermission(String permission){return checkPermission(permission,android.os.Binder.getCallingPid(),android.os.Binder.getCallingUid());}
     public int checkUriPermission(android.net.Uri uri,int pid,int uid,int modeFlags){
         if(pid!=android.os.Process.myPid()||uid!=android.os.Process.myUid())return PackageManager.PERMISSION_DENIED;
         return shiraz.runtime.HostDocuments.forContext(this).permitted(uri,modeFlags)?PackageManager.PERMISSION_GRANTED:PackageManager.PERMISSION_DENIED;
@@ -30,6 +37,7 @@ public abstract class Context {
     public void enforceCallingOrSelfPermission(String permission,String message){if(checkCallingOrSelfPermission(permission)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException((message==null?"Permission denied":message)+": "+permission);}
     public boolean isRestricted() { return false; }
     public abstract SharedPreferences getSharedPreferences(String name, int mode);
+    public boolean deleteSharedPreferences(String name) { throw new UnsupportedOperationException("Preference storage unavailable"); }
     public boolean moveSharedPreferencesFrom(Context sourceContext, String name) {
         if (sourceContext == null) throw new NullPointerException("sourceContext");
         return shiraz.runtime.HostPreferences.move(sourceContext.getSharedPreferences(name, MODE_PRIVATE),
@@ -57,6 +65,10 @@ public abstract class Context {
     public static final String CLIPBOARD_SERVICE="clipboard";
     public static final String TELECOM_SERVICE="telecom";
     public static final String USER_SERVICE="user";
+    public static final String TELEPHONY_SUBSCRIPTION_SERVICE="telephony_subscription_service";
+    public static final String BATTERY_SERVICE="batterymanager";
+    public static final String RESTRICTIONS_SERVICE="restrictions";
+    public static final String DEVICE_POLICY_SERVICE="device_policy";
     public static final String JOB_SCHEDULER_SERVICE="jobscheduler";
     public static final String ALARM_SERVICE="alarm";
     public static final String ACCESSIBILITY_SERVICE="accessibility";
@@ -71,6 +83,7 @@ public abstract class Context {
     }
     public String getSystemServiceName(Class<?> serviceClass) {
         if (serviceClass == android.os.storage.StorageManager.class) return STORAGE_SERVICE;
+        if (serviceClass == android.app.usage.StorageStatsManager.class) return STORAGE_STATS_SERVICE;
         if (serviceClass == android.nfc.NfcManager.class) return NFC_SERVICE;
         if (serviceClass == android.accounts.AccountManager.class) return ACCOUNT_SERVICE;
         if (serviceClass == android.hardware.input.InputManager.class) return INPUT_SERVICE;
@@ -88,6 +101,7 @@ public abstract class Context {
         if (serviceClass == android.content.pm.ShortcutManager.class) return SHORTCUT_SERVICE;
         if (serviceClass == android.hardware.display.DisplayManager.class) return DISPLAY_SERVICE;
         if (serviceClass == android.app.NotificationManager.class) return NOTIFICATION_SERVICE;
+        if (serviceClass == android.os.BatteryManager.class) return BATTERY_SERVICE;
         if (serviceClass == android.os.PowerManager.class) return POWER_SERVICE;
         if (serviceClass == android.app.KeyguardManager.class) return KEYGUARD_SERVICE;
         if (serviceClass == android.app.ActivityManager.class) return ACTIVITY_SERVICE;
@@ -100,6 +114,10 @@ public abstract class Context {
         if (serviceClass == android.view.WindowManager.class) return WINDOW_SERVICE;
         if (serviceClass == android.content.ClipboardManager.class) return CLIPBOARD_SERVICE;
         if (serviceClass == android.telecom.TelecomManager.class) return TELECOM_SERVICE;
+        if (serviceClass == android.app.admin.DevicePolicyManager.class) return DEVICE_POLICY_SERVICE;
+        if (serviceClass == android.content.RestrictionsManager.class) return RESTRICTIONS_SERVICE;
+        if (serviceClass == android.telephony.SubscriptionManager.class) return TELEPHONY_SUBSCRIPTION_SERVICE;
+        if (serviceClass == android.service.persistentdata.PersistentDataBlockManager.class) return PERSISTENT_DATA_BLOCK_SERVICE;
         if (serviceClass == android.os.UserManager.class) return USER_SERVICE;
         if (serviceClass == android.app.AlarmManager.class) return ALARM_SERVICE;
         if (serviceClass == android.app.job.JobScheduler.class) return JOB_SCHEDULER_SERVICE;
@@ -117,7 +135,9 @@ public abstract class Context {
     }
     public static final int MODE_APPEND = 0x8000, CONTEXT_INCLUDE_CODE = 1, CONTEXT_IGNORE_SECURITY = 2;
     public boolean isDeviceProtectedStorage() { return false; }
-    public Context createDeviceProtectedStorageContext() { return this; }
+    public boolean isCredentialProtectedStorage() { return false; }
+    public Context createDeviceProtectedStorageContext() { throw new UnsupportedOperationException("Protected storage unavailable"); }
+    public Context createCredentialProtectedStorageContext() { throw new UnsupportedOperationException("Protected storage unavailable"); }
     public Context createPackageContext(String packageName, int flags) throws PackageManager.NameNotFoundException {
         if (getPackageName().equals(packageName)) return this;
         throw new PackageManager.NameNotFoundException(packageName);
@@ -141,8 +161,16 @@ public abstract class Context {
     public void startActivity(Intent intent){startActivity(intent,null);}
     public void startActivity(Intent intent,android.os.Bundle options){throw new UnsupportedOperationException("Activity launch from a non-activity context requires task support");}
     protected shiraz.runtime.HostServices shirazServices(){throw new UnsupportedOperationException("Service sessions are not available in this context");}
-    public static final int BIND_AUTO_CREATE=1,BIND_WAIVE_PRIORITY=32,BIND_IMPORTANT=64;
-    public boolean bindService(Intent intent,ServiceConnection connection,int flags){return shirazServices().bindUnavailable(intent,connection,flags);}
+    public static final int BIND_AUTO_CREATE=1,BIND_WAIVE_PRIORITY=32,BIND_IMPORTANT=64,BIND_ADJUST_WITH_ACTIVITY=128,BIND_INCLUDE_CAPABILITIES=4096;
+    public static final class BindServiceFlags {
+        private final long mValue;
+        private BindServiceFlags(long value){mValue=value;}
+        public static BindServiceFlags of(long value){return new BindServiceFlags(value);}
+        public long getValue(){return mValue;}
+    }
+    public boolean bindService(Intent intent,ServiceConnection connection,int flags){return shirazServices().bindUnavailable(intent,connection,flags,this);}
+    public boolean bindService(Intent intent,ServiceConnection connection,BindServiceFlags flags){return bindService(intent,connection,(int)(flags==null?0L:flags.getValue()));}
+    public boolean bindService(Intent intent,BindServiceFlags flags,java.util.concurrent.Executor executor,ServiceConnection connection){return bindService(intent,connection,(int)(flags==null?0L:flags.getValue()));}
     public void unbindService(ServiceConnection connection){shirazServices().unbindUnavailable(connection);}
     public ComponentName startService(Intent intent){return shirazServices().start(intent);}
     public boolean stopService(Intent intent){return shirazServices().stop(intent);}
@@ -155,6 +183,13 @@ public abstract class Context {
     public void unregisterReceiver(BroadcastReceiver receiver) { shirazBroadcasts().unregister(this, receiver); }
     public void sendBroadcast(Intent intent) { sendBroadcast(intent, null); }
     public void sendBroadcast(Intent intent, String permission) { shirazBroadcasts().send(intent, permission); }
+    public void sendBroadcastAsUser(Intent intent, android.os.UserHandle user) { sendBroadcastAsUser(intent, user, null); }
+    /** Only the current single-user session is addressable; this grants no cross-user authority. */
+    public void sendBroadcastAsUser(Intent intent, android.os.UserHandle user, String permission) {
+        if (user == null) throw new NullPointerException("user");
+        if (!android.os.UserHandle.SYSTEM.equals(user)) throw new SecurityException("Broadcast target is outside the current user session");
+        sendBroadcast(intent, permission);
+    }
     public void sendOrderedBroadcast(Intent intent, String permission) { throw new UnsupportedOperationException("Ordered broadcasts are not implemented"); }
     public void sendStickyBroadcast(Intent intent) { throw new UnsupportedOperationException("Sticky broadcast publication is not implemented"); }
     public abstract Object getSystemService(String name);

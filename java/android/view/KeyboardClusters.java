@@ -39,13 +39,31 @@ final class KeyboardClusters {
   if(policy!=ViewGroup.FOCUS_BLOCK_DESCENDANTS)for(View child:children(view))tabStops(child,values,depth+1);
   if(own&&policy==ViewGroup.FOCUS_AFTER_DESCENDANTS&&values.size()==before)values.add(view);
  }
+ private static View explicit(View root,View current,int direction){
+  if(current==null)return null;
+  ArrayList<View> eligible=new ArrayList<View>();tabStops(root,eligible,0);
+  Set<View> visited=Collections.newSetFromMap(new IdentityHashMap<View,Boolean>());
+  View from=current;
+  while(from!=null&&visited.add(from)){
+   int id;
+   switch(direction){case View.FOCUS_LEFT:id=from.getNextFocusLeftId();break;case View.FOCUS_RIGHT:id=from.getNextFocusRightId();break;case View.FOCUS_UP:id=from.getNextFocusUpId();break;case View.FOCUS_DOWN:id=from.getNextFocusDownId();break;case View.FOCUS_FORWARD:id=from.getNextFocusForwardId();break;
+    case View.FOCUS_BACKWARD:View previous=null;if(from.getId()!=View.NO_ID)for(View candidate:eligible)if(candidate.getNextFocusForwardId()==from.getId()){previous=candidate;break;}return previous==current?null:previous;
+    default:return null;
+   }
+   if(id==View.NO_ID)return null;
+   View target=root.findViewById(id);if(target==null||target==current)return null;
+   if(eligible.contains(target)&&(!target.isInTouchMode()||target.isFocusableInTouchMode()))return target;
+   from=target;if(visited.size()>=4096)throw new IllegalStateException("Focus link limit");
+  }
+  return null;
+ }
  private static boolean tab(View root,boolean forward){
   ArrayList<View> values=new ArrayList<View>();tabStops(root,values,0);
   if(values.isEmpty())return false;
-  View current=root.findFocus();int index=values.indexOf(current),step=forward?1:-1;
+  View current=root.findFocus();View linked=explicit(root,current,forward?View.FOCUS_FORWARD:View.FOCUS_BACKWARD);if(linked!=null&&linked.requestFocus(forward?View.FOCUS_FORWARD:View.FOCUS_BACKWARD))return true;int index=values.indexOf(current),step=forward?1:-1;
   if(index<0)index=forward?-1:values.size();
   for(int i=0;i<values.size();i++){index=(index+step+values.size())%values.size();View target=values.get(index);if(target!=current&&target.requestFocus(forward?View.FOCUS_FORWARD:View.FOCUS_BACKWARD))return true;}
   return false;
  }
- static boolean key(View root,KeyEvent event){if(root==null||event.getAction()!=KeyEvent.ACTION_DOWN||event.getKeyCode()!=KeyEvent.KEYCODE_TAB)return false;if(event.hasNoModifiers())return tab(root,true);if(event.hasModifiers(KeyEvent.META_SHIFT_ON))return tab(root,false);int direction;if(event.hasModifiers(KeyEvent.META_META_ON))direction=View.FOCUS_FORWARD;else if(event.hasModifiers(KeyEvent.META_META_ON|KeyEvent.META_SHIFT_ON))direction=View.FOCUS_BACKWARD;else return false;View focus=root.findFocus();View target=search(focus==null?root:focus,null,direction);if(target==null)return false;if(target!=root)return restore(target,direction,false);if(restore(root,direction,true))return true;target=search(root,null,direction);return target!=null&&target!=root&&restore(target,direction,false);}
+ static boolean key(View root,KeyEvent event){if(root==null||event.getAction()!=KeyEvent.ACTION_DOWN)return false;if(event.getKeyCode()!=KeyEvent.KEYCODE_TAB){if(!event.hasNoModifiers())return false;int d;switch(event.getKeyCode()){case KeyEvent.KEYCODE_DPAD_LEFT:d=View.FOCUS_LEFT;break;case KeyEvent.KEYCODE_DPAD_RIGHT:d=View.FOCUS_RIGHT;break;case KeyEvent.KEYCODE_DPAD_UP:d=View.FOCUS_UP;break;case KeyEvent.KEYCODE_DPAD_DOWN:d=View.FOCUS_DOWN;break;default:return false;}View linked=explicit(root,root.findFocus(),d);return linked!=null&&linked.requestFocus(d);}if(event.hasNoModifiers())return tab(root,true);if(event.hasModifiers(KeyEvent.META_SHIFT_ON))return tab(root,false);int direction;if(event.hasModifiers(KeyEvent.META_META_ON))direction=View.FOCUS_FORWARD;else if(event.hasModifiers(KeyEvent.META_META_ON|KeyEvent.META_SHIFT_ON))direction=View.FOCUS_BACKWARD;else return false;View focus=root.findFocus();View target=search(focus==null?root:focus,null,direction);if(target==null)return false;if(target!=root)return restore(target,direction,false);if(restore(root,direction,true))return true;target=search(root,null,direction);return target!=null&&target!=root&&restore(target,direction,false);}
 }

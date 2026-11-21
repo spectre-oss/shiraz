@@ -21,6 +21,13 @@ import java.nio.charset.StandardCharsets;
 
 /** Initial host activity lifecycle and programmatic View startup frame. */
 public final class ActivityRunner {
+    static String activityProcessName(String pkg,String declared) {
+        String value=declared==null?pkg:declared;
+        String plain=value.startsWith(pkg+":")?value.substring(pkg.length()+1):value;
+        if(value.length()>1024||!plain.matches("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)*"))throw new IllegalArgumentException("Invalid activity process name");
+        return value;
+    }
+
     static final class HostContext extends Context {
         private final String name;
         private final TestLocationConfig testLocation;
@@ -40,7 +47,8 @@ public final class ActivityRunner {
         private android.app.AlarmManager alarms;
         private android.app.DownloadManager downloads;
         private android.os.storage.StorageManager storageManager;
-        private static final java.util.Set<String> ABSENT_SERVICES = new java.util.HashSet<String>(java.util.Arrays.asList("phone", "wifip2p", "bluetooth", "vibrator", "vibrator_manager", "usb", "nfc", "camera", "keyguard", "power", "batterymanager", "storage", "uimode", "media_session", "media_router", "mediaprojection", "device_policy", "launcherapps", "restrictions", "servicediscovery", "wallpaper", "search", "textservices", "textclassification", "captioning", "input", "usagestats", "role", "print", "dropbox", "consumer_ir", "tv_input", "locale"));
+        private android.app.usage.StorageStatsManager storageStatsManager;
+        private static final java.util.Set<String> ABSENT_SERVICES = new java.util.HashSet<String>(java.util.Arrays.asList("phone", "wifip2p", "bluetooth", "vibrator", "vibrator_manager", "usb", "nfc", "camera", "keyguard", "power", "batterymanager", "storage", "uimode", "media_session", "media_router", "mediaprojection", "launcherapps", "restrictions", "servicediscovery", "wallpaper", "search", "textservices", "textclassification", "captioning", "input", "usagestats", "role", "print", "dropbox", "consumer_ir", "tv_input", "locale", PERSISTENT_DATA_BLOCK_SERVICE));
         private android.view.accessibility.AccessibilityManager accessibility;
         private android.app.NotificationManager notifications;
         private android.content.pm.ShortcutManager shortcuts;
@@ -53,6 +61,13 @@ public final class ActivityRunner {
         private android.content.res.Resources.Theme theme;
         private final HostPreferences preferences;
         private final HostStorage storage;
+        private HostProtectedStorageContext deviceStorage;
+        @Override public boolean isCredentialProtectedStorage(){return true;}
+        @Override public Context createCredentialProtectedStorageContext(){return this;}
+        @Override public synchronized Context createDeviceProtectedStorageContext(){
+            if(deviceStorage==null)deviceStorage=new HostProtectedStorageContext(this);
+            return deviceStorage;
+        }
         private boolean foreground = true;
         HostContext(String name, File data, HostStorage storage, Application application, Properties metadata, int width, int height, int densityDpi) {
             this.densityDpi=densityDpi;
@@ -62,12 +77,14 @@ public final class ActivityRunner {
             this.application = application; this.packages = new HostPackageManager(metadata, this);
             this.preferences = new HostPreferences(new File(data, "preferences"));
             this.services = new HostServices(this,application,metadata);
+            this.activities = ActivityManager.shirazForProcess(Application.getProcessName()==null?name:Application.getProcessName(),this);
+            ActivityManager.shirazInstall(activities,new java.util.function.IntSupplier(){public int getAsInt(){return services.processImportance();}});
             this.launches = new ActivityLaunchQueue(new ActivityLaunchResolver(name,packages));
             this.storage = storage;
         }
         private boolean ownSignaturePermission(String permission){int count=Integer.parseInt(permissionMetadata.getProperty("ownSignaturePermission.count","0"));if(count<0||count>1024)throw new IllegalArgumentException("Own permission count");if(!permission.startsWith(name+"."))return false;for(int i=0;i<count;i++)if(permission.equals(permissionMetadata.getProperty("ownSignaturePermission."+i)))return true;return false;}
         private boolean declaredNormalPermission(String permission){
-            if(!"android.permission.INTERNET".equals(permission)&&!"android.permission.ACCESS_NETWORK_STATE".equals(permission))return false;
+            if(!"android.permission.WAKE_LOCK".equals(permission)&&!"android.permission.INTERNET".equals(permission)&&!"android.permission.ACCESS_NETWORK_STATE".equals(permission)&&!ForegroundServicePermissions.isNormalPermission(permission))return false;
             int count=Integer.parseInt(permissionMetadata.getProperty("permission.count","0"));
             if(count<0||count>1024)throw new IllegalArgumentException("Permission count");
             for(int i=0;i<count;i++)if(permission.equals(permissionMetadata.getProperty("permission."+i)))return true;
@@ -75,12 +92,25 @@ public final class ActivityRunner {
         }
         @Override public int checkPermission(String permission,int pid,int uid){
             if(permission==null)throw new IllegalArgumentException("permission");
+            if("android.permission.ACCOUNT_MANAGER".equals(permission))return AuthenticatorEndpoint.permits(pid,uid)?PackageManager.PERMISSION_GRANTED:PackageManager.PERMISSION_DENIED;
+            ServiceBrokerClient broker=RuntimeBroker.client();
+            if(broker!=null&&!permission.startsWith("android.")){
+                if(uid<0)return PackageManager.PERMISSION_DENIED;
+                try{return broker.checkPermission(permission,"uid",Integer.valueOf(uid));}
+                catch(java.io.IOException error){throw new IllegalStateException("Registered permission query unavailable",error);}
+            }
             return pid==android.os.Process.myPid()&&uid==android.os.Process.myUid()&&(ownSignaturePermission(permission)||declaredNormalPermission(permission)||capture.granted(permission)||testLocation!=null&&testLocation.grants(permission,permissionMetadata))?PackageManager.PERMISSION_GRANTED:PackageManager.PERMISSION_DENIED;
         }
         @Override public void startActivity(android.content.Intent intent,android.os.Bundle options){if(options!=null&&!options.isEmpty())throw new UnsupportedOperationException("Activity options");launches.enqueue(intent);}
         @Override protected ActivityLaunchQueue shirazActivityLaunches(){return launches;}
         @Override protected HostServices shirazServices(){return services;}
-        @Override protected synchronized HostBroadcasts shirazBroadcasts() { if (broadcasts == null) broadcasts = new HostBroadcasts(name); return broadcasts; }
+        private ReceiverHost receiverHost;
+        synchronized boolean hasInboundReceiverWork(){return receiverHost!=null&&receiverHost.hasWork();}
+        synchronized void startReceiverHost()throws java.io.IOException {
+            ServiceBrokerClient broker=RuntimeBroker.client();
+            if(broker!=null&&receiverHost==null)receiverHost=new ReceiverHost(broker,name,shirazBroadcasts());
+        }
+        @Override protected synchronized HostBroadcasts shirazBroadcasts() { if (broadcasts == null) broadcasts = new HostBroadcasts(this); return broadcasts; }
         private android.view.inputmethod.InputMethodManager inputMethod;
         private android.view.autofill.AutofillManager autofill;
         private android.location.LocationManager locations;
@@ -88,19 +118,27 @@ public final class ActivityRunner {
         private android.net.wifi.WifiManager wifi;
         private android.view.LayoutInflater inflater;
         private android.os.PowerManager power;
+        private android.os.BatteryManager battery;
+        private android.telephony.SubscriptionManager subscriptions;
         private android.app.AppOpsManager appOps;
         private android.app.KeyguardManager keyguard;
+        private android.app.admin.DevicePolicyManager devicePolicy;
         @Override public synchronized Object getSystemService(String service) {
+            if(STORAGE_STATS_SERVICE.equals(service)){if(storageStatsManager==null)storageStatsManager=android.app.usage.StorageStatsManager.shirazForStorage(storage);return storageStatsManager;}
             if(STORAGE_SERVICE.equals(service)){if(storageManager==null)storageManager=android.os.storage.StorageManager.shirazForStorage(storage);return storageManager;}
             if(DOWNLOAD_SERVICE.equals(service)){if(downloads==null)downloads=android.app.DownloadManager.shirazForHost(this);return downloads;}
             if(VIBRATOR_SERVICE.equals(service))return new android.os.Vibrator();
             if("uimode".equals(service))return new android.app.UiModeManager(this);
             if(MEDIA_ROUTER_SERVICE.equals(service)){if(mediaRouter==null)mediaRouter=android.media.MediaRouter.shirazForHost(this);return mediaRouter;}
             if(AUDIO_SERVICE.equals(service)){if(audio==null)audio=android.media.AudioManager.shirazForProcess();return audio;}
-            if(POWER_SERVICE.equals(service)){if(power==null)power=new android.os.PowerManager();return power;}
+            if(BATTERY_SERVICE.equals(service)){if(battery==null)battery=android.os.BatteryManager.shirazForContext(this);return battery;}
+            if(POWER_SERVICE.equals(service)){if(power==null)power=android.os.PowerManager.shirazForContext(this);return power;}
+            if(RESTRICTIONS_SERVICE.equals(service))return new android.content.RestrictionsManager();
+            if(DEVICE_POLICY_SERVICE.equals(service)){if(devicePolicy==null)devicePolicy=new android.app.admin.DevicePolicyManager();return devicePolicy;}
             if(KEYGUARD_SERVICE.equals(service)){if(keyguard==null)keyguard=new android.app.KeyguardManager();return keyguard;}
             if(NFC_SERVICE.equals(service))return new android.nfc.NfcManager(this);
             if(ACCOUNT_SERVICE.equals(service))return android.accounts.AccountManager.get(this);
+            if(TELEPHONY_SUBSCRIPTION_SERVICE.equals(service)){if(subscriptions==null)subscriptions=new android.telephony.SubscriptionManager();return subscriptions;}
             if(TELEPHONY_SERVICE.equals(service))return new android.telephony.TelephonyManager();
             if(APP_OPS_SERVICE.equals(service)){if(appOps==null)appOps=new android.app.AppOpsManager(this);return appOps;}
             if(WIFI_SERVICE.equals(service)){capture.wifiAccess("service:requested");if(wifi==null)wifi=android.net.wifi.WifiManager.shirazForHost(capture);return wifi;}
@@ -108,7 +146,7 @@ public final class ActivityRunner {
             if(INPUT_SERVICE.equals(service))return android.hardware.input.InputManager.getInstance();
             if(INPUT_METHOD_SERVICE.equals(service)){if(inputMethod==null)inputMethod=android.view.inputmethod.InputMethodManager.shirazHost(new android.view.inputmethod.InputMethodManager.KeyboardController(){public boolean setVisible(boolean visible){return NativeSurface.requestTextInput(visible);}});return inputMethod;}
             if(AUTOFILL_SERVICE.equals(service)){if(autofill==null)autofill=android.view.autofill.AutofillManager.shirazUnavailable();return autofill;}
-            if(LOCATION_SERVICE.equals(service)){if(locations==null)locations=android.location.LocationManager.shirazForTest(this,testLocation);locations.shirazSetForeground(foreground);return locations;}
+            if(LOCATION_SERVICE.equals(service)){if(locations==null){locations=android.location.LocationManager.shirazForTest(this,testLocation);services.trackLocationManager(locations);}locations.shirazSetForeground(foreground);return locations;}
             if(SHORTCUT_SERVICE.equals(service)){if(shortcuts==null)shortcuts=android.content.pm.ShortcutManager.shirazForProcess(name);return shortcuts;}
             if(ACCESSIBILITY_SERVICE.equals(service)){if(accessibility==null)accessibility=android.view.accessibility.AccessibilityManager.shirazCreate();return accessibility;}
             if(LAYOUT_INFLATER_SERVICE.equals(service)){if(inflater==null)inflater=new HostLayoutInflater(this);return inflater;}
@@ -137,7 +175,7 @@ public final class ActivityRunner {
                 return windows;
             }
             if (USER_SERVICE.equals(service)) {
-                if (users == null) users = new android.os.UserManager();
+                if (users == null) users = new android.os.UserManager(this);
                 return users;
             }
             if (ALARM_SERVICE.equals(service)) {
@@ -145,7 +183,7 @@ public final class ActivityRunner {
                 return alarms;
             }
             if (JOB_SCHEDULER_SERVICE.equals(service)) {
-                if (jobs == null) jobs = new android.app.job.JobScheduler();
+                if (jobs == null) jobs = new android.app.job.JobScheduler(services);
                 return jobs;
             }
             if (TELECOM_SERVICE.equals(service)) {
@@ -155,7 +193,7 @@ public final class ActivityRunner {
             if (ABSENT_SERVICES.contains(service)) return null;
             if (!ACTIVITY_SERVICE.equals(service)) throw new UnsupportedOperationException("System service is not implemented: " + service);
             if (activities == null) {
-                activities = ActivityManager.shirazForProcess(Application.getProcessName()==null?name:Application.getProcessName());
+                activities = ActivityManager.shirazForProcess(Application.getProcessName()==null?name:Application.getProcessName(),this);
                 activities.shirazSetForeground(foreground);
             }
             return activities;
@@ -177,12 +215,26 @@ public final class ActivityRunner {
             }
             return resources;
         }
-        synchronized void close() {
+        void close() {try{closeServices();}finally{if(power!=null)power.shirazClose();}}
+        private void closeServices() {
+            if(connectivity!=null)connectivity.shirazClose();
+            if(receiverHost!=null)receiverHost.close();
+            if(jobs!=null)jobs.shirazClose();
+            if(alarms!=null)alarms.shirazClose();
             if(downloads!=null)downloads.shirazClose();
             launches.close();
             if(locations!=null)locations.shirazClose();
             try { try { services.close(); } finally { try { if (broadcasts != null) broadcasts.close(); } finally { if (notifications != null) notifications.shirazClose(); } } }
-            finally { try { if(accessibility!=null)accessibility.shirazClose();preferences.close(); } finally { if (resources != null) resources.shirazClose(); } }
+            finally {
+                if(accessibility!=null)accessibility.shirazClose();
+                // Services have ended and the windowless lifetime is over. Join
+                // guest handlers before closing resources they may still read.
+                // On timeout keep resources alive until DedicatedProcess exits.
+                shirazSyncAdapters().close(5000);
+                shirazContentObservers().close();
+                android.os.HandlerThread.shirazShutdown(5000);
+                try{try{preferences.close();}finally{if(deviceStorage!=null)deviceStorage.close();}}finally{if(resources!=null)resources.shirazClose();}
+            }
         }
         @Override public synchronized void setTheme(int id) { getTheme().applyStyle(id, true); }
         @Override public synchronized android.content.res.Resources.Theme getTheme() {
@@ -190,6 +242,7 @@ public final class ActivityRunner {
             return theme;
         }
         @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return preferences.get(name, mode); }
+        @Override public boolean deleteSharedPreferences(String name) { return preferences.delete(name); }
         @Override public PackageManager getPackageManager() { return packages; }
         @Override public ApplicationInfo getApplicationInfo() {
             try { return packages.getApplicationInfo(name, 0); }
@@ -250,8 +303,26 @@ public final class ActivityRunner {
                 if(!directory.isDirectory()&&!directory.mkdirs())throw new java.io.IOException("Cannot create method trace directory");
                 dalvik.system.VMDebug.startMethodTracing(new File(directory,"shiraz-methods.trace").getAbsolutePath(),8*1024*1024,0,true,1000);
             }
-            try { ActivityRunner.run(args); }
-            finally { if(profile)dalvik.system.VMDebug.stopMethodTracing(); }
+            try {
+                RuntimeBroker.attach();
+                String launchFd=System.getenv("SHIRAZ_ACTIVITY_FD"),launchUid=System.getenv("SHIRAZ_ACTIVITY_CALLER_UID");
+                if(launchFd==null&&launchUid==null)ActivityRunner.run(args,null);
+                else {
+                    if(args.length!=9||RuntimeBroker.client()==null||launchFd==null||launchUid==null)throw new SecurityException("Incomplete admitted activity channel");
+                    int fd=Integer.parseInt(launchFd),uid=Integer.parseInt(launchUid);
+                    if(fd<3||launchFd.equals(System.getenv("SHIRAZ_BROKER_FD")))throw new SecurityException("Invalid activity descriptor");
+                    try(ActivityLaunchEndpoint endpoint=new ActivityLaunchEndpoint(args[0],args[2],uid);
+                        android.os.BinderTransport transport=new android.os.BinderTransport(fd,endpoint,uid)){
+                        transport.remoteRoot().linkToDeath(endpoint,0);
+                        android.content.Intent initial=endpoint.await(30,java.util.concurrent.TimeUnit.SECONDS);
+                        ActivityRunner.run(args,initial);
+                        // Keep callback capabilities alive while the peer receives the
+                        // terminal result and closes its endpoint, with bounded teardown.
+                        if(!transport.awaitClosed(5,java.util.concurrent.TimeUnit.SECONDS))throw new java.io.IOException("Activity launch peer teardown timed out");
+                    }
+                }
+            }
+            finally { try{RuntimeBroker.close();}finally{if(profile)dalvik.system.VMDebug.stopMethodTracing();} }
         }},new DedicatedProcess.Task(){public void run() throws Throwable {
             android.app.ActivityThread.shirazClear();
             try { android.os.AsyncTask.shirazShutdown(); }
@@ -264,13 +335,14 @@ public final class ActivityRunner {
             }
         }});
     }
-    private static void run(String[] args) throws Exception {
+    private static void run(String[] args,android.content.Intent initialIntent) throws Exception {
         if (args.length != 9) throw new IllegalArgumentException("package application activity width height frames data snapshot metadata");
         final boolean traceFrames="1".equals(System.getenv("SHIRAZ_TRACE_FRAMES"));
         final boolean liveSnapshot="1".equals(System.getenv("SHIRAZ_LIVE_SNAPSHOT"));
         if(liveSnapshot&&"-".equals(args[7]))throw new IllegalArgumentException("Live capture requires a snapshot path");
         String name = args[0];
-        Application.shirazSetProcessName(name);ServiceProcess.configure(args);
+        final String processName=activityProcessName(name,System.getProperty("shiraz.activityProcess"));
+        Application.shirazSetProcessName(processName);ServiceProcess.configure(args);
         int width = Integer.parseInt(args[3]), height = Integer.parseInt(args[4]), frames = Integer.parseInt(args[5]);
         if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || (long) width * height > 16 * 1024 * 1024 || (frames != -1 && (frames < 1 || frames > 600)))
             throw new IllegalArgumentException("Invalid activity geometry/frame limit");
@@ -283,6 +355,14 @@ public final class ActivityRunner {
         Properties metadata = new Properties();
         try (InputStreamReader reader = new InputStreamReader(new FileInputStream(args[8]), StandardCharsets.UTF_8)) { metadata.load(reader); }
         if (!name.equals(metadata.getProperty("package"))) throw new IllegalArgumentException("Package metadata identity mismatch");
+        // ServiceProcess has already saved the ART command for child launches.
+        // Set the native name before loading app classes, as Android does when
+        // binding the application. Some host launchers lack writable argv space;
+        // keep those applications runnable and report that limitation explicitly.
+        try { android.os.Process.setArgV0(processName); }
+        catch (IllegalArgumentException unsupported) {
+            System.err.println("SHIRAZ_UNSUPPORTED process-name: native argv storage unavailable or name too long");
+        }
         HostNetworkPolicy.install(metadata);
         HostStorage storage = new HostStorage(new File(args[6]), name);
         android.os.Environment.shirazInitialize(storage);
@@ -296,19 +376,23 @@ public final class ActivityRunner {
             android.os.StrictMode.setThreadPolicy(new android.os.StrictMode.ThreadPolicy.Builder().detectNetwork().penaltyDeathOnNetwork().build());
         try {
             android.app.ActivityThread.shirazBind(app, name);
-            attach(app, context);if(context.getApplicationInfo().theme!=0)context.setTheme(context.getApplicationInfo().theme);context.capture.setAppName(context.packages.getApplicationLabel(context.getApplicationInfo())); ProviderHost.attach(context, metadata); app.onCreate();
+            attach(app, context);if(context.getApplicationInfo().theme!=0)context.setTheme(context.getApplicationInfo().theme);context.capture.setAppName(context.packages.getApplicationLabel(context.getApplicationInfo())); ProviderHost.attach(context, metadata); app.onCreate();context.startReceiverHost();
             final android.view.ViewTreeObserver[] windowObserver={android.view.ViewTreeObserver.shirazCreateWindowObserver()};
             final View[] attachedRoot={null};
             final java.util.IdentityHashMap<Activity,OrientationRequest> orientations=new java.util.IdentityHashMap<Activity,OrientationRequest>();
             final java.util.IdentityHashMap<Activity,android.content.res.Configuration> configurations=new java.util.IdentityHashMap<Activity,android.content.res.Configuration>();
-            ActivityStack stack=new ActivityStack(new ActivityStack.Factory(){public ActivityLifecycle create(final android.content.Intent launch){
-                final String className=launch.getComponent().getClassName();
+            final boolean[] backgroundEligible={false};
+            ActivityTasks stack=new ActivityTasks(new ActivityStack.Factory(){public ActivityLifecycle create(final android.content.Intent launch){
+                final android.content.pm.ActivityInfo launchInfo;
+                try{launchInfo=context.getPackageManager().getActivityInfo(launch.getComponent(),0);}
+                catch(android.content.pm.PackageManager.NameNotFoundException missing){throw new android.content.ActivityNotFoundException(launch.getComponent().flattenToString());}
+                final String className=launchInfo.targetActivity!=null?launchInfo.targetActivity:launchInfo.name;
                 ActivityConfigurationPolicy policy=new ActivityConfigurationPolicy(metadata,className,context.getApplicationInfo().targetSdkVersion);
                 policy.setSizeConfigurations(context.getResources().getSizeConfigurations());
                 android.util.DisplayMetrics metrics=context.getResources().getDisplayMetrics();
                 final OrientationRequest orientation=new OrientationRequest(policy.requestedOrientation(),metrics.widthPixels,metrics.heightPixels);
                 return new ActivityLifecycle(new ActivityLifecycle.Factory(){public Activity create(){
-                    try{Activity instance=Class.forName(className).asSubclass(Activity.class).newInstance();instance.shirazBindComponent(launch.getComponent());instance.setIntent(launch.shirazBroadcastCopy());instance.shirazBindOrientation(orientation);attach(instance,context);android.content.pm.ActivityInfo info=context.getPackageManager().getActivityInfo(instance.getComponentName(),0);if(info.getThemeResource()!=0)instance.setTheme(info.getThemeResource());
+                    try{Activity instance=Class.forName(className).asSubclass(Activity.class).newInstance();instance.shirazBindComponent(launch.getComponent(),className);instance.setIntent(launch.shirazBroadcastCopy());instance.shirazBindOrientation(orientation);attach(instance,context);android.content.pm.ActivityInfo info=context.getPackageManager().getActivityInfo(instance.getComponentName(),0);if(info.getThemeResource()!=0)instance.setTheme(info.getThemeResource());
                         CharSequence title=info.nonLocalizedLabel!=null?info.nonLocalizedLabel:info.labelRes!=0?instance.getString(info.labelRes):context.getPackageManager().getApplicationLabel(info.applicationInfo);instance.shirazBindTitle(title);instance.getLayoutInflater().setPrivateFactory(instance);orientations.put(instance,orientation);configurations.put(instance,new android.content.res.Configuration(instance.getResources().getConfiguration()));return instance;}
                     catch(Exception error){throw new IllegalStateException("Cannot construct activity",error);}
                 }},new ActivityLifecycle.Cleanup(){public void detached(Activity old){orientations.remove(old);configurations.remove(old);if(attachedRoot[0]!=null&&attachedRoot[0]==old.shirazContentView()){try{android.widget.PopupWindow.shirazClear();DialogOverlay.clear();}finally{attachedRoot[0].shirazDetachTree();attachedRoot[0]=null;windowObserver[0].shirazKill();windowObserver[0]=android.view.ViewTreeObserver.shirazCreateWindowObserver();}}}},policy,context.getApplicationInfo().targetSdkVersion);
@@ -320,7 +404,8 @@ public final class ActivityRunner {
             }});
             Throwable activityFailure=null;
             try {
-                stack.launch(new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER).setComponent(new android.content.ComponentName(name,args[2])));
+                android.content.Intent firstLaunch=initialIntent!=null?initialIntent:new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER).setComponent(new android.content.ComponentName(name,args[2]));
+                stack.launch(firstLaunch,context.getPackageManager().getActivityInfo(firstLaunch.getComponent(),0).launchMode);
                 final Activity activity=stack.current();
                 if (stack.current()!=null) {
                     activity.shirazTakeTransition();
@@ -331,7 +416,7 @@ public final class ActivityRunner {
                         surface.presentDispatched(frames, new NativeSurface.ResizeCallback() {
                             private int width=surface.getWidth(),height=surface.getHeight();
                             private int densityDpi=startupDensity;
-                            private int keyboardFullHeight;
+                            private int keyboardFullHeight,resizeTraceCount;
                             private Activity activity=stack.current();
                             @Override public void onResize(final int newWidth,final int newHeight){onDisplayChanged(newWidth,newHeight,densityDpi);}
                             @Override public void onDisplayChanged(final int newWidth,final int newHeight,final int newDensity){
@@ -360,6 +445,16 @@ public final class ActivityRunner {
                                 final android.content.res.Configuration before=activity.getResources().getConfiguration();
                                 int changed=new android.content.res.Configuration(before).updateFrom(activityNext);
                                 final Bitmap replacement=Bitmap.createBitmap(newWidth,newHeight,Bitmap.Config.ARGB_8888);replacement.setDensity(newDensity);
+                                boolean resizeTracing=false;
+                                if("1".equals(System.getenv("SHIRAZ_PROFILE_RESIZE"))&&!"1".equals(System.getenv("SHIRAZ_PROFILE_METHODS"))&&resizeTraceCount<4){
+                                    try{
+                                        File directory=new File(args[6],"cache");
+                                        if(!directory.isDirectory()&&!directory.mkdirs())throw new IllegalStateException("Cannot create resize trace directory");
+                                        File trace=new File(directory,"shiraz-resize-"+(++resizeTraceCount)+".trace");
+                                        dalvik.system.VMDebug.startMethodTracing(trace.getAbsolutePath(),8*1024*1024,0,true,1000);
+                                        resizeTracing=true;System.err.println("SHIRAZ_RESIZE_TRACE start="+trace.getName());
+                                    }catch(RuntimeException|LinkageError error){System.err.println("SHIRAZ_RESIZE_TRACE unavailable="+error.getClass().getName());}
+                                }
                                 try{
                                     boolean recreated=stack.currentLifecycle().reconfigure(before,activityNext,changed,new Runnable(){public void run(){
                                         surface.resize(newWidth,newHeight);resources.shirazResizeDisplay(newWidth,newHeight,newDensity);
@@ -372,14 +467,18 @@ public final class ActivityRunner {
                                     activity=stack.current();configurations.put(activity,new android.content.res.Configuration(activity.getResources().getConfiguration()));rendered=null;overlayRevision=dialogRevision=-1;if(recreated){priorFocus=null;modalFocus=false;}
                                     View root=activity.shirazContentView();if(root!=null){if(!recreated)root.dispatchConfigurationChanged(new android.content.res.Configuration(activity.getResources().getConfiguration()));root.requestLayout();root.invalidate();}
                                     if(!recreated){DialogOverlay.configurationChanged(new android.content.res.Configuration(next));android.widget.PopupWindow.shirazConfigurationChanged(new android.content.res.Configuration(next));}
-                                }finally{if(bitmap[0]!=replacement)replacement.recycle();}
+                                }finally{
+                                    if(resizeTracing)try{dalvik.system.VMDebug.stopMethodTracing();System.err.println("SHIRAZ_RESIZE_TRACE complete="+resizeTraceCount);}
+                                    catch(RuntimeException|LinkageError error){System.err.println("SHIRAZ_RESIZE_TRACE stop_failed="+error.getClass().getName());}
+                                    if(bitmap[0]!=replacement)replacement.recycle();
+                                }
                             }
                             @Override public void onTestLocation(double latitude,double longitude,float accuracy){
                                 android.location.LocationManager manager=(android.location.LocationManager)context.getSystemService(android.content.Context.LOCATION_SERVICE);
                                 manager.shirazSetTestLocation(TestLocationConfig.parse(Double.toString(latitude)+","+Double.toString(longitude)+","+Float.toString(accuracy)));
                             }
                             private boolean hostFocused,touchMode,hostVisible=true;
-                            @Override public void onWindowVisibility(boolean visible){hostVisible=visible;if(!visible)navigation.close();context.capture.setForeground(visible&&hostFocused);android.widget.PopupWindow.shirazWindowState(hostFocused,hostVisible,touchMode);DialogOverlay.windowVisibility(activity.shirazContentView(),visible);}
+                            @Override public void onWindowVisibility(boolean visible){if(hostVisible!=visible){hostVisible=visible;context.foreground(visible);stack.setVisible(visible);if(!visible){navigation.close();app.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN);}}context.capture.setForeground(visible&&hostFocused);android.widget.PopupWindow.shirazWindowState(hostFocused,hostVisible,touchMode);DialogOverlay.windowVisibility(activity.shirazContentView(),visible);}
                             private void touchMode(boolean value){touchMode=value;android.widget.PopupWindow.shirazWindowState(hostFocused,hostVisible,touchMode);DialogOverlay.touchMode(activity.shirazContentView(),value);}
                             @Override public void onWindowFocus(boolean focused){hostFocused=focused;context.capture.setForeground(focused&&hostVisible);android.widget.PopupWindow.shirazWindowState(hostFocused,hostVisible,touchMode);DialogOverlay.windowFocus(activity.shirazContentView(),focused);}
                             private String lastTitle;
@@ -486,7 +585,7 @@ public final class ActivityRunner {
                                     android.widget.PopupWindow.shirazClear();DialogOverlay.clear();attach(null);windowObserver[0].shirazKill();windowObserver[0]=android.view.ViewTreeObserver.shirazCreateWindowObserver();
                                     if(launch!=null)stack.launch(launch.intent(),launch.launchMode);
                                     while(stack.finishTop()){}
-                                    activity=stack.current();if(activity==null){navigation.close();return false;}
+                                    activity=stack.current();if(activity==null){backgroundEligible[0]=true;navigation.close();return false;}
                                     int[] oldTransition=previousActivity.shirazTakeTransition(),newTransition=activity.shirazTakeTransition();
                                     if(activity!=previousActivity)navigation.start(bitmap[0],activity,newTransition!=null?newTransition:oldTransition,back,launch!=null&&(launch.intent().getFlags()&android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION)!=0);
                                     rendered=null;overlayRevision=dialogRevision=-1;priorFocus=null;modalFocus=false;lastTitle=null;
@@ -593,6 +692,16 @@ public final class ActivityRunner {
                 try{stack.close();app.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN);}
                 catch(Throwable cleanup){if(activityFailure==null)throw cleanup;if(cleanup!=activityFailure)activityFailure.addSuppressed(cleanup);}
                 finally{windowObserver[0].shirazKill();}
+            }
+            if(frames==-1&&backgroundEligible[0]&&(context.services.hasWork()||context.jobs!=null&&context.jobs.shirazHasWork()||context.broadcasts!=null&&context.broadcasts.hasWork()||context.hasInboundReceiverWork())) {
+                context.launches.enterWindowless();
+                display.close();
+                System.out.println("SHIRAZ_BACKGROUND_ENTERED " + name);
+                android.os.Looper.myLooper().shirazLoopWhile(new java.util.function.BooleanSupplier(){
+                    public boolean getAsBoolean(){
+                        return context.services.hasWork()||context.jobs!=null&&context.jobs.shirazHasWork()||context.broadcasts!=null&&context.broadcasts.hasWork()||context.hasInboundReceiverWork();
+                    }
+                });
             }
         } finally {
             context.foreground(false);

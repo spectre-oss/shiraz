@@ -42,6 +42,12 @@ public abstract class Drawable {
         invalidateSelf();
     }
     public void setTintMode(PorterDuff.Mode mode) { }
+    public void setTintBlendMode(BlendMode blendMode) { if (blendMode != null) setTintMode(blendMode.shirazPorterDuff()); }
+    public void setDither(boolean dither) { }
+    public void setFilterBitmap(boolean filter) { }
+    public boolean isFilterBitmap() { return false; }
+    public void inflate(android.content.res.Resources r, org.xmlpull.v1.XmlPullParser parser, android.util.AttributeSet attrs) throws org.xmlpull.v1.XmlPullParserException, java.io.IOException { inflate(r, parser, attrs, null); }
+    public void inflate(android.content.res.Resources r, org.xmlpull.v1.XmlPullParser parser, android.util.AttributeSet attrs, android.content.res.Resources.Theme theme) throws org.xmlpull.v1.XmlPullParserException, java.io.IOException { }
     public void getOutline(Outline outline) { outline.setRect(getBounds()); outline.setAlpha(0); }
     public abstract void draw(Canvas canvas);
     public abstract void setAlpha(int alpha);

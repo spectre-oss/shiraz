@@ -8,13 +8,45 @@ import java.lang.reflect.*;
 public final class ActivityLifecycle implements AutoCloseable {
  private static final boolean TRACE="1".equals(System.getenv("SHIRAZ_TRACE_FRAMES"));
  private static void timing(String phase,long start){if(TRACE)System.err.println("SHIRAZ_LIFECYCLE phase="+phase+" elapsed_us="+(System.nanoTime()-start)/1000);}
+ private static void traceState(String phase,Bundle state){
+  if(!TRACE)return;
+  System.err.println("SHIRAZ_SAVED_STATE phase="+phase+" entries="+(state==null?-1:state.size()));
+  if(state==null)return;
+  // Inspect framework-owned slots only; never log application keys or values.
+  String[] keys={"android:fragments","android:support:fragments","androidx.lifecycle.BundlableSavedStateRegistry.key"};
+  for(String key:keys){Object value=state.get(key);System.err.println("SHIRAZ_SAVED_STATE slot="+key+" present="+(value!=null)+" bundle_entries="+(value instanceof Bundle?((Bundle)value).size():-1));}
+  Bundle registry=state.getBundle("androidx.lifecycle.BundlableSavedStateRegistry.key");
+  Bundle fragments=registry==null?null:registry.getBundle("android:support:fragments");
+  System.err.println("SHIRAZ_SAVED_STATE fragment_bundle_entries="+(fragments==null?-1:fragments.size()));
+  Object manager=fragments==null?null:fragments.get("state");
+  if(manager!=null&&"androidx.fragment.app.FragmentManagerState".equals(manager.getClass().getName())){
+   for(String name:new String[]{"mActive","mAdded","mBackStack"})try{
+    Field field=manager.getClass().getDeclaredField(name);field.setAccessible(true);Object value=field.get(manager);
+    int count=value==null?0:value instanceof java.util.Collection?((java.util.Collection<?>)value).size():value.getClass().isArray()?Array.getLength(value):-1;
+    System.err.println("SHIRAZ_SAVED_STATE fragment_field="+name+" count="+count);
+   }catch(ReflectiveOperationException|RuntimeException unavailable){System.err.println("SHIRAZ_SAVED_STATE fragment_field="+name+" unavailable=true");}
+  }
+ }
  public interface Factory { Activity create(); }
+ private void traceFragments(String phase){
+  if(!TRACE)return;
+  try{
+   Object manager=activity.getClass().getMethod("getSupportFragmentManager").invoke(activity);
+   java.util.List<?> fragments=(java.util.List<?>)manager.getClass().getMethod("getFragments").invoke(manager);
+   System.err.println("SHIRAZ_FRAGMENT_VIEWS phase="+phase+" count="+fragments.size());
+   for(int i=0;i<Math.min(64,fragments.size());i++){
+    Object fragment=fragments.get(i);Object value=fragment.getClass().getMethod("getView").invoke(fragment);
+    android.view.View view=value instanceof android.view.View?(android.view.View)value:null;
+    System.err.println("SHIRAZ_FRAGMENT_VIEWS index="+i+" view="+(view!=null)+" visibility="+(view==null?-1:view.getVisibility())+" alpha="+(view==null?-1:view.getAlpha())+" parent="+(view!=null&&view.getParent()!=null));
+   }
+  }catch(NoSuchMethodException absent){}catch(ReflectiveOperationException|RuntimeException unavailable){System.err.println("SHIRAZ_FRAGMENT_VIEWS phase="+phase+" unavailable=true");}
+ }
  public interface Cleanup { void detached(Activity activity); }
  private final Factory factory;private final Cleanup cleanup;private final ActivityConfigurationPolicy policy;
  private final int targetSdk;private final Thread owner=Thread.currentThread();
  private java.util.function.BooleanSupplier taskRootQuery;
  public void setTaskRootQuery(java.util.function.BooleanSupplier query){thread();taskRootQuery=query;}
- private Activity activity;private boolean created,started,resumed,closed,transition;
+ private Activity activity;private boolean created,started,resumed,closed,transition,visible=true;
  public ActivityLifecycle(Factory factory,Cleanup cleanup,ActivityConfigurationPolicy policy,int targetSdk){if(factory==null||cleanup==null||policy==null)throw new NullPointerException();this.factory=factory;this.cleanup=cleanup;this.policy=policy;this.targetSdk=targetSdk;}
  private void thread(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Activity lifecycle must run on its owner thread");}
  private void enter(){thread();if(closed||transition)throw new IllegalStateException("Activity lifecycle is closed or transitioning");transition=true;}
@@ -30,6 +62,7 @@ public final class ActivityLifecycle implements AutoCloseable {
  private void state(String name,Bundle bundle){int kind=name.equals("onCreate")?0:name.equals("onSaveInstanceState")?5:-1;if(kind>=0)activity.shirazDispatchLifecycle(kind,0,bundle);invoke(activity,name,new Class<?>[]{Bundle.class},bundle);if(kind==5){activity.shirazSaveFragments(bundle);dispatch(5,bundle);}}
  public Activity current(){thread();if(activity==null)throw new IllegalStateException("No live activity");return activity;}
  private void launch(Bundle state,Object retained,android.content.Intent intent,PermissionRequests permissions){
+  traceState("launch",state);
   long begin=TRACE?System.nanoTime():0;
   activity=factory.create();if(activity==null)throw new IllegalStateException("Activity factory returned null");
   timing("factory",begin);
@@ -38,14 +71,21 @@ public final class ActivityLifecycle implements AutoCloseable {
   activity.shirazSetLifecycleState(false,false,retained);
   activity.shirazRestorePermissionRequests(permissions);
   activity.shirazPrepareFragments(state);state("onCreate",state);created=true;activity.shirazMoveFragments(2);dispatch(0,state);
+  traceFragments("created");
   if(activity.isFinishing())return;
   call("onStart");started=true;activity.shirazMoveFragments(3);dispatch(1,null);
   if(state!=null)state("onRestoreInstanceState",state);
+  traceFragments("restored");
   state("onPostCreate",state);
   if(activity.isFinishing())return;
+  if(!visible){stop();return;}
   call("onResume");resumed=true;activity.shirazMoveFragments(4);call("onPostResume");dispatch(2,null);
+  traceFragments("resumed");
  }
- public void start(){enter();try{if(activity!=null)throw new IllegalStateException("Activity already started");launch(null,null,null,null);}finally{transition=false;}}
+ public void start(){start(true);}
+ public void start(boolean visible){enter();try{if(activity!=null)throw new IllegalStateException("Activity already started");this.visible=visible;launch(null,null,null,null);}finally{transition=false;}}
+ /** Restore resumes explicitly, so result/intent delivery can precede onResume. */
+ public void setVisible(boolean value){enter();try{requireCreated();visible=value;if(!value){pause();stop();}}finally{transition=false;}}
  /** Pause before launching a covering activity; a failed launch can resume this instance. */
  public void pauseForLaunch(){enter();try{requireCreated();pause();}finally{transition=false;}}
  /** Stop only after the covering activity has resumed. Keep this instance and its state. */
@@ -53,7 +93,7 @@ public final class ActivityLifecycle implements AutoCloseable {
  /** Return from a covering activity without onCreate or configuration-retention callbacks. */
  public void resumeFromBackStack(){
   enter();try{
-   requireCreated();if(activity.isFinishing())throw new IllegalStateException("Cannot resume a finishing activity");
+   requireCreated();if(activity.isFinishing())throw new IllegalStateException("Cannot resume a finishing activity");if(!visible)return;
    if(!started){call("onRestart");call("onStart");started=true;activity.shirazMoveFragments(3);dispatch(1,null);}
    if(!resumed){call("onResume");resumed=true;activity.shirazMoveFragments(4);call("onPostResume");dispatch(2,null);windowVisibility(android.view.View.VISIBLE);}
   }finally{transition=false;}
@@ -88,6 +128,7 @@ public final class ActivityLifecycle implements AutoCloseable {
    Bundle saved=new Bundle();
    if(targetSdk<28)state("onSaveInstanceState",saved);
    stop();if(targetSdk>=28)state("onSaveInstanceState",saved);
+   traceState("saved",saved);
    Object retained=activity.onRetainNonConfigurationInstance();
    android.content.Intent intent=activity.getIntent();
    PermissionRequests permissions=activity.shirazTakePermissionRequests();

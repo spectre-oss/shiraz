@@ -14,10 +14,13 @@ import android.view.KeyEvent;
 public class SearchView extends LinearLayout {
     public interface OnQueryTextListener {boolean onQueryTextSubmit(String query);boolean onQueryTextChange(String newText);}
     public interface OnCloseListener {boolean onClose();}
+    public interface OnSuggestionListener {boolean onSuggestionSelect(int position);boolean onSuggestionClick(int position);}
 
     private final EditText query;
     private OnQueryTextListener listener;
     private OnCloseListener closeListener;
+    private OnSuggestionListener suggestionListener;
+    private CursorAdapter suggestionsAdapter;
     private boolean iconified,submitEnabled;
     private CharSequence hint;
 
@@ -45,6 +48,9 @@ public class SearchView extends LinearLayout {
     private void submit(){if(listener!=null)listener.onQueryTextSubmit(query.getText().toString());}
     public void setOnQueryTextListener(OnQueryTextListener value){listener=value;}
     public void setOnCloseListener(OnCloseListener value){closeListener=value;}
+    public void setOnSuggestionListener(OnSuggestionListener value){suggestionListener=value;}
+    public void setSuggestionsAdapter(CursorAdapter adapter){suggestionsAdapter=adapter;}
+    public CursorAdapter getSuggestionsAdapter(){return suggestionsAdapter;}
     public CharSequence getQuery(){return query.getText();}
     public void setQuery(CharSequence value,boolean submit){query.setText(value==null?"":value);if(submit)submit();}
     public void setQueryHint(CharSequence value){hint=value;query.setHint(value);}

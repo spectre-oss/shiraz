@@ -7,6 +7,8 @@ public final class Build {
     public static final String MODEL = shiraz.runtime.DeviceProfile.get("build.model", "Shiraz Linux"), MANUFACTURER = shiraz.runtime.DeviceProfile.get("build.manufacturer", "Shiraz"), BRAND = shiraz.runtime.DeviceProfile.get("build.brand", "Shiraz");
     public static final String DEVICE = shiraz.runtime.DeviceProfile.get("build.device", "linux"), PRODUCT = shiraz.runtime.DeviceProfile.get("build.product", "shiraz"), HARDWARE = shiraz.runtime.DeviceProfile.get("build.hardware", System.getProperty("os.arch", "unknown"));
     public static final String BOARD = shiraz.runtime.DeviceProfile.get("build.board", "linux"), BOOTLOADER = shiraz.runtime.DeviceProfile.get("build.bootloader", UNKNOWN), RADIO = UNKNOWN, SERIAL = shiraz.runtime.DeviceProfile.get("build.serial", UNKNOWN);
+    /** No radio firmware is exposed by the desktop runtime. */
+    public static String getRadioVersion() { return null; }
     public static String getSerial() { shiraz.runtime.HostAppInstaller.recordAccess("build:getSerial"); return SERIAL; }
     // No Android SoC properties are supplied by the Linux host profile.
     public static final String SOC_MANUFACTURER = UNKNOWN, SOC_MODEL = UNKNOWN;
@@ -37,5 +39,53 @@ public final class Build {
         public static final int O = 26, O_MR1 = 27, P = 28, Q = 29, R = 30, S = 31, S_V2 = 32;
         public static final int TIRAMISU = 33, UPSIDE_DOWN_CAKE = 34, VANILLA_ICE_CREAM = 35;
         private VERSION_CODES() { }
+    }
+
+    public static class Partition {
+        public static final String PARTITION_NAME_SYSTEM = "system";
+
+        private final String name;
+        private final String fingerprint;
+        private final long timeMs;
+
+        Partition(String name, String fingerprint, long timeMs) {
+            this.name = name;
+            this.fingerprint = fingerprint;
+            this.timeMs = timeMs;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public String getFingerprint() {
+            return fingerprint;
+        }
+
+        public long getBuildTimeMillis() {
+            return timeMs;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof Partition)) {
+                return false;
+            }
+            Partition other = (Partition) o;
+            return java.util.Objects.equals(name, other.name)
+                    && java.util.Objects.equals(fingerprint, other.fingerprint)
+                    && timeMs == other.timeMs;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(name, fingerprint, Long.valueOf(timeMs));
+        }
+    }
+
+    public static java.util.List<Partition> getFingerprintedPartitions() {
+        java.util.ArrayList<Partition> list = new java.util.ArrayList<Partition>(1);
+        list.add(new Partition(Partition.PARTITION_NAME_SYSTEM, FINGERPRINT, TIME));
+        return java.util.Collections.unmodifiableList(list);
     }
 }

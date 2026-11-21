@@ -5,7 +5,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 
 public class ContextWrapper extends Context {
-    private Context base;
+    Context base;
     public ContextWrapper(Context base) { this.base = base; }
     protected void attachBaseContext(Context base) {
         if (base == null) throw new NullPointerException("base context");
@@ -21,6 +21,8 @@ public class ContextWrapper extends Context {
     @Override public void enforceCallingOrSelfPermission(String p,String message){requireBase().enforceCallingOrSelfPermission(p,message);}
     @Override public boolean isRestricted() { return requireBase().isRestricted(); }
     @Override public ContentResolver getContentResolver(){return requireBase().getContentResolver();}
+    @Override public shiraz.runtime.HostContentObservers shirazContentObservers(){return base==null?super.shirazContentObservers():base.shirazContentObservers();}
+    @Override public shiraz.runtime.HostSyncAdapters shirazSyncAdapters(){return base==null?super.shirazSyncAdapters():base.shirazSyncAdapters();}
     public Context getBaseContext() { return base; }
     private Context requireBase() {
         if (base == null) throw new IllegalStateException("Context is not attached");
@@ -37,6 +39,11 @@ public class ContextWrapper extends Context {
     @Override public void setTheme(int id) { requireBase().setTheme(id); }
     @Override public android.content.res.Resources.Theme getTheme() { return requireBase().getTheme(); }
     @Override public SharedPreferences getSharedPreferences(String name, int mode) { return requireBase().getSharedPreferences(name, mode); }
+    @Override public boolean deleteSharedPreferences(String name) { return requireBase().deleteSharedPreferences(name); }
+    @Override public boolean isDeviceProtectedStorage() { return requireBase().isDeviceProtectedStorage(); }
+    @Override public boolean isCredentialProtectedStorage() { return requireBase().isCredentialProtectedStorage(); }
+    @Override public Context createDeviceProtectedStorageContext() { return requireBase().createDeviceProtectedStorageContext(); }
+    @Override public Context createCredentialProtectedStorageContext() { return requireBase().createCredentialProtectedStorageContext(); }
     @Override public boolean moveSharedPreferencesFrom(Context source, String name) { return requireBase().moveSharedPreferencesFrom(source, name); }
     @Override public Context createConfigurationContext(android.content.res.Configuration configuration) { return requireBase().createConfigurationContext(configuration); }
     @Override public android.content.res.Resources getResources() { return requireBase().getResources(); }

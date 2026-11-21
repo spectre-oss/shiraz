@@ -17,6 +17,16 @@ public abstract class AdapterView<T extends Adapter> extends ViewGroup {
  public interface OnItemClickListener{void onItemClick(AdapterView<?> parent,View view,int position,long id);}
  public interface OnItemLongClickListener{boolean onItemLongClick(AdapterView<?> parent,View view,int position,long id);}
  public interface OnItemSelectedListener{void onItemSelected(AdapterView<?> parent,View view,int position,long id);void onNothingSelected(AdapterView<?> parent);}
+ public static class AdapterContextMenuInfo implements android.view.ContextMenu.ContextMenuInfo {
+  public View targetView;
+  public int position;
+  public long id;
+  public AdapterContextMenuInfo(View targetView, int position, long id) {
+   this.targetView = targetView;
+   this.position = position;
+   this.id = id;
+  }
+ }
  public void setOnItemClickListener(OnItemClickListener value){click=value;}public final OnItemClickListener getOnItemClickListener(){return click;}
  public void setOnItemLongClickListener(OnItemLongClickListener value){longClick=value;}public final OnItemLongClickListener getOnItemLongClickListener(){return longClick;}
  public void setOnItemSelectedListener(OnItemSelectedListener value){selected=value;}public final OnItemSelectedListener getOnItemSelectedListener(){return selected;}
