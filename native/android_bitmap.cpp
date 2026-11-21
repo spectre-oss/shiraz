@@ -225,3 +225,192 @@ extern "C" int AndroidBitmap_unlockPixels(JNIEnv* env, jobject bitmap) {
     locked.erase(it);
     return env->ExceptionCheck() ? exception : 0;
 }
+
+#include <csetjmp>
+#include <cstdio>
+#include <jpeglib.h>
+#include <png.h>
+#include <webp/encode.h>
+
+namespace {
+struct CompressJpegErr {
+    jpeg_error_mgr pub;
+    jmp_buf env;
+};
+
+void compress_jpeg_error_exit(j_common_ptr cinfo) {
+    auto* err = reinterpret_cast<CompressJpegErr*>(cinfo->err);
+    longjmp(err->env, 1);
+}
+
+struct PngSink {
+    void* user = nullptr;
+    AndroidBitmap_CompressWriteFunc fn = nullptr;
+    bool ok = true;
+};
+
+void png_write_cb(png_structp png_ptr, png_bytep data, png_size_t length) {
+    auto* sink = static_cast<PngSink*>(png_get_io_ptr(png_ptr));
+    if (!sink || !sink->fn || !sink->fn(sink->user, data, length)) {
+        if (sink)
+            sink->ok = false;
+        png_error(png_ptr, "write callback failed");
+    }
+}
+
+void png_flush_cb(png_structp) {}
+
+void to_straight_rgba(const AndroidBitmapInfo& info, const uint8_t* pixels,
+                      std::vector<uint8_t>& out) {
+    out.resize(static_cast<size_t>(info.width) * static_cast<size_t>(info.height) * 4);
+    for (uint32_t y = 0; y < info.height; ++y) {
+        const uint8_t* row = pixels + static_cast<size_t>(y) * info.stride;
+        uint8_t* dst = out.data() + static_cast<size_t>(y) * info.width * 4;
+        for (uint32_t x = 0; x < info.width; ++x) {
+            if (info.format == 4) {
+                uint16_t v = 0;
+                std::memcpy(&v, row + x * 2, 2);
+                uint32_t c = unpack565(v);
+                dst[x * 4 + 0] = static_cast<uint8_t>((c >> 16) & 255);
+                dst[x * 4 + 1] = static_cast<uint8_t>((c >> 8) & 255);
+                dst[x * 4 + 2] = static_cast<uint8_t>(c & 255);
+                dst[x * 4 + 3] = 255;
+            } else if (info.format == 8) {
+                dst[x * 4 + 0] = 0;
+                dst[x * 4 + 1] = 0;
+                dst[x * 4 + 2] = 0;
+                dst[x * 4 + 3] = row[x];
+            } else {
+                uint32_t c = decode(row + x * 4);
+                dst[x * 4 + 0] = static_cast<uint8_t>((c >> 16) & 255);
+                dst[x * 4 + 1] = static_cast<uint8_t>((c >> 8) & 255);
+                dst[x * 4 + 2] = static_cast<uint8_t>(c & 255);
+                dst[x * 4 + 3] = static_cast<uint8_t>(c >> 24);
+            }
+        }
+    }
+}
+} // namespace
+
+extern "C" int32_t AndroidBitmap_getDataSpace(JNIEnv* env, jobject bitmap) {
+    AndroidBitmapInfo info{};
+    if (AndroidBitmap_getInfo(env, bitmap, &info) != 0)
+        return 0;
+    return info.format == 8 ? 0 : 142671872 /* ADATASPACE_SRGB */;
+}
+
+extern "C" int AndroidBitmap_compress(const AndroidBitmapInfo* info, int32_t, const void* pixels,
+                                      int32_t format, int32_t quality, void* userContext,
+                                      AndroidBitmap_CompressWriteFunc fn) {
+    if (!info || !pixels || !fn || info->width == 0 || info->height == 0 || info->width > 16384 ||
+        info->height > 16384 || quality < 0 || quality > 100)
+        return bad;
+    size_t min_bpp = info->format == 8 ? 1 : info->format == 4 ? 2 : 4;
+    if (info->stride < info->width * min_bpp)
+        return bad;
+    std::vector<uint8_t> rgba;
+    try {
+        to_straight_rgba(*info, static_cast<const uint8_t*>(pixels), rgba);
+    } catch (const std::bad_alloc&) {
+        return allocation;
+    }
+
+    if (format == ANDROID_BITMAP_COMPRESS_FORMAT_PNG) {
+        png_structp png_ptr =
+            png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+        if (!png_ptr)
+            return allocation;
+        png_infop info_ptr = png_create_info_struct(png_ptr);
+        if (!info_ptr) {
+            png_destroy_write_struct(&png_ptr, nullptr);
+            return allocation;
+        }
+        PngSink sink{userContext, fn, true};
+        if (setjmp(png_jmpbuf(png_ptr))) {
+            png_destroy_write_struct(&png_ptr, &info_ptr);
+            return -4;
+        }
+        png_set_write_fn(png_ptr, &sink, png_write_cb, png_flush_cb);
+        png_set_IHDR(png_ptr, info_ptr, info->width, info->height, 8, PNG_COLOR_TYPE_RGBA,
+                     PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+        png_write_info(png_ptr, info_ptr);
+        std::vector<png_bytep> rows(info->height);
+        for (uint32_t y = 0; y < info->height; ++y)
+            rows[y] = rgba.data() + static_cast<size_t>(y) * info->width * 4;
+        png_write_image(png_ptr, rows.data());
+        png_write_end(png_ptr, nullptr);
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        return sink.ok ? 0 : -4;
+    }
+
+    if (format == ANDROID_BITMAP_COMPRESS_FORMAT_JPEG) {
+        jpeg_compress_struct cinfo{};
+        CompressJpegErr jerr{};
+        cinfo.err = jpeg_std_error(&jerr.pub);
+        jerr.pub.error_exit = compress_jpeg_error_exit;
+        unsigned char* out_buf = nullptr;
+        unsigned long out_size = 0;
+        if (setjmp(jerr.env)) {
+            jpeg_destroy_compress(&cinfo);
+            std::free(out_buf);
+            return -4;
+        }
+        jpeg_create_compress(&cinfo);
+        jpeg_mem_dest(&cinfo, &out_buf, &out_size);
+        cinfo.image_width = info->width;
+        cinfo.image_height = info->height;
+        cinfo.input_components = 3;
+        cinfo.in_color_space = JCS_RGB;
+        jpeg_set_defaults(&cinfo);
+        jpeg_set_quality(&cinfo, quality, TRUE);
+        jpeg_start_compress(&cinfo, TRUE);
+        std::vector<uint8_t> rgb_row(static_cast<size_t>(info->width) * 3);
+        while (cinfo.next_scanline < cinfo.image_height) {
+            const uint8_t* src =
+                rgba.data() + static_cast<size_t>(cinfo.next_scanline) * info->width * 4;
+            for (uint32_t x = 0; x < info->width; ++x) {
+                rgb_row[x * 3 + 0] = src[x * 4 + 0];
+                rgb_row[x * 3 + 1] = src[x * 4 + 1];
+                rgb_row[x * 3 + 2] = src[x * 4 + 2];
+            }
+            JSAMPROW row_ptr = rgb_row.data();
+            jpeg_write_scanlines(&cinfo, &row_ptr, 1);
+        }
+        jpeg_finish_compress(&cinfo);
+        jpeg_destroy_compress(&cinfo);
+        bool ok = out_buf && out_size > 0 && fn(userContext, out_buf, out_size);
+        std::free(out_buf);
+        return ok ? 0 : -4;
+    }
+
+    if (format == ANDROID_BITMAP_COMPRESS_FORMAT_WEBP_LOSSY ||
+        format == ANDROID_BITMAP_COMPRESS_FORMAT_WEBP_LOSSLESS) {
+        uint8_t* out_buf = nullptr;
+        size_t out_size = 0;
+        if (format == ANDROID_BITMAP_COMPRESS_FORMAT_WEBP_LOSSLESS) {
+            out_size = WebPEncodeLosslessRGBA(rgba.data(), static_cast<int>(info->width),
+                                              static_cast<int>(info->height),
+                                              static_cast<int>(info->width * 4), &out_buf);
+        } else {
+            out_size = WebPEncodeRGBA(
+                rgba.data(), static_cast<int>(info->width), static_cast<int>(info->height),
+                static_cast<int>(info->width * 4), static_cast<float>(quality), &out_buf);
+        }
+        if (!out_buf || out_size == 0)
+            return -4;
+        bool ok = fn(userContext, out_buf, out_size);
+        WebPFree(out_buf);
+        return ok ? 0 : -4;
+    }
+
+    return bad;
+}
+
+extern "C" int AndroidBitmap_getHardwareBuffer(JNIEnv* env, jobject bitmap,
+                                               struct AHardwareBuffer** outBuffer) {
+    if (!env || !bitmap || !outBuffer)
+        return bad;
+    *outBuffer = nullptr;
+    // Shiraz Java Bitmaps are software pixel arrays; hardware-backed Bitmaps are unsupported.
+    return -5 /* ANDROID_BITMAP_RESULT_UNSUPPORTED */;
+}

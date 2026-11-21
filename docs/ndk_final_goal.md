@@ -38,7 +38,7 @@ behavioral unit tests:
 |---|---|---|---|
 | **N0** | NDK audit infrastructure & standalone targets | `scripts/audit_ndk_apis.py`, `mk/ndk.mk`, standalone `libmediandk.so`, `libsync.so`, `libOpenSLES.so` (macOS) | `[x]` |
 | **N1** | `libandroid.so` core app, input, config & assets | `AConfiguration_*`, `AInputEvent_*`, `AInputQueue_*`, `AKeyEvent_*`, `AMotionEvent_*`, `ANativeActivity_*`, `AAssetManager_*` / `AAsset_*` / `AAssetDir_*` | `[x]` |
-| **N2** | `libandroid.so` graphics/system/storage & `libjnigraphics.so` | `ASurfaceControl_*`, `ASurfaceTransaction_*`, `AImageDecoder_*`, `APerformanceHint_*`, `AThermal_*`, `AStorageManager_*`, `AObbInfo_*`, `AndroidBitmap_compress` / `_getDataSpace` / `_getHardwareBuffer` | `[ ]` |
+| **N2** | `libandroid.so` graphics/system/storage & `libjnigraphics.so` | `ASurfaceControl_*`, `ASurfaceTransaction_*`, `AImageDecoder_*`, `APerformanceHint_*`, `AThermal_*`, `AStorageManager_*`, `AObbInfo_*`, `AndroidBitmap_compress` / `_getDataSpace` / `_getHardwareBuffer` | `[x]` |
 | **N3** | `libmediandk.so` containers & codec surface | `AMediaExtractor_*` (WAV/MP4), `AMediaMuxer_*` (WAV/MP4), `AMediaDataSource_*`, `AMediaFormat_*` & `AMediaCodec_*` completion | `[ ]` |
 | **N4** | `libaaudio.so` low-latency audio | Full `AAudioStreamBuilder_*` & `AAudioStream_*` over CoreAudio/ALSA + callback/ring-buffer engine | `[ ]` |
 | **N5** | `libicu.so` & `liblog.so` | Unversioned NDK ICU4C ABI (`u_*`, `ubrk_*`, `ucnv_*`, `ucol_*`, `udat_*`, `uloc_*`, `unorm2_*`, `unum_*`, `ubidi_*`, `uscript_*`, `utext_*`, `utrans_*`, `ucal_*`) + full Android logging API | `[ ]` |
@@ -51,8 +51,8 @@ behavioral unit tests:
 
 | Status | Library | Primary APIs | Milestone |
 |---|---|---|---|
-| `[~]` | `libandroid.so` | `ANativeWindow`, `AHardwareBuffer`, `ASharedMemory`, `ALooper`, `AChoreographer`, `ASensor*`, `AFont`, `ATrace`, `AConfiguration`, `AInput*`, `ANativeActivity`, `AAsset*`, `ASurfaceControl*`, `AImageDecoder*`, `APerformanceHint*`, `AThermal*`, `AStorageManager*`, `AObbInfo*` | Existing + N1 + N2 |
-| `[~]` | `libjnigraphics.so` | `AndroidBitmap_getInfo`, `_lockPixels`, `_unlockPixels`, `_getDataSpace`, `_compress`, `_getHardwareBuffer` | Existing + N2 |
+| `[x]` | `libandroid.so` | `ANativeWindow`, `AHardwareBuffer`, `ASharedMemory`, `ALooper`, `AChoreographer`, `ASensor*`, `AFont`, `ATrace`, `AConfiguration`, `AInput*`, `ANativeActivity`, `AAsset*`, `ASurfaceControl*`, `AImageDecoder*`, `APerformanceHint*`, `AThermal*`, `AStorageManager*`, `AObbInfo*` | Existing + N1 + N2 |
+| `[x]` | `libjnigraphics.so` | `AndroidBitmap_getInfo`, `_lockPixels`, `_unlockPixels`, `_getDataSpace`, `_compress`, `_getHardwareBuffer` | Existing + N2 |
 | `[~]` | `libmediandk.so` | `AMediaFormat`, `AMediaCodec`, `AMediaCrypto`, `AMediaDrm`, `AImageReader`, `AImage`, `AMediaExtractor`, `AMediaMuxer`, `AMediaDataSource` | N0 + N3 |
 | `[x]` | `libsync.so` | `sync_wait`, `sync_merge`, `sync_file_info`, `sync_file_info_free` | N0 |
 | `[x]` | `libOpenSLES.so` | `slCreateEngine`, `slQueryNumSupportedEngineInterfaces`, `slQuerySupportedEngineInterfaces`, `SL_IID_*` | Existing + N0 |

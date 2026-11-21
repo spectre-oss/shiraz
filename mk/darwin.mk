@@ -102,8 +102,8 @@ MACOS_CXX = $(CXX) $(CPPFLAGS) $(CXXFLAGS)
 
 # Same source list as the Linux build/libandroid.so. EGL-backed entry points fail
 # explicitly on macOS until ANGLE-Metal lands (docs/macos_final_goal.md, M4).
-MACOS_ANDROID_SOURCES := native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp
-MACOS_ANDROID_HEADERS := include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h include/shiraz/ndk/configuration.h include/shiraz/ndk/input.h include/shiraz/ndk/native_activity.h include/shiraz/ndk/asset_manager.h
+MACOS_ANDROID_SOURCES := native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp native/ndk_surface_control.cpp native/ndk_imagedecoder.cpp native/ndk_system_services.cpp
+MACOS_ANDROID_HEADERS := include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h include/shiraz/ndk/configuration.h include/shiraz/ndk/input.h include/shiraz/ndk/native_activity.h include/shiraz/ndk/asset_manager.h include/shiraz/ndk/surface_control.h include/shiraz/ndk/imagedecoder.h include/shiraz/ndk/system_services.h
 MACOS_ANDROID_FRAMEWORKS := -framework CoreFoundation -framework CoreText -framework IOSurface
 # Same source list as the Linux build/libshiraz-host.so, including the
 # native/gles_version.cpp reqGlEsVersion probe (see the OpenGL ES rules below).
@@ -184,7 +184,7 @@ $(MACOS_SDL_CONFIG):
 	@echo 'SDL2 missing. Run make macos-deps (local source build).'; exit 1
 
 $(MACOS_OUT)/libandroid.so: $(MACOS_ANDROID_SOURCES) $(MACOS_ANDROID_HEADERS) mk/darwin.mk $(MACOS_OUT)/.dir
-	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) $(MACOS_ANDROID_SOURCES) -o $@ -pthread $(MACOS_ANDROID_FRAMEWORKS)
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) $(MACOS_IMAGE_CFLAGS) -fPIC $(MACOS_DYLIB) $(MACOS_ANDROID_SOURCES) -o $@ $(MACOS_IMAGE_LIBS) -pthread $(MACOS_ANDROID_FRAMEWORKS)
 
 # The Linux library links -lEGL (libglvnd). Here the probe's EGL calls bind to
 # libEGL_shim, which reaches ANGLE only through SHIRAZ_EGL_LIBRARY at run time:
@@ -2783,7 +2783,7 @@ macos-guest-check: macos-guest-mrs-accessor-code-check
 # NDK bitmap ABI smoke on darwin ART (Mach-O libraries keep Android .so names).
 $(MACOS_OUT)/libjnigraphics.so: native/android_bitmap.cpp include/shiraz/android_bitmap.h
 	@mkdir -p $(MACOS_OUT)
-	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/android_bitmap.cpp -o $@
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) $(MACOS_IMAGE_CFLAGS) -fPIC $(MACOS_DYLIB) native/android_bitmap.cpp -o $@ $(MACOS_IMAGE_LIBS)
 $(MACOS_OUT)/libshiraz-test-android-bitmap.so: tests/android_bitmap.cpp include/shiraz/android_bitmap.h $(MACOS_OUT)/libjnigraphics.so
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) tests/android_bitmap.cpp $(MACOS_OUT)/libjnigraphics.so $(MACOS_RPATH) -o $@
 .PHONY: macos-android-bitmap-smoke

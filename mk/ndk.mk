@@ -49,6 +49,9 @@ $(MACOS_OUT)/test-ndk-standalone: tests/ndk_standalone.cpp $(MACOS_OUT)/libmedia
 $(MACOS_OUT)/test-ndk-core-app: tests/ndk_core_app.cpp $(MACOS_OUT)/libandroid.so
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) tests/ndk_core_app.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) -pthread
 
+$(MACOS_OUT)/test-ndk-graphics-system: tests/ndk_graphics_system.cpp $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libjnigraphics.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) tests/ndk_graphics_system.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libjnigraphics.so $(MACOS_RPATH) -pthread
+
 build/test-ndk-standalone: tests/ndk_standalone.cpp build/libmediandk.so build/libsync.so build/libOpenSLES.so build/libnativewindow.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_standalone.cpp -o $@ -Lbuild -lmediandk -lsync -lOpenSLES -Wl,-rpath,'$$ORIGIN' -pthread
@@ -57,19 +60,25 @@ build/test-ndk-core-app: tests/ndk_core_app.cpp build/libandroid.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/ndk_core_app.cpp -o $@ -Lbuild -landroid -Wl,-rpath,'$$ORIGIN' -pthread
 
+build/test-ndk-graphics-system: tests/ndk_graphics_system.cpp build/libandroid.so build/libjnigraphics.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/ndk_graphics_system.cpp -o $@ -Lbuild -landroid -ljnigraphics -Wl,-rpath,'$$ORIGIN' -pthread
+
 .PHONY: ndk-build ndk-test macos-ndk-build macos-ndk-test ndk-audit
 
 ndk-build: $(NDK_LINUX_LIBS)
 
-ndk-test: build/test-ndk-standalone build/test-ndk-core-app
+ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system
 	./build/test-ndk-standalone
 	./build/test-ndk-core-app
+	./build/test-ndk-graphics-system
 
 macos-ndk-build: $(NDK_MACOS_LIBS)
 
-macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app
+macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system
 	$(MACOS_OUT)/test-ndk-standalone
 	$(MACOS_OUT)/test-ndk-core-app
+	$(MACOS_OUT)/test-ndk-graphics-system
 
 ndk-audit:
 	python3 scripts/audit_ndk_apis.py
