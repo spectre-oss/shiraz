@@ -20,9 +20,9 @@ NDK_MACOS_LIBS := \
 
 # --- Milestone N0: Standalone libmediandk.so, libsync.so, libnativewindow.so, libOpenSLES.so ---
 
-build/libmediandk.so: native/media_ndk.cpp native/media_crypto.cpp native/image_reader.cpp include/shiraz/media_crypto.h include/shiraz/image_reader.h include/shiraz/hardware_buffer.h include/shiraz/native_window.h build/libandroid.so
+build/libmediandk.so: native/media_ndk.cpp native/ndk_media_container.cpp native/media_crypto.cpp native/image_reader.cpp include/shiraz/ndk/media_container.h include/shiraz/media_crypto.h include/shiraz/image_reader.h include/shiraz/hardware_buffer.h include/shiraz/native_window.h build/libandroid.so
 	@mkdir -p build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/media_ndk.cpp native/media_crypto.cpp native/image_reader.cpp -o $@ -Lbuild -landroid -pthread -Wl,-rpath,'$$ORIGIN'
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/media_ndk.cpp native/ndk_media_container.cpp native/media_crypto.cpp native/image_reader.cpp -o $@ -Lbuild -landroid -pthread -Wl,-rpath,'$$ORIGIN'
 
 build/libsync.so: native/sync_fence.cpp build/libandroid.so
 	@mkdir -p build
@@ -34,8 +34,8 @@ build/libOpenSLES.so: build/libOpenSLES.so.1
 $(MACOS_OUT)/libnativewindow.so: $(MACOS_OUT)/libandroid.so
 	ln -sfn libandroid.so $@
 
-$(MACOS_OUT)/libmediandk.so: native/media_ndk.cpp native/media_crypto.cpp native/image_reader.cpp include/shiraz/media_crypto.h include/shiraz/image_reader.h include/shiraz/hardware_buffer.h include/shiraz/native_window.h $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/.dir
-	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/media_ndk.cpp native/media_crypto.cpp native/image_reader.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) -pthread $(MACOS_ANDROID_FRAMEWORKS)
+$(MACOS_OUT)/libmediandk.so: native/media_ndk.cpp native/ndk_media_container.cpp native/media_crypto.cpp native/image_reader.cpp include/shiraz/ndk/media_container.h include/shiraz/media_crypto.h include/shiraz/image_reader.h include/shiraz/hardware_buffer.h include/shiraz/native_window.h $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/.dir
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/media_ndk.cpp native/ndk_media_container.cpp native/media_crypto.cpp native/image_reader.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) -pthread $(MACOS_ANDROID_FRAMEWORKS)
 
 $(MACOS_OUT)/libsync.so: native/sync_fence.cpp $(MACOS_OUT)/.dir
 	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/sync_fence.cpp -o $@ -pthread
@@ -52,6 +52,9 @@ $(MACOS_OUT)/test-ndk-core-app: tests/ndk_core_app.cpp $(MACOS_OUT)/libandroid.s
 $(MACOS_OUT)/test-ndk-graphics-system: tests/ndk_graphics_system.cpp $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libjnigraphics.so
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) tests/ndk_graphics_system.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libjnigraphics.so $(MACOS_RPATH) -pthread
 
+$(MACOS_OUT)/test-ndk-mediandk: tests/ndk_mediandk.cpp $(MACOS_OUT)/libmediandk.so
+	$(MACOS_CXX) tests/ndk_mediandk.cpp -o $@ $(MACOS_OUT)/libmediandk.so $(MACOS_RPATH) -pthread
+
 build/test-ndk-standalone: tests/ndk_standalone.cpp build/libmediandk.so build/libsync.so build/libOpenSLES.so build/libnativewindow.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_standalone.cpp -o $@ -Lbuild -lmediandk -lsync -lOpenSLES -Wl,-rpath,'$$ORIGIN' -pthread
@@ -64,21 +67,27 @@ build/test-ndk-graphics-system: tests/ndk_graphics_system.cpp build/libandroid.s
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/ndk_graphics_system.cpp -o $@ -Lbuild -landroid -ljnigraphics -Wl,-rpath,'$$ORIGIN' -pthread
 
+build/test-ndk-mediandk: tests/ndk_mediandk.cpp build/libmediandk.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_mediandk.cpp -o $@ -Lbuild -lmediandk -Wl,-rpath,'$$ORIGIN' -pthread
+
 .PHONY: ndk-build ndk-test macos-ndk-build macos-ndk-test ndk-audit
 
 ndk-build: $(NDK_LINUX_LIBS)
 
-ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system
+ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk
 	./build/test-ndk-standalone
 	./build/test-ndk-core-app
 	./build/test-ndk-graphics-system
+	./build/test-ndk-mediandk
 
 macos-ndk-build: $(NDK_MACOS_LIBS)
 
-macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system
+macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk
 	$(MACOS_OUT)/test-ndk-standalone
 	$(MACOS_OUT)/test-ndk-core-app
 	$(MACOS_OUT)/test-ndk-graphics-system
+	$(MACOS_OUT)/test-ndk-mediandk
 
 ndk-audit:
 	python3 scripts/audit_ndk_apis.py

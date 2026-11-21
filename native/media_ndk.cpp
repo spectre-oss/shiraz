@@ -1,18 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // NDK format storage and explicit codec-unavailable fallback. Java MediaCodec
 // remains the OS decoder path; native callers may fall back to their own codecs.
+#include "shiraz/ndk/media_container.h"
+
 #include <algorithm>
-#include <type_traits>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <map>
-#include <string>
-#include <vector>
-#include <variant>
 #include <new>
+#include <string>
 #include <sys/types.h>
+#include <type_traits>
+#include <variant>
+#include <vector>
+
+struct AMediaFormatRect {
+    int32_t left = 0;
+    int32_t top = 0;
+    int32_t right = 0;
+    int32_t bottom = 0;
+};
+
 struct AMediaFormat {
-    using Value = std::variant<int32_t, int64_t, float, std::string, std::vector<uint8_t>>;
+    using Value = std::variant<int32_t, int64_t, float, double, size_t, AMediaFormatRect,
+                               std::string, std::vector<uint8_t>>;
     std::map<std::string, Value> values;
     std::string display;
 };
@@ -65,6 +77,27 @@ bool AMediaFormat_getInt64(AMediaFormat* f, const char* k, int64_t* v) {
 bool AMediaFormat_getFloat(AMediaFormat* f, const char* k, float* v) {
     return get(f, k, v);
 }
+bool AMediaFormat_getDouble(AMediaFormat* f, const char* k, double* v) {
+    return get(f, k, v);
+}
+bool AMediaFormat_getSize(AMediaFormat* f, const char* k, size_t* v) {
+    return get(f, k, v);
+}
+bool AMediaFormat_getRect(AMediaFormat* f, const char* k, int32_t* left, int32_t* top,
+                          int32_t* right, int32_t* bottom) {
+    if (!left || !top || !right || !bottom) {
+        return false;
+    }
+    AMediaFormatRect r{};
+    if (!get(f, k, &r)) {
+        return false;
+    }
+    *left = r.left;
+    *top = r.top;
+    *right = r.right;
+    *bottom = r.bottom;
+    return true;
+}
 void AMediaFormat_setInt32(AMediaFormat* f, const char* k, int32_t v) {
     set(f, k, v);
 }
@@ -73,6 +106,16 @@ void AMediaFormat_setInt64(AMediaFormat* f, const char* k, int64_t v) {
 }
 void AMediaFormat_setFloat(AMediaFormat* f, const char* k, float v) {
     set(f, k, v);
+}
+void AMediaFormat_setDouble(AMediaFormat* f, const char* k, double v) {
+    set(f, k, v);
+}
+void AMediaFormat_setSize(AMediaFormat* f, const char* k, size_t v) {
+    set(f, k, v);
+}
+void AMediaFormat_setRect(AMediaFormat* f, const char* k, int32_t left, int32_t top, int32_t right,
+                          int32_t bottom) {
+    set(f, k, AMediaFormatRect{left, top, right, bottom});
 }
 void AMediaFormat_setString(AMediaFormat* f, const char* k, const char* v) {
     if (v)
@@ -117,6 +160,25 @@ bool AMediaFormat_getBuffer(AMediaFormat* f, const char* k, void** out, size_t* 
     *size = v->size();
     return true;
 }
+media_status_t AMediaFormat_copy(AMediaFormat* to, AMediaFormat* from) {
+    if (!to || !from) {
+        return AMEDIA_ERROR_INVALID_PARAMETER;
+    }
+    try {
+        to->values = from->values;
+        to->display.clear();
+        return AMEDIA_OK;
+    } catch (const std::bad_alloc&) {
+        return AMEDIA_ERROR_UNKNOWN;
+    }
+}
+void AMediaFormat_clear(AMediaFormat* f) {
+    if (!f) {
+        return;
+    }
+    f->values.clear();
+    f->display.clear();
+}
 const char* AMediaFormat_toString(AMediaFormat* f) {
     if (!f)
         return nullptr;
@@ -133,6 +195,10 @@ const char* AMediaFormat_toString(AMediaFormat* f) {
                         f->display += v;
                     else if constexpr (std::is_same_v<T, std::vector<uint8_t>>)
                         f->display += "buffer(" + std::to_string(v.size()) + ")";
+                    else if constexpr (std::is_same_v<T, AMediaFormatRect>)
+                        f->display += "rect(" + std::to_string(v.left) + "," +
+                                      std::to_string(v.top) + "," + std::to_string(v.right) + "," +
+                                      std::to_string(v.bottom) + ")";
                     else
                         f->display += std::to_string(v);
                 },
@@ -190,6 +256,9 @@ uint8_t* AMediaCodec_getOutputBuffer(AMediaCodec*, size_t, size_t* size) {
 AMediaFormat* AMediaCodec_getOutputFormat(AMediaCodec*) {
     return nullptr;
 }
+AMediaFormat* AMediaCodec_getInputFormat(AMediaCodec*) {
+    return nullptr;
+}
 int AMediaCodec_queueInputBuffer(AMediaCodec*, size_t, size_t, size_t, uint64_t, uint32_t) {
     return invalid;
 }
@@ -205,5 +274,40 @@ int AMediaCodec_releaseOutputBufferAtTime(AMediaCodec*, size_t, int64_t) {
 }
 int AMediaCodec_setParameters(AMediaCodec*, const AMediaFormat*) {
     return invalid;
+}
+media_status_t AMediaCodec_setOutputSurface(AMediaCodec*, ANativeWindow*) {
+    return invalid;
+}
+media_status_t AMediaCodec_createInputSurface(AMediaCodec*, ANativeWindow** surface) {
+    if (surface) {
+        *surface = nullptr;
+    }
+    return invalid;
+}
+media_status_t AMediaCodec_createPersistentInputSurface(ANativeWindow** surface) {
+    if (!surface) {
+        return AMEDIA_ERROR_INVALID_PARAMETER;
+    }
+    *surface = nullptr;
+    return AMEDIA_ERROR_UNSUPPORTED;
+}
+media_status_t AMediaCodec_setInputSurface(AMediaCodec*, ANativeWindow*) {
+    return invalid;
+}
+media_status_t AMediaCodec_signalEndOfInputStream(AMediaCodec*) {
+    return invalid;
+}
+media_status_t AMediaCodec_setAsyncNotifyCallback(AMediaCodec*, AMediaCodecOnAsyncNotifyCallback,
+                                                  void*) {
+    return invalid;
+}
+media_status_t AMediaCodec_getName(AMediaCodec*, char** out_name) {
+    if (out_name) {
+        *out_name = nullptr;
+    }
+    return invalid;
+}
+void AMediaCodec_releaseName(AMediaCodec*, char* name) {
+    std::free(name);
 }
 }
