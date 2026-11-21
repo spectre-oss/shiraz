@@ -102,8 +102,8 @@ MACOS_CXX = $(CXX) $(CPPFLAGS) $(CXXFLAGS)
 
 # Same source list as the Linux build/libandroid.so. EGL-backed entry points fail
 # explicitly on macOS until ANGLE-Metal lands (docs/macos_final_goal.md, M4).
-MACOS_ANDROID_SOURCES := native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp
-MACOS_ANDROID_HEADERS := include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h
+MACOS_ANDROID_SOURCES := native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp
+MACOS_ANDROID_HEADERS := include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h include/shiraz/ndk/configuration.h include/shiraz/ndk/input.h include/shiraz/ndk/native_activity.h include/shiraz/ndk/asset_manager.h
 MACOS_ANDROID_FRAMEWORKS := -framework CoreFoundation -framework CoreText -framework IOSurface
 # Same source list as the Linux build/libshiraz-host.so, including the
 # native/gles_version.cpp reqGlEsVersion probe (see the OpenGL ES rules below).

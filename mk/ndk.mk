@@ -46,21 +46,30 @@ $(MACOS_OUT)/libOpenSLES.so: native/opensles.cpp third_party/opensles/SLES/OpenS
 $(MACOS_OUT)/test-ndk-standalone: tests/ndk_standalone.cpp $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_OUT)/libnativewindow.so
 	$(MACOS_CXX) tests/ndk_standalone.cpp -o $@ $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_RPATH) -pthread
 
+$(MACOS_OUT)/test-ndk-core-app: tests/ndk_core_app.cpp $(MACOS_OUT)/libandroid.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) tests/ndk_core_app.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) -pthread
+
 build/test-ndk-standalone: tests/ndk_standalone.cpp build/libmediandk.so build/libsync.so build/libOpenSLES.so build/libnativewindow.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_standalone.cpp -o $@ -Lbuild -lmediandk -lsync -lOpenSLES -Wl,-rpath,'$$ORIGIN' -pthread
+
+build/test-ndk-core-app: tests/ndk_core_app.cpp build/libandroid.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/ndk_core_app.cpp -o $@ -Lbuild -landroid -Wl,-rpath,'$$ORIGIN' -pthread
 
 .PHONY: ndk-build ndk-test macos-ndk-build macos-ndk-test ndk-audit
 
 ndk-build: $(NDK_LINUX_LIBS)
 
-ndk-test: build/test-ndk-standalone
+ndk-test: build/test-ndk-standalone build/test-ndk-core-app
 	./build/test-ndk-standalone
+	./build/test-ndk-core-app
 
 macos-ndk-build: $(NDK_MACOS_LIBS)
 
-macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone
+macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app
 	$(MACOS_OUT)/test-ndk-standalone
+	$(MACOS_OUT)/test-ndk-core-app
 
 ndk-audit:
 	python3 scripts/audit_ndk_apis.py

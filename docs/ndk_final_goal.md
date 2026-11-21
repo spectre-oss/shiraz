@@ -37,7 +37,7 @@ behavioral unit tests:
 | Milestone | Scope | Libraries / families | Status |
 |---|---|---|---|
 | **N0** | NDK audit infrastructure & standalone targets | `scripts/audit_ndk_apis.py`, `mk/ndk.mk`, standalone `libmediandk.so`, `libsync.so`, `libOpenSLES.so` (macOS) | `[x]` |
-| **N1** | `libandroid.so` core app, input, config & assets | `AConfiguration_*`, `AInputEvent_*`, `AInputQueue_*`, `AKeyEvent_*`, `AMotionEvent_*`, `ANativeActivity_*`, `AAssetManager_*` / `AAsset_*` / `AAssetDir_*` | `[ ]` |
+| **N1** | `libandroid.so` core app, input, config & assets | `AConfiguration_*`, `AInputEvent_*`, `AInputQueue_*`, `AKeyEvent_*`, `AMotionEvent_*`, `ANativeActivity_*`, `AAssetManager_*` / `AAsset_*` / `AAssetDir_*` | `[x]` |
 | **N2** | `libandroid.so` graphics/system/storage & `libjnigraphics.so` | `ASurfaceControl_*`, `ASurfaceTransaction_*`, `AImageDecoder_*`, `APerformanceHint_*`, `AThermal_*`, `AStorageManager_*`, `AObbInfo_*`, `AndroidBitmap_compress` / `_getDataSpace` / `_getHardwareBuffer` | `[ ]` |
 | **N3** | `libmediandk.so` containers & codec surface | `AMediaExtractor_*` (WAV/MP4), `AMediaMuxer_*` (WAV/MP4), `AMediaDataSource_*`, `AMediaFormat_*` & `AMediaCodec_*` completion | `[ ]` |
 | **N4** | `libaaudio.so` low-latency audio | Full `AAudioStreamBuilder_*` & `AAudioStream_*` over CoreAudio/ALSA + callback/ring-buffer engine | `[ ]` |

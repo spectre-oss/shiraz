@@ -355,3 +355,11 @@ extern "C" int ALooper_pollOnce(int timeout_ms, int* out_fd, int* out_events, vo
     return watch.ident;
 #endif
 }
+
+extern "C" int ALooper_pollAll(int timeout_ms, int* out_fd, int* out_events, void** out_data) {
+    int result;
+    do {
+        result = ALooper_pollOnce(timeout_ms, out_fd, out_events, out_data);
+    } while (result == poll_callback);
+    return result;
+}
