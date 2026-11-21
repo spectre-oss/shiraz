@@ -471,6 +471,12 @@ PATCHES_DARWIN = {
             },
         ),
         (
+            'art-darwin-socket-sigpipe.patch',
+            {
+                'libcore/luni/src/main/native/libcore_io_Linux.cpp': '98e5e8fbd4a1ddb974336f7f2c510356b1a0edb041d812a0d6014d6d0646a74d',
+            },
+        ),
+        (
             'art-darwin-nanotime.patch',
             {
                 'libcore/ojluni/src/main/native/System.c': 'caa2de487a286b94f12e64b9da313decb6867c72d9f13440b18f8a751ba9dabc',

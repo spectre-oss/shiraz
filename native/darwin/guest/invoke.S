@@ -43,6 +43,61 @@ _shiraz_guest_invoke_asm:
     ret
 .cfi_endproc
 
+// Explicit admitted invocation. The return scope is armed with the exact
+// outgoing guest SP after copying stack arguments and before loading GPR/SIMD
+// arguments. The ordinary invocation above remains unchanged.
+.p2align 2
+.globl _shiraz_guest_invoke_admitted_asm
+_shiraz_guest_invoke_admitted_asm:
+.cfi_startproc
+    stp x29, x30, [sp, #-48]!
+.cfi_def_cfa_offset 48
+.cfi_offset x29, -48
+.cfi_offset x30, -40
+    stp x19, x20, [sp, #16]
+.cfi_offset x19, -32
+.cfi_offset x20, -24
+    stp x21, x22, [sp, #32]
+.cfi_offset x21, -16
+.cfi_offset x22, -8
+    mov x29, sp
+.cfi_def_cfa x29, 48
+    mov x19, x0
+    mov x20, x1
+    mov x21, x4
+    sub sp, sp, x3
+    mov x9, sp
+    cbz x3, 4f
+3:
+    ldp x10, x11, [x2], #16
+    stp x10, x11, [x9], #16
+    subs x3, x3, #16
+    b.ne 3b
+4:
+    mov x0, x21
+    adr x1, Lshiraz_admitted_return
+    mov x2, sp
+    bl _shiraz_guest_admission_arm
+    ldp q0, q1, [x19, #64]
+    ldp q2, q3, [x19, #96]
+    ldp q4, q5, [x19, #128]
+    ldp q6, q7, [x19, #160]
+    ldp x0, x1, [x19]
+    ldp x2, x3, [x19, #16]
+    ldp x4, x5, [x19, #32]
+    ldp x6, x7, [x19, #48]
+    blr x20
+Lshiraz_admitted_return:
+    stp x0, x1, [x19, #192]
+    stp q0, q1, [x19, #208]
+    mov sp, x29
+    ldp x21, x22, [sp, #32]
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #48
+.cfi_def_cfa sp, 0
+    ret
+.cfi_endproc
+
 // A leaf closure tail-branches here with its immutable context in x17.
 .macro SHIRAZ_CLOSURE_ENTRY name, scalar
 .p2align 2

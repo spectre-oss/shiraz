@@ -89,7 +89,8 @@ public final class StyledAttributesFixture {
   check(image.getImageTintList().getDefaultColor()==0xff112233&&image.getImageTintMode()==android.graphics.PorterDuff.Mode.SRC_IN,"XML image tint");
   image.setPadding(0,0,0,0);image.layout(0,0,2,2);android.graphics.Bitmap tinted=android.graphics.Bitmap.createBitmap(2,2,android.graphics.Bitmap.Config.ARGB_8888);image.draw(new android.graphics.Canvas(tinted));check(tinted.getPixel(0,0)==0xff112233,"XML tinted image pixels");tinted.recycle();
   android.widget.TextView text=new android.widget.TextView(context,null,0,R.style.ConstructorText);check(text.getText().toString().equals("Styled text")&&text.getTextSize()==18&&text.getCurrentTextColor()==0xff778899,"TextView default attributes");
-  try{new android.view.View(context,null,0,R.style.ConstructorUnsupported);throw new AssertionError("Unsupported styled rotation ignored");}catch(UnsupportedOperationException expected){}
+  check(new android.view.View(context,null,0,R.style.ConstructorRotation).getRotation()==20,"styled planar rotation");
+  try{new android.view.View(context,null,0,R.style.ConstructorUnsupported);throw new AssertionError("Unsupported styled perspective rotation ignored");}catch(UnsupportedOperationException expected){}
   TypedArray unchanged=context.obtainStyledAttributes(new int[]{android.R.attr.paddingBottom,android.R.attr.paddingTop});check(unchanged.getDimensionPixelSize(0,0)==2&&!unchanged.hasValue(1),"constructors mutated base theme");unchanged.recycle();
   System.out.println("VIEW_CONSTRUCTOR_STYLE_CASCADE_OK");
  }

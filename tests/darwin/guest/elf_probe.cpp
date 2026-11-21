@@ -6,6 +6,7 @@
 #include "shiraz/darwin/guest/tls.hpp"
 #include "shiraz/darwin/guest/va_list.hpp"
 #include <cstring>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -23,354 +24,411 @@
 #include <vector>
 
 using namespace shiraz::guest;
-extern "C" int shiraz_test_other_stack(void *, int (*)(void *), void *);
-static int reject_other_stack(void *entry) {
-  try {
-    invoke(entry, {});
-  } catch (const std::invalid_argument &error) {
-    return std::strcmp(error.what(), "guest call stack outside prepared native extent") == 0;
-  } catch (...) {
+extern "C" int shiraz_test_other_stack(void*, int (*)(void*), void*);
+static int reject_other_stack(void* entry) {
+    try {
+        invoke(entry, {});
+    } catch (const std::invalid_argument& error) {
+        return std::strcmp(error.what(), "guest call stack outside prepared native extent") == 0;
+    } catch (...) {
+        return 0;
+    }
     return 0;
-  }
-  return 0;
 }
-static int call_other_stack_provider(void *entry) {
-  reinterpret_cast<void (*)()>(entry)();
-  return 0;
+static int call_other_stack_provider(void* entry) {
+    reinterpret_cast<void (*)()>(entry)();
+    return 0;
 }
-static void require(bool value, const char *label) {
-  if (!value)
-    throw std::runtime_error(label);
+static void require(bool value, const char* label) {
+    if (!value)
+        throw std::runtime_error(label);
 }
 class WaitableChildDisposition {
-  struct sigaction previous{};
-public:
-  WaitableChildDisposition() {
-    require(!sigaction(SIGCHLD, nullptr, &previous), "snapshot child disposition");
-    struct sigaction action{};
-    sigemptyset(&action.sa_mask);
-    action.sa_handler = SIG_DFL;
-    require(!sigaction(SIGCHLD, &action, nullptr), "keep refusal child waitable");
-  }
-  ~WaitableChildDisposition() {
-    if (sigaction(SIGCHLD, &previous, nullptr)) _exit(95);
-  }
+    struct sigaction previous{};
+
+  public:
+    WaitableChildDisposition() {
+        require(!sigaction(SIGCHLD, nullptr, &previous), "snapshot child disposition");
+        struct sigaction action{};
+        sigemptyset(&action.sa_mask);
+        action.sa_handler = SIG_DFL;
+        require(!sigaction(SIGCHLD, &action, nullptr), "keep refusal child waitable");
+    }
+    ~WaitableChildDisposition() {
+        if (sigaction(SIGCHLD, &previous, nullptr))
+            _exit(95);
+    }
 };
 static int foreign_stack_provider_case() {
-  // Fresh self-exec isolates this fatal admission test from inherited native
-  // TLS/C++ state after fork. No guest instructions or handler may execute.
-  prepare_guest_tls();
-  require(guest_tls_prepared(), "provider refusal child has prepared TLS");
-  constexpr size_t bytes = 256 * 1024;
-  void *memory = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-  require(memory != MAP_FAILED, "provider refusal child stack allocation");
-  void *top = static_cast<uint8_t *>(memory) + bytes - 16;
-  require(!prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(top)),
-          "provider refusal child stack is foreign");
-  void *provider = closure([](Capture &) {
-    constexpr char marker[] = "UNEXPECTED_PROVIDER_HANDLER_ENTRY\n";
-    (void)::write(STDERR_FILENO, marker, sizeof(marker) - 1);
-  });
-  require(std::signal(SIGABRT, [](int) { _exit(97); }) != SIG_ERR,
-          "provider refusal child abort observer");
-  shiraz_test_other_stack(top, &call_other_stack_provider, provider);
-  return 98;
-}
-static double host_va_callback(int count, const GuestVaList *args) noexcept {
-  try {
-    if (count < 0 || count > 32 || !args)
-      return std::numeric_limits<double>::quiet_NaN();
-    VaListCursor cursor(*args);
-    double sum = 0;
-    for (int i = 1; i <= count; ++i) {
-      int32_t integer = static_cast<int32_t>(cursor.next(ArgumentType::Int32));
-      uint64_t bits = cursor.next(ArgumentType::Double);
-      double real;
-      std::memcpy(&real, &bits, sizeof(real));
-      sum += i * (integer + real);
-    }
-    return sum;
-  } catch (...) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-}
-int main(int argc, char **argv) {
-  try {
-    if (argc == 2 && std::strcmp(argv[1], "--provider-foreign-stack") == 0)
-      return foreign_stack_provider_case();
-    require(argc == 2, "usage: elf-probe fixture.so");
-    std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
-    require(bool(file), "fixture open");
-    auto length = file.tellg();
-    require(length > 0 && length <= (256 << 20), "fixture length");
-    std::vector<uint8_t> bytes(static_cast<size_t>(length));
-    file.seekg(0);
-    require(bool(file.read(reinterpret_cast<char *>(bytes.data()), length)),
-            "fixture read");
-    const auto parsed = parse_elf(bytes, 16384);
-    for (uint32_t type : {257u, 1025u, 1026u, 1027u}) {
-      bool found = false;
-      for (const auto &relocation : parsed.relocations)
-        found |= relocation.type == type;
-      require(found, "fixture must exercise all four relocation kinds");
-    }
-    uint32_t dyld_count = _dyld_image_count();
-    Image first(bytes), second(bytes);
-    require(first.metrics().relocations_verified && second.metrics().relocations_verified &&
-                first.metrics().verified_relocations == parsed.relocations.size() &&
-                first.relocation_values().size() == parsed.relocations.size(),
-            "complete relocation readback published before constructors");
-    for (size_t i = 0; i < parsed.relocations.size(); ++i) {
-      uint64_t observed = 0;
-      std::memcpy(&observed, reinterpret_cast<const void *>(first.load_bias() + parsed.relocations[i].address), 8);
-      require(observed == first.relocation_values()[i], "independent slot read matches saved relocation value");
-    }
-    Image retry(bytes, Image::Mapping::Deferred);
-    bool resolve_failed = false;
-    try { retry.relocate([](size_t) -> uintptr_t { throw ElfError("fixture resolver refusal"); }); }
-    catch (const ElfError &) { resolve_failed = true; }
-    require(resolve_failed && !retry.metrics().relocations_verified && retry.relocation_values().empty(),
-            "failed resolution cannot publish readback success");
-    retry.relocate([&](size_t index) { return retry.address(index); });
-    retry.seal();
-    require(retry.metrics().relocations_verified && retry.relocation_values().size() == parsed.relocations.size(),
-            "resolution retry publishes only complete readback");
-    require(_dyld_image_count() == dyld_count,
-            "ELF must not be registered with dyld");
-    require(*static_cast<long *>(first.symbol("guest_state")) == 0,
-            "initial BSS zero");
-    require(first.initialize() == 1 && first.initialize() == 0,
-            "constructor exactly once");
-    require(invoke(first.symbol("guest_read"), {}).result_integers[0] == 237,
-            "relocations/BSS/constructor");
-    const auto pointer_address = reinterpret_cast<uintptr_t>(first.symbol("guest_pointer"));
-    size_t pointer_index = parsed.relocations.size();
-    for (size_t i = 0; i < parsed.relocations.size(); ++i)
-      if (first.load_bias() + parsed.relocations[i].address == pointer_address) pointer_index = i;
-    require(pointer_index < parsed.relocations.size(), "mutable pointer has relocation evidence");
-    const auto saved_pointer = first.relocation_values()[pointer_index];
-    const auto changed_pointer = reinterpret_cast<uintptr_t>(second.symbol("guest_state"));
-    std::memcpy(reinterpret_cast<void *>(pointer_address), &changed_pointer, 8);
-    require(first.relocation_values()[pointer_index] == saved_pointer && changed_pointer != saved_pointer,
-            "historical relocation snapshot survives later valid writable data mutation");
-    std::memcpy(reinterpret_cast<void *>(pointer_address), &saved_pointer, 8);
-    std::cout << "M5_RELOCATION_READBACK_PASS slots=" << parsed.relocations.size()
-              << " kinds=4 before_init=1 failed_resolve_unpublished=1 retry=1 historical_snapshot=1 raw_pointers_in_report=0\n";
-    require(*static_cast<long *>(second.symbol("guest_state")) == 0,
-            "second image isolation");
-    require(second.initialize() == 1, "second constructor");
-    constexpr size_t other_stack_bytes = 256 * 1024;
-    void *other_stack = mmap(nullptr, other_stack_bytes, PROT_READ | PROT_WRITE,
-                             MAP_PRIVATE | MAP_ANON, -1, 0);
-    require(other_stack != MAP_FAILED, "temporary alternate stack allocation");
-    void *other_top = static_cast<uint8_t *>(other_stack) + other_stack_bytes - 16;
-    require(!prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(other_top)),
-            "alternate stack lies outside the prepared pthread extent");
-    int rejected = shiraz_test_other_stack(other_top, &reject_other_stack, first.symbol("guest_leaf"));
-    require(munmap(other_stack, other_stack_bytes) == 0, "temporary alternate stack cleanup");
-    require(rejected == 1 && !capture_boundary_token(),
-            "real alternate-stack invocation refuses before guest entry and restores boundary");
-    alignas(16) uint64_t va_words[2] = {0x1122334455667788ULL, 0x8877665544332211ULL};
-    GuestVaList va_list{reinterpret_cast<uintptr_t>(va_words), 0, 0, 0, 0};
-    VaListCursor bounded_va(va_list, 8);
-    require(bounded_va.next(ArgumentType::Int64) == va_words[0], "bounded variadic first word");
-    bool va_end_rejected = false, va_partial_rejected = false, va_owner_rejected = false;
-    try { (void)bounded_va.next(ArgumentType::Int64); }
-    catch (const std::invalid_argument &error) {
-      va_end_rejected = std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
-    }
-    try { (void)VaListCursor(va_list, 4).next(ArgumentType::Double); }
-    catch (const std::invalid_argument &error) {
-      va_partial_rejected = std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
-    }
-    VaListCursor owner_va(va_list, 8);
-    std::thread other_va([&] {
-      try { (void)owner_va.next(ArgumentType::Int64); }
-      catch (const std::invalid_argument &error) {
-        va_owner_rejected = std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
-      }
-    });
-    other_va.join();
-    require(va_end_rejected && va_partial_rejected && va_owner_rejected &&
-                owner_va.next(ArgumentType::Int64) == va_words[0],
-            "variadic span/partial/owner refusals precede reads and preserve cursor position");
-    VaListCursor caller_owned_va(va_list);
-    require(caller_owned_va.next(ArgumentType::Int64) == va_words[0] &&
-                caller_owned_va.next(ArgumentType::Int64) == va_words[1],
-            "caller-owned V-list memory retains existing semantics");
-    const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
-    Capture partial{};
-    partial.stack = reinterpret_cast<const uint8_t *>(high - 4);
-    partial.native_stack_remaining = prepared_guest_stack_remaining(high - 4);
-    CallCursor partial_cursor(partial, Convention::Aapcs64);
-    for (unsigned i = 0; i < 8; ++i) (void)partial_cursor.next(8, false);
-    bool span_rejected = false;
-    try { (void)partial_cursor.next(8, false); }
-    catch (const std::invalid_argument &error) {
-      span_rejected = std::strcmp(error.what(), "guest callback stack read outside prepared native extent") == 0;
-    }
-    require(span_rejected, "native callback read crossing extent end refuses before memcpy");
-    auto owned = std::make_unique<uint64_t>(0x123456789abcdef0ULL);
-    Capture synthetic{};
-    synthetic.stack = reinterpret_cast<const uint8_t *>(owned.get());
-    CallCursor synthetic_cursor(synthetic, Convention::Aapcs64);
-    for (unsigned i = 0; i < 8; ++i) (void)synthetic_cursor.next(8, false);
-    require(synthetic_cursor.next(8, false) == *owned, "caller-owned synthetic argument buffer remains supported");
-    alignas(16) uint64_t epoch_value = 0xfedcba9876543210ULL;
-    Capture epoch_capture{};
-    epoch_capture.stack = reinterpret_cast<const uint8_t *>(&epoch_value);
-    std::unique_ptr<CallCursor> epoch_cursor;
-    {
-      GuestTlsCleanupScope transient;
-      require(prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(&epoch_value)),
-              "epoch cursor starts in a prepared native frame");
-      epoch_capture.native_stack_remaining = prepared_guest_stack_remaining(reinterpret_cast<uintptr_t>(&epoch_value));
-      epoch_cursor = std::make_unique<CallCursor>(epoch_capture, Convention::Aapcs64);
-    }
-    require(!guest_tls_prepared(), "transient scope really releases its TLS readiness record");
-    for (unsigned i = 0; i < 8; ++i) (void)epoch_cursor->next(8, false);
-    require(epoch_cursor->next(8, false) == epoch_value,
-            "live native argument span survives a TLS readiness epoch");
+    // Fresh self-exec isolates this fatal admission test from inherited native
+    // TLS/C++ state after fork. No guest instructions or handler may execute.
     prepare_guest_tls();
-    {
-    WaitableChildDisposition child_disposition;
-    int descriptors[2];
-    require(pipe(descriptors) == 0, "provider refusal diagnostic pipe");
-    char child_mode[] = "--provider-foreign-stack";
-    char *child_argv[] = {argv[0], child_mode, nullptr};
-    pid_t child = fork();
-    require(child >= 0, "provider refusal child");
-    if (!child) {
-      close(descriptors[0]);
-      if (dup2(descriptors[1], STDERR_FILENO) < 0) _exit(96);
-      close(descriptors[1]);
-      execv(argv[0], child_argv);
-      _exit(96);
-    }
-    close(descriptors[1]);
-    std::string diagnostic;
-    char buffer[512];
-    ssize_t count = -1;
-    bool failed = false;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (std::chrono::steady_clock::now() < deadline) {
-      pollfd input{descriptors[0], POLLIN | POLLHUP, 0};
-      int ready = poll(&input, 1, 100);
-      if (ready < 0 && errno == EINTR) continue;
-      if (ready < 0) { failed = true; break; }
-      if (!ready) continue;
-      count = read(descriptors[0], buffer, sizeof(buffer));
-      if (count < 0 && errno == EINTR) continue;
-      if (count <= 0) break;
-      diagnostic.append(buffer, size_t(count));
-      if (diagnostic.size() > 8192) { failed = true; break; }
-    }
-    close(descriptors[0]);
-    int status = -1;
-    int wait_error = 0;
-    pid_t waited = 0;
-    while (std::chrono::steady_clock::now() < deadline) {
-      waited = waitpid(child, &status, WNOHANG);
-      wait_error = waited < 0 ? errno : 0;
-      if (waited == child || (waited < 0 && wait_error != EINTR)) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    if (waited != child) {
-      failed = true;
-      // With default SIGCHLD and no competing reaper, an outstanding child
-      // retains its PID until we reap it. ECHILD removes that ownership:
-      // never signal a numeric PID after the kernel says it is not ours.
-      if (waited == 0 || (waited < 0 && wait_error == EINTR)) {
-        kill(child, SIGKILL);
-        do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
-      }
-    }
-    const bool refused = !failed && waited == child && WIFEXITED(status) &&
-        WEXITSTATUS(status) == 97 && count == 0 &&
-        diagnostic == "SHIRAZ_GUEST_FATAL provider SP outside prepared native stack extent\n";
-    if (!refused)
-      std::cerr << "provider refusal child status=" << status << " read=" << count
-                << " failed=" << failed << " wait_errno=" << wait_error
-                << " diagnostic=" << diagnostic << std::endl;
-    require(refused,
-            "real provider entry refuses foreign SP before handler execution");
-    }
-    std::vector<Argument> twelve;
-    for (int i = 1; i <= 12; ++i)
-      twelve.push_back(Argument::integer(i % 2 ? i : -i));
-    auto integers = invoke(first.symbol("guest_twelve"), twelve);
-    require(static_cast<int64_t>(integers.result_integers[0]) == -78,
-            "12 integer stack slots");
-    void *scratch = mmap(nullptr, 16384, PROT_READ | PROT_WRITE | PROT_EXEC,
-                         MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
-    require(scratch != MAP_FAILED, "nested JIT write test reservation");
-    {
-      JitWriteScope outer;
-      closure([](Capture &) {});
-      // Creating a nested closure must not restore execution mode prematurely.
-      *static_cast<volatile uint32_t *>(scratch) = 0xd503201f;
-    }
-    require(munmap(scratch, 16384) == 0, "nested JIT write cleanup");
-    void *thunk = closure([&](Capture &capture) {
-      CallCursor cursor(capture, Convention::Apple);
-      std::vector<Argument> arguments;
-      for (int i = 0; i < 12; ++i)
-        arguments.push_back(Argument::integer(cursor.read<int>()));
-      auto result = invoke(first.symbol("guest_twelve"), arguments);
-      capture.frame.result_integers[0] = result.result_integers[0];
+    require(guest_tls_prepared(), "provider refusal child has prepared TLS");
+    constexpr size_t bytes = 256 * 1024;
+    void* memory = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    require(memory != MAP_FAILED, "provider refusal child stack allocation");
+    void* top = static_cast<uint8_t*>(memory) + bytes - 16;
+    require(!prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(top)),
+            "provider refusal child stack is foreign");
+    void* provider = closure([](Capture&) {
+        constexpr char marker[] = "UNEXPECTED_PROVIDER_HANDLER_ENTRY\n";
+        (void)::write(STDERR_FILENO, marker, sizeof(marker) - 1);
     });
-    using Twelve =
-        long (*)(int, int, int, int, int, int, int, int, int, int, int, int);
-    Twelve host_call;
-    std::memcpy(&host_call, &thunk, sizeof(host_call));
-    require(host_call(1, -2, 3, -4, 5, -6, 7, -8, 9, -10, 11, -12) == -78,
-            "generated Apple-to-AAPCS64 closure");
-    std::vector<Argument> mixed;
-    double expected = 0;
-    for (int i = 1; i <= 24; ++i) {
-      if (i % 2 == 0) {
-        if (i == 4)
-          mixed.push_back(Argument::real(float(i + 0.25)));
-        else
-          mixed.push_back(Argument::real(i + 0.25));
-        expected += i * (i + 0.25);
-      } else {
-        auto type = i == 3   ? ArgumentType::Int8
-                    : i == 5 ? ArgumentType::Int16
-                             : ArgumentType::Int32;
-        mixed.push_back(Argument::integer(-i, type));
-        expected -= i * i;
-      }
+    require(std::signal(SIGABRT, [](int) { _exit(97); }) != SIG_ERR,
+            "provider refusal child abort observer");
+    shiraz_test_other_stack(top, &call_other_stack_provider, provider);
+    return 98;
+}
+static double host_va_callback(int count, const GuestVaList* args) noexcept {
+    try {
+        if (count < 0 || count > 32 || !args)
+            return std::numeric_limits<double>::quiet_NaN();
+        VaListCursor cursor(*args);
+        double sum = 0;
+        for (int i = 1; i <= count; ++i) {
+            int32_t integer = static_cast<int32_t>(cursor.next(ArgumentType::Int32));
+            uint64_t bits = cursor.next(ArgumentType::Double);
+            double real;
+            std::memcpy(&real, &bits, sizeof(real));
+            sum += i * (integer + real);
+        }
+        return sum;
+    } catch (...) {
+        return std::numeric_limits<double>::quiet_NaN();
     }
-    require(invoke(first.symbol("guest_mixed"), mixed).double_result() ==
-                expected,
-            "24 mixed narrow/integer/FP arguments");
-    std::vector<Argument> variadic{Argument::integer(12)};
-    expected = 0;
-    for (int i = 1; i <= 12; ++i) {
-      variadic.push_back(Argument::integer(-i));
-      variadic.push_back(Argument::real(i + 0.5));
-      expected += i * 0.5;
+}
+int main(int argc, char** argv) {
+    try {
+        if (argc == 2 && std::strcmp(argv[1], "--provider-foreign-stack") == 0)
+            return foreign_stack_provider_case();
+        require(argc == 2, "usage: elf-probe fixture.so");
+        std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
+        require(bool(file), "fixture open");
+        auto length = file.tellg();
+        require(length > 0 && length <= (256 << 20), "fixture length");
+        std::vector<uint8_t> bytes(static_cast<size_t>(length));
+        file.seekg(0);
+        require(bool(file.read(reinterpret_cast<char*>(bytes.data()), length)), "fixture read");
+        const auto parsed = parse_elf(bytes, 16384);
+        for (uint32_t type : {257u, 1025u, 1026u, 1027u}) {
+            bool found = false;
+            for (const auto& relocation : parsed.relocations)
+                found |= relocation.type == type;
+            require(found, "fixture must exercise all four relocation kinds");
+        }
+        uint32_t dyld_count = _dyld_image_count();
+        Image first(bytes), second(bytes);
+        require(first.metrics().relocations_verified && second.metrics().relocations_verified &&
+                    first.metrics().verified_relocations == parsed.relocations.size() &&
+                    first.relocation_values().size() == parsed.relocations.size(),
+                "complete relocation readback published before constructors");
+        for (size_t i = 0; i < parsed.relocations.size(); ++i) {
+            uint64_t observed = 0;
+            std::memcpy(
+                &observed,
+                reinterpret_cast<const void*>(first.load_bias() + parsed.relocations[i].address),
+                8);
+            require(observed == first.relocation_values()[i],
+                    "independent slot read matches saved relocation value");
+        }
+        Image retry(bytes, Image::Mapping::Deferred);
+        bool resolve_failed = false;
+        try {
+            retry.relocate([](size_t) -> uintptr_t { throw ElfError("fixture resolver refusal"); });
+        } catch (const ElfError&) {
+            resolve_failed = true;
+        }
+        require(resolve_failed && !retry.metrics().relocations_verified &&
+                    retry.relocation_values().empty(),
+                "failed resolution cannot publish readback success");
+        retry.relocate([&](size_t index) { return retry.address(index); });
+        retry.seal();
+        require(retry.metrics().relocations_verified &&
+                    retry.relocation_values().size() == parsed.relocations.size(),
+                "resolution retry publishes only complete readback");
+        require(_dyld_image_count() == dyld_count, "ELF must not be registered with dyld");
+        require(*static_cast<long*>(first.symbol("guest_state")) == 0, "initial BSS zero");
+        require(first.initialize() == 1 && first.initialize() == 0, "constructor exactly once");
+        require(invoke(first.symbol("guest_read"), {}).result_integers[0] == 237,
+                "relocations/BSS/constructor");
+        const auto pointer_address = reinterpret_cast<uintptr_t>(first.symbol("guest_pointer"));
+        size_t pointer_index = parsed.relocations.size();
+        for (size_t i = 0; i < parsed.relocations.size(); ++i)
+            if (first.load_bias() + parsed.relocations[i].address == pointer_address)
+                pointer_index = i;
+        require(pointer_index < parsed.relocations.size(),
+                "mutable pointer has relocation evidence");
+        const auto saved_pointer = first.relocation_values()[pointer_index];
+        const auto changed_pointer = reinterpret_cast<uintptr_t>(second.symbol("guest_state"));
+        std::memcpy(reinterpret_cast<void*>(pointer_address), &changed_pointer, 8);
+        require(first.relocation_values()[pointer_index] == saved_pointer &&
+                    changed_pointer != saved_pointer,
+                "historical relocation snapshot survives later valid writable data mutation");
+        std::memcpy(reinterpret_cast<void*>(pointer_address), &saved_pointer, 8);
+        std::cout << "M5_RELOCATION_READBACK_PASS slots=" << parsed.relocations.size()
+                  << " kinds=4 before_init=1 failed_resolve_unpublished=1 retry=1 "
+                     "historical_snapshot=1 raw_pointers_in_report=0\n";
+        require(*static_cast<long*>(second.symbol("guest_state")) == 0, "second image isolation");
+        require(second.initialize() == 1, "second constructor");
+        constexpr size_t other_stack_bytes = 256 * 1024;
+        void* other_stack =
+            mmap(nullptr, other_stack_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        require(other_stack != MAP_FAILED, "temporary alternate stack allocation");
+        void* other_top = static_cast<uint8_t*>(other_stack) + other_stack_bytes - 16;
+        require(!prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(other_top)),
+                "alternate stack lies outside the prepared pthread extent");
+        int rejected =
+            shiraz_test_other_stack(other_top, &reject_other_stack, first.symbol("guest_leaf"));
+        require(munmap(other_stack, other_stack_bytes) == 0, "temporary alternate stack cleanup");
+        require(rejected == 1 && !capture_boundary_token(),
+                "real alternate-stack invocation refuses before guest entry and restores boundary");
+        alignas(16) uint64_t va_words[2] = {0x1122334455667788ULL, 0x8877665544332211ULL};
+        GuestVaList va_list{reinterpret_cast<uintptr_t>(va_words), 0, 0, 0, 0};
+        VaListCursor bounded_va(va_list, 8);
+        require(bounded_va.next(ArgumentType::Int64) == va_words[0], "bounded variadic first word");
+        bool va_end_rejected = false, va_partial_rejected = false, va_owner_rejected = false;
+        try {
+            (void)bounded_va.next(ArgumentType::Int64);
+        } catch (const std::invalid_argument& error) {
+            va_end_rejected =
+                std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
+        }
+        try {
+            (void)VaListCursor(va_list, 4).next(ArgumentType::Double);
+        } catch (const std::invalid_argument& error) {
+            va_partial_rejected =
+                std::strcmp(error.what(), "guest va_list stack read outside validated extent") == 0;
+        }
+        VaListCursor owner_va(va_list, 8);
+        std::thread other_va([&] {
+            try {
+                (void)owner_va.next(ArgumentType::Int64);
+            } catch (const std::invalid_argument& error) {
+                va_owner_rejected =
+                    std::strcmp(error.what(),
+                                "guest va_list stack read outside validated extent") == 0;
+            }
+        });
+        other_va.join();
+        require(va_end_rejected && va_partial_rejected && va_owner_rejected &&
+                    owner_va.next(ArgumentType::Int64) == va_words[0],
+                "variadic span/partial/owner refusals precede reads and preserve cursor position");
+        VaListCursor caller_owned_va(va_list);
+        require(caller_owned_va.next(ArgumentType::Int64) == va_words[0] &&
+                    caller_owned_va.next(ArgumentType::Int64) == va_words[1],
+                "caller-owned V-list memory retains existing semantics");
+        const auto high = reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+        Capture partial{};
+        partial.stack = reinterpret_cast<const uint8_t*>(high - 4);
+        partial.native_stack_remaining = prepared_guest_stack_remaining(high - 4);
+        CallCursor partial_cursor(partial, Convention::Aapcs64);
+        for (unsigned i = 0; i < 8; ++i)
+            (void)partial_cursor.next(8, false);
+        bool span_rejected = false;
+        try {
+            (void)partial_cursor.next(8, false);
+        } catch (const std::invalid_argument& error) {
+            span_rejected =
+                std::strcmp(error.what(),
+                            "guest callback stack read outside prepared native extent") == 0;
+        }
+        require(span_rejected, "native callback read crossing extent end refuses before memcpy");
+        auto owned = std::make_unique<uint64_t>(0x123456789abcdef0ULL);
+        Capture synthetic{};
+        synthetic.stack = reinterpret_cast<const uint8_t*>(owned.get());
+        CallCursor synthetic_cursor(synthetic, Convention::Aapcs64);
+        for (unsigned i = 0; i < 8; ++i)
+            (void)synthetic_cursor.next(8, false);
+        require(synthetic_cursor.next(8, false) == *owned,
+                "caller-owned synthetic argument buffer remains supported");
+        alignas(16) uint64_t epoch_value = 0xfedcba9876543210ULL;
+        Capture epoch_capture{};
+        epoch_capture.stack = reinterpret_cast<const uint8_t*>(&epoch_value);
+        std::unique_ptr<CallCursor> epoch_cursor;
+        {
+            GuestTlsCleanupScope transient;
+            require(prepared_guest_stack_contains(reinterpret_cast<uintptr_t>(&epoch_value)),
+                    "epoch cursor starts in a prepared native frame");
+            epoch_capture.native_stack_remaining =
+                prepared_guest_stack_remaining(reinterpret_cast<uintptr_t>(&epoch_value));
+            epoch_cursor = std::make_unique<CallCursor>(epoch_capture, Convention::Aapcs64);
+        }
+        require(!guest_tls_prepared(), "transient scope really releases its TLS readiness record");
+        for (unsigned i = 0; i < 8; ++i)
+            (void)epoch_cursor->next(8, false);
+        require(epoch_cursor->next(8, false) == epoch_value,
+                "live native argument span survives a TLS readiness epoch");
+        prepare_guest_tls();
+        {
+            WaitableChildDisposition child_disposition;
+            int descriptors[2];
+            require(pipe(descriptors) == 0, "provider refusal diagnostic pipe");
+            char child_mode[] = "--provider-foreign-stack";
+            char* child_argv[] = {argv[0], child_mode, nullptr};
+            pid_t child = fork();
+            require(child >= 0, "provider refusal child");
+            if (!child) {
+                close(descriptors[0]);
+                if (dup2(descriptors[1], STDERR_FILENO) < 0)
+                    _exit(96);
+                close(descriptors[1]);
+                execv(argv[0], child_argv);
+                _exit(96);
+            }
+            close(descriptors[1]);
+            std::string diagnostic;
+            char buffer[512];
+            ssize_t count = -1;
+            bool failed = false;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (std::chrono::steady_clock::now() < deadline) {
+                pollfd input{descriptors[0], POLLIN | POLLHUP, 0};
+                int ready = poll(&input, 1, 100);
+                if (ready < 0 && errno == EINTR)
+                    continue;
+                if (ready < 0) {
+                    failed = true;
+                    break;
+                }
+                if (!ready)
+                    continue;
+                count = read(descriptors[0], buffer, sizeof(buffer));
+                if (count < 0 && errno == EINTR)
+                    continue;
+                if (count <= 0)
+                    break;
+                diagnostic.append(buffer, size_t(count));
+                if (diagnostic.size() > 8192) {
+                    failed = true;
+                    break;
+                }
+            }
+            close(descriptors[0]);
+            int status = -1;
+            int wait_error = 0;
+            pid_t waited = 0;
+            while (std::chrono::steady_clock::now() < deadline) {
+                waited = waitpid(child, &status, WNOHANG);
+                wait_error = waited < 0 ? errno : 0;
+                if (waited == child || (waited < 0 && wait_error != EINTR))
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (waited != child) {
+                failed = true;
+                // With default SIGCHLD and no competing reaper, an outstanding child
+                // retains its PID until we reap it. ECHILD removes that ownership:
+                // never signal a numeric PID after the kernel says it is not ours.
+                if (waited == 0 || (waited < 0 && wait_error == EINTR)) {
+                    kill(child, SIGKILL);
+                    do {
+                        waited = waitpid(child, &status, 0);
+                    } while (waited < 0 && errno == EINTR);
+                }
+            }
+            const bool refused =
+                !failed && waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 97 &&
+                count == 0 &&
+                diagnostic ==
+                    "SHIRAZ_GUEST_FATAL provider SP outside prepared native stack extent\n";
+            if (!refused)
+                std::cerr << "provider refusal child status=" << status << " read=" << count
+                          << " failed=" << failed << " wait_errno=" << wait_error
+                          << " diagnostic=" << diagnostic << std::endl;
+            require(refused, "real provider entry refuses foreign SP before handler execution");
+        }
+        std::vector<Argument> twelve;
+        for (int i = 1; i <= 12; ++i)
+            twelve.push_back(Argument::integer(i % 2 ? i : -i));
+        auto integers = invoke(first.symbol("guest_twelve"), twelve);
+        require(static_cast<int64_t>(integers.result_integers[0]) == -78, "12 integer stack slots");
+        void* scratch = mmap(nullptr, 16384, PROT_READ | PROT_WRITE | PROT_EXEC,
+                             MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+        require(scratch != MAP_FAILED, "nested JIT write test reservation");
+        {
+            JitWriteScope outer;
+            closure([](Capture&) {});
+            // Creating a nested closure must not restore execution mode prematurely.
+            *static_cast<volatile uint32_t*>(scratch) = 0xd503201f;
+        }
+        require(munmap(scratch, 16384) == 0, "nested JIT write cleanup");
+        void* thunk = closure([&](Capture& capture) {
+            CallCursor cursor(capture, Convention::Apple);
+            std::vector<Argument> arguments;
+            for (int i = 0; i < 12; ++i)
+                arguments.push_back(Argument::integer(cursor.read<int>()));
+            auto result = invoke(first.symbol("guest_twelve"), arguments);
+            capture.frame.result_integers[0] = result.result_integers[0];
+        });
+        require(known_guest_closure(thunk) && !known_guest_closure(nullptr) &&
+                    !known_guest_closure(static_cast<const uint8_t*>(thunk) + 4),
+                "only exact published closure entries are recognized");
+        void* scalar = scalar_closure([](Capture&) {});
+        require(known_guest_closure(scalar) &&
+                    !known_guest_closure(static_cast<const uint8_t*>(scalar) + 16),
+                "scalar closure entries are exact");
+        std::atomic<unsigned> closure_checks{0};
+        std::vector<std::thread> closure_workers;
+        for (unsigned i = 0; i < 4; ++i)
+            closure_workers.emplace_back([&] {
+                for (unsigned j = 0; j < 32; ++j) {
+                    void* entry = closure([](Capture&) {});
+                    if (known_guest_closure(entry) &&
+                        !known_guest_closure(static_cast<uint8_t*>(entry) + 4))
+                        ++closure_checks;
+                }
+            });
+        for (auto& worker : closure_workers)
+            worker.join();
+        require(closure_checks == 128, "concurrent published closure lookup");
+        using Twelve = long (*)(int, int, int, int, int, int, int, int, int, int, int, int);
+        Twelve host_call;
+        std::memcpy(&host_call, &thunk, sizeof(host_call));
+        require(host_call(1, -2, 3, -4, 5, -6, 7, -8, 9, -10, 11, -12) == -78,
+                "generated Apple-to-AAPCS64 closure");
+        std::vector<Argument> mixed;
+        double expected = 0;
+        for (int i = 1; i <= 24; ++i) {
+            if (i % 2 == 0) {
+                if (i == 4)
+                    mixed.push_back(Argument::real(float(i + 0.25)));
+                else
+                    mixed.push_back(Argument::real(i + 0.25));
+                expected += i * (i + 0.25);
+            } else {
+                auto type = i == 3   ? ArgumentType::Int8
+                            : i == 5 ? ArgumentType::Int16
+                                     : ArgumentType::Int32;
+                mixed.push_back(Argument::integer(-i, type));
+                expected -= i * i;
+            }
+        }
+        require(invoke(first.symbol("guest_mixed"), mixed).double_result() == expected,
+                "24 mixed narrow/integer/FP arguments");
+        std::vector<Argument> variadic{Argument::integer(12)};
+        expected = 0;
+        for (int i = 1; i <= 12; ++i) {
+            variadic.push_back(Argument::integer(-i));
+            variadic.push_back(Argument::real(i + 0.5));
+            expected += i * 0.5;
+        }
+        require(invoke(first.symbol("guest_variadic"), variadic).double_result() == expected,
+                "AAPCS64 variadic register saves and stack overflow");
+        std::vector<Argument> callback{
+            Argument::integer(reinterpret_cast<uintptr_t>(&host_va_callback), ArgumentType::Int64),
+            Argument::integer(12),
+        };
+        callback.insert(callback.end(), variadic.begin() + 1, variadic.end());
+        require(invoke(first.symbol("guest_callback"), callback).double_result() == expected,
+                "guest-to-host AAPCS64 va_list conversion");
+        std::cout << "M5_STACK_ENTRY_PASS alternate_stack_rejected=1 boundary_restored=1\n";
+        std::cout << "M5_PROVIDER_STACK_PASS foreign_stack_rejected=1 handler_not_entered=1 "
+                     "span_rejected=1 synthetic_buffer=1\n";
+        std::cout << "M5_VA_SPAN_PASS end=1 partial=1 owner=1 caller_owned=1\n";
+        std::cout << "M5_ELF_ABI_PASS images=2 constructors=2 integer12=1 "
+                     "mixed24=1 variadic25=1 callback_va_list=1 closure=1 dyld=0\n";
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL " << error.what() << '\n';
+        return 1;
     }
-    require(invoke(first.symbol("guest_variadic"), variadic).double_result() ==
-                expected,
-            "AAPCS64 variadic register saves and stack overflow");
-    std::vector<Argument> callback{
-        Argument::integer(reinterpret_cast<uintptr_t>(&host_va_callback),
-                          ArgumentType::Int64),
-        Argument::integer(12),
-    };
-    callback.insert(callback.end(), variadic.begin() + 1, variadic.end());
-    require(invoke(first.symbol("guest_callback"), callback).double_result() ==
-                expected,
-            "guest-to-host AAPCS64 va_list conversion");
-    std::cout << "M5_STACK_ENTRY_PASS alternate_stack_rejected=1 boundary_restored=1\n";
-    std::cout << "M5_PROVIDER_STACK_PASS foreign_stack_rejected=1 handler_not_entered=1 span_rejected=1 synthetic_buffer=1\n";
-    std::cout << "M5_VA_SPAN_PASS end=1 partial=1 owner=1 caller_owned=1\n";
-    std::cout << "M5_ELF_ABI_PASS images=2 constructors=2 integer12=1 "
-                 "mixed24=1 variadic25=1 callback_va_list=1 closure=1 dyld=0\n";
-  } catch (const std::exception &error) {
-    std::cerr << "FAIL " << error.what() << '\n';
-    return 1;
-  }
 }

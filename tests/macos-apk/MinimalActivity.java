@@ -10,10 +10,8 @@ public final class MinimalActivity extends android.app.Activity {
         view.setBackgroundColor(0xff123456);
         setContentView(view);
         System.out.println("MACOS_FIXTURE_CONTENT_SET");
-        // macOS boots without okhttp/wolfJSSE: URL parsing must work and
-        // openConnection must fail with an IOException an app can catch. No
-        // connection is attempted (.invalid never resolves). Any other
-        // Throwable propagates and fails the run.
+        // URL handlers must construct connection objects. openConnection does
+        // not initiate I/O; the reserved .invalid hostname is never resolved.
         for (String scheme : new String[] {"http", "https"}) {
             java.net.URL url;
             try {
@@ -22,11 +20,10 @@ public final class MinimalActivity extends android.app.Activity {
                 throw new IllegalStateException("URL parsing failed for " + scheme, failure);
             }
             try {
-                url.openConnection();
+                if (url.openConnection() == null) throw new IllegalStateException("Null URL connection");
                 System.out.println("MACOS_FIXTURE_URL_CONNECTION_OPENED " + scheme);
-            } catch (java.io.IOException expected) {
-                System.out.println("MACOS_FIXTURE_URL_IOEXCEPTION " + scheme);
-                System.out.println("MACOS_FIXTURE_URL_DETAIL " + expected);
+            } catch (java.io.IOException failure) {
+                throw new IllegalStateException("URL connection construction failed for " + scheme, failure);
             }
         }
     }

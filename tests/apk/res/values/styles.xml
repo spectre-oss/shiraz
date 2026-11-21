@@ -52,11 +52,16 @@
     <style name="ConstructorLinear" parent=""><item name="android:orientation">vertical</item><item name="android:weightSum">2</item><item name="android:baselineAligned">false</item></style>
     <style name="ConstructorImage" parent=""><item name="android:tint">#ff112233</item><item name="android:tintMode">src_in</item><item name="android:src">#ff445566</item><item name="android:scaleType">centerInside</item><item name="android:maxHeight">42px</item></style>
     <style name="ConstructorText" parent=""><item name="android:text">Styled text</item><item name="android:textSize">18px</item><item name="android:textColor">#ff778899</item></style>
-    <style name="ConstructorUnsupported" parent=""><item name="android:rotation">20</item></style>
+    <style name="ConstructorRotation" parent=""><item name="android:rotation">20</item></style>
+    <style name="ConstructorUnsupported" parent=""><item name="android:rotationX">20</item></style>
     <style name="TypographyBase" parent=""><item name="android:textSize">18px</item><item name="android:textColor">#ff223344</item><item name="android:textStyle">bold</item><item name="android:fontFamily">monospace</item></style>
     <style name="TypographyChild" parent="TypographyBase"><item name="android:textColorHint">#ff556677</item><item name="android:textColorLink">#ff778899</item></style>
     <style name="TypographyColors" parent=""><item name="android:textColor">@color/typography_colors</item></style>
     <style name="TypographySpacing" parent=""><item name="android:letterSpacing">0.2</item></style>
     <style name="TypographyCaps" parent="TypographyBase"><item name="android:textAllCaps">true</item></style>
 <style name="FocusHighlightFixture" parent=""><item name="android:selectableItemBackground">@drawable/focus_highlight_fixture</item></style>
+    <style name="TypographyUnavailableProvider" parent="">
+        <item name="android:fontFamily">@font/unavailable_provider</item>
+        <item name="android:textStyle">bold</item>
+    </style>
 </resources>

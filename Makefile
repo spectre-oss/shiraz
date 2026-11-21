@@ -340,6 +340,10 @@ build: build/libshiraz-sqlite.so
 sqlite-smoke: build framework
 	python3 scripts/sqlite_smoke.py
 
+.PHONY: sensor-math-smoke
+sensor-math-smoke: build framework
+	python3 scripts/java_framework_smoke.py SensorMathSmoke --marker SENSOR_MATH_OK
+
 .PHONY: database-utils-smoke
 database-utils-smoke: build framework
 	python3 scripts/java_framework_smoke.py DatabaseUtilsSmoke --marker DATABASE_UTILS_OK
@@ -369,8 +373,17 @@ notification-policy-smoke: build framework
 	python3 scripts/notification_policy_smoke.py
 
 .PHONY: broadcast-smoke
-broadcast-smoke: build framework
-	python3 scripts/broadcast_smoke.py
+ifeq ($(shell uname -s),Darwin)
+broadcast-smoke: macos-framework build/macos/libshiraz-host.so
+else
+broadcast-smoke: framework build/libshiraz-host.so
+endif
+broadcast-smoke:
+ifeq ($(shell uname -s),Darwin)
+	mkdir -p build/macos/jvm-native
+	ln -sfn ../libshiraz-host.so build/macos/jvm-native/libshiraz-host.dylib
+endif
+	uv run --no-project python scripts/broadcast_smoke.py
 
 build/libshiraz-bitmap.so: native/bitmap.cpp include/shiraz/color_filter.hpp
 	@mkdir -p build
@@ -503,8 +516,17 @@ dialog-smoke: build framework framework-resources build/libshiraz-test-input.so
 	python3 scripts/dialog_smoke.py
 
 .PHONY: service-smoke
-service-smoke: build framework
-	python3 scripts/service_smoke.py
+ifeq ($(shell uname -s),Darwin)
+service-smoke: macos-framework macos-framework-resources build/macos/libshiraz-host.so
+else
+service-smoke: build framework framework-resources
+endif
+service-smoke:
+ifeq ($(shell uname -s),Darwin)
+	mkdir -p build/macos/jvm-native
+	ln -sfn ../libshiraz-host.so build/macos/jvm-native/libshiraz-host.dylib
+endif
+	uv run --no-project python scripts/service_smoke.py
 
 .PHONY: service-metadata-smoke
 service-metadata-smoke: build framework apk-fixture framework-resources
@@ -571,6 +593,24 @@ insets-smoke: build framework
 .PHONY: textview-smoke
 textview-smoke: build framework
 	python3 scripts/textview_smoke.py
+
+.PHONY: textview-bullet-smoke
+ifeq ($(shell uname -s),Darwin)
+textview-bullet-smoke: macos-framework macos-framework-resources
+else
+textview-bullet-smoke: framework framework-resources
+endif
+textview-bullet-smoke:
+	uv run --no-project python scripts/java_framework_smoke.py TextViewBulletSmoke --marker TEXTVIEW_BULLET_PIXELS_WRAP_HIT_OK --framework-res build/framework-res/framework-res.apk
+
+.PHONY: dialog-pointer-bounds-smoke
+ifeq ($(shell uname -s),Darwin)
+dialog-pointer-bounds-smoke: macos-framework macos-framework-resources
+else
+dialog-pointer-bounds-smoke: framework framework-resources
+endif
+dialog-pointer-bounds-smoke:
+	uv run --no-project python scripts/java_framework_smoke.py DialogPointerBoundsSmoke --marker DIALOG_POINTER_BOUNDS_OK --framework-res build/framework-res/framework-res.apk
 
 .PHONY: title-smoke
 title-smoke: build framework build/libshiraz-test-input.so
@@ -1322,10 +1362,13 @@ digitalis-nativewindow-proxy:
 	python3 scripts/digitalis/build_nativewindow_proxy.py $(DIGITALIS_PROXY_OPTIONS)
 
 .PHONY: provider-metadata-smoke
+ifeq ($(shell uname -s),Darwin)
+provider-metadata-smoke: macos-framework build/macos/libshiraz-host.so
+else
 provider-metadata-smoke: framework build/libshiraz-host.so
-	mkdir -p build/provider-metadata-smoke
-	javac --release 8 -cp build/framework/classes -d build/provider-metadata-smoke tests/java/ProviderMetadataSmoke.java
-	java -Djava.library.path=build -cp build/provider-metadata-smoke:build/framework/classes shiraz.runtime.ProviderMetadataSmoke
+endif
+provider-metadata-smoke:
+	uv run --no-project python scripts/java_framework_smoke.py shiraz.runtime.ProviderMetadataSmoke --marker PROVIDER_METADATA_OK
 
 .PHONY: telephony-listener-smoke
 telephony-listener-smoke: framework build/libshiraz-host.so
@@ -1585,10 +1628,15 @@ locale-defaults-smoke: framework
 check: locale-defaults-smoke
 
 .PHONY: file-observer-smoke
+ifeq ($(shell uname -s),Darwin)
+file-observer-smoke: macos-framework build/macos/libshiraz-host.so
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py FileObserverSmoke --marker FILE_OBSERVER_EVENTS_OK
+else
 file-observer-smoke: framework build/libshiraz-host.so
 	mkdir -p build/file-observer-smoke
 	javac --release 8 -cp build/framework/classes -d build/file-observer-smoke tests/java/FileObserverSmoke.java
 	$(JAVA) -Djava.library.path=build -cp build/file-observer-smoke:build/framework/classes FileObserverSmoke
+endif
 check: file-observer-smoke
 
 .PHONY: split-resources-smoke
@@ -1696,3 +1744,154 @@ bootstrap-patch-check:
 	uv run --no-project python scripts/check_bootstrap_patches.py --host "$(BOOTSTRAP_PATCH_HOST)"
 
 include mk/launcher.mk
+
+include mk/pending-intent.mk
+
+# Optional upstream Apache HTTP compatibility; inputs and notices stay local.
+.PHONY: legacy-http
+legacy-http:
+	@test -n "$(LEGACY_HTTP_JARS)" -a -n "$(LEGACY_HTTP_NOTICES)" || { echo 'Set LEGACY_HTTP_JARS and LEGACY_HTTP_NOTICES to local upstream files'; exit 1; }
+	uv run --no-project python scripts/build_legacy_http.py $(foreach jar,$(LEGACY_HTTP_JARS),--jar $(jar)) $(foreach notice,$(LEGACY_HTTP_NOTICES),--notice $(notice)) $(LEGACY_HTTP_OPTIONS)
+
+.PHONY: authenticator-metadata-smoke
+authenticator-metadata-smoke: macos-framework
+	uv run --no-project python scripts/bootstrap_apksig.py
+	uv run --no-project python scripts/build_macos_fixture.py --fixture background
+	uv run --no-project python scripts/build_macos_fixture.py --fixture authenticator
+	SHIRAZ_TEST_AUTHENTICATOR=1 uv run --no-project python -m unittest discover -s tests -p test_apk_verifier.py -v
+
+.PHONY: explicit-activity-smoke
+explicit-activity-smoke: macos-framework
+	uv run --no-project python scripts/bootstrap_apksig.py
+	uv run --no-project python scripts/build_macos_fixture.py --fixture background
+	uv run --no-project python scripts/build_macos_fixture.py --fixture authenticator
+	uv run --no-project python scripts/build_macos_fixture.py --fixture activity-caller
+	SHIRAZ_TEST_EXPLICIT_ACTIVITY=1 uv run --no-project python -m unittest discover -s tests -p test_apk_verifier.py -v
+
+# Passive native host observation; independent of the ART/JNI library.
+.PHONY: macos-job-network
+macos-job-network: build/macos/libshiraz-job-network.dylib
+build/macos/libshiraz-job-network.dylib: native/darwin/job_network.cpp
+	@mkdir -p build/macos
+	xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -fblocks -dynamiclib $< -framework Network -o $@
+
+# Optional logind backend, loaded dynamically without desktop-shell dependencies.
+build: build/libshiraz-power.so
+build/libshiraz-power.so: native/power.cpp include/shiraz/logind_power.hpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/power.cpp -o $@ -ldl
+
+.PHONY: native-power-smoke
+native-power-smoke: build/shiraz-framework.jar build/libshiraz-power.so build/libshiraz-host.so
+	uv run --no-project python scripts/java_framework_smoke.py NativePowerSmoke --marker NATIVE_POWER_ASSERTIONS_OK
+
+build/power-bus-fixture.so: tests/native/power_bus_fixture.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared $< -o $@
+build/test-logind-power: tests/native/logind_power.cpp include/shiraz/logind_power.hpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $< -o $@ -ldl
+.PHONY: logind-power-protocol-test
+logind-power-protocol-test: build/power-bus-fixture.so build/test-logind-power
+	build/test-logind-power $(CURDIR)/build/power-bus-fixture.so
+
+.PHONY: date-picker-smoke
+date-picker-smoke:
+	python3 scripts/java_framework_smoke.py DatePickerSmoke --marker DATE_PICKER_OK --framework-res build/framework-res/framework-res.apk
+
+.PHONY: device-policy-smoke
+device-policy-smoke:
+	python3 scripts/java_framework_smoke.py DevicePolicySmoke --marker DEVICE_POLICY_OK
+
+.PHONY: stable-density-smoke
+stable-density-smoke:
+	python3 scripts/java_framework_smoke.py StableDensitySmoke --marker STABLE_DENSITY_OK --framework-res build/framework-res/framework-res.apk
+
+.PHONY: job-work-item-smoke
+job-work-item-smoke:
+	python3 scripts/java_framework_smoke.py JobWorkItemSmoke --marker JOB_WORK_ITEM_OK
+
+.PHONY: job-work-channel-smoke
+job-work-channel-smoke:
+	python3 scripts/java_framework_smoke.py shiraz.runtime.JobWorkChannelSmoke --marker JOB_WORK_CHANNEL_OK
+
+.PHONY: job-work-apk-fixture job-work-apk-smoke
+job-work-apk-fixture:
+	python3 scripts/build_macos_fixture.py --fixture job-work
+job-work-apk-smoke: macos-framework apksig-deps job-work-apk-fixture
+	PYTHONPATH=src uv run --no-project python tests/job_work_apk_probe.py
+
+.PHONY: secure-long-setting-smoke
+secure-long-setting-smoke:
+	python3 scripts/java_framework_smoke.py SecureLongSettingSmoke --marker SECURE_LONG_SETTING_OK
+
+.PHONY: add-account-endpoint-smoke
+add-account-endpoint-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py shiraz.runtime.AddAccountEndpointSmoke --marker ADD_ACCOUNT_ENDPOINT_OK
+
+.PHONY: cross-signer-add-account-smoke
+cross-signer-add-account-smoke: macos-framework apksig-deps
+	uv run --no-project python scripts/build_macos_fixture.py --fixture authenticator
+	uv run --no-project python scripts/build_macos_fixture.py --fixture activity-caller
+	PYTHONPATH=src uv run --no-project python tests/cross_signer_add_account_probe.py
+
+.PHONY: delete-preferences-smoke
+delete-preferences-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py DeletePreferencesSmoke --marker DELETE_PREFERENCES_OK
+
+.PHONY: protected-storage-smoke
+protected-storage-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py shiraz.runtime.ProtectedStorageSmoke --marker PROTECTED_STORAGE_OK
+
+.PHONY: uri-absolute-path-smoke
+uri-absolute-path-smoke: macos-framework
+	uv run --no-project python scripts/java_framework_smoke.py UriAbsolutePathSmoke --marker URI_ABSOLUTE_PATH_OK
+
+.PHONY: multiprocess-preferences-smoke
+multiprocess-preferences-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py MultiProcessPreferencesSmoke --marker MULTIPROCESS_PREFERENCES_OK
+
+.PHONY: persistent-data-block-smoke
+persistent-data-block-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py PersistentDataBlockSmoke --marker PERSISTENT_DATA_BLOCK_ABSENT_OK
+
+.PHONY: sqlite-idle-timeout-smoke
+sqlite-idle-timeout-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py SQLiteIdleTimeoutSmoke --marker SQLITE_IDLE_TIMEOUT_OK
+
+.PHONY: service-binding-flags-smoke
+service-binding-flags-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py ServiceBindingFlagsSmoke --marker SERVICE_BINDING_FLAGS_OK
+
+.PHONY: intent-extras-loader-smoke
+intent-extras-loader-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py IntentExtrasLoaderSmoke --marker INTENT_EXTRAS_LOADER_OK
+
+.PHONY: package-metadata-stream-smoke
+package-metadata-stream-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py PackageMetadataStreamSmoke --runtime art --marker PACKAGE_METADATA_STREAM_OK
+
+.PHONY: pending-intent-authority-test
+pending-intent-authority-test:
+	PYTHONPATH=src:tests uv run --no-project --python 3.12 python -m unittest test_pending_intent_store
+
+.PHONY: pending-intent-wire-smoke
+pending-intent-wire-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py shiraz.runtime.PendingIntentWireSmoke --marker PENDING_INTENT_WIRE_OK
+
+.PHONY: pending-intent-dispatch-test
+pending-intent-dispatch-test:
+	PYTHONPATH=src:tests uv run --no-project --python 3.12 python -m unittest test_pending_intent_dispatch
+
+.PHONY: pending-intent-delivery-smoke
+pending-intent-delivery-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py shiraz.runtime.PendingIntentDeliverySmoke --marker PENDING_INTENT_DELIVERY_OK
+
+.PHONY: parcel-byte-array-slice-smoke
+parcel-byte-array-slice-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py ParcelByteArraySliceSmoke --marker PARCEL_BYTE_ARRAY_SLICE_OK
+
+.PHONY: pending-intent-snapshot-smoke
+pending-intent-snapshot-smoke: macos-framework
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py shiraz.runtime.PendingIntentSnapshotSmoke --marker PENDING_INTENT_SNAPSHOT_OK
+	uv run --no-project --python 3.12 python scripts/java_framework_smoke.py shiraz.runtime.ParcelOwnedCopySmoke --marker PARCEL_OWNED_COPY_OK --runtime art

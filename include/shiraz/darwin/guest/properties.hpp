@@ -4,6 +4,7 @@
 namespace shiraz::guest {
 using PropertyMap = std::map<std::string, std::string>;
 // An explicit guest property namespace, independent of host environment/secrets.
-std::vector<ProviderExport> property_exports(PropertyMap properties);
+std::vector<ProviderExport> property_exports(PropertyMap properties,
+                                             std::function<bool(const void*)> validate = {});
 PropertyMap api27_properties();
-}
+} // namespace shiraz::guest

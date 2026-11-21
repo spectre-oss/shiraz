@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.syncdispatchfixture" android:versionCode="1">
+ <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="27"/>
+ <application android:label="Sync dispatch fixture">
+  <service android:name=".SyncService" android:process=":sync" android:exported="true">
+   <intent-filter><action android:name="android.content.SyncAdapter"/></intent-filter>
+   <meta-data android:name="android.content.SyncAdapter" android:resource="@xml/sync"/>
+  </service>
+  <service android:name=".AuthService" android:exported="true" android:permission="android.permission.BIND_ACCOUNT_AUTHENTICATOR">
+   <intent-filter><action android:name="android.accounts.AccountAuthenticator"/></intent-filter>
+   <meta-data android:name="android.accounts.AccountAuthenticator" android:resource="@xml/auth"/>
+  </service>
+ </application>
+</manifest>

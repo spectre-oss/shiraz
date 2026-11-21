@@ -45,6 +45,13 @@ public final class AlertDialogBuilderSmoke {
    AlertDialog second=builder.show();check(second!=first&&"Changed".contentEquals(second.getButton(-1).getText()),"builder creates independent dialogs");
    second.onBackPressed();Looper.getMainLooper().shirazDispatchDue(100);
    check(cancels[0]==1&&dismisses[0]==2&&!DialogOverlay.hasVisible(),"cancel and cleanup");
+   final int[] messages={0,0};
+   android.os.Handler sink=new android.os.Handler(Looper.getMainLooper()){public void handleMessage(android.os.Message message){messages[message.what]++;}};
+   AlertDialog third=builder.create();third.setCancelMessage(sink.obtainMessage(0));third.setDismissMessage(sink.obtainMessage(1));
+   third.show();third.onBackPressed();Looper.getMainLooper().shirazDispatchDue(100);
+   check(messages[0]==1&&messages[1]==1&&cancels[0]==1&&dismisses[0]==2,"messages replace listeners and are copied per send");
+   third.setDismissMessage(null);third.show();third.dismiss();Looper.getMainLooper().shirazDispatchDue(100);
+   check(messages[1]==1&&dismisses[0]==2,"null dismiss message clears the slot");
    AlertDialog dark=new AlertDialog.Builder(context,0x01030009).setTitle("Dark theme").setMessage("Readable error").setPositiveButton("OK",null).show();
    check(DialogOverlay.prepare(720,1280),"dark dialog layout");
    android.widget.TextView error=findText(dark.getWindow().getDecorView(),"Readable error");

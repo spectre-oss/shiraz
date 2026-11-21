@@ -4,12 +4,13 @@
 
 import fcntl
 import json
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import zipfile
-from art_smoke import environment, HOST, JARS
+from pathlib import Path
+
+from art_smoke import DARWIN, HOST, JARS, NATIVE, environment
 
 ROOT = Path(__file__).resolve().parents[1]
 work = ROOT / 'build/layer-smoke'
@@ -62,7 +63,7 @@ commands = [
         [
             'java',
             '-Xcheck:jni',
-            '-Djava.library.path=' + str(ROOT / 'build'),
+            '-Djava.library.path=' + str(NATIVE / 'jvm-native' if DARWIN else NATIVE),
             '-cp',
             str(classes) + ':' + classpath,
             'LayerSmoke',
@@ -95,7 +96,7 @@ commands.append(
             '-Xint',
             '-Xnoimage-dex2oat',
             '-Xcompiler:' + str(HOST / 'bin/dex2oat'),
-            '-Djava.library.path=' + str(ROOT / 'build'),
+            '-Djava.library.path=' + str(NATIVE),
             '-cp',
             str(ROOT / 'build/shiraz-framework.jar') + ':' + str(jar),
             'LayerSmoke',

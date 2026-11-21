@@ -21,6 +21,14 @@ public final class VectorFixture {
         state.setAlpha(100); state.setChangingConfigurations(0x1000); Drawable.ConstantState saved=state.getConstantState(); Drawable copy=saved.newDrawable(r); check(copy.getAlpha()==100 && (copy.getChangingConfigurations()&0x1000)!=0,"constant state properties"); state.setAlpha(255); copy.setTintList(ColorStateList.valueOf(Color.GREEN)); b=draw(copy,16,16); check((b.getPixel(2,8)>>>24)==100 && (b.getPixel(2,8)&0xffffff)==0x00ff00,"independent clone state"); b.recycle(); b=draw(state,16,16); check(b.getPixel(2,8)==Color.BLUE,"clone mutations independent"); b.recycle();
         group.setBounds(0,0,8,8); b=Bitmap.createBitmap(64,32,Bitmap.Config.ARGB_8888); Canvas canvas=new Canvas(b); canvas.scale(8,4); group.draw(canvas); check(b.getPixel(20,10)==Color.RED && b.getPixel(50,10)==0,"device scale cache"); b.recycle(); b=draw(group,32,64); check(b.getPixel(10,20)==Color.RED && b.getPixel(28,20)==0,"portrait reraster"); b.recycle();
         Resources.Theme theme=r.newTheme(); theme.applyStyle(id(r,"style","FixtureBase"),true); Drawable themed=r.getDrawable(id(r,"drawable","vector_theme"),theme); b=draw(themed,8,8); check(b.getPixel(3,3)==0xff112233,"theme vector color"); b.recycle(); check(themed.canApplyTheme(),"theme dependency"); theme.applyStyle(id(r,"style","FixtureOverlay"),true); themed.applyTheme(theme); b=draw(themed,8,8); check(b.getPixel(3,3)==0xff445566,"theme reapplication"); b.recycle();
+        Drawable deferred=r.getDrawable(id(r,"drawable","vector_theme"));
+        check(deferred.canApplyTheme(),"unresolved vector lost theme dependency");
+        b=draw(deferred,8,8);check(b.getPixel(3,3)==0,"unresolved fill fabricated a color");b.recycle();
+        Drawable independent=deferred.getConstantState().newDrawable(r);
+        Resources.Theme empty=r.newTheme();deferred.applyTheme(empty);
+        b=draw(deferred,8,8);check(b.getPixel(3,3)==0,"empty theme fabricated fill");b.recycle();
+        deferred.applyTheme(theme);b=draw(deferred,8,8);check(b.getPixel(3,3)==0xff445566,"deferred theme did not color path");b.recycle();
+        b=draw(independent,8,8);check(b.getPixel(3,3)==0,"theme leaked across constant state copies");b.recycle();
         b=draw(load(r,"vector_trim"),8,8);check(b.getPixel(6,1)==Color.BLACK&&b.getPixel(1,6)==0,"Trimmed closed path fill");b.recycle();
         Drawable clip=load(r,"vector_clip");b=draw(clip,16,24);check(b.getPixel(2,12)==Color.BLACK&&b.getPixel(6,12)==0&&b.getPixel(14,12)==0,"nonuniform clip and even-odd hole");b.recycle();
         clip.setLayoutDirection(1);b=draw(clip,16,24);check(b.getPixel(14,12)==Color.BLACK&&b.getPixel(10,12)==0&&b.getPixel(2,12)==0,"mirrored clip matches painted geometry");b.recycle();

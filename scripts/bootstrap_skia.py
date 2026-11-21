@@ -2,12 +2,23 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Pinned, minimal Ganesh build. No Android runtime, window system, or GTK dependency."""
 
-from pathlib import Path
 import os
 import subprocess
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / '.deps/skia'
+
+
+def source_directory(root, configured=None):
+    """Allow a separate pinned checkout without modifying another local tree."""
+    source = (root / (configured or '.deps/skia')).resolve()
+    dependencies = (root / '.deps').resolve()
+    if source == dependencies or dependencies not in source.parents:
+        raise ValueError('Skia source must be a checkout inside this repository .deps directory')
+    return source
+
+
+SOURCE = source_directory(ROOT, os.environ.get('SHIRAZ_SKIA_SOURCE'))
 REVISION = '5db0949ba318d248ebc3d33c73ad1251bf95c243'
 ARGS = '''is_official_build=true is_debug=false cc="gcc" cxx="g++"
 skia_use_gl=true skia_use_vulkan=false skia_use_icu=false skia_use_harfbuzz=false
@@ -142,7 +153,7 @@ def main_darwin():
     )
     normalized = repr(sorted(angle.normalize_gn(args.replace('\n', ' ')).items()))
     build_key = angle.sha256('\n'.join([REVISION, normalized, gn_sha, angle.toolchain_identity()]))
-    key = angle.sha256('\n'.join([build_key, script_sha]))
+    key = angle.sha256('\n'.join([build_key, script_sha, str(SOURCE)]))
     if (
         stamp.is_file()
         and stamp.read_text().splitlines()[:1] == [key]
@@ -163,7 +174,7 @@ def main_darwin():
     angle.ensure_gn()
     gn_sha = hashlib.sha256(angle.GN_BIN.read_bytes()).hexdigest()
     build_key = angle.sha256('\n'.join([REVISION, normalized, gn_sha, angle.toolchain_identity()]))
-    key = angle.sha256('\n'.join([build_key, script_sha]))
+    key = angle.sha256('\n'.join([build_key, script_sha, str(SOURCE)]))
     gn = SOURCE / 'bin/gn'
     if not gn.is_file() or hashlib.sha256(gn.read_bytes()).hexdigest() != gn_sha:
         temporary = gn.with_name('gn.tmp')

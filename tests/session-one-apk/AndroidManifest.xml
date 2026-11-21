@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.sessionone" android:versionCode="1" android:versionName="1">
+ <uses-permission android:name="org.shiraz.sessiontwo.RECEIVE"/>
+ <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="27"/>
+ <application android:label="Shared session fixture" android:theme="@android:style/Theme.Material.NoActionBar">
+  <activity android:name="org.shiraz.sessionfixture.MainActivity" android:exported="true">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+  </activity>
+ </application>
+</manifest>

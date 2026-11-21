@@ -4,19 +4,28 @@
 
 macOS support is added inside `#if defined(__APPLE__)` blocks. For every C/C++
 source or header that differs from the base revision, the text left after
-removing those blocks with `unifdef -U__APPLE__` must match the base revision
-byte for byte. New files are reported but not compared.
+removing those blocks with `unifdef -U__APPLE__` must match the similarly
+processed base revision byte for byte. New files are reported but not compared.
 """
 
 import argparse
 import subprocess
 import sys
+from pathlib import Path
 
 SUFFIXES = ('.c', '.cc', '.cpp', '.h', '.hpp', '.inc', '.S', '.s', '.m', '.mm')
 
 
 def git(*args, check=True):
     return subprocess.run(['git', *args], check=check, capture_output=True).stdout
+
+
+def linux_view(source):
+    # Both revisions may already contain Apple branches. Compare like with like.
+    result = subprocess.run(['unifdef', '-U__APPLE__'], input=source, capture_output=True)
+    if result.returncode not in (0, 1):
+        raise ValueError(result.stderr.decode(errors='replace').strip())
+    return result.stdout
 
 
 def main():
@@ -33,12 +42,14 @@ def main():
         if base.returncode:
             print(f'new      {name}')
             continue
-        # unifdef exits 1 when it changed the input; only 2 is an error.
-        stripped = subprocess.run(['unifdef', '-U__APPLE__', name], capture_output=True)
-        if stripped.returncode not in (0, 1):
-            print(f'error    {name}: {stripped.stderr.decode().strip()}')
+        try:
+            current_linux = linux_view(Path(name).read_bytes())
+            base_linux = linux_view(base.stdout)
+        except ValueError as error:
+            print(f'error    {name}: {error}')
             failures += 1
-        elif stripped.stdout == base.stdout:
+            continue
+        if current_linux == base_linux:
             print(f'same     {name}')
         else:
             print(f'CHANGED  {name}: Linux path differs from {args.base}')

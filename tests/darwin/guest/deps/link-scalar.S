@@ -253,6 +253,10 @@ timezone: .quad 0
 .type prctl, %function
 prctl:
  brk #0
+.global ptrace
+.type ptrace, %function
+ptrace:
+ brk #0
 .global __assert2
 .type __assert2, %function
 __assert2:

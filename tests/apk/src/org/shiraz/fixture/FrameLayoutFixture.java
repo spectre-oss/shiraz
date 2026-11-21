@@ -31,6 +31,15 @@ public final class FrameLayoutFixture {
         DrawResultFrame(Context context) { super(context); }
         protected boolean drawChild(Canvas canvas,View child,long time) { more=super.drawChild(canvas,child,time); return more; }
     }
+    private static final class UnboundedFrame extends FrameLayout {
+        int measurements;
+        UnboundedFrame(Context context) { super(context); }
+        @Override protected void measureChildWithMargins(View child,int widthSpec,int widthUsed,int heightSpec,int heightUsed) {
+            measurements++;
+            FrameLayout.LayoutParams params=(FrameLayout.LayoutParams)child.getLayoutParams();
+            child.measure(getChildMeasureSpec(widthSpec,widthUsed,params.width),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));
+        }
+    }
     private static class InterceptFrame extends FrameLayout {
         boolean intercept; int ownMoves;
         InterceptFrame(Context context) { super(context); }
@@ -61,6 +70,11 @@ public final class FrameLayoutFixture {
         System.out.println("SHIRAZ_FOREGROUND_XML_OK");
     }
     public static void check(Context context) {
+        UnboundedFrame unbounded=new UnboundedFrame(context);
+        Leaf tall=new Leaf(context,40,700,Color.RED);
+        unbounded.addView(tall,new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT));
+        layout(unbounded,80,40);
+        check(unbounded.measurements==1&&tall.getMeasuredHeight()==700,"subclass receives child measurement and can exceed viewport");
         MotionEvent finite=MotionEvent.obtain(1,1,MotionEvent.ACTION_DOWN,-Float.MAX_VALUE,0,0);
         try {
             finite.setLocation(Float.MAX_VALUE,1); check(finite.getX() == Float.MAX_VALUE && finite.getRawX() == -Float.MAX_VALUE,"finite location transition preserves raw input");
@@ -99,7 +113,7 @@ public final class FrameLayoutFixture {
         Leaf fixed=new Leaf(context,3,2,Color.RED),fill=new Leaf(context,0,0,Color.BLUE),gone=new Leaf(context,10,9,Color.GREEN);
         FrameLayout.LayoutParams fixedParams=new FrameLayout.LayoutParams(-2,-2); fixedParams.setMargins(1,1,1,1);
         wrap.addView(fixed,fixedParams); wrap.addView(fill,new FrameLayout.LayoutParams(-1,-1)); gone.setVisibility(View.GONE); wrap.addView(gone,new FrameLayout.LayoutParams(-2,-2));
-        wrap.measure(loose(100),loose(100)); check(wrap.getMeasuredWidth() == 7 && wrap.getMeasuredHeight() == 6 && fill.getMeasuredWidth() == 5 && fill.getMeasuredHeight() == 4,"wrap and match-parent second pass");
+        wrap.measure(loose(100),loose(100)); check(wrap.getMeasuredWidth() == 7 && wrap.getMeasuredHeight() == 6 && fill.getMeasuredWidth() == 0 && fill.getMeasuredHeight() == 0,"single match-parent child retains first-pass dimensions (Android behavior)");
         wrap.setMeasureAllChildren(true); wrap.measure(loose(100),loose(100)); check(wrap.getMeasureAllChildren() && wrap.getMeasuredWidth() == 12 && wrap.getMeasuredHeight() == 11,"gone measuring policy");
         FrameLayout.LayoutParams relative=new FrameLayout.LayoutParams(2,1,Gravity.START|Gravity.TOP); relative.setMargins(3,0,4,0); relative.setMarginStart(1);
         FrameLayout rtl=new FrameLayout(context); Leaf start=new Leaf(context,2,1,Color.RED); rtl.addView(start,relative); layout(rtl,10,4);

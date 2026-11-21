@@ -58,6 +58,12 @@ public final class KeyboardSmoke {
         check(activity.getWindow().shirazDispatchKeyEvent(back)&&first.hasFocus(),"Shift Tab reverses traversal");
         check(activity.getWindow().shirazDispatchKeyEvent(back)&&last.hasFocus(),"reverse traversal wraps");
         check(activity.getWindow().shirazDispatchKeyEvent(tab)&&first.hasFocus(),"forward traversal wraps");
+        first.setId(101);last.setId(102);disabled.setId(103);
+        check(first.getNextFocusDownId()==View.NO_ID,"Default focus link");first.setNextFocusDownId(103);disabled.setNextFocusDownId(102);
+        check(activity.getWindow().shirazDispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_DOWN))&&last.hasFocus(),"Explicit arrow skips disabled intermediary");
+        last.setNextFocusUpId(101);check(activity.getWindow().shirazDispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_UP))&&first.hasFocus(),"Explicit up link");
+        disabled.setNextFocusDownId(103);check(!activity.getWindow().shirazDispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_DOWN))&&first.hasFocus(),"Focus cycle terminates");
+        first.setNextFocusForwardId(102);check(activity.getWindow().shirazDispatchKeyEvent(tab)&&last.hasFocus(),"Explicit forward link");check(activity.getWindow().shirazDispatchKeyEvent(back)&&first.hasFocus(),"Reverse explicit forward link");
         first.setOnKeyListener(new View.OnKeyListener(){public boolean onKey(View v,int code,KeyEvent e){return true;}});
         check(activity.getWindow().shirazDispatchKeyEvent(tab)&&first.hasFocus(),"consumed Tab does not move focus");first.setOnKeyListener(null);
         check(!activity.getWindow().shirazDispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_TAB))&&first.hasFocus(),"Tab release does not navigate");

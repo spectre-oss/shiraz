@@ -15,7 +15,7 @@ public final class ServiceSmoke {
   @Override protected void onCreate(Bundle state){
    super.onCreate(state);
    connection=new ServiceConnection(){public void onServiceConnected(ComponentName name,IBinder binder){}public void onServiceDisconnected(ComponentName name){}};
-   check(bindService(new Intent(this,ServiceFixture.Sample.class),connection,Context.BIND_AUTO_CREATE),"Activity service binding");
+   check(bindService(new Intent(this,ServiceFixture.Sample.class),connection,4225),"Activity service binding with GMS flags");
   }
  }
  private static void activityBindingCleanup(final Context context){
@@ -26,6 +26,64 @@ public final class ServiceSmoke {
   try{context.unbindService(connection);throw new AssertionError("Destroyed Activity retained its service binding");}catch(IllegalArgumentException expected){}
   activity.unbindService(connection);
   try{activity.unbindService(connection);throw new AssertionError("Late unbind accepted twice");}catch(IllegalArgumentException expected){}
+ }
+ public static class QueueService extends Service {
+  static int destroys;
+  public IBinder onBind(Intent intent){return new Binder();}
+  public int onStartCommand(Intent intent,int flags,int id){return START_NOT_STICKY;}
+  public void onDestroy(){destroys++;}
+ }
+ public static class AdmissionService extends Service {
+  static int starts,lastId,destroys;
+  public IBinder onBind(Intent intent){return new Binder();}
+  public int onStartCommand(Intent intent,int flags,int id){starts++;lastId=id;return START_NOT_STICKY;}
+  public void onDestroy(){destroys++;}
+ }
+ private static void rejectedForegroundRestart(Context context,Application app,HostServices[] host)throws Exception{
+  Properties metadata=new Properties();metadata.setProperty("service.count","1");metadata.setProperty("service.0.name",AdmissionService.class.getName());
+  host[0]=new HostServices(context,app,metadata);Intent intent=new Intent(context,AdmissionService.class);
+  context.startService(intent);due();check(AdmissionService.starts==1&&AdmissionService.lastId==1,"Initial service delivery");
+  Handler filler=new Handler(Looper.getMainLooper());Runnable noop=new Runnable(){public void run(){}};
+  // Exercise failure of the timeout post, then failure of delivery after timeout admission.
+  for(int count:new int[]{100000,99999}){
+   for(int i=0;i<count;i++)check(filler.postAtFrontOfQueue(noop),"Fill restart queue");
+   try{context.startForegroundService(intent);throw new AssertionError("Full queue accepted foreground restart");}
+   catch(java.util.concurrent.RejectedExecutionException expected){}
+   finally{filler.removeCallbacks(noop);}
+   due();check(host[0].hasWork()&&AdmissionService.starts==1&&AdmissionService.destroys==0,"Failed restart changed existing work");
+  }
+  ServiceConnection connection=new ServiceConnection(){public void onServiceConnected(ComponentName name,IBinder binder){}public void onServiceDisconnected(ComponentName name){}};
+  check(context.bindService(intent,connection,Context.BIND_AUTO_CREATE),"Bind after rejected foreground restart");due();context.unbindService(connection);due();
+  check(AdmissionService.destroys==0,"Failed foreground restart cleared started state");
+  context.startService(intent);due();check(AdmissionService.starts==2&&AdmissionService.lastId==2,"Failed foreground restart consumed start ID");
+  Thread.sleep(5100);due(); // A rejected request must not leave a promotion timeout behind.
+  check(context.stopService(intent),"Stop preserved service");due();
+  check(AdmissionService.destroys==1&&!host[0].hasWork(),"Preserved service teardown");host[0].close();
+ }
+ private static void rejectedForegroundStart(Context context,Application app,HostServices[] host){
+  Properties metadata=new Properties();metadata.setProperty("service.count","1");metadata.setProperty("service.0.name",QueueService.class.getName());
+  host[0]=new HostServices(context,app,metadata);
+  Handler filler=new Handler(Looper.getMainLooper());Runnable noop=new Runnable(){public void run(){}};
+  // Leave one slot: service delivery and its promotion deadline require two.
+  for(int i=0;i<99999;i++)check(filler.postAtFrontOfQueue(noop),"Fill main queue");
+  try{context.startForegroundService(new Intent(context,QueueService.class));throw new AssertionError("Partial foreground start accepted");}
+  catch(java.util.concurrent.RejectedExecutionException expected){}
+  finally{filler.removeCallbacks(noop);}
+  check(!host[0].hasWork(),"Rejected foreground start retained service work");
+  due();host[0].close();
+ }
+ private static void rejectedStop(Context context,Application app,HostServices[] host){
+  Properties metadata=new Properties();metadata.setProperty("service.count","1");metadata.setProperty("service.0.name",QueueService.class.getName());
+  host[0]=new HostServices(context,app,metadata);Intent intent=new Intent(context,QueueService.class);
+  context.startService(intent);due();
+  for(int i=0;i<1024;i++)context.startService(intent);
+  try{context.stopService(intent);throw new AssertionError("Full queue accepted stop");}catch(IllegalStateException expected){check(expected.getMessage().contains("queue limit"),"Expected queue rejection: "+expected);}
+  due();
+  ServiceConnection connection=new ServiceConnection(){public void onServiceConnected(ComponentName name,IBinder binder){}public void onServiceDisconnected(ComponentName name){}};
+  check(context.bindService(intent,connection,Context.BIND_AUTO_CREATE),"Bind after rejected stop");due();context.unbindService(connection);due();
+  check(QueueService.destroys==0,"Rejected stop cleared started state");
+  check(context.stopService(intent),"Retry stop after draining queue");due();
+  check(QueueService.destroys==1,"Successful stop destroys exactly once");host[0].close();
  }
  public static class NeverForeground extends Service {public IBinder onBind(Intent intent){return null;}public int onStartCommand(Intent intent,int flags,int id){return START_NOT_STICKY;}}
  public static class Foreground extends Service {
@@ -42,7 +100,17 @@ public final class ServiceSmoke {
   check(!context.bindService(external,connection,Context.BIND_AUTO_CREATE),"Absent external service must not report a connection");due();check(callbacks[0]==0,"Absent service must not fabricate callbacks");context.unbindService(connection);
   try{context.unbindService(connection);throw new AssertionError("Unknown connection accepted");}catch(IllegalArgumentException expected){}
   check(!context.bindService(new Intent().setComponent(new ComponentName("org.shiraz.fixture","org.shiraz.fixture.Absent")),connection,0),"Absent local service");context.unbindService(connection);
+  for(int flags:new int[]{0,Context.BIND_WAIVE_PRIORITY,Context.BIND_IMPORTANT}){
+   try{context.bindService(new Intent(context,ServiceFixture.Sample.class),connection,flags);throw new AssertionError("Non-auto binding silently created a service");}
+   catch(UnsupportedOperationException expected){check(expected.getMessage().contains("BIND_AUTO_CREATE"),"Explicit unsupported binding mode");}
+   due();check(callbacks[0]==0,"Rejected binding delivered a callback");
+   try{context.unbindService(connection);throw new AssertionError("Rejected binding retained ownership");}catch(IllegalArgumentException expected){}
+  }
   check(context.bindService(new Intent(context,ServiceFixture.Sample.class),connection,Context.BIND_AUTO_CREATE),"Declared bound service scheduled");context.unbindService(connection);due();check(callbacks[0]==0,"Canceled binding must not connect");
+  for(Context caller:new Context[]{context,new ContextWrapper(context),new BoundActivity(context)}){
+   check(caller.bindService(new Intent(context,ServiceFixture.Sample.class),connection,4225),"API27 GMS flags accepted for same-process binding");
+   caller.unbindService(connection);due();check(callbacks[0]==0,"Canceled GMS-flags binding connected");
+  }
   try{context.bindService(new Intent("implicit"),connection,0);throw new AssertionError("Implicit service accepted");}catch(IllegalArgumentException expected){}
  }
  private static void due(){for(int i=0;i<12;i++)Looper.myLooper().shirazDispatchDue(256);}
@@ -63,7 +131,38 @@ public final class ServiceSmoke {
   check(info.services.length==1&&info.services[0].processName.equals("test.pkg:child")&&(info.services[0].flags&android.content.pm.ServiceInfo.FLAG_ISOLATED_PROCESS)!=0,"Package service manifest metadata");
   info.services[0].name="mutated";check(manager.getPackageInfo("test.pkg",0).services==null&&manager.getPackageInfo("test.pkg",android.content.pm.PackageManager.GET_SERVICES|android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS).services.length==2,"Service query flags and fresh snapshots");
  }
- public static void main(String[] args)throws Exception{serviceMetadata();Looper.prepareMainLooper();final HostServices[] host={null};final Application app=new Application();final java.io.File policy=java.io.File.createTempFile("shiraz-service-", ".db");policy.delete();final NotificationManager notifications=NotificationManager.shirazForProcess("Service test",policy);Context context=new ContextWrapper(null){public String getPackageName(){return "org.shiraz.fixture";}public Context getApplicationContext(){return app;}public ApplicationInfo getApplicationInfo(){ApplicationInfo i=new ApplicationInfo();i.targetSdkVersion=35;return i;}protected HostServices shirazServices(){return host[0];}public Object getSystemService(String name){if(NOTIFICATION_SERVICE.equals(name))return notifications;throw new UnsupportedOperationException(name);}};
+ private static void wakeLocks()throws Exception{
+  PowerManager.WakeLock denied=new PowerManager(new ContextWrapper(null){public int checkSelfPermission(String permission){return android.content.pm.PackageManager.PERMISSION_DENIED;}}).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"denied");
+  try{denied.acquire();throw new AssertionError("Undeclared wake lock accepted");}catch(SecurityException expected){}
+  try{denied.acquire(0);throw new AssertionError("Undeclared timed wake lock accepted");}catch(SecurityException expected){}
+  check(!denied.isHeld(),"Denied acquisition changed held state");
+  PowerManager power=new PowerManager(new android.content.ContextWrapper(null){public int checkSelfPermission(String permission){return "android.permission.WAKE_LOCK".equals(permission)?android.content.pm.PackageManager.PERMISSION_GRANTED:android.content.pm.PackageManager.PERMISSION_DENIED;}});PowerManager.WakeLock lock=power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"service-work");
+  lock.acquire();lock.acquire();lock.release();check(lock.isHeld(),"Nested wake lock released early");lock.release();check(!lock.isHeld(),"Balanced wake lock held");
+  try{lock.release();throw new AssertionError("Wake lock under-release accepted");}catch(RuntimeException expected){}
+  lock=power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"un-counted");lock.setReferenceCounted(false);lock.acquire();lock.acquire();lock.release();check(!lock.isHeld(),"Non-reference-counted release");
+  lock=power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"timeout");lock.acquire(0);due();check(!lock.isHeld(),"Timed wake lock did not expire");lock.release();
+  lock.acquire(0);lock.acquire();due();check(lock.isHeld(),"Timeout released another acquisition");lock.release();check(!lock.isHeld(),"Remaining acquisition leaked");lock.release();
+  lock.acquire(0);lock.release();lock.acquire();due();check(lock.isHeld(),"Cancelled timeout released new acquisition");lock.release();
+  lock.acquire(1000);
+  java.lang.reflect.Field timer=lock.getClass().getDeclaredField("timeoutRelease");timer.setAccessible(true);
+  Runnable dispatched=(Runnable)timer.get(lock);lock.release();lock.acquire();
+  dispatched.run();check(lock.isHeld(),"Already dispatched stale timeout released new acquisition");lock.release();
+  lock.acquire(30);check(lock.isHeld(),"Delayed acquisition not held");
+  long deadline=System.nanoTime()+2000000000L;
+  while(lock.isHeld()&&System.nanoTime()<deadline){due();Thread.sleep(2);}
+  check(!lock.isHeld(),"Delayed timeout failed to release");lock.release();
+  PowerManager.WakeLock existing=power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"existing-on-failure");existing.setReferenceCounted(false);existing.acquire();
+  Looper.shirazRequestMainExit();
+  try{lock.acquire(10);throw new AssertionError("Stopped timeout queue accepted acquisition");}catch(IllegalStateException expected){}
+  check(!lock.isHeld(),"Failed timed acquisition leaked held state");
+  try{existing.acquire(10);throw new AssertionError("Stopped queue accepted reacquisition");}catch(IllegalStateException expected){}
+  check(existing.isHeld(),"Failed timed reacquisition released existing lock");existing.release();
+  Looper.shirazShutdownMain();Looper.prepareMainLooper();
+ }
+ public static void main(String[] args)throws Exception{serviceMetadata();Looper.prepareMainLooper();wakeLocks();final HostServices[] host={null};final Application app=new Application();final java.io.File policy=java.io.File.createTempFile("shiraz-service-", ".db");policy.delete();final NotificationManager notifications=NotificationManager.shirazForProcess("Service test",policy);Context context=new ContextWrapper(null){public String getPackageName(){return "org.shiraz.fixture";}public Context getApplicationContext(){return app;}public ApplicationInfo getApplicationInfo(){ApplicationInfo i=new ApplicationInfo();i.targetSdkVersion=35;return i;}protected HostServices shirazServices(){return host[0];}public Object getSystemService(String name){if(NOTIFICATION_SERVICE.equals(name))return notifications;throw new UnsupportedOperationException(name);}};
+  rejectedForegroundStart(context,app,host);
+  rejectedForegroundRestart(context,app,host);
+  rejectedStop(context,app,host);
   Properties metadata=new Properties();String[] names={"Sample","Legacy","Persistent","Disabled","Separate"};metadata.setProperty("service.count","5");for(int i=0;i<names.length;i++)metadata.setProperty("service."+i+".name","org.shiraz.fixture.ServiceFixture$"+names[i]);metadata.setProperty("service.3.enabled","false");metadata.setProperty("service.4.process",":separate");host[0]=new HostServices(context,app,metadata);
   try{absent(context);activityBindingCleanup(context);ServiceFixture.start(context);due();ServiceFixture.verify(context);app.onLowMemory();check(ServiceFixture.memory==0,"destroyed service callback unregistered");host[0].close();check(ServiceFixture.persistentDestroys==1,"session destroys running service");host[0].close();check(ServiceFixture.persistentDestroys==1,"idempotent close");try{context.startService(new Intent(context,ServiceFixture.Sample.class));throw new AssertionError("closed session restarted");}catch(IllegalStateException expected){}
    host[0]=new HostServices(context,app,metadata);Thread worker=new Thread(new Runnable(){public void run(){context.startService(new Intent(context,ServiceFixture.Persistent.class));}});worker.start();try{worker.join();}catch(InterruptedException error){throw new AssertionError(error);}check(ServiceFixture.persistentStarts==1,"worker start queued");due();check(ServiceFixture.persistentStarts==2&&context.stopService(new Intent(context,ServiceFixture.Persistent.class)),"worker delivery/explicit stop");check(ServiceFixture.persistentDestroys==1,"stopService queues destruction");due();check(ServiceFixture.persistentDestroys==2,"explicit stop delivered");host[0].close();
@@ -91,6 +190,10 @@ public final class ServiceSmoke {
    boolean file=shiraz.runtime.ExternalLauncher.open(new android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse("file:///etc/passwd")));
    boolean spaced=shiraz.runtime.ExternalLauncher.open(new android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse("https://a.b/x y")));
    boolean send=shiraz.runtime.ExternalLauncher.open(new android.content.Intent(android.content.Intent.ACTION_SEND,android.net.Uri.parse("https://a.b")));
+   android.content.Intent browser=android.content.Intent.makeMainSelectorActivity(android.content.Intent.ACTION_MAIN,android.content.Intent.CATEGORY_APP_BROWSER).setData(android.net.Uri.parse("https://a.b/help"));
+   if(!"https://a.b/help".equals(shiraz.runtime.ExternalLauncher.externalTarget(browser)))throw new AssertionError("Browser selector not recognized");
+   browser.getSelector().setPackage("other.browser");
+   if(shiraz.runtime.ExternalLauncher.externalTarget(browser)!=null)throw new AssertionError("Scoped browser selector escaped to host");
    if(!web||scoped||file||spaced||send||!ran.toString().equals("["+shiraz.runtime.ExternalLauncher.opener()+", https://osmand.net/a?x=1]"))throw new AssertionError("External launcher "+web+scoped+file+spaced+send+ran);}
    {java.io.File picked=java.io.File.createTempFile("shiraz-pick-",".png");picked.deleteOnExit();try(java.io.FileOutputStream out=new java.io.FileOutputStream(picked)){out.write(new byte[]{(byte)0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A});}
     final String[] chosen={null};shiraz.runtime.HostContentPicker.setChooser(new shiraz.runtime.HostContentPicker.Chooser(){public String choose(String mime){return chosen[0];}});
@@ -110,7 +213,20 @@ public final class ServiceSmoke {
    host[0]=new HostServices(context,app,metadata);context.startForegroundService(new Intent(context,Foreground.class));due();Foreground.instance.stopForeground(false);check(notifications.shirazForegroundSummary().isEmpty()&&notifications.shirazNotification(8)!=null,"legacy demotion retains notification until service stops");host[0].close();check(notifications.shirazNotification(8)==null,"legacy notification removed at destruction");
    metadata.setProperty("service.count","7");metadata.setProperty("service.6.name",NeverForeground.class.getName());host[0]=new HostServices(context,app,metadata);context.startForegroundService(new Intent(context,NeverForeground.class));due();Thread.sleep(5100);try{due();throw new AssertionError("Missing foreground promotion accepted");}catch(IllegalStateException expected){check(expected.getMessage().contains("five seconds"),"foreground deadline failure");}host[0].close();
    Intent tokenIntent=new Intent(context,Foreground.class);PendingIntent token=PendingIntent.getActivity(context,19,tokenIntent,PendingIntent.FLAG_IMMUTABLE);check(token==PendingIntent.getActivity(context,19,new Intent(tokenIntent).putExtra("changed",1),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE),"PendingIntent stable identity ignores extras");check(PendingIntent.getActivity(context,20,tokenIntent,PendingIntent.FLAG_NO_CREATE|PendingIntent.FLAG_IMMUTABLE)==null,"PendingIntent no-create");check(PendingIntent.getBroadcast(context,19,tokenIntent,PendingIntent.FLAG_IMMUTABLE)!=token,"PendingIntent operation isolation");
-   notifications.shirazClose();policy.delete();
+   host[0].close();metadata.setProperty("service.5.process",":worker");Application.shirazSetProcessName(context.getPackageName()+":worker");host[0]=new HostServices(context,app,metadata);
+   try{context.startService(new Intent(context,ServiceFixture.Persistent.class));throw new AssertionError("wrong process admitted");}catch(UnsupportedOperationException expected){}
+   final java.util.List<Boolean> transitions=new java.util.ArrayList<Boolean>();
+   int before=Foreground.destroys;Foreground owned=(Foreground)host[0].createWorkerService(new ComponentName(context.getPackageName(),Foreground.class.getName()),new HostServices.StartedListener(){public void changed(boolean started){transitions.add(started);}});
+   check(context.startService(new Intent(context,Foreground.class))!=null,"worker service start accepted");due();
+   check(Foreground.instance==owned&&!notifications.shirazForegroundSummary().isEmpty(),"worker instance tracked for foreground promotion");
+   context.startService(new Intent(context,Foreground.class));due();
+   check(!owned.stopSelfResult(1),"stale stopSelf ID cannot release newer start");
+   check(transitions.equals(java.util.Arrays.asList(Boolean.TRUE)),"one started transition across repeated starts");
+   check(owned.stopSelfResult(2),"worker start ID stop");due();
+   check(transitions.equals(java.util.Arrays.asList(Boolean.TRUE,Boolean.FALSE)),"stop updates worker lifetime once");
+   check(Foreground.destroys==before&&host[0].hasWork(),"worker ownership survives stop until control closes");
+   host[0].close();host[0].close();check(Foreground.destroys==before+1&&notifications.shirazNotification(8)==null,"worker destroyed exactly once and foreground removed");
+   Application.shirazSetProcessName(context.getPackageName());notifications.shirazClose();policy.delete();
    System.out.println("STARTED_SERVICE_LIFECYCLE_AND_TEARDOWN_OK");}finally{try{host[0].close();}finally{Looper.shirazShutdownMain();}}
  }
 }

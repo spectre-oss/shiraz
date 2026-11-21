@@ -27,6 +27,7 @@ public struct ExitStatus: Sendable, Equatable, CustomStringConvertible {
 
 public struct SpawnError: Error, LocalizedError, Sendable {
     public var message: String
+    public init(message: String) { self.message = message }
     public var errorDescription: String? { message }
 }
 
@@ -64,6 +65,7 @@ public enum ProcessRunner {
         arguments: [String],
         environment: [String: String],
         workingDirectory: URL?,
+        standardInput: FileHandle? = nil,
         onOutput: @escaping @Sendable (StreamKind, Data) -> Void,
         onExit: @escaping @Sendable (ExitStatus) -> Void
     ) throws -> RunningProcess {
@@ -79,7 +81,11 @@ public enum ProcessRunner {
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        if let standardInput {
+            posix_spawn_file_actions_adddup2(&actions, standardInput.fileDescriptor, 0)
+        } else {
+            posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        }
         posix_spawn_file_actions_adddup2(&actions, outPipe[1], 1)
         posix_spawn_file_actions_adddup2(&actions, errPipe[1], 2)
         if let workingDirectory {
@@ -95,7 +101,7 @@ public enum ProcessRunner {
         posix_spawnattr_setsigdefault(&attributes, &defaults)
         posix_spawnattr_setsigmask(&attributes, &mask)
         posix_spawnattr_setpgroup(&attributes, 0)
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT))
 
         let argv = ([executable.path] + arguments).map { strdup($0) } + [nil]
         let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]

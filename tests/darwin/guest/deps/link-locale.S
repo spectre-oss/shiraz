@@ -245,6 +245,30 @@ getauxval:
 .type getpid, %function
 getpid:
  brk #0
+.global getppid
+.type getppid, %function
+getppid:
+ brk #0
+.global getrusage
+.type getrusage, %function
+getrusage:
+ brk #0
+.global basename
+.type basename, %function
+basename:
+ brk #0
+.global dirname
+.type dirname, %function
+dirname:
+ brk #0
+.global killpg
+.type killpg, %function
+killpg:
+ brk #0
+.global setpgid
+.type setpgid, %function
+setpgid:
+ brk #0
 .global getuid
 .type getuid, %function
 getuid:
@@ -317,3 +341,10 @@ srand:
 .type qsort, %function
 qsort:
  brk #0
+.data
+.p2align 3
+.global __progname
+.type __progname, %object
+__progname:
+ .xword 0
+.size __progname, 8

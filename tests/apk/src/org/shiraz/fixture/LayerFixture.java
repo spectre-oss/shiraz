@@ -18,6 +18,15 @@ public final class LayerFixture {
         public boolean getPadding(Rect r){r.set(1,2,3,4);return true;}
     }
     public static void check(Resources r){
+        LayerDrawable classified=(LayerDrawable)r.getDrawable(id(r,"layer_opacity","drawable"));
+        check(classified.getOpacity()==PixelFormat.TRANSPARENT,"XML opacity override");
+        Bitmap classifiedPixels=Bitmap.createBitmap(4,4,Bitmap.Config.ARGB_8888);
+        try{classified.setBounds(0,0,4,4);classified.draw(new Canvas(classifiedPixels));check(classifiedPixels.getPixel(2,2)==Color.RED,"opacity classification changed actual alpha");}finally{classifiedPixels.recycle();}
+        classified.setOpacity(PixelFormat.UNKNOWN);check(classified.getOpacity()==PixelFormat.OPAQUE,"reset opacity derives children");
+        classified.setOpacity(PixelFormat.TRANSLUCENT);check(classified.getOpacity()==PixelFormat.TRANSLUCENT,"explicit classification");
+        try{classified.setOpacity(123);throw new AssertionError("invalid opacity accepted");}catch(IllegalArgumentException expected){}
+        check(classified.getOpacity()==PixelFormat.TRANSLUCENT,"invalid override changed state");
+
         Drawable nestedColor=r.getDrawable(id(r,"color_nested","drawable"));nestedColor.setBounds(0,0,12,12);Bitmap colorPixels=Bitmap.createBitmap(12,12,Bitmap.Config.ARGB_8888);try{nestedColor.draw(new Canvas(colorPixels));check(colorPixels.getPixel(0,0)==0xffff0000&&colorPixels.getPixel(8,8)==0xff7f8000,"Nested color XML alpha composition");}finally{colorPixels.recycle();}
 
         Drawable d=r.getDrawable(id(r,"layer_fixture","drawable"));check(d instanceof LayerDrawable,"layer-list type");LayerDrawable xml=(LayerDrawable)d;

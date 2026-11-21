@@ -190,6 +190,7 @@ _shiraz_tpidr_test_start:
     movk x30, #0x2233, lsl #16
     movk x30, #0x4455, lsl #32
     movk x30, #0x6677, lsl #48
+    nop // reserved for an indirect-transfer fixture's ADR
 _shiraz_tpidr_test_site:
     mrs x0, tpidr_el0
     stp x0, x1, [sp, #0]

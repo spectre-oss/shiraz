@@ -18,7 +18,10 @@ int guest_thread_signal(pthread_t thread, int signal);
 // must be restored before shutdown. Exiting native threads release their masks.
 class SignalRuntime {
   public:
-    explicit SignalRuntime(CodeValidator validate);
+    // Immutable for the runtime lifetime: RejectCallbacks must be selected
+    // before attachment and before any guest signal disposition can be owned.
+    enum class CallbackPolicy { Allow, RejectCallbacks };
+    explicit SignalRuntime(CodeValidator validate, CallbackPolicy policy = CallbackPolicy::Allow);
     ~SignalRuntime();
     std::vector<ProviderExport> exports() const;
     void attach(Loader& loader);

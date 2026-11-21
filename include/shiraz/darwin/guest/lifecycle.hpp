@@ -23,6 +23,9 @@ class Lifecycle {
     // Empty means registration admission is closed. No Image access occurs here.
     std::shared_ptr<void> retain_thread_callback() const;
     size_t retained_thread_callbacks() const;
+    // Resolve the callback's owning domain while this lifecycle is attached.
+    // Returns empty for a non-admission loader and rejects a foreign domain.
+    std::shared_ptr<AdmissionDomain> callback_admission() const;
 
   private:
     struct State;

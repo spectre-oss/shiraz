@@ -21,6 +21,7 @@ public final class DownloadManagerSmoke {
   public void sendBroadcast(Intent intent){check(DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction()),"Completion action");completion=intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID,0);}
  }
  public static void main(String[] args)throws Exception{
+  if(java.security.Security.getProvider("wolfJSSE")!=null)shiraz.runtime.HostTlsProvider.install();
   java.util.Map<String,String> environment=new java.util.HashMap<String,String>();
   environment.put("SHIRAZ_PRESENT_SNAPSHOT","parent.ppm");environment.put("SHIRAZ_INPUT_SCRIPT","parent.script");environment.put("SHIRAZ_LIVE_INPUT","parent.input");environment.put("SHIRAZ_CANVAS","gpu");environment.put("XDG_DATA_HOME","private-parent");environment.put("SHIRAZ_HOST_XDG_DATA_HOME","host-data");
   java.lang.reflect.Method clean=shiraz.runtime.HostAppInstaller.class.getDeclaredMethod("cleanEnvironment",java.util.Map.class);clean.setAccessible(true);clean.invoke(null,environment);
@@ -32,7 +33,24 @@ public final class DownloadManagerSmoke {
   try{
    check(app.getSystemService(DownloadManager.class)==app.manager,"Typed service name");
    File target=new File(app.getExternalFilesDir("Download"),"sample.txt");
-   DownloadManager.Request request=new DownloadManager.Request(Uri.parse("http://127.0.0.1:"+server.getLocalPort()+"/file")).setTitle("sample").setDescription("test transfer").setDestinationUri(Uri.fromFile(target)).setAllowedOverMetered(false).setAllowedOverRoaming(false).setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN);
+   Uri source=Uri.parse("http://127.0.0.1:"+server.getLocalPort()+"/file");
+   for(DownloadManager.Request constrained:new DownloadManager.Request[]{
+    new DownloadManager.Request(source).setRequiresCharging(true),
+    new DownloadManager.Request(source).setRequiresDeviceIdle(true)}){
+    try{app.manager.enqueue(constrained);throw new AssertionError("Download policy silently ignored");}catch(UnsupportedOperationException expected){}
+   }
+   try(Cursor cursor=app.manager.query(new DownloadManager.Query())){check(cursor.getCount()==0,"Rejected policy persisted a download");}
+   long paused=app.manager.enqueue(new DownloadManager.Request(source).setAllowedNetworkTypes(0));
+   long pauseDeadline=System.currentTimeMillis()+5000;boolean observedPause=false;
+   while(System.currentTimeMillis()<pauseDeadline){
+    try(Cursor cursor=app.manager.query(new DownloadManager.Query().setFilterById(paused).setFilterByStatus(DownloadManager.STATUS_PAUSED))){
+     if(cursor.moveToFirst()){check(cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))==DownloadManager.PAUSED_WAITING_FOR_NETWORK,"Paused API reason");observedPause=true;break;}
+    }
+    Thread.sleep(20);
+   }
+   check(observedPause&&app.completion==0&&app.manager.getUriForDownloadedFile(paused)==null,"Constrained API request did not pause");
+   check(app.manager.remove(paused)==1,"Remove paused request");
+   DownloadManager.Request request=new DownloadManager.Request(source).setTitle("sample").setDescription("test transfer").setDestinationUri(Uri.fromFile(target)).setAllowedOverMetered(false).setAllowedOverMetered(true).setAllowedOverRoaming(false).setAllowedOverRoaming(true).setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN);
    long id=app.manager.enqueue(request),deadline=System.currentTimeMillis()+10000;
    while(app.completion==0&&System.currentTimeMillis()<deadline){Looper.getMainLooper().shirazDispatchDue(100);Thread.sleep(20);}
    check(app.completion==id,"Completion delivered on application loop");

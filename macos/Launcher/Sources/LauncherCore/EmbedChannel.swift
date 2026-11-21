@@ -48,6 +48,86 @@ public enum EmbedError: Error, Equatable, LocalizedError {
     }
 }
 
+/// A frame read may have started before the placement command was written.
+/// Keep the requested state until a matching runtime frame acknowledges it.
+public struct EmbeddedPlacement: Sendable {
+    public private(set) var detached = false
+    public private(set) var pending = false
+
+    public init() {}
+
+    @discardableResult
+    public mutating func request(detached value: Bool) -> Bool {
+        guard !pending, detached != value else { return false }
+        detached = value
+        pending = true
+        return true
+    }
+
+    public mutating func observe(detached value: Bool) {
+        guard !pending || detached == value else { return }
+        detached = value
+        pending = false
+    }
+}
+
+/// Selection and surface visibility are independent: an outgoing SwiftUI view
+/// may remain attached during a transition and still receive window events.
+public struct EmbeddedVisibility: Sendable {
+    private var selected = false
+    private var surfaceVisible = false
+    private var delivered: Bool?
+    private var windowFocused = false
+    private var deliveredFocus = false
+
+    public init() {}
+
+    public mutating func select(_ value: Bool) -> [LiveCommand] {
+        selected = value
+        return commands()
+    }
+
+    public mutating func surface(_ value: Bool) -> [LiveCommand] {
+        surfaceVisible = value
+        return commands()
+    }
+
+    public mutating func window(visible: Bool, focused: Bool) -> [LiveCommand] {
+        surfaceVisible = visible
+        windowFocused = focused
+        return commands()
+    }
+
+    public mutating func focus(_ value: Bool) -> [LiveCommand] {
+        windowFocused = value
+        return commands()
+    }
+
+    public mutating func resend() -> [LiveCommand] {
+        delivered = nil
+        return commands(forceFocus: true)
+    }
+
+    private mutating func commands(forceFocus: Bool = false) -> [LiveCommand] {
+        let visible = selected && surfaceVisible
+        let focused = visible && windowFocused
+        var result: [LiveCommand] = []
+        if delivered != visible {
+            delivered = visible
+            if !visible {
+                deliveredFocus = false
+                return [.focus(false), .visible(false)]
+            }
+            result.append(.visible(true))
+        }
+        if deliveredFocus != focused || forceFocus {
+            deliveredFocus = focused
+            result.append(.focus(focused))
+        }
+        return result
+    }
+}
+
 /// One command line of the live input stream. Bounds match live_input.hpp.
 public enum LiveCommand: Equatable, Sendable {
     case move(Int, Int), down(Int, Int), up(Int, Int)
@@ -55,6 +135,7 @@ public enum LiveCommand: Equatable, Sendable {
     case text(String)
     case keyDown(String), keyUp(String)
     case focus(Bool)
+    case visible(Bool)
     case resize(Int, Int)
     case embed(Bool)
     case close
@@ -85,6 +166,7 @@ public enum LiveCommand: Equatable, Sendable {
             Self.validKey(name) ? "keydown " + Self.quoted(name) : nil
         case .keyUp(let name):
             Self.validKey(name) ? "keyup " + Self.quoted(name) : nil
+        case .visible(let on): "visible \(on ? 1 : 0)"
         case .focus(let on): "focus \(on ? 1 : 0)"
         case .resize(let width, let height):
             width > 0 && height > 0 && width <= Self.maxCoordinate && height <= Self.maxCoordinate

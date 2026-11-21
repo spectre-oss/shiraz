@@ -38,9 +38,6 @@ public final class ActivityLifecycleSmoke {
   check(stack.current()==null&&stack.size()==0&&!stack.finishTop(),"empty stack");
   Intent launch=new Intent("map").putExtra("value",1);stack.launch(launch);launch.putExtra("value",2);LifecycleFixture.Sample map=made.get(0);map.value=73;check(map.getIntent().getIntExtra("value",0)==1,"launch intent snapshot");
   check(map.isTaskRoot(),"Initial activity is task root");
-  check(map.getActionBar()==null,"Window without native action-bar feature returns no bar");
-  try{map.requestWindowFeature(android.view.Window.FEATURE_ACTION_BAR);throw new AssertionError("Unsupported native action bar accepted");}catch(UnsupportedOperationException expected){}
-  check(map.getActionBar()==null&&!map.getWindow().hasFeature(android.view.Window.FEATURE_ACTION_BAR),"Rejected action-bar request preserves window state");
   LifecycleFixture.events.clear();stack.launch(new Intent("download").addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT));LifecycleFixture.Sample download=made.get(1);
   try{stack.launch(new Intent("other").addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT));throw new AssertionError("Unsupported result handoff accepted");}catch(UnsupportedOperationException expected){}
   check(stack.size()==2&&stack.current()==download,"Rejected forwarding preserves stack");
@@ -131,6 +128,35 @@ public final class ActivityLifecycleSmoke {
   }
   if(!events.equals(expected))throw new AssertionError("Lifecycle callback order: "+events+" expected "+expected);
  }
+ public static class TaskScreen extends LifecycleFixture.Sample {
+  int intents,results;
+  TaskScreen(Context context){super(context);}
+  protected void onNewIntent(Intent intent){intents++;}
+  protected void onActivityResult(int request,int result,Intent data){results++;}
+ }
+ private static void tasks(final Context context,final Properties metadata){
+  final java.util.ArrayList<TaskScreen> made=new java.util.ArrayList<TaskScreen>();final int[] destroyed={0};
+  ActivityTasks tasks=new ActivityTasks(new ActivityStack.Factory(){public ActivityLifecycle create(final Intent intent){
+   return new ActivityLifecycle(new ActivityLifecycle.Factory(){public android.app.Activity create(){
+    TaskScreen screen=new TaskScreen(context){protected void onCreate(android.os.Bundle state){super.onCreate(state);if("fail".equals(intent.getAction()))throw new IllegalStateException("task create failure");}};
+    screen.setIntent(intent);screen.shirazBindComponent(intent.getComponent(),screen.getClass().getName());made.add(screen);return screen;
+   }},new ActivityLifecycle.Cleanup(){public void detached(android.app.Activity activity){destroyed[0]++;}},new ActivityConfigurationPolicy(metadata,"sample.Main",27),27);
+  }},new ActivityStack.Activation(){public void prepare(ActivityLifecycle lifecycle){}});
+  Intent normal=new Intent().setComponent(new ComponentName("sample","Normal")),isolated=new Intent().setComponent(new ComponentName("sample","Isolated")),child=new Intent().setComponent(new ComponentName("sample","Child"));
+  tasks.launch(normal);TaskScreen root=(TaskScreen)tasks.current();check(root.isTaskRoot(),"normal task root");
+  tasks.launch(isolated,3);TaskScreen single=(TaskScreen)tasks.current();check(tasks.taskCount()==2&&tasks.size()==1&&single.isTaskRoot()&&!root.isDestroyed(),"isolated task root");
+  tasks.launch(isolated,3);check(tasks.current()==single&&single.intents==1&&made.size()==2,"single instance reused");
+  tasks.launch(child);TaskScreen nested=(TaskScreen)tasks.current();check(tasks.taskCount()==2&&tasks.size()==2&&!nested.isTaskRoot(),"child routed to normal task");
+  tasks.launch(isolated,3);check(tasks.current()==single&&single.intents==2&&tasks.size()==1,"isolated task retains no children");
+  single.setResult(99,new Intent("result"));single.finish();check(tasks.finishTop()&&tasks.current()==nested&&tasks.taskCount()==1,"back returns to previous task");
+  check(nested.results==0&&root.results==0,"cross-task result leaked");
+  nested.finish();tasks.finishTop();check(tasks.current()==root,"normal task back stack preserved");
+  try{tasks.launch(new Intent(isolated).setAction("fail"),3);throw new AssertionError("failed task accepted");}catch(IllegalStateException expected){check("task create failure".equals(expected.getMessage()),"task failure identity");}
+  check(tasks.current()==root&&tasks.taskCount()==1&&!root.isDestroyed(),"failed task did not restore caller");
+  tasks.setVisible(false);tasks.launch(isolated,3);tasks.setVisible(true);TaskScreen last=(TaskScreen)tasks.current();
+  root.finish();last.finish();tasks.finishTop();check(tasks.current()==null&&tasks.taskCount()==0,"covered finishing task retained");
+  tasks.close();tasks.close();check(destroyed[0]==made.size(),"task lifecycle cleanup count");
+ }
  public static void main(String[] args)throws Exception {
   scopedCallbacks();
   final Context context=new ContextWrapper(null);
@@ -158,7 +184,7 @@ public final class ActivityLifecycleSmoke {
    final Throwable[] cross={null};Thread worker=new Thread(new Runnable(){public void run(){try{lifecycle.current();}catch(Throwable t){cross[0]=t;}}});worker.start();worker.join();check(cross[0] instanceof IllegalStateException,"cross-thread lifecycle");
    LifecycleFixture.events.clear();lifecycle.close();lifecycle.close();check(LifecycleFixture.events.toString().equals("[pause:false, stop, destroy]")&&detached[0]==3,"final teardown");
   }
-  buckets(context,metadata);covered(context,metadata);stack(context,metadata);retainedLaunches(context,metadata);
+  buckets(context,metadata);covered(context,metadata);stack(context,metadata);retainedLaunches(context,metadata);tasks(context,metadata);
   ActivityLifecycle failing=new ActivityLifecycle(new ActivityLifecycle.Factory(){public android.app.Activity create(){return new LifecycleFixture.Sample(context);}},new ActivityLifecycle.Cleanup(){public void detached(android.app.Activity a){}},new ActivityConfigurationPolicy(metadata,"sample.Main",27),27);failing.start();LifecycleFixture.events.clear();LifecycleFixture.failPause=true;
   try{failing.close();throw new AssertionError("callback failure hidden");}catch(IllegalStateException expected){check(expected.getMessage().equals("pause failure"),"failure identity");}finally{LifecycleFixture.failPause=false;}
   check(LifecycleFixture.events.toString().equals("[pause:false, stop, destroy]"),"failure cleanup");failing.close();

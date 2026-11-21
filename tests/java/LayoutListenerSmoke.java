@@ -2,6 +2,7 @@
 import android.view.View;
 public final class LayoutListenerSmoke {
  public static void main(String[] args){
+  android.os.Looper.prepareMainLooper();
   android.content.Context context=new android.content.ContextWrapper(null);
   org.shiraz.fixture.LayoutListenerFixture.check(context);
   final int[] measures={0};

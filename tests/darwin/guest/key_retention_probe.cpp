@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/lifecycle.hpp"
+#include "shiraz/darwin/guest/admission_domain.hpp"
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
 #include <chrono>
+#include <cerrno>
 #include <condition_variable>
 #include <csignal>
 #include <cstdlib>
@@ -10,6 +12,17 @@
 #include <mutex>
 #include <thread>
 using namespace shiraz::guest;
+extern "C" uintptr_t key_retention_validate(uintptr_t target, uintptr_t site,
+                                            uintptr_t sp) noexcept {
+    try {
+        auto domain = AdmissionDomain::current_invocation();
+        if (!domain)
+            std::abort();
+        return domain->route(site, target, sp).target;
+    } catch (...) {
+        std::abort();
+    }
+}
 static volatile sig_atomic_t finalizations = 0;
 static void require(bool value, const char* message) {
     if (!value) {
@@ -45,26 +58,49 @@ static void release(Barrier& barrier) {
 int main(int argc, char** argv) {
     require(argc == 3, "usage: key-retention-probe fixture-directory mode");
     const std::string mode = argv[2];
-    require(mode == "joined" || mode == "pending" || mode == "same-thread" || mode == "clear" ||
-                mode == "delete" || mode == "active-delete" || mode == "active-delete-release" ||
-                mode == "exhaustion" || mode == "multi",
+    require(mode == "joined" || mode == "admitted" || mode == "pending" || mode == "same-thread" ||
+                mode == "clear" || mode == "delete" || mode == "active-delete" ||
+                mode == "active-delete-release" || mode == "exhaustion" || mode == "multi",
             "unknown mode");
     const bool active = mode == "active-delete" || mode == "active-delete-release";
     Loader* current = nullptr;
     auto validate = [&](const void* p) { return current && current->contains_code(p); };
     auto lifecycle = std::make_shared<Lifecycle>(validate);
-    auto loader = std::make_unique<Loader>(std::vector<std::filesystem::path>{argv[1]},
-                                           native_personality(validate, lifecycle));
+    auto loader = mode == "admitted"
+                      ? std::make_unique<Loader>(std::vector<std::filesystem::path>{argv[1]},
+                                                 native_personality(validate, lifecycle),
+                                                 Loader::Mode::AdmissionFixture,
+                                                 uintptr_t(&key_retention_validate))
+                      : std::make_unique<Loader>(std::vector<std::filesystem::path>{argv[1]},
+                                                 native_personality(validate, lifecycle));
     current = loader.get();
     lifecycle->attach(*loader);
     auto* module = loader->open("libkey-retention.so");
     auto call = [&](const char* name, const std::vector<Argument>& args = std::vector<Argument>{}) {
-        return invoke(reinterpret_cast<void*>(loader->symbol(module, name).address), args)
+        auto entry = reinterpret_cast<void*>(loader->symbol(module, name).address);
+        return (mode == "admitted" ? invoke_admitted(loader->admission_domain(), entry, args)
+                                   : invoke(entry, args))
             .result_integers[0];
     };
     Barrier barrier, replaced;
     barrier.block = active;
     auto callback = fixed_export("fixture_key_observe", "LIBC", &observe);
+    if (mode == "admitted") {
+        AdmissionDomain::Invocation invocation(loader->admission_domain());
+        (void)loader->admission_domain()->register_closure(
+            reinterpret_cast<void*>(callback.address));
+        // A key created outside this namespace cannot publish an unowned
+        // destructor into it; a key without a destructor needs no domain.
+        auto unowned = std::thread([&] {
+            auto key = make_guest_thread_key(reinterpret_cast<void*>(uintptr_t(1)));
+            auto plain = make_guest_thread_key(nullptr);
+            AdmissionDomain::Invocation entry(loader->admission_domain());
+            require(set_guest_thread_value(key, &barrier) == EINVAL, "unowned key was accepted");
+            require(set_guest_thread_value(plain, &barrier) == 0, "plain key was refused");
+            require(set_guest_thread_value(plain, nullptr) == 0, "plain key clear failed");
+        });
+        unowned.join();
+    }
     require(call("key_retention_create",
                  {pointer(reinterpret_cast<void*>(callback.address)),
                   pointer(const_cast<sig_atomic_t*>(&finalizations)),

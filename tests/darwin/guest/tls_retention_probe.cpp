@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/guest/lifecycle.hpp"
+#include "shiraz/darwin/guest/admission_domain.hpp"
 #include "shiraz/darwin/guest/memory.hpp"
 #include "shiraz/darwin/guest/tls.hpp"
 #include <atomic>
@@ -12,6 +13,17 @@
 #include <thread>
 #include <unistd.h>
 using namespace shiraz::guest;
+extern "C" uintptr_t tls_retention_validate(uintptr_t target, uintptr_t site,
+                                            uintptr_t sp) noexcept {
+    try {
+        auto domain = AdmissionDomain::current_invocation();
+        if (!domain)
+            std::abort();
+        return domain->route(site, target, sp).target;
+    } catch (...) {
+        std::abort();
+    }
+}
 static volatile sig_atomic_t finalizations = 0;
 static void require(bool value, const char* message) {
     if (!value) {
@@ -48,8 +60,8 @@ static void rejected_unmap(int) {
 int main(int argc, char** argv) {
     require(argc == 3, "usage: tls-retention-probe fixture-directory mode");
     const std::string mode = argv[2];
-    require(mode == "joined" || mode == "pending" || mode == "active" || mode == "validation" ||
-                mode == "unmap" || mode == "same-thread",
+    require(mode == "joined" || mode == "admitted" || mode == "pending" || mode == "active" ||
+                mode == "validation" || mode == "unmap" || mode == "same-thread",
             "unknown mode");
     Loader* current = nullptr;
     Barrier barrier;
@@ -74,17 +86,28 @@ int main(int argc, char** argv) {
         if (entry.name == "__cxa_thread_atexit_impl")
             registration = entry.address;
     require(registration != 0, "registration export missing");
-    auto loader =
-        std::make_unique<Loader>(std::vector<std::filesystem::path>{argv[1]}, std::move(providers));
+    auto loader = mode == "admitted"
+                      ? std::make_unique<Loader>(
+                            std::vector<std::filesystem::path>{argv[1]}, std::move(providers),
+                            Loader::Mode::AdmissionFixture, uintptr_t(&tls_retention_validate))
+                      : std::make_unique<Loader>(std::vector<std::filesystem::path>{argv[1]},
+                                                 std::move(providers));
     current = loader.get();
     lifecycle->attach(*loader);
     auto* module = loader->open("libtls-retention.so");
     auto call = [&](const char* name, const std::vector<Argument>& args) {
-        return invoke(reinterpret_cast<void*>(loader->symbol(module, name).address), args)
+        auto entry = reinterpret_cast<void*>(loader->symbol(module, name).address);
+        return (mode == "admitted" ? invoke_admitted(loader->admission_domain(), entry, args)
+                                   : invoke(entry, args))
             .result_integers[0];
     };
     call("retention_bind_finalizer", {pointer(const_cast<sig_atomic_t*>(&finalizations))});
     auto callback = fixed_export("fixture_observe", "LIBC", &observe);
+    if (mode == "admitted") {
+        AdmissionDomain::Invocation invocation(loader->admission_domain());
+        (void)loader->admission_domain()->register_closure(
+            reinterpret_cast<void*>(callback.address));
+    }
     require(int(invoke(reinterpret_cast<void*>(registration),
                        {pointer(reinterpret_cast<void*>(uintptr_t(0x1000))), pointer(nullptr),
                         pointer(nullptr)})
@@ -134,7 +157,7 @@ int main(int argc, char** argv) {
     }
     require(lifecycle->retained_thread_callbacks() == 1,
             "queued/executing/validating callback lost retention");
-    if (mode == "joined") {
+    if (mode == "joined" || mode == "admitted") {
         {
             std::lock_guard<std::mutex> lock(barrier.mutex);
             barrier.release = true;
@@ -154,8 +177,8 @@ int main(int argc, char** argv) {
                     before == validations,
                 "closed registration touched validator");
         loader.reset();
-        std::cout
-            << "M5_TLS_RETENTION_JOINED_PASS callback=1 tokens=0 fini=1 closed_validator_calls=0\n";
+        std::cout << "M5_TLS_RETENTION_JOINED_PASS mode=" << mode
+                  << " callback=1 tokens=0 fini=1 closed_validator_calls=0\n";
         return 0;
     }
     if (mode == "unmap") {

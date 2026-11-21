@@ -48,46 +48,50 @@ class GuestRuntimeTests(unittest.TestCase):
                 "DYLD_INSERT_LIBRARIES": "/untrusted",
                 "LD_PRELOAD": "/untrusted",
                 "SHIRAZ_GUEST_EGL_SHIM": "/untrusted",
+                "SHIRAZ_GUEST_ANDROID_LIB_DIR": "/untrusted",
             },
         )
         self.assertIn("-XX:NativeBridge=" + str(bridge), command)
         self.assertIn("-Xforce-nb-testing", command)
-        path = next(
-            value for value in command if value.startswith("-Djava.library.path=")
-        )
+        path = next(value for value in command if value.startswith("-Djava.library.path="))
         self.assertIn("/runtime/work/app_lib", path.split(":"))
-        self.assertEqual(
-            env["SHIRAZ_GUEST_EGL_SHIM"], "/runtime/build/macos/libEGL_shim.so"
-        )
+        self.assertEqual(env["SHIRAZ_GUEST_EGL_SHIM"], "/runtime/build/macos/libEGL_shim.so")
         self.assertEqual(env["SHIRAZ_EGL_LIBRARY"], "/runtime/build/macos/libEGL.dylib")
+        self.assertEqual(env["SHIRAZ_GUEST_ANDROID_LIB_DIR"], "/runtime/build/macos")
         self.assertFalse(any(key.startswith(("LD_", "DYLD_")) for key in env))
 
+    def test_android_provider_is_available_without_gles(self):
+        bridge = Path("/runtime/build/macos/libshiraz-guest.so")
+        _, env = self.command(guest_bridge=bridge, gles=False)
+        self.assertEqual(env["SHIRAZ_GUEST_ANDROID_LIB_DIR"], "/runtime/build/macos")
+        self.assertNotIn("SHIRAZ_GUEST_EGL_SHIM", env)
+
     def test_disabled_bridge_does_not_expose_guest_elf_directory(self):
-        command, env = self.command(environ={"SHIRAZ_GUEST_EGL_SHIM": "/untrusted"})
-        self.assertFalse(any("NativeBridge=" in value for value in command))
-        path = next(
-            value for value in command if value.startswith("-Djava.library.path=")
+        command, env = self.command(
+            environ={
+                "SHIRAZ_GUEST_EGL_SHIM": "/untrusted",
+                "SHIRAZ_GUEST_ANDROID_LIB_DIR": "/untrusted",
+            }
         )
+        self.assertFalse(any("NativeBridge=" in value for value in command))
+        path = next(value for value in command if value.startswith("-Djava.library.path="))
         self.assertNotIn("/runtime/work/app_lib", path)
         self.assertNotIn("SHIRAZ_GUEST_EGL_SHIM", env)
+        self.assertNotIn("SHIRAZ_GUEST_ANDROID_LIB_DIR", env)
 
     def test_bridge_selection_rejects_missing_build_and_wrong_abi(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with patch("shiraz.runtime.native_abi", return_value="arm64-v8a"):
                 with self.assertRaisesRegex(FormatError, "not built"):
-                    darwin_guest_bridge(
-                        root, ["arm64-v8a"], {"SHIRAZ_GUEST_LOADER": "1"}
-                    )
+                    darwin_guest_bridge(root, ["arm64-v8a"], {"SHIRAZ_GUEST_LOADER": "1"})
                 with self.assertRaisesRegex(FormatError, "arm64-v8a"):
                     darwin_guest_bridge(root, ["x86_64"], {"SHIRAZ_GUEST_LOADER": "1"})
                 library = root / DARWIN_LIBRARIES / "libshiraz-guest.so"
                 library.parent.mkdir(parents=True)
                 library.touch()  # Selection only; real ART gates verify executable behavior.
                 self.assertEqual(
-                    darwin_guest_bridge(
-                        root, ["arm64-v8a"], {"SHIRAZ_GUEST_LOADER": "1"}
-                    ),
+                    darwin_guest_bridge(root, ["arm64-v8a"], {"SHIRAZ_GUEST_LOADER": "1"}),
                     library.resolve(),
                 )
                 self.assertIsNone(darwin_guest_bridge(root, ["arm64-v8a"], {}))

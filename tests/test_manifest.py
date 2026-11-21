@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import struct
 import unittest
+
 from shiraz.manifest import ANDROID, ManifestError, inspect_manifest
 
 
@@ -12,6 +13,7 @@ def binary_fixture(
     launch_mode=None,
     themes=False,
     package_metadata=False,
+    filter_priority=None,
 ):
     strings = [
         ANDROID,
@@ -23,6 +25,7 @@ def binary_fixture(
         'name',
         '.Main',
         'intent-filter',
+        'priority',
         'action',
         'android.intent.action.MAIN',
         'category',
@@ -94,6 +97,7 @@ def binary_fixture(
 
     intent = node(
         'intent-filter',
+        attrs=[] if filter_priority is None else [(ANDROID, 'priority', filter_priority)],
         children=node('action', [(ANDROID, 'name', 'android.intent.action.MAIN')])
         + node('category', [(ANDROID, 'name', 'android.intent.category.LAUNCHER')]),
     )
@@ -160,6 +164,76 @@ def binary_fixture(
 
 
 class ManifestTests(unittest.TestCase):
+    def test_large_activity_and_service_sets_remain_bounded(self):
+        for tag, field in (('activity', 'activities'), ('service', 'services')):
+
+            def manifest(count, duplicate=False):
+                children = ''.join(
+                    f'<{tag} android:name=".Component{0 if duplicate else i}"/>'
+                    for i in range(count)
+                )
+                return (
+                    f'<manifest xmlns:android="{ANDROID}" package="sample.app">'
+                    f'<application>{children}</application></manifest>'
+                ).encode()
+
+            with self.subTest(tag=tag):
+                self.assertEqual(len(inspect_manifest(manifest(512))[field]), 512)
+                with self.assertRaises(ManifestError):
+                    inspect_manifest(manifest(513))
+                with self.assertRaises(ManifestError):
+                    inspect_manifest(manifest(2, duplicate=True))
+
+    def test_foreground_service_type_transport(self):
+        from shiraz.android_attributes import ANDROID_ATTRIBUTE_NAMES
+        from shiraz.runtime import application_metadata
+
+        self.assertEqual(ANDROID_ATTRIBUTE_NAMES[0x01010599], 'foregroundServiceType')
+
+        def manifest(value):
+            attribute = '' if value is None else f' android:foregroundServiceType="{value}"'
+            return inspect_manifest(
+                (
+                    f'<manifest xmlns:android="{ANDROID}" package="example.app">'
+                    f'<application><service android:name=".Worker"{attribute}/></application></manifest>'
+                ).encode()
+            )
+
+        for value, expected in (
+            (None, 0),
+            ('none', 0),
+            ('location|mediaPlayback', 10),
+            ('location|location', 8),
+            ('10', 10),
+            ('0x40000008', 0x40000008),
+        ):
+            result = manifest(value)
+            self.assertEqual(result['services'][0]['foregroundServiceType'], expected)
+            self.assertEqual(
+                application_metadata(result, '/app.apk', '/data')[
+                    'service.0.foregroundServiceType'
+                ],
+                expected,
+            )
+            from shiraz.runtime import properties_text
+
+            self.assertIn(
+                f'service.0.foregroundServiceType={expected}\n',
+                properties_text(application_metadata(result, '/app.apk', '/data')),
+            )
+        for value in (
+            '',
+            '-1',
+            '2147483648',
+            '0xzz',
+            'location|',
+            'unknown',
+            '@integer/type',
+            '1' * 257,
+        ):
+            with self.subTest(value=value), self.assertRaises(ManifestError):
+                manifest(value)
+
     def test_configuration_and_features(self):
         manifest = inspect_manifest(
             f'<manifest xmlns:android="{ANDROID}" package="test.app"><uses-feature android:name="test.camera" android:required="false" android:version="2"/><uses-feature android:glEsVersion="0x00030000"/><feature-group><uses-feature android:name="test.touch"/></feature-group><uses-configuration android:reqTouchScreen="finger" android:reqHardKeyboard="true"/><application/></manifest>'.encode()
@@ -184,7 +258,7 @@ class ManifestTests(unittest.TestCase):
 
     def test_application_declarations(self):
         manifest = inspect_manifest(
-            f'<manifest xmlns:android="{ANDROID}" package="test.app" android:compileSdkVersion="35"><supports-screens android:requiresSmallestWidthDp="320"/><application android:backupAgent=".Backup" android:manageSpaceActivity=".Storage" android:appComponentFactory=".Factory" android:permission="test.P" android:process=":worker" android:taskAffinity=":tasks" android:appCategory="productivity" android:uiOptions="splitActionBarWhenNarrow"/></manifest>'.encode()
+            f'<manifest xmlns:android="{ANDROID}" package="test.app" android:compileSdkVersion="35" android:targetSandboxVersion="2"><supports-screens android:requiresSmallestWidthDp="320"/><application android:backupAgent=".Backup" android:manageSpaceActivity=".Storage" android:appComponentFactory=".Factory" android:permission="test.P" android:process=":worker" android:taskAffinity=":tasks" android:appCategory="productivity" android:uiOptions="splitActionBarWhenNarrow"/></manifest>'.encode()
         )
         info = manifest['application_info']
         self.assertEqual(info['backupAgent'], 'test.app.Backup')
@@ -196,6 +270,13 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(info['category'], 7)
         self.assertEqual(info['uiOptions'], 1)
         self.assertEqual(info['compileSdkVersion'], 35)
+        self.assertEqual(info['targetSandboxVersion'], 2)
+        self.assertEqual(
+            inspect_manifest(b'<manifest package="test.app"><application/></manifest>')[
+                'application_info'
+            ]['targetSandboxVersion'],
+            1,
+        )
         self.assertEqual(info['requiresSmallestWidthDp'], 320)
 
     def test_binary_package_metadata(self):
@@ -258,6 +339,28 @@ class ManifestTests(unittest.TestCase):
         manifest = inspect_manifest(xml)
         self.assertEqual(manifest['application_class'], 'example.app.Application')
         self.assertEqual(manifest['launcher_activities'][0]['target'], 'example.app.Main')
+        self.assertEqual(
+            manifest['activity_aliases'],
+            [
+                dict(
+                    name='example.app.Alias',
+                    target='example.app.Main',
+                    enabled=None,
+                    exported='true',
+                    permission=None,
+                    filters=[
+                        dict(
+                            priority='0',
+                            action=['android.intent.action.MAIN'],
+                            category=['android.intent.category.LAUNCHER'],
+                            scheme=[],
+                            mime=[],
+                            unsupported_data=False,
+                        )
+                    ],
+                )
+            ],
+        )
 
     def test_service_declarations_and_process_inheritance(self):
         xml = f'<manifest xmlns:android="{ANDROID}" package="example.app"><application android:process=":app"><service android:name=".Worker"/><service android:name="Disabled" android:enabled="false" android:process="example.app" android:isolatedProcess="true"/></application></manifest>'.encode()
@@ -370,6 +473,36 @@ class ManifestTests(unittest.TestCase):
                 inspect_manifest(
                     f'<manifest xmlns:android="{ANDROID}" package="example.app"><application>{body}</application></manifest>'.encode()
                 )
+
+    def test_signed_filter_priorities(self):
+        for kind in (0x10, 0x11):
+            for value, expected in (
+                (0, '0'),
+                (0x7FFFFFFF, '2147483647'),
+                (0x80000000, '-2147483648'),
+                (0xFFFFFF9C, '-100'),
+                (0xFFFFFFFF, '-1'),
+            ):
+                result = inspect_manifest(binary_fixture(filter_priority=(kind, value)))
+                self.assertEqual(result['activities'][0]['filters'][0]['priority'], expected)
+        for component in ('activity', 'service', 'receiver'):
+            for text, expected in (
+                ('-100', '-100'),
+                ('0x7fffffff', '2147483647'),
+                ('-0x80000000', '-2147483648'),
+            ):
+                xml = f'<manifest xmlns:android="{ANDROID}" package="sample.app"><application><{component} android:name=".Main"><intent-filter android:priority="{text}"/></{component}></application></manifest>'.encode()
+                result = inspect_manifest(xml)
+                key = dict(activity='activities', service='services', receiver='receivers')[
+                    component
+                ]
+                self.assertEqual(result[key][0]['filters'][0]['priority'], expected)
+        for text in ('4294967196', '2147483648', '-2147483649', 'false', ''):
+            xml = f'<manifest xmlns:android="{ANDROID}" package="sample.app"><application><activity android:name=".Main"><intent-filter android:priority="{text}"/></activity></application></manifest>'.encode()
+            with self.assertRaises(ManifestError):
+                inspect_manifest(xml)
+        with self.assertRaises(ManifestError):
+            inspect_manifest(binary_fixture(filter_priority=(0x12, 1)))
 
     def test_activity_filter_transport(self):
         from shiraz.runtime import application_metadata

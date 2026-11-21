@@ -113,6 +113,19 @@ int main() {
     auto closeEvent = shiraz::live_event("close", 7);
     assert(closeEvent.type == SDL_WINDOWEVENT && closeEvent.window.windowID == 7 &&
            closeEvent.window.event == SDL_WINDOWEVENT_CLOSE);
+    bool visible = false;
+    assert(shiraz::live_visibility("visible 1", visible) && visible);
+    assert(shiraz::live_visibility("visible 0", visible) && !visible);
+    assert(!shiraz::live_visibility("focus 1", visible));
+    for (const char* invalid : {"visible", "visible -1", "visible 2", "visible 1 extra"}) {
+        bool rejected = false;
+        try {
+            shiraz::live_visibility(invalid, visible);
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        assert(rejected);
+    }
     auto gain = shiraz::live_event("focus 1", 7);
     assert(gain.type == SDL_WINDOWEVENT && gain.window.windowID == 7 &&
            gain.window.event == SDL_WINDOWEVENT_FOCUS_GAINED);
@@ -215,6 +228,23 @@ int main() {
         });
     assert(frames == 2 && pointers == 2 && keys == 2 && texts == 1 && resizes == 1 &&
            locations == 1 && wheels == 1);
+#if defined(__APPLE__)
+    // A hidden SDL window is expected when embedded. Only stage visibility
+    // changes should pause/resume the Activity; focus loss alone must not.
+    assert(ftruncate(file, 0) == 0 && lseek(file, 0, SEEK_SET) == 0);
+    std::string stageFrame = std::string(path) + ".stage";
+    int stageFd = open(stageFrame.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+    assert(stageFd >= 0);
+    close(stageFd);
+    setenv("SHIRAZ_EMBED_FRAME", stageFrame.c_str(), 1);
+    std::vector<bool> visibilityChanges;
+    append("focus 0\nvisible 0\nvisible 1\nclose\n");
+    shiraz::present(surface, "Embedded visibility test", 5, {}, {}, {}, {}, {}, {},
+                    [&](bool shown) { visibilityChanges.push_back(shown); });
+    assert((visibilityChanges == std::vector<bool>{true, false, true}));
+    unsetenv("SHIRAZ_EMBED_FRAME");
+    unlink(stageFrame.c_str());
+#endif
     unsetenv("SHIRAZ_TEST_LOCATION");
     assert(ftruncate(file, 0) == 0 && lseek(file, 0, SEEK_SET) == 0);
     append("location 1 2 5\n");

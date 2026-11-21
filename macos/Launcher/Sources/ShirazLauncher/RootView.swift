@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import LauncherCore
+import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
-
-extension UTType {
-    /// Android packages have no system-declared type, so derive one from the extension.
-    static let apk = UTType(filenameExtension: "apk", conformingTo: .zip) ?? .zip
-}
 
 struct RootView: View {
     @Environment(LauncherModel.self) private var model
     @State private var isTargeted = false
+    @State private var apkPicker = APKPicker()
 
     var body: some View {
         @Bindable var model = model
@@ -44,11 +40,10 @@ struct RootView: View {
         } isTargeted: { isTargeted = $0 }
         .overlay { if isTargeted { DropOverlay() } }
         .overlay(alignment: .bottom) { ToastHost() }
-        .fileImporter(isPresented: $model.showImporter, allowedContentTypes: [.apk], allowsMultipleSelection: true) { result in
-            switch result {
-            case .success(let urls): model.importAPKs(urls)
-            case .failure(let error): model.present(error)
-            }
+        .onChange(of: model.showImporter) { _, requested in
+            guard requested else { return }
+            model.showImporter = false
+            apkPicker.present { urls in model.importAPKs(urls) }
         }
         .confirmationDialog(
             removalTitle,
@@ -86,6 +81,44 @@ struct RootView: View {
     private var removalTitle: String {
         let name = model.pendingRemoval.flatMap { model.entry($0)?.displayName } ?? "app"
         return "Remove \(name) from the library?"
+    }
+}
+
+/// Filename filtering avoids reliance on conflicting dynamic APK type declarations.
+@MainActor
+private final class APKPicker: NSObject, NSOpenSavePanelDelegate {
+    private var panel: NSOpenPanel?
+
+    func present(completion: @escaping @MainActor ([URL]) -> Void) {
+        guard panel == nil else { return }
+        let chooser = NSOpenPanel()
+        chooser.title = "Add APK"
+        chooser.prompt = "Add"
+        chooser.canChooseFiles = true
+        chooser.canChooseDirectories = false
+        chooser.allowsMultipleSelection = true
+        chooser.delegate = self
+        panel = chooser
+        let finished: (NSApplication.ModalResponse) -> Void = { [weak self, weak chooser] response in
+            let urls = response == .OK ? chooser?.urls ?? [] : []
+            self?.panel = nil
+            if !urls.isEmpty { completion(urls) }
+        }
+        if let window = NSApplication.shared.keyWindow {
+            chooser.beginSheetModal(for: window, completionHandler: finished)
+        } else {
+            chooser.begin(completionHandler: finished)
+        }
+    }
+
+    func panel(_ sender: Any, shouldEnable url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true || url.pathExtension.lowercased() == "apk"
+    }
+
+    func panel(_ sender: Any, validate url: URL) throws {
+        guard url.pathExtension.lowercased() == "apk" else {
+            throw LibraryError.notAnAPK("Choose a file with the .apk extension.")
+        }
     }
 }
 

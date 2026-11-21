@@ -88,6 +88,19 @@ inline bool live_location(const std::string& line, TestLocationCommand& result) 
     result = value;
     return true;
 }
+// Visibility belongs to the embedding stage, independently of keyboard focus.
+inline bool live_visibility(const std::string& line, bool& visible) {
+    std::istringstream row(line);
+    std::string action, extra;
+    row >> action;
+    if (action != "visible")
+        return false;
+    int value;
+    if (!(row >> value) || (value != 0 && value != 1) || (row >> extra))
+        throw std::invalid_argument("Live visible requires 0 or 1");
+    visible = value == 1;
+    return true;
+}
 #if defined(__APPLE__)
 // "embed 0" detaches an embedded app into its own window; "embed 1" returns it
 // to the launcher (SHIRAZ_EMBED_FRAME). Returns false for other commands.

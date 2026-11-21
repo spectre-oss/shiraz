@@ -92,7 +92,7 @@ class ResourceTable:
                 chunks.append((pos, size, pos + length))
             pos += length
 
-    def values(self, res_id, locale=False):
+    def values(self, res_id, locale=False, configuration=False):
         """Every configuration's (density, data_type, data) for one resource ID.
 
         With `locale`, each tuple also carries the config's packed language
@@ -102,6 +102,9 @@ class ResourceTable:
         for start, header, end in self.chunks.get(key, ()):
             _, flags, _, count, entries_start = self._unpack('<BBHII', start + 8, end)
             (config_size,) = self._unpack('<I', start + 20, end)
+            if config_size < 4 or config_size > header - 20:
+                raise FormatError('Invalid resource configuration size')
+            config = self.data[start + 20 : start + 20 + config_size]
             density = language = 0
             if config_size >= 16 and header >= 20 + 16:
                 (language,) = self._unpack('<I', start + 20 + 8, end)
@@ -111,7 +114,12 @@ class ResourceTable:
                 continue
             value = self._entry_value(start + entries_start + offset, end)
             if value is not None:
-                result.append((density,) + value + ((language,) if locale else ()))
+                result.append(
+                    (density,)
+                    + value
+                    + ((language,) if locale else ())
+                    + ((config,) if configuration else ())
+                )
         return result
 
     def _entry_offset(self, table, flags, count, entry, end):

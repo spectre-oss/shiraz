@@ -4,12 +4,13 @@
 
 import fcntl
 import json
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import zipfile
-from art_smoke import environment, HOST, JARS
+from pathlib import Path
+
+from art_smoke import DARWIN, HOST, JARS, NATIVE, environment
 
 ROOT = Path(__file__).resolve().parents[1]
 work = ROOT / 'build/keyboard-smoke'
@@ -51,7 +52,7 @@ commands = [
             'java',
             '-Xcheck:jni',
             '-Dshiraz.frameworkResources=' + str(ROOT / 'build/framework-res/framework-res.apk'),
-            '-Djava.library.path=' + str(ROOT / 'build'),
+            '-Djava.library.path=' + str(NATIVE / 'jvm-native' if DARWIN else NATIVE),
             '-cp',
             str(classes) + ':' + classpath,
             'org.shiraz.fixture.KeyboardSmoke',
@@ -85,7 +86,7 @@ commands.append(
             '-Xnoimage-dex2oat',
             '-Xcompiler:' + str(HOST / 'bin/dex2oat'),
             '-Dshiraz.frameworkResources=' + str(ROOT / 'build/framework-res/framework-res.apk'),
-            '-Djava.library.path=' + str(ROOT / 'build'),
+            '-Djava.library.path=' + str(NATIVE),
             '-cp',
             str(ROOT / 'build/shiraz-framework.jar') + ':' + str(jar),
             'org.shiraz.fixture.KeyboardSmoke',

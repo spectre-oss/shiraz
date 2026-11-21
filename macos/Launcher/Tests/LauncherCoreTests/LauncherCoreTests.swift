@@ -99,7 +99,7 @@ private let sampleReport = Data("""
 
     @Test func dropsOldestPastCapacityAndKeepsIDsIncreasing() {
         var log = LogBuffer(capacity: 3)
-        for i in 0..<10 { log.append(Data("l\(i)\n".utf8), stream: .stderr) }
+        for i in 0 ..< 10 { log.append(Data("l\(i)\n".utf8), stream: .stderr) }
         #expect(log.lines.map(\.text) == ["l7", "l8", "l9"])
         #expect(log.lines.allSatisfy { $0.isError })
         #expect(log.lines.map(\.id) == [7, 8, 9])
@@ -369,6 +369,9 @@ private let sampleReport = Data("""
         let directory = FileManager.default.temporaryDirectory.appending(path: "launcher-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = LibraryStore(directory: directory)
+        let apk = store.apkURL(for: "net.example.app")
+        try FileManager.default.createDirectory(at: apk.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("icon extraction fixture".utf8).write(to: apk)
         #expect(!store.iconWasAttempted(for: "net.example.app"))
         await store.extractIcon(for: "net.example.app") { _, _ in throw LibraryError.inspectFailed("vector icons are not rendered yet") }
         #expect(store.iconWasAttempted(for: "net.example.app"))

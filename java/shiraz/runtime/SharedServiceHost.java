@@ -135,7 +135,7 @@ final class SharedServiceHost implements Closeable {
    if(authenticator||add!=null){
     Intent intent=new Intent(android.accounts.AccountManager.ACTION_AUTHENTICATOR_INTENT).setClassName(pkg,component);
     IBinder target=bind(client,intent);
-    if(add!=null){client.accountAdd=new AddAccountEndpoint(target,add.type,add.caller,pkg,uid,service.getPackageManager());root=client.accountAdd;}
+    if(add!=null){client.accountAdd=new AddAccountEndpoint(target,add.type,add.caller,pkg,uid,service.getBaseContext()!=null?service.getPackageManager():null);root=client.accountAdd;}
     else root=new AuthenticatorEndpoint(target);
    }
    client.transport=new BinderTransport(endpoint.detachFd(),root,uid);clients.add(client);

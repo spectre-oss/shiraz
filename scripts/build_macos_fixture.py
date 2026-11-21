@@ -22,16 +22,17 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from build_apk_fixture import TOOLS, aapt2_jar, tools  # noqa: E402
+
 from shiraz.apk import inspect_apk  # noqa: E402
 from shiraz.host_layout import host_out_dir  # noqa: E402
 
@@ -47,6 +48,66 @@ def graphics_assets(directory):
 
 # name: (source tree, default output, work directory, asset generator or None)
 FIXTURES = {
+    "job-work": (
+        ROOT / "tests/job-work-apk",
+        ROOT / "build/macos-apk/job-work.apk",
+        ROOT / "build/macos-apk/job-work-work",
+        None,
+    ),
+    "sync-owner": (
+        ROOT / "tests/sync-owner-apk",
+        ROOT / "build/macos-apk/sync-owner.apk",
+        ROOT / "build/macos-apk/sync-owner-work",
+        None,
+    ),
+    "sync-dispatch": (
+        ROOT / "tests/sync-dispatch-apk",
+        ROOT / "build/macos-apk/sync-dispatch.apk",
+        ROOT / "build/macos-apk/sync-dispatch-work",
+        None,
+    ),
+    "activity-caller": (
+        ROOT / "tests/activity-caller-apk",
+        ROOT / "build/macos-apk/activity-caller.apk",
+        ROOT / "build/macos-apk/activity-caller-work",
+        None,
+    ),
+    "authenticator": (
+        ROOT / "tests/authenticator-apk",
+        ROOT / "build/macos-apk/authenticator.apk",
+        ROOT / "build/macos-apk/authenticator-work",
+        None,
+    ),
+    "session-one": (
+        ROOT / "tests/session-one-apk",
+        ROOT / "build/macos-apk/session-one.apk",
+        ROOT / "build/macos-apk/session-one-work",
+        None,
+    ),
+    "session-two": (
+        ROOT / "tests/session-two-apk",
+        ROOT / "build/macos-apk/session-two.apk",
+        ROOT / "build/macos-apk/session-two-work",
+        None,
+    ),
+    "broker-caller": (
+        ROOT / "tests/broker-caller-apk",
+        ROOT / "build/macos-apk/broker-caller.apk",
+        ROOT / "build/macos-apk/broker-caller-work",
+        None,
+    ),
+    "service-only": (
+        ROOT / "tests/service-only-apk",
+        ROOT / "build/macos-apk/service-only.apk",
+        ROOT / "build/macos-apk/service-only-work",
+        None,
+    ),
+    "background": (
+        ROOT / "tests/background-apk",
+        ROOT / "build/macos-apk/background.apk",
+        ROOT / "build/macos-apk/background-work",
+        None,
+    ),
     'minimal': (
         ROOT / 'tests/macos-apk',
         ROOT / 'build/macos-apk/minimal.apk',
@@ -114,6 +175,9 @@ def main():
         shutil.rmtree(work)
     classes = work / 'classes'
     classes.mkdir(parents=True)
+    sources = sorted(source.rglob('*.java'))
+    if args.fixture in ('authenticator', 'activity-caller'):
+        sources += sorted((ROOT / 'tests/account-listener-fixture').glob('*.java'))
     android_jar = TOOLS / 'android.jar'
     subprocess.run(
         [
@@ -125,7 +189,7 @@ def main():
             str(android_jar),
             '-d',
             str(classes),
-            *map(str, sorted(source.rglob('*.java'))),
+            *map(str, sources),
         ],
         check=True,
         timeout=300,
@@ -139,6 +203,15 @@ def main():
         timeout=300,
         env=env,
     )
+    compiled_resources = []
+    if (source / 'res').is_dir():
+        resources = work / 'resources.zip'
+        subprocess.run(
+            [str(TOOLS / 'aapt2'), 'compile', '--dir', str(source / 'res'), '-o', str(resources)],
+            check=True,
+            timeout=120,
+        )
+        compiled_resources = [str(resources)]
     pending = work / (args.fixture + '.pending.apk')
     assets = []
     if generate_assets:
@@ -155,6 +228,7 @@ def main():
             '-I',
             str(android_jar),
             *(['-A', str(asset_dir)] if assets else []),
+            *compiled_resources,
         ],
         check=True,
         timeout=120,

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.authenticatorfixture" android:versionCode="1" android:versionName="1">
+ <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="27"/>
+ <application android:label="Authenticator descriptor fixture">
+  <activity android:name=".MainActivity" android:exported="true">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+  </activity>
+  <activity android:name=".AccountUiActivity" android:exported="true"/>
+  <activity-alias android:name=".PrivateAccountUi" android:targetActivity=".AccountUiActivity" android:exported="false"/>
+  <activity android:name=".ExplicitActivity" android:exported="true"/>
+  <activity-alias android:name=".ExplicitAlias" android:targetActivity=".ExplicitActivity" android:exported="true"/>
+  <service android:process=":accounts" android:name=".AuthenticatorService" android:exported="true" android:permission="android.permission.BIND_ACCOUNT_AUTHENTICATOR">
+   <intent-filter><action android:name="android.accounts.AccountAuthenticator"/></intent-filter>
+   <meta-data android:name="android.accounts.AccountAuthenticator" android:resource="@xml/authenticator"/>
+  </service>
+  <service android:process=":accounts" android:name=".CustomAuthenticatorService" android:exported="true" android:permission="android.permission.BIND_ACCOUNT_AUTHENTICATOR">
+   <intent-filter><action android:name="android.accounts.AccountAuthenticator"/></intent-filter>
+   <meta-data android:name="android.accounts.AccountAuthenticator" android:resource="@xml/custom_authenticator"/>
+  </service>
+ </application>
+</manifest>

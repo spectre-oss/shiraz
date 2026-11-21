@@ -1,0 +1,56 @@
+--- a/libcore/luni/src/main/native/libcore_io_Linux.cpp
++++ b/libcore/luni/src/main/native/libcore_io_Linux.cpp
+@@ -990,6 +990,19 @@
+     return 0;
+ }
+ 
++// Socket-scoped suppression also covers pending SIGPIPE at thread teardown.
++// Do not change process signal dispositions owned by the embedding application.
++static bool configureSocketSigpipe(JNIEnv* env, int fd) {
++#if defined(__APPLE__)
++    int enabled = 1;
++    if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)) == -1) {
++        throwErrnoException(env, "setsockopt(SO_NOSIGPIPE)");
++        return false;
++    }
++#endif
++    return true;
++}
++
+ static jobject Linux_accept(JNIEnv* env, jobject, jobject javaFd, jobject javaSocketAddress) {
+     sockaddr_storage ss;
+     socklen_t sl = sizeof(ss);
+@@ -997,6 +1010,10 @@
+     sockaddr* peer = (javaSocketAddress != NULL) ? reinterpret_cast<sockaddr*>(&ss) : NULL;
+     socklen_t* peerLength = (javaSocketAddress != NULL) ? &sl : 0;
+     jint clientFd = NET_FAILURE_RETRY(env, int, accept, javaFd, peer, peerLength);
++    if (clientFd != -1 && !configureSocketSigpipe(env, clientFd)) {
++        close(clientFd);
++        return NULL;
++    }
+ #if defined(__APPLE__)
+     // Linux accept(2) does not copy O_NONBLOCK/O_ASYNC from the listening
+     // socket; BSD/Darwin accept(2) does. Every java.net.ServerSocket fd is
+@@ -2544,6 +2561,10 @@
+     }
+ #endif
+     int fd = throwIfMinusOne(env, "socket", TEMP_FAILURE_RETRY(socket(domain, type, protocol)));
++    if (fd != -1 && !configureSocketSigpipe(env, fd)) {
++        close(fd);
++        return NULL;
++    }
+     return fd != -1 ? jniCreateFileDescriptor(env, fd) : NULL;
+ }
+ 
+@@ -2551,6 +2572,11 @@
+     int fds[2];
+     int rc = throwIfMinusOne(env, "socketpair", TEMP_FAILURE_RETRY(socketpair(domain, type, protocol, fds)));
+     if (rc != -1) {
++        if (!configureSocketSigpipe(env, fds[0]) || !configureSocketSigpipe(env, fds[1])) {
++            close(fds[0]);
++            close(fds[1]);
++            return;
++        }
+         jniSetFileDescriptorOfFD(env, javaFd1, fds[0]);
+         jniSetFileDescriptorOfFD(env, javaFd2, fds[1]);
+     }

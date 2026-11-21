@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
+import Darwin
 
 public enum LibraryError: Error, LocalizedError, Sendable, Equatable {
     case notAnAPK(String)
@@ -8,6 +9,8 @@ public enum LibraryError: Error, LocalizedError, Sendable, Equatable {
     case inspectFailed(String)
     case alreadyInLibrary(String)
     case notAnImage(String)
+    case busy
+    case publicationFailed(package: String, recoveryAPK: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -17,6 +20,9 @@ public enum LibraryError: Error, LocalizedError, Sendable, Equatable {
         case .inspectFailed(let message): message
         case .alreadyInLibrary(let package): "\(package) is already in the library."
         case .notAnImage(let reason): "Not a usable picture: \(reason)"
+        case .busy: "Another app installation or removal is in progress. Try again when it finishes."
+        case .publicationFailed(let package, let recoveryAPK, let reason):
+            "Could not publish \(package): \(reason). Runtime registration may already have succeeded. After resolving the filesystem problem, import the retained APK at \(recoveryAPK)."
         }
     }
 }
@@ -32,6 +38,51 @@ public struct LibraryStore: Sendable {
     public var directory: URL
 
     public init(directory: URL) { self.directory = directory }
+
+    /// Kernel-owned lock survives async suspension and is released on process
+    /// exit. Keep the lock file: unlinking it would let another inode bypass it.
+    private func beginMutation() throws -> Int32 {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fd = Darwin.open(directory.appending(path: ".install.lock").path,
+                             O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, mode_t(0o600))
+        guard fd >= 0 else { throw LibraryError.inspectFailed("Cannot open the library installation lock.") }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            let reason = errno
+            Darwin.close(fd)
+            if reason == EWOULDBLOCK { throw LibraryError.busy }
+            throw LibraryError.inspectFailed("Cannot lock the app library.")
+        }
+        return fd
+    }
+
+    private func endMutation(_ fd: Int32) {
+        // A concurrently forked helper can briefly inherit the open-file
+        // description before exec closes CLOEXEC descriptors. Explicit unlock
+        // releases ownership without waiting for that child's descriptor.
+        _ = flock(fd, LOCK_UN)
+        Darwin.close(fd)
+    }
+
+    func withInstalledPackage(_ package: String, operation: @Sendable () async -> Void) async throws {
+        guard Self.isValidPackageName(package) else { throw LibraryError.invalidPackageName(package) }
+        let lock = try beginMutation()
+        defer { endMutation(lock) }
+        guard FileManager.default.fileExists(atPath: apkURL(for: package).path) else { return }
+        await operation()
+    }
+
+    func withPackageSnapshot<T: Sendable>(_ package: String,
+                                          operation: @Sendable (AppEntry) async throws -> T) async throws -> T {
+        guard Self.isValidPackageName(package) else { throw LibraryError.invalidPackageName(package) }
+        let lock = try beginMutation()
+        defer { endMutation(lock) }
+        guard let entry = load().first(where: { $0.packageName == package }) else {
+            throw LibraryError.inspectFailed("The app is no longer in the library.")
+        }
+        return try await operation(entry)
+    }
+
+    public var registryDirectory: URL { directory.appending(path: "registry", directoryHint: .isDirectory) }
 
     /// `SHIRAZ_LAUNCHER_LIBRARY` points the launcher at another library,
     /// for development and UI testing without touching the user's apps.
@@ -188,6 +239,16 @@ public struct LibraryStore: Sendable {
         for package: String,
         extract: @Sendable (_ apk: URL, _ output: URL) async throws -> Void
     ) async {
+        try? await withInstalledPackage(package) {
+            await extractIconDuringMutation(for: package, extract: extract)
+        }
+    }
+
+    // Caller owns the library mutation lock (import enrichment or refresh).
+    func extractIconDuringMutation(
+        for package: String,
+        extract: @Sendable (_ apk: URL, _ output: URL) async throws -> Void
+    ) async {
         guard Self.isValidPackageName(package) else { return }
         let fileManager = FileManager.default
         let directory = iconDirectory(for: package)
@@ -233,7 +294,19 @@ public struct LibraryStore: Sendable {
 
     public func remove(_ package: String) throws {
         guard Self.isValidPackageName(package) else { throw LibraryError.invalidPackageName(package) }
+        let lock = try beginMutation()
+        defer { endMutation(lock) }
         try FileManager.default.removeItem(at: appsDirectory.appending(path: package, directoryHint: .isDirectory))
+    }
+
+    /// Hold the same lock as import and launch through runtime retirement and
+    /// file deletion. A failed or ambiguous retirement retains the library entry.
+    public func remove(_ package: String,
+                       after retirement: @Sendable (AppEntry) async throws -> Void) async throws {
+        try await withPackageSnapshot(package) { entry in
+            try await retirement(entry)
+            try FileManager.default.removeItem(at: appsDirectory.appending(path: package, directoryHint: .isDirectory))
+        }
     }
 
     /// Cheap checks before anything parses the file: regular file, size
@@ -258,16 +331,23 @@ public struct LibraryStore: Sendable {
     public func importAPK(
         from source: URL,
         replacing: Bool = true,
+        enrich: (@Sendable (AppEntry) async throws -> AppEntry)? = nil,
         inspect: @Sendable (URL) async throws -> InspectReport
     ) async throws -> AppEntry {
         let source = source.resolvingSymlinksInPath()
         try Self.precheck(source)
 
+        let lock = try beginMutation()
+        defer { endMutation(lock) }
+
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: appsDirectory, withIntermediateDirectories: true)
-        let staged = appsDirectory.appending(path: ".staging-\(UUID().uuidString).apk")
+        let candidate = appsDirectory.appending(path: ".staging-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: candidate, withIntermediateDirectories: false)
+        var retainCandidate = false
+        defer { if !retainCandidate { try? fileManager.removeItem(at: candidate) } }
+        let staged = candidate.appending(path: "app.apk")
         try fileManager.copyItem(at: source, to: staged)
-        defer { try? fileManager.removeItem(at: staged) }
 
         let report: InspectReport
         do {
@@ -287,14 +367,34 @@ public struct LibraryStore: Sendable {
             guard replacing else { throw LibraryError.alreadyInLibrary(entry.packageName) }
             entry.settings = existing.settings
         }
-        let target = apkURL(for: entry.packageName)
-        try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: target.path) {
-            _ = try fileManager.replaceItemAt(target, withItemAt: staged)
-        } else {
-            try fileManager.moveItem(at: staged, to: target)
+        let target = apkURL(for: entry.packageName).deletingLastPathComponent()
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(entry).write(to: candidate.appending(path: "entry.json"), options: .atomic)
+            var info = stat()
+            let exists = lstat(target.path, &info) == 0
+            guard exists || errno == ENOENT else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            if exists {
+                guard info.st_mode & S_IFMT == S_IFDIR else {
+                    throw LibraryError.inspectFailed("The app library destination is not a directory.")
+                }
+            }
+            // Publish APK and entry together. On replacement, candidate becomes
+            // the old directory and is removed by defer only after success.
+            let flags = exists ? UInt32(RENAME_SWAP) : UInt32(RENAME_EXCL)
+            guard renameatx_np(AT_FDCWD, candidate.path, AT_FDCWD, target.path, flags) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        } catch {
+            retainCandidate = true
+            throw LibraryError.publicationFailed(package: entry.packageName, recoveryAPK: staged.path,
+                                                 reason: error.localizedDescription)
         }
-        try save(entry)
+        // Optional presentation/metadata work stays within the same import
+        // ownership. A newer import or removal must not overtake it.
+        if let enrich { return try await enrich(entry) }
         return entry
     }
 }

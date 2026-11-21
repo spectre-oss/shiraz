@@ -21,9 +21,12 @@ final class Session: Identifiable {
     let startedAt = Date()
     var state: State
     var log = LogBuffer()
-    fileprivate var process: RunningProcess?
+    fileprivate var launchID: String?
+    fileprivate var stdoutReader: FileHandle?
+    fileprivate var stderrReader: FileHandle?
     fileprivate var stopRequested = false
     fileprivate var relaunchAfterExit = false
+    fileprivate let acknowledgement = LaunchAcknowledgement()
     /// Requests from this app to the launcher (InstallInbox).
     fileprivate var inbox: URL?
     fileprivate var inboxWatcher: Task<Void, Never>?
@@ -165,6 +168,23 @@ final class LauncherModel {
     private var toastTask: Task<Void, Never>?
     /// Packages whose label lookup already failed this session.
     private var labelAttempted: Set<String> = []
+    private struct ImportRequest {
+        let apk: URL
+        let runtime: RuntimeLocation
+        let expected: String?
+        let installer: String?
+        let replacing: Bool
+        let check: (@Sendable (InspectReport) async throws -> Void)?
+        let completion: CheckedContinuation<AppEntry, any Error>
+    }
+    private enum HostCommand { case start(Session, RuntimeLocation, HostLaunchRequester?), stop(Session), remove(String, RuntimeLocation), importAPK(ImportRequest) }
+    private var removingPackages: Set<String> = []
+    private var updateStops: Set<String> = []
+    private var removalWaiters: [String: [CheckedContinuation<Bool, Never>]] = [:]
+    private var hostCommands: [HostCommand] = []
+    private var sharedHost: SharedHostClient?
+    private var hostRuntime: RuntimeLocation?
+    private var hostPump: Task<Void, Never>?
 
     init(store: LibraryStore = LibraryStore(directory: LibraryStore.defaultDirectory)) {
         self.store = store
@@ -351,13 +371,18 @@ final class LauncherModel {
         }
         importCount += 1
         defer { importCount -= 1 }
-        let tools = RuntimeTools(runtime: runtime)
         var failures: [String] = []
         var added: [AppEntry] = []
         for url in apks {
             do {
-                added.append(try await tools.add(
-                    apk: url, to: store, expected: expectedPackage, installer: installer, replacing: replacing, check: check))
+                guard hostCommands.count < 32 else { throw LibraryError.busy }
+                let imported: AppEntry = try await withCheckedThrowingContinuation { completion in
+                    hostCommands.append(.importAPK(ImportRequest(apk: url, runtime: runtime,
+                                                                 expected: expectedPackage, installer: installer, replacing: replacing,
+                                                                 check: check, completion: completion)))
+                    ensureHostPump()
+                }
+                added.append(imported)
             } catch {
                 failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -375,8 +400,7 @@ final class LauncherModel {
         let store = store
         Task {
             for package in pending {
-                let installer = store.metadata(for: package)?["installer"].flatMap { LibraryStore.isValidPackageName($0) ? $0 : nil }
-                await RuntimeTools(runtime: runtime).writeMetadata(for: package, installer: installer, store: store)
+                await RuntimeTools(runtime: runtime).refreshMissingMetadata(for: package, store: store)
             }
         }
     }
@@ -389,10 +413,9 @@ final class LauncherModel {
         let store = store
         Task {
             for package in pending {
-                guard let label = try? await RuntimeTools(runtime: runtime).label(apk: store.apkURL(for: package)),
-                      var entry = entry(package) else { continue }
-                entry.label = label
-                save(entry)
+                if !(await RuntimeTools(runtime: runtime).refreshMissingLabel(for: package, store: store)) {
+                    labelAttempted.remove(package)
+                }
             }
             apps = store.load()
         }
@@ -512,19 +535,19 @@ final class LauncherModel {
     }
 
     func remove(_ package: String) {
-        let name = entry(package)?.displayName ?? package
-        stop(package)
-        do {
-            try store.remove(package)
-            sessions[package] = nil
-            icons[package] = nil
-            accents[package] = nil
-            apps = store.load()
-            routes.removeAll { $0 == .app(package) }
-            inform("Removed \(name)")
-        } catch {
-            present(error)
+        guard !removingPackages.contains(package) else { return }
+        guard let runtime = runtimeStatus.location else {
+            present(failure: "Runtime unavailable", "Package removal requires the shared host.")
+            return
         }
+        guard hostCommands.count < 32 else {
+            present(failure: "Too many pending app operations.")
+            return
+        }
+        removingPackages.insert(package)
+        sessions[package]?.relaunchAfterExit = false
+        hostCommands.append(.remove(package, runtime))
+        ensureHostPump()
     }
 
     func toggleFavorite(_ package: String) {
@@ -550,8 +573,8 @@ final class LauncherModel {
 
     // MARK: Running
 
-    func launch(_ package: String) {
-        guard var entry = entry(package), sessions[package]?.isRunning != true else { return }
+    func launch(_ package: String, requester: HostLaunchRequester? = nil) {
+        guard !removingPackages.contains(package), var entry = entry(package), sessions[package]?.isRunning != true else { return }
         guard entry.compatibility.isLaunchable else {
             if case .unsupported(let why) = entry.compatibility { present(failure: "Cannot launch \(entry.displayName)", why) }
             return
@@ -568,50 +591,208 @@ final class LauncherModel {
         entry.lastLaunchedAt = Date()
         save(entry)
 
-        let name = entry.displayName
-        let arguments = runtime.arguments(RuntimeCommand.run(apk: store.apkURL(for: package), settings: entry.settings))
-        let inbox = store.sessionsDirectory.appending(path: session.id.uuidString, directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
-        session.inbox = inbox
-        let runEnvironment = RuntimeCommand.runEnvironment(settings: entry.settings)
-        let assignments = runEnvironment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
-        session.log.appendNotice("$ " + (assignments + ["python3"] + arguments).joined(separator: " "))
+        guard hostCommands.count < 32 else {
+            session.state = .failed("Too many pending app operations.")
+            session.acknowledgement.finish(false)
+            return
+        }
+        session.log.appendNotice("Starting through the shared Android host.")
+        hostCommands.append(.start(session, runtime, requester))
+        ensureHostPump()
+    }
+
+    private func ensureHostPump() {
+        guard hostPump == nil else { return }
+        hostPump = Task { [weak self] in await self?.runHostPump() }
+    }
+
+    private func launchAndWait(_ package: String, requester: Session) async -> Bool {
+        // Reusing an existing activity needs a separately authorized delivery path.
+        guard sessions[package]?.isRunning != true, requester.isRunning,
+              !requester.stopRequested, let token = requester.launchID else { return false }
+        launch(package, requester: HostLaunchRequester(package: requester.package, launchID: token))
+        guard let session = sessions[package], session.isRunning, !session.stopRequested else { return false }
+        if case .running = session.state { return true }
+        return await session.acknowledgement.wait()
+    }
+
+    /// One command owner avoids overlapping requests on the private host pipe.
+    private func runHostPump() async {
+        defer { hostPump = nil }
         do {
-            let process = try ProcessRunner.spawn(
-                executable: runtime.python,
-                arguments: arguments,
-                environment: runtime.environment
-                    .merging(runEnvironment) { _, new in new }
-                    .merging(RuntimeCommand.libraryEnvironment(apps: store.appsDirectory, inbox: inbox)) { _, new in new },
-                workingDirectory: runtime.root,
-                onOutput: { kind, data in
-                    Task { @MainActor in session.log.append(data, stream: kind) }
-                },
-                onExit: { [weak self] status in
-                    Task { @MainActor in
-                        session.log.flush()
-                        session.process = nil
-                        session.inboxWatcher?.cancel()
-                        if let inbox = session.inbox { try? FileManager.default.removeItem(at: inbox) }
-                        if session.stopRequested {
-                            session.state = .finished("Stopped")
-                        } else if status.succeeded {
-                            session.state = .finished("Closed")
-                        } else {
-                            session.state = .failed("The runtime \(status).")
-                            self?.present(failure: "\(name) quit unexpectedly", "The runtime \(status). See its console.")
+            while !Task.isCancelled {
+                if !hostCommands.isEmpty {
+                    let command = hostCommands.removeFirst()
+                    switch command {
+                    case .importAPK(let request):
+                        defer {
+                            for package in updateStops where sessions[package]?.isRunning == true {
+                                sessions[package]?.stopRequested = false
+                            }
+                            updateStops.removeAll()
                         }
-                        session.log.appendNotice("[\(session.state.summary)]")
-                        if session.relaunchAfterExit { self?.launch(package) }
+                        do {
+                            if sharedHost == nil {
+                                sharedHost = try await SharedHostClient.connect(runtime: request.runtime,
+                                                                                registry: store.registryDirectory, library: store.directory)
+                                hostRuntime = request.runtime
+                            }
+                            guard hostRuntime == request.runtime, let host = sharedHost else {
+                                throw SpawnError(message: "Restart the launcher to use a different runtime.")
+                            }
+                            let imported = try await RuntimeTools(runtime: request.runtime).add(
+                                apk: request.apk, to: store, expected: request.expected,
+                                installer: request.installer, replacing: request.replacing, host: host,
+                                onReply: { [weak self] reply in await self?.acceptCompletions(reply) },
+                                onQuiesce: { [weak self] package in await self?.prepareUpdateStop(package) },
+                                check: request.check)
+                            request.completion.resume(returning: imported)
+                        } catch { request.completion.resume(throwing: error) }
+                    case .start(let session, let runtime, let requester):
+                        defer {
+                            if case .running = session.state {
+                                session.acknowledgement.finish(!session.stopRequested)
+                            } else {
+                                session.acknowledgement.finish(false)
+                            }
+                        }
+                        if sharedHost == nil {
+                            sharedHost = try await SharedHostClient.connect(runtime: runtime,
+                                                                            registry: store.registryDirectory, library: store.directory)
+                            hostRuntime = runtime
+                        }
+                        guard hostRuntime == runtime, let host = sharedHost else {
+                            throw SpawnError(message: "Restart the launcher to use a different runtime.")
+                        }
+                        // Embedded launch: the app's frames and input go through the stage.
+                        let embed = try? EmbedHub.shared.prepareLaunch(session.package, root: store.directory)
+                        do {
+                            let reply = try await RuntimeTools(runtime: runtime).launchRegistered(
+                                package: session.package, store: store, host: host, requester: requester, embed: embed)
+                            acceptCompletions(reply)
+                            guard reply.ok == true, let token = reply.launch_id, let pid = reply.pid,
+                                  let inbox = reply.inbox, let stdout = reply.stdout, let stderr = reply.stderr else {
+                                throw SpawnError(message: reply.error ?? "Incomplete shared-host launch response.")
+                            }
+                            session.launchID = token
+                            session.state = .running(pid: Int32(pid))
+                            session.inbox = URL(fileURLWithPath: inbox)
+                            session.stdoutReader = try? FileHandle(forReadingFrom: URL(fileURLWithPath: stdout))
+                            session.stderrReader = try? FileHandle(forReadingFrom: URL(fileURLWithPath: stderr))
+                            session.inboxWatcher = Task { [weak self] in await self?.watchInbox(session) }
+                            if embed != nil, requester == nil { showRunning(session.package) }
+                            if session.stopRequested {
+                                acceptCompletions(try await host.stop(package: session.package, launchID: token))
+                            }
+                        } catch {
+                            if embed != nil { EmbedHub.shared.end(session.package) }
+                            session.state = .failed(error.localizedDescription)
+                            session.log.appendNotice(error.localizedDescription)
+                            present(error)
+                        }
+                    case .remove(let package, let runtime):
+                        defer {
+                            removingPackages.remove(package)
+                            for waiter in removalWaiters.removeValue(forKey: package) ?? [] {
+                                waiter.resume(returning: entry(package) == nil)
+                            }
+                        }
+                        do {
+                            if sharedHost == nil {
+                                sharedHost = try await SharedHostClient.connect(runtime: runtime,
+                                                                                registry: store.registryDirectory, library: store.directory)
+                                hostRuntime = runtime
+                            }
+                            guard hostRuntime == runtime, let host = sharedHost else {
+                                throw SpawnError(message: "Restart the launcher to use a different runtime.")
+                            }
+                            let name = entry(package)?.displayName ?? package
+                            sessions[package]?.stopRequested = true
+                            try await RuntimeTools(runtime: runtime).removeRegistered(package: package, store: store,
+                                                                                      host: host, onReply: { [weak self] reply in await self?.acceptCompletions(reply) })
+                            if let session = sessions[package] {
+                                drainHostLogs(session, final: true)
+                                session.inboxWatcher?.cancel()
+                            }
+                            sessions[package] = nil
+                            icons[package] = nil
+                            accents[package] = nil
+                            apps = store.load()
+                            routes.removeAll { $0 == .app(package) }
+                            inform("Removed \(name)")
+                        } catch {
+                            sessions[package]?.stopRequested = false
+                            present(error)
+                        }
+                    case .stop(let session):
+                        if let host = sharedHost, let token = session.launchID, session.isRunning {
+                            let reply = try await host.stop(package: session.package, launchID: token)
+                            acceptCompletions(reply)
+                            if reply.ok != true { throw SpawnError(message: reply.error ?? "Cannot stop the app.") }
+                        }
                     }
-                })
-            session.process = process
-            session.state = .running(pid: process.pid)
-            session.inboxWatcher = Task { [weak self] in await self?.watchInbox(session) }
+                } else if let host = sharedHost {
+                    let reply = try await host.status()
+                    guard reply.ok == true else { throw SpawnError(message: reply.error ?? "Shared host status failed.") }
+                    acceptCompletions(reply)
+                    for session in sessions.values where session.isRunning { drainHostLogs(session) }
+                    try await Task.sleep(for: .milliseconds(250))
+                } else { return }
+            }
         } catch {
-            session.state = .failed(error.localizedDescription)
-            session.log.appendNotice(error.localizedDescription)
-            present(error)
+            await sharedHost?.close()
+            sharedHost = nil; hostRuntime = nil
+            for command in hostCommands {
+                if case .importAPK(let request) = command { request.completion.resume(throwing: error) }
+            }
+            hostCommands.removeAll()
+            removingPackages.removeAll()
+            for waiters in removalWaiters.values {
+                for waiter in waiters { waiter.resume(returning: false) }
+            }
+            removalWaiters.removeAll()
+            for session in sessions.values where session.isRunning {
+                session.acknowledgement.finish(false)
+                drainHostLogs(session, final: true)
+                session.inboxWatcher?.cancel()
+                session.state = .failed("Shared host disconnected: " + error.localizedDescription)
+            }
+            if !Task.isCancelled { present(error) }
+        }
+    }
+
+    private func drainHostLogs(_ session: Session, final: Bool = false) {
+        for (handle, kind) in [(session.stdoutReader, StreamKind.stdout), (session.stderrReader, StreamKind.stderr)] {
+            guard let handle else { continue }
+            for _ in 0 ..< (final ? 16 : 1) {
+                guard let data = try? handle.read(upToCount: 65536), !data.isEmpty else { break }
+                session.log.append(data, stream: kind)
+            }
+            if final { try? handle.close() }
+        }
+        if final {
+            session.stdoutReader = nil; session.stderrReader = nil
+            session.log.flush()
+        }
+    }
+
+    private func prepareUpdateStop(_ package: String) {
+        updateStops.insert(package)
+        sessions[package]?.stopRequested = true
+        sessions[package]?.relaunchAfterExit = false
+    }
+
+    private func acceptCompletions(_ reply: HostReply) {
+        for event in reply.finished ?? [] {
+            guard let session = sessions[event.package], session.launchID == event.launch_id else { continue }
+            drainHostLogs(session, final: true)
+            session.inboxWatcher?.cancel()
+            EmbedHub.shared.end(event.package)
+            session.state = session.stopRequested ? .finished("Stopped") :
+                (event.exit_status == 0 ? .finished("Closed") : .failed("The runtime exited with code \(event.exit_status)."))
+            session.log.appendNotice("[\(session.state.summary)]")
+            if event.exit_status != 0 && !session.stopRequested { present(failure: "App quit unexpectedly", "See its console for details.") }
+            if session.relaunchAfterExit { launch(event.package) }
         }
     }
 
@@ -663,12 +844,14 @@ final class LauncherModel {
                 return try await update(package, with: apk, installer: installer)
             },
             launch: { [unowned self] package in
-                launch(package)
-                return sessions[package]?.isRunning == true
+                await launchAndWait(package, requester: session)
             },
             remove: { [unowned self] package in
                 remove(package)
-                return entry(package) == nil
+                guard removingPackages.contains(package) else { return entry(package) == nil }
+                return await withCheckedContinuation { continuation in
+                    removalWaiters[package, default: []].append(continuation)
+                }
             })
         switch await InstallInbox.handle(request, requester: requester, library: apps, inbox: inbox, actions: actions) {
         case .refused(let reason):
@@ -806,9 +989,12 @@ final class LauncherModel {
     }
 
     func stop(_ package: String) {
-        guard let session = sessions[package], session.isRunning else { return }
+        guard let session = sessions[package], session.isRunning, !session.stopRequested else { return }
         session.stopRequested = true
-        session.process?.terminate()
+        if session.launchID != nil {
+            hostCommands.append(.stop(session))
+            ensureHostPump()
+        }
     }
 
     func restart(_ package: String) {

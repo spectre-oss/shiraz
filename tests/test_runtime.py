@@ -79,6 +79,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(facts['provider.0.filter.0.action.0'], 'sample.LOOKUP')
         self.assertEqual(facts['provider.0.filter.0.mime.0'], 'text/plain')
 
+    def test_provider_effective_permissions_reach_runtime_metadata(self):
+        from shiraz.manifest import inspect_manifest
+
+        manifest = inspect_manifest(b'''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="sample.app"><application android:permission="sample.BASE">
+        <provider android:name=".Inherited" android:authorities="sample.inherited"/>
+        <provider android:name=".Override" android:authorities="sample.override" android:permission="sample.PROVIDER" android:readPermission="sample.READ" android:initOrder="17"/>
+        </application></manifest>''')
+        facts = application_metadata(manifest, Path('/app.apk'), Path('/data'))
+        self.assertEqual(facts['provider.0.readPermission'], 'sample.BASE')
+        self.assertEqual(facts['provider.0.writePermission'], 'sample.BASE')
+        self.assertEqual(facts['provider.1.readPermission'], 'sample.READ')
+        self.assertEqual(facts['provider.1.writePermission'], 'sample.PROVIDER')
+        self.assertEqual(str(facts['provider.1.initOrder']), '17')
+
     def test_launcher_alias_metadata_keeps_resolved_target(self):
         from shiraz.manifest import inspect_manifest
 
@@ -308,6 +322,7 @@ class RuntimeTests(unittest.TestCase):
                 **self.report['manifest'],
                 'application_info': {
                     'backupAgent': 'test.Backup',
+                    'targetSandboxVersion': 2,
                     'category': 7,
                     'processName': 'test:worker',
                     'unexpected': 'ignored',
@@ -317,6 +332,7 @@ class RuntimeTests(unittest.TestCase):
             Path('/data'),
         )
         self.assertEqual(values['applicationInfo.backupAgent'], 'test.Backup')
+        self.assertEqual(values['applicationInfo.targetSandboxVersion'], 2)
         self.assertEqual(values['applicationInfo.category'], 7)
         self.assertEqual(values['applicationInfo.processName'], 'test:worker')
         self.assertNotIn('applicationInfo.unexpected', values)
@@ -399,7 +415,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn('activity.0.private', values)
         with self.assertRaises(FormatError):
             application_metadata(
-                {**manifest, 'activities': manifest['activities'] * 257},
+                {**manifest, 'activities': manifest['activities'] * 513},
                 Path('/app.apk'),
                 Path('/data'),
             )
@@ -443,7 +459,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn('service.0.private', values)
         with self.assertRaises(FormatError):
             application_metadata(
-                {**manifest, 'services': manifest['services'] * 257},
+                {**manifest, 'services': manifest['services'] * 513},
                 Path('/app.apk'),
                 Path('/data'),
             )

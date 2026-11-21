@@ -73,6 +73,8 @@ trap pthread_create
 trap pthread_join
 trap pthread_detach
 trap pthread_self
+trap pthread_setname_np
+trap pthread_setschedparam
 trap pthread_equal
 trap pthread_key_create
 trap pthread_key_delete

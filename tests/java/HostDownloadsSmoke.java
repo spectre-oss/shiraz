@@ -10,6 +10,7 @@ public final class HostDownloadsSmoke {
   long deadline=System.currentTimeMillis()+10000;while(System.currentTimeMillis()<deadline){HostDownloads.Record r=queue.get(id);if(r!=null&&(r.status==8||r.status==16))return r;Thread.sleep(20);}throw new AssertionError("Download did not finish");
  }
  public static void main(String[] args)throws Exception{
+  if(java.security.Security.getProvider("wolfJSSE")!=null)shiraz.runtime.HostTlsProvider.install();
   File root=Files.createTempDirectory("shiraz-download-test").toFile();ServerSocket server=new ServerSocket(0,16,InetAddress.getByName("127.0.0.1"));
   Thread serve=new Thread(new Runnable(){public void run(){while(!server.isClosed())try{Socket socket=server.accept();new Thread(new Runnable(){public void run(){try(Socket owned=socket){BufferedReader in=new BufferedReader(new InputStreamReader(owned.getInputStream(),"UTF-8"));String request=in.readLine();boolean header=false;for(String line;(line=in.readLine())!=null&&!line.isEmpty();)if(line.equals("X-Test: yes"))header=true;
    if(request.contains("/slow ")){owned.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n".getBytes("UTF-8"));byte[] chunk=new byte[1024];for(int i=0;i<1024;i++){owned.getOutputStream().write(chunk);owned.getOutputStream().flush();try{Thread.sleep(10);}catch(InterruptedException error){return;}}return;}

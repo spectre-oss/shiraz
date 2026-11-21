@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
-from pathlib import Path
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from shiraz.apk import FormatError
@@ -94,8 +94,8 @@ class DeviceProfileTests(unittest.TestCase):
 
 class DeviceProfileHostTests(unittest.TestCase):
     def test_x86_64_template_is_rejected_on_other_native_abis(self):
-        # No arm64 device identity exists yet; an arm64 host must not store an
-        # x86_64 emulator identity next to an arm64-v8a ABI.
+        # An arm64 host must not store an x86_64 emulator identity next to
+        # an arm64-v8a ABI.
         for abi in ('arm64-v8a', None):
             with self.subTest(abi=abi), patch('shiraz.runtime.native_abi', return_value=abi):
                 with self.assertRaisesRegex(FormatError, 'ABI and Android release'):
@@ -108,6 +108,30 @@ class DeviceProfileHostTests(unittest.TestCase):
                             (Path(directory) / 'shiraz/devices').exists()
                             and any((Path(directory) / 'shiraz/devices').iterdir())
                         )
+
+    def test_arm64_template_creates_distinct_persistent_app_identities(self):
+        template = ROOT / 'config/app-arm64.properties'
+        with patch('shiraz.runtime.native_abi', return_value='arm64-v8a'):
+            self.assertEqual(validate_device_profile(template)['build.abi'], 'arm64-v8a')
+            with tempfile.TemporaryDirectory() as directory:
+                with patch.dict(os.environ, {'XDG_CONFIG_HOME': directory}, clear=False):
+                    first = selected_device_profile('example.first', template)
+                    second = selected_device_profile('example.second', template)
+                    first_values = validate_device_profile(first)
+                    second_values = validate_device_profile(second)
+                    self.assertNotEqual(
+                        first_values['settings.androidId'], second_values['settings.androidId']
+                    )
+                    self.assertNotEqual(
+                        first_values['settings.androidId'],
+                        validate_device_profile(template)['settings.androidId'],
+                    )
+                    self.assertEqual(first.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(selected_device_profile('example.first'), first)
+                    self.assertEqual(validate_device_profile(first), first_values)
+        with patch('shiraz.runtime.native_abi', return_value='x86_64'):
+            with self.assertRaisesRegex(FormatError, 'ABI and Android release'):
+                validate_device_profile(template)
 
 
 if __name__ == '__main__':

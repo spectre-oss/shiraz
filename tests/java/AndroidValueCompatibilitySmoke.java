@@ -26,6 +26,11 @@ public class AndroidValueCompatibilitySmoke {
         check(TextUtils.lastIndexOf("ababa",'a',2)==2);
         check(TextUtils.indexOf("ababa","ba",2,5)==3);
         check(TextUtils.indexOf("ababa",'a',1,2)==-1);
+        check(TextUtils.indexOf("ababa",'a',-5)==0);
+        check(TextUtils.indexOf("ababa","ba",-5,5)==1);
+        check(TextUtils.indexOf("ababa","ba",-5,1)==-1);
+        try { TextUtils.indexOf(new StringBuilder("ababa"),'a',-1); throw new AssertionError("negative non-string start accepted"); }
+        catch (IndexOutOfBoundsException expected) { }
         check(ImageFormat.getBitsPerPixel(ImageFormat.NV21)==12);
         check(ImageFormat.getBitsPerPixel(ImageFormat.JPEG)==-1);
         CdmaCellLocation cdma=new CdmaCellLocation();

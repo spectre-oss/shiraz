@@ -4,12 +4,13 @@
 
 import fcntl
 import json
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import zipfile
-from art_smoke import environment, HOST, JARS
+from pathlib import Path
+
+from art_smoke import DARWIN, HOST, JARS, NATIVE, environment
 
 ROOT = Path(__file__).resolve().parents[1]
 work = ROOT / 'build/vector-smoke'
@@ -69,6 +70,9 @@ commands = [
         ],
     )
 ]
+# Darwin runtime libraries use Android .so names and are not OpenJDK JNI libraries.
+if DARWIN:
+    commands = []
 dex = work / 'classes.dex'
 subprocess.run(
     [str(HOST / 'bin/dx'), '--dex', '--min-sdk-version=27', '--output=' + str(dex), str(classes)],
@@ -95,7 +99,7 @@ commands.append(
             '-Xint',
             '-Xnoimage-dex2oat',
             '-Xcompiler:' + str(HOST / 'bin/dex2oat'),
-            '-Djava.library.path=' + str(ROOT / 'build'),
+            '-Djava.library.path=' + str(NATIVE),
             '-cp',
             str(ROOT / 'build/shiraz-framework.jar') + ':' + str(jar),
             'VectorSmoke',
@@ -123,6 +127,9 @@ for runtime, command in commands:
         )
     print('VECTOR_OK ' + runtime)
 (work / 'result.json').write_text(
-    json.dumps({'runtimes': ['openjdk', 'art'], 'marker': marker, 'component_only': True}, indent=2)
+    json.dumps(
+        {'runtimes': [name for name, _ in commands], 'marker': marker, 'component_only': True},
+        indent=2,
+    )
     + '\n'
 )

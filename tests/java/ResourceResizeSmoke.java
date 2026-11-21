@@ -18,11 +18,17 @@ public final class ResourceResizeSmoke {
    Display display=Display.shirazForResources(root);DisplayMetrics physical=new DisplayMetrics();
    Configuration fixed=new Configuration();fixed.orientation=1;fixed.screenWidthDp=96;fixed.screenHeightDp=160;
    Resources pinned=root.shirazWithConfiguration(fixed),inherited=root.shirazWithConfiguration(new Configuration());
+   Resources pinnedFacade=new Resources(ResourceResizeSmoke.class.getClassLoader());pinnedFacade.setImpl(pinned.getImpl());
+   Resources inheritedFacade=new Resources(ResourceResizeSmoke.class.getClassLoader());inheritedFacade.setImpl(inherited.getImpl());
+   try{pinnedFacade.shirazPreviewInheritedConfiguration(null);throw new AssertionError("null preview accepted");}catch(NullPointerException expected){}
+   try{new Resources(ResourceResizeSmoke.class.getClassLoader()).shirazPreviewInheritedConfiguration(new Configuration());throw new AssertionError("unattached facade preview accepted");}catch(IllegalStateException expected){}
    Display childDisplay=Display.shirazForResources(pinned);
    for(int i=0;i<4;i++) {
     int width=i%2==0?160:96,height=i%2==0?96:160;
     Configuration preview=root.shirazPreviewDisplay(width,height);
     check(pinned.shirazPreviewInheritedConfiguration(preview).orientation==1,"scoped preview retains override");
+    check(pinnedFacade.shirazPreviewInheritedConfiguration(preview).equals(pinned.shirazPreviewInheritedConfiguration(preview)),"facade preview retains scoped overrides");
+    check(inheritedFacade.shirazPreviewInheritedConfiguration(preview).equals(inherited.shirazPreviewInheritedConfiguration(preview)),"facade preview follows inherited display");
     root.shirazResizeDisplay(width,height);
     check(root.getDisplayMetrics().widthPixels==width&&root.getConfiguration().screenWidthDp==width,"root size/dp");
     check(inherited.getDisplayMetrics().heightPixels==height&&inherited.getConfiguration().orientation==(width>height?2:1),"inherited configuration and pixels");

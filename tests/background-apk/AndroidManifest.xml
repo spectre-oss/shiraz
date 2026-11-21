@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.backgroundfixture" android:versionCode="1" android:versionName="1">
+ <uses-permission android:name="org.shiraz.servicefixture.NORMAL"/>
+ <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+ <uses-permission android:name="android.permission.WAKE_LOCK"/>
+ <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"/>
+ <uses-permission android:name="org.shiraz.servicefixture.SIGNATURE"/>
+ <uses-permission android:name="org.shiraz.servicefixture.DANGEROUS"/>
+ <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="34"/>
+ <application android:label="Background lifecycle fixture" android:theme="@android:style/Theme.Material.NoActionBar">
+  <activity android:name=".BackgroundActivity" android:exported="true">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+  </activity>
+  <receiver android:name=".HeadlessReceiver" android:process=":events" android:exported="false"/>
+  <service android:name=".LeafService" android:process=":leaf" android:exported="true"/>
+  <service android:name=".BackgroundWorker" android:exported="false" android:foregroundServiceType="dataSync|location|camera|microphone"/>
+  <service android:name=".BackgroundJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false"/>
+  <service android:name=".HeadlessJob" android:process=":jobs" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false"/>
+ </application>
+</manifest>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<font-family xmlns:android="http://schemas.android.com/apk/res/android"
+ android:fontProviderAuthority="org.shiraz.missing.fonts"
+ android:fontProviderPackage="org.shiraz.missing"
+ android:fontProviderQuery="name=Missing" />

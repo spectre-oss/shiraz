@@ -73,6 +73,14 @@ _shiraz_guest_tpidr_entry:
     stp q26, q27, [sp, #688]
     stp q28, q29, [sp, #720]
     stp q30, q31, [sp, #752]
+    // Indirect-transfer islands carry an explicit guest continuation. Ordinary
+    // MRS/SVC islands encode it in the B at context-16.
+    ldr w9, [x16, #12]
+    cmp w9, #2
+    b.ne Lshiraz_tpidr_derive_pc
+    ldr x9, [x16, #32]
+    b Lshiraz_tpidr_have_pc
+Lshiraz_tpidr_derive_pc:
     // Recover guest site+4 from the island B at context-16.
     // Sign-extend its imm26 before scaling; the planner bounded this branch.
     // Keep this PC distinct from the saved original x30 in the frame record.
@@ -81,6 +89,7 @@ _shiraz_guest_tpidr_entry:
     lsl x9, x9, #2
     sub x10, x16, #16
     add x9, x10, x9
+Lshiraz_tpidr_have_pc:
     str x9, [sp, #816]
 .cfi_offset 32, -32
     add x9, sp, #800
@@ -92,7 +101,11 @@ _shiraz_guest_tpidr_entry:
     ldr x16, [sp, #784]
     ldr w9, [x16, #12]
     cmp w9, #1
-    b.ne Lshiraz_tpidr_generic_accessor
+    b.eq Lshiraz_tpidr_prepared_accessor
+    cmp w9, #2
+    b.eq Lshiraz_indirect_validator
+    b Lshiraz_tpidr_generic_accessor
+Lshiraz_tpidr_prepared_accessor:
     // Only the planned default TLS accessor receives quarantined inputs.
     // x29 is this native frame, not the saved guest FP; x18 is Darwin state.
     // Saved guest values remain recoverable by CFI, so this is not a native
@@ -159,6 +172,80 @@ _shiraz_guest_tpidr_entry:
     eor v31.16b, v31.16b, v31.16b
     bl _shiraz_guest_tls_access
     b Lshiraz_tpidr_accessor_return
+Lshiraz_indirect_validator:
+    // The captured GPR slot is authoritative even for x16/x17. The callback
+    // must validate the actual target and return it unchanged.
+    ldr w9, [x16, #8]
+    ldr x0, [sp, x9, lsl #3]
+    ldr x1, [x16, #32]
+    sub x1, x1, #4
+    add x2, sp, #848
+    ldr x16, [x16, #16]
+    // The validator needs only target, site and SP. Keep guest register
+    // contents out of its remaining argument and scratch registers.
+    mov x3, xzr
+    mov x4, xzr
+    mov x5, xzr
+    mov x6, xzr
+    mov x7, xzr
+    mov x8, xzr
+    mov x9, xzr
+    mov x10, xzr
+    mov x11, xzr
+    mov x12, xzr
+    mov x13, xzr
+    mov x14, xzr
+    mov x15, xzr
+    mov x17, xzr
+    mov x19, xzr
+    mov x20, xzr
+    mov x21, xzr
+    mov x22, xzr
+    mov x23, xzr
+    mov x24, xzr
+    mov x25, xzr
+    mov x26, xzr
+    mov x27, xzr
+    mov x28, xzr
+    eor v0.16b, v0.16b, v0.16b
+    eor v1.16b, v1.16b, v1.16b
+    eor v2.16b, v2.16b, v2.16b
+    eor v3.16b, v3.16b, v3.16b
+    eor v4.16b, v4.16b, v4.16b
+    eor v5.16b, v5.16b, v5.16b
+    eor v6.16b, v6.16b, v6.16b
+    eor v7.16b, v7.16b, v7.16b
+    eor v8.16b, v8.16b, v8.16b
+    eor v9.16b, v9.16b, v9.16b
+    eor v10.16b, v10.16b, v10.16b
+    eor v11.16b, v11.16b, v11.16b
+    eor v12.16b, v12.16b, v12.16b
+    eor v13.16b, v13.16b, v13.16b
+    eor v14.16b, v14.16b, v14.16b
+    eor v15.16b, v15.16b, v15.16b
+    eor v16.16b, v16.16b, v16.16b
+    eor v17.16b, v17.16b, v17.16b
+    eor v18.16b, v18.16b, v18.16b
+    eor v19.16b, v19.16b, v19.16b
+    eor v20.16b, v20.16b, v20.16b
+    eor v21.16b, v21.16b, v21.16b
+    eor v22.16b, v22.16b, v22.16b
+    eor v23.16b, v23.16b, v23.16b
+    eor v24.16b, v24.16b, v24.16b
+    eor v25.16b, v25.16b, v25.16b
+    eor v26.16b, v26.16b, v26.16b
+    eor v27.16b, v27.16b, v27.16b
+    eor v28.16b, v28.16b, v28.16b
+    eor v29.16b, v29.16b, v29.16b
+    eor v30.16b, v30.16b, v30.16b
+    eor v31.16b, v31.16b, v31.16b
+    blr x16
+    ldr x16, [sp, #784]
+    ldr w9, [x16, #8]
+    ldr x9, [sp, x9, lsl #3]
+    cmp x0, x9
+    b.eq Lshiraz_tpidr_accessor_return
+    brk #0 // A validator must never redirect an admitted transfer.
 Lshiraz_tpidr_generic_accessor:
     ldr x16, [x16, #16]
     // SVC dispatch takes Linux x8 as its seventh integer argument. Production

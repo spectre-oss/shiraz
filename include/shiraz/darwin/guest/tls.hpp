@@ -1,18 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "shiraz/darwin/guest/thread.hpp"
+#ifdef SHIRAZ_EXPERIMENTAL_THREAD_CAPTURE
+#include <stdexcept>
+#endif
 namespace shiraz::guest {
+#ifdef SHIRAZ_EXPERIMENTAL_THREAD_CAPTURE
+// Reserved for an explicitly exhausted experimental identity budget. Other
+// setup failures must not be converted into JNI capacity failures.
+class ExperimentalIdentityCapacity : public std::runtime_error {
+  public:
+    ExperimentalIdentityCapacity() : std::runtime_error("foreign identity capacity exhausted") {}
+};
+#endif
 // Initializes native TLS storage before entering guest code. No TPIDR register
 // is written; instruction redirection is a separate verification gate.
 // Late teardown callbacks require this scope; fresh state is drained at the
 // callback boundary without depending on another native destructor round.
 class GuestTlsCleanupScope {
-  void *state_ = nullptr;
-public:
-  GuestTlsCleanupScope() noexcept;
-  ~GuestTlsCleanupScope();
-  GuestTlsCleanupScope(const GuestTlsCleanupScope &) = delete;
-  GuestTlsCleanupScope &operator=(const GuestTlsCleanupScope &) = delete;
+    void* state_ = nullptr;
+
+  public:
+    GuestTlsCleanupScope() noexcept;
+    ~GuestTlsCleanupScope();
+    GuestTlsCleanupScope(const GuestTlsCleanupScope&) = delete;
+    GuestTlsCleanupScope& operator=(const GuestTlsCleanupScope&) = delete;
 };
 // Synchronous invoke during teardown requires an owned scope or active drain.
 // Ordinary native entries preserve state for the entire pthread lifetime.
@@ -28,46 +40,80 @@ inline constexpr uint32_t kImageStackExclusionProfile = 1;
 // Registration and native-stack publication share one exclusion lock. The
 // owner must retain this token until after unmapping the reservation.
 class GuestImageReservation {
-  uintptr_t base_;
-public:
-  GuestImageReservation(uintptr_t base, uint64_t bytes);
-  ~GuestImageReservation();
-  GuestImageReservation(const GuestImageReservation &) = delete;
-  GuestImageReservation &operator=(const GuestImageReservation &) = delete;
+    uintptr_t base_;
+
+  public:
+    GuestImageReservation(uintptr_t base, uint64_t bytes);
+    ~GuestImageReservation();
+    GuestImageReservation(const GuestImageReservation&) = delete;
+    GuestImageReservation& operator=(const GuestImageReservation&) = delete;
 };
 // A bounded managed allocator range, not a complete allocation-lifetime or
 // readable-object certificate. Opaque native allocation APIs remain outside
 // this registry. Admission, relocation and native-stack publication serialize
 // with Image reservations. Retain the token until the native free completes.
+// A regional OsmAnd map exceeds one million live small allocations (~84 MiB).
+// Bound metadata independently of payload size, using the same cap in both registries.
+inline constexpr size_t kMaximumManagedGuestAllocations = size_t(1) << 22;
 class GuestHeapReservation {
-  uintptr_t base_;
-public:
-  GuestHeapReservation(uintptr_t base, uint64_t bytes);
-  ~GuestHeapReservation();
-  GuestHeapReservation(GuestHeapReservation &&other) noexcept;
-  GuestHeapReservation(const GuestHeapReservation &) = delete;
-  GuestHeapReservation &operator=(const GuestHeapReservation &) = delete;
-  // Strong precheck; reuses its existing registry node without allocating.
-  void relocate(uintptr_t base, uint64_t bytes);
+    uintptr_t base_;
+
+  public:
+    GuestHeapReservation(uintptr_t base, uint64_t bytes);
+    ~GuestHeapReservation();
+    GuestHeapReservation(GuestHeapReservation&& other) noexcept;
+    GuestHeapReservation(const GuestHeapReservation&) = delete;
+    GuestHeapReservation& operator=(const GuestHeapReservation&) = delete;
+    // Strong precheck; reuses its existing registry node without allocating.
+    void relocate(uintptr_t base, uint64_t bytes);
+};
+// A runtime-owned guest thread mapping, including its guard pages. This is
+// distinct from both APK images and guest malloc allocations. Retain the
+// token until after unmapping; it does not certify readability or ownership
+// of arbitrary addresses within the range.
+class GuestThreadImageReservation {
+    uintptr_t base_;
+
+  public:
+    GuestThreadImageReservation(uintptr_t base, uint64_t bytes);
+    ~GuestThreadImageReservation();
+    // Atomically unmap the exact owned extent and retire its reservation with
+    // respect to memory-domain registration. Caller must quiesce all users.
+    // Fatal on unmap/registry failure; preserves the caller's native errno.
+    void unmap_owned() noexcept;
+    GuestThreadImageReservation(const GuestThreadImageReservation&) = delete;
+    GuestThreadImageReservation& operator=(const GuestThreadImageReservation&) = delete;
 };
 // Locked diagnostic snapshot only. Not async-safe, a lifetime lease, proof of
 // actual mapped/readable user bytes, or an analyzer alias exemption.
 bool registered_guest_heap_contains(uintptr_t pointer, uint64_t bytes);
 void prepare_guest_tls();
-void *guest_tls_base();
+#ifdef SHIRAZ_EXPERIMENTAL_THREAD_CAPTURE
+// Select guest-created ownership before this thread's first prepared TLS row.
+void experimental_begin_guest_thread();
+// Research build only; caller retains the object through TLS destruction.
+// Does not publish a pthread handle or support foreign/native entry.
+void experimental_install_thread_slot(uintptr_t object);
+#endif
+// Finish the current guest-created thread's TLS epoch after its start routine
+// returns, before retiring its pthread record. Guest destructors run while
+// that record and its callback-code retention are still live. This is not an
+// ordinary invoke/attach boundary and must only be used by the thread wrapper.
+void finish_guest_thread_tls();
+void* guest_tls_base();
 // Native pthread identity for an already prepared ordinary stack. This leaf
 // reads the native read-only TLS register and published cache, without native
 // calls or TLV access. Unsupported/unprepared stacks trap. This is not a fork
 // validity or arbitrary asynchronous-lifetime guarantee.
 extern "C" uintptr_t shiraz_guest_cached_pthread_self() noexcept;
 struct CachedSelfTable {
-  const char *role;
-  uintptr_t address;
-  uint64_t bytes;
+    const char* role;
+    uintptr_t address;
+    uint64_t bytes;
 };
 struct CachedSelfTables {
-  CachedSelfTable tables[4];
-  uint64_t rows;
+    CachedSelfTable tables[4];
+    uint64_t rows;
 };
 inline constexpr uint32_t kCachedSelfStackExclusionProfile = 1;
 // Addresses/extents only, never live row contents. This snapshot is not an
@@ -79,8 +125,8 @@ bool cached_self_tables_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
 // Default MRS lookup additionally reads the guest-base table. Keep the four
 // pthread-self tables/profile stable while checking the whole MRS read set.
 struct MrsAccessTables {
-  CachedSelfTable tables[5];
-  uint64_t rows;
+    CachedSelfTable tables[5];
+    uint64_t rows;
 };
 // Extents only; no row-content, asynchronous lifetime or code-effects claim.
 MrsAccessTables mrs_access_tables() noexcept;
@@ -95,7 +141,7 @@ bool prepared_guest_cleanup_admitted(uintptr_t incoming_sp) noexcept;
 // Prepared state-owned native errno residence, physically separate from TP.
 // No Mach-O TLV resolution/initialization occurs in this query. Null means
 // unprepared, invalid SP or unavailable metadata; no lifetime lease follows.
-int *prepared_guest_errno_location(uintptr_t incoming_sp) noexcept;
+int* prepared_guest_errno_location(uintptr_t incoming_sp) noexcept;
 CachedSelfTable prepared_guest_errno_table() noexcept;
 bool prepared_guest_errno_disjoint_stack(uintptr_t low, uintptr_t high) noexcept;
 // Async-signal-safe readiness query only; never initializes native TLS.
@@ -122,13 +168,15 @@ struct GuestThreadKey;
 using GuestThreadKeyHandle = std::shared_ptr<GuestThreadKey>;
 // An optional owner retains callback code while active nonnull values or
 // selected callbacks exist. Application payload objects remain caller-owned.
-GuestThreadKeyHandle make_guest_thread_key(void *destructor, std::shared_ptr<Lifecycle> lifecycle = {});
-void delete_guest_thread_key(const GuestThreadKeyHandle &key) noexcept;
-int set_guest_thread_value(const GuestThreadKeyHandle &key, const void *value);
-void *guest_thread_value(const GuestThreadKeyHandle &key);
+GuestThreadKeyHandle make_guest_thread_key(void* destructor,
+                                           std::shared_ptr<Lifecycle> lifecycle = {});
+void delete_guest_thread_key(const GuestThreadKeyHandle& key) noexcept;
+int set_guest_thread_value(const GuestThreadKeyHandle& key, const void* value);
+void* guest_thread_value(const GuestThreadKeyHandle& key);
 // With a lifecycle, C++ thread destructor registration retains the namespace
 // through callback return and rejects shutdown before guest images finalize.
 // The standalone form requires the caller to retain all validated code until
 // native thread cleanup completes. Pthread keys use their own value retention.
-std::vector<ProviderExport> tls_exports(CodeValidator validate, std::shared_ptr<Lifecycle> lifecycle = {});
+std::vector<ProviderExport> tls_exports(CodeValidator validate,
+                                        std::shared_ptr<Lifecycle> lifecycle = {});
 } // namespace shiraz::guest

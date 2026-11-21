@@ -514,7 +514,7 @@ void present(const Surface& initial, const std::string& title, int frames,
     auto& window = owned->window;
     SDL_SetWindowTitle(window.get(), title.c_str());
 #if defined(__APPLE__)
-    const Uint32 liveResizeEvent = SDL_RegisterEvents(3);
+    const Uint32 liveResizeEvent = SDL_RegisterEvents(4);
 #else
     const Uint32 liveResizeEvent = SDL_RegisterEvents(2);
 #endif
@@ -778,8 +778,12 @@ void present(const Surface& initial, const std::string& title, int frames,
             pointer.cancel(eventTime(timestamp));
             keys.cancel(eventTime(timestamp));
             if (displayChanged) {
+                int windowX = 0, windowY = 0;
+                SDL_GetWindowPosition(window.get(), &windowX, &windowY);
                 std::cerr << "SHIRAZ_DISPLAY logical=" << lw << "x" << lh << " pixels=" << pw << "x"
-                          << ph << " density=" << geometry.densityDpi << "\n";
+                          << ph << " density=" << geometry.densityDpi
+                          << " display=" << SDL_GetWindowDisplayIndex(window.get())
+                          << " position=" << windowX << "," << windowY << "\n";
                 displayChanged(image, geometry);
             } else
                 resize(image, width, height);
@@ -848,6 +852,18 @@ void present(const Surface& initial, const std::string& title, int frames,
                 continue;
             }
 #if defined(__APPLE__)
+            bool stageVisible = false;
+            if (live_visibility(line, stageVisible)) {
+                if (!exporter)
+                    throw std::invalid_argument("Live visible requires SHIRAZ_EMBED_FRAME");
+                SDL_Event command{};
+                command.type = liveResizeEvent + 3;
+                command.user.windowID = SDL_GetWindowID(window.get());
+                command.user.code = stageVisible ? 1 : 0;
+                if (SDL_PushEvent(&command) != 1)
+                    throw std::runtime_error("Cannot enqueue embedded visibility");
+                continue;
+            }
             bool embedValue = false;
             if (live_embed(line, embedValue)) {
                 if (!exporter)
@@ -906,6 +922,21 @@ void present(const Surface& initial, const std::string& title, int frames,
                 continue;
             }
 #if defined(__APPLE__)
+            if (event.type == liveResizeEvent + 3 && ownWindow(event.user.windowID)) {
+                // Stale stage commands must not hide a detached native window.
+                if (embedded) {
+                    const bool shown = event.user.code == 1;
+                    if (!shown) {
+                        touches.cancel(eventTime(event.common.timestamp));
+                        pointer.cancel(eventTime(event.common.timestamp));
+                        keys.cancel(eventTime(event.common.timestamp));
+                    }
+                    if (visibility)
+                        visibility(shown);
+                    std::cerr << "SHIRAZ_EMBED visible=" << shown << "\n";
+                }
+                continue;
+            }
             if (event.type == liveResizeEvent + 2 && ownWindow(event.user.windowID)) {
                 const bool embed = event.user.code == 1;
                 if (embed != embedded) {

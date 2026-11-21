@@ -17,7 +17,10 @@ spec.loader.exec_module(packaging)
 
 
 class AppImageTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which('cc'), 'native fixture compiler required')
+    @unittest.skipUnless(
+        sys.platform.startswith('linux') and shutil.which('cc'),
+        'Linux /proc mappings and native fixture compiler required',
+    )
     def test_bionic_libc_mapping_and_aliases_survive_relocation(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)

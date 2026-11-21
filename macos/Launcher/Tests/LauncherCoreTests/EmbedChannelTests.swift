@@ -29,6 +29,77 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: paths.directory.path))
     }
 
+    @Test func outgoingStageCannotResumeAfterHomeOrSwitch() {
+        var state = EmbeddedVisibility()
+        #expect(state.surface(true) == [.focus(false), .visible(false)])
+        #expect(state.select(true) == [.visible(true)])
+        #expect(state.select(false) == [.focus(false), .visible(false)])
+        // The outgoing stage remains attached during a view animation.
+        #expect(state.surface(false).isEmpty)
+        #expect(state.surface(true).isEmpty)
+        #expect(state.select(true) == [.visible(true)])
+        #expect(state.surface(false) == [.focus(false), .visible(false)])
+        // Selecting an app cannot resume a minimized/hidden surface.
+        #expect(state.select(false).isEmpty)
+        #expect(state.select(true).isEmpty)
+        #expect(state.surface(true) == [.visible(true)])
+    }
+
+    @Test func reattachResendsCurrentStageVisibility() {
+        var state = EmbeddedVisibility()
+        _ = state.select(true)
+        _ = state.surface(true)
+        #expect(state.resend() == [.visible(true), .focus(false)])
+        _ = state.select(false)
+        #expect(state.resend() == [.focus(false), .visible(false)])
+    }
+
+    @Test func focusFollowsKeyWindowWithoutPausingVisibleActivity() {
+        var state = EmbeddedVisibility()
+        _ = state.surface(true)
+        #expect(state.select(true) == [.visible(true)])
+        #expect(state.focus(true) == [.focus(true)])
+        #expect(state.focus(false) == [.focus(false)])
+        #expect(state.focus(false).isEmpty)
+        #expect(state.surface(false) == [.focus(false), .visible(false)])
+        // A key-window notification cannot focus a still-minimized stage.
+        #expect(state.focus(true).isEmpty)
+        #expect(state.surface(true) == [.visible(true), .focus(true)])
+        #expect(state.select(false) == [.focus(false), .visible(false)])
+        #expect(state.focus(true).isEmpty)
+        #expect(state.select(true) == [.visible(true), .focus(true)])
+        #expect(state.resend() == [.visible(true), .focus(true)])
+    }
+
+    @Test func restoringNonKeyWindowDoesNotBrieflyGrantFocus() {
+        var state = EmbeddedVisibility()
+        _ = state.select(true)
+        #expect(state.window(visible: true, focused: true) == [.visible(true), .focus(true)])
+        #expect(state.surface(false) == [.focus(false), .visible(false)])
+        // Both facts must be applied together, not visibility with stale key state.
+        #expect(state.window(visible: true, focused: false) == [.visible(true)])
+    }
+
+    @Test func staleFramesCannotUndoPendingPlacement() {
+        var state = EmbeddedPlacement()
+        let detached = state.request(detached: true)
+        #expect(detached)
+        state.observe(detached: false) // In-flight frame from before the request.
+        #expect(state.detached && state.pending)
+        let overlapping = state.request(detached: false)
+        #expect(!overlapping) // Serialize until acknowledgment.
+        state.observe(detached: true)
+        #expect(state.detached && !state.pending)
+        let attached = state.request(detached: false)
+        #expect(attached)
+        state.observe(detached: true)
+        #expect(!state.detached && state.pending)
+        state.observe(detached: false)
+        #expect(!state.detached && !state.pending)
+        let redundant = state.request(detached: false)
+        #expect(!redundant)
+    }
+
     @Test func commandLinesMatchRuntimeGrammar() {
         #expect(LiveCommand.down(12, 40).line == "down 12 40")
         #expect(LiveCommand.move(-5, 9000).line == "move 0 8192")
@@ -38,6 +109,8 @@ import Testing
         #expect(LiveCommand.resize(0, 360).line == nil)
         #expect(LiveCommand.resize(8192, 8192).line == nil)
         #expect(LiveCommand.embed(false).line == "embed 0")
+        #expect(LiveCommand.visible(false).line == "visible 0")
+        #expect(LiveCommand.visible(true).line == "visible 1")
         #expect(LiveCommand.focus(true).line == "focus 1")
         #expect(LiveCommand.keyDown("AC Back").line == "keydown \"AC Back\"")
         #expect(LiveCommand.keyDown("bad\nkey").line == nil)

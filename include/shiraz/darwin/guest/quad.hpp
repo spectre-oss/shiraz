@@ -9,4 +9,6 @@ std::vector<ProviderExport> quad_exports();
 // Rigorous adaptive fixed-point intervals; raw binary128 q0 in/out. Explicit
 // EOVERFLOW/qNaN if the bounded refinement cannot prove unique rounding.
 ProviderExport quad_log2_export();
-}
+// Experimental binary128 powl provider; guest-signal execution is refused.
+ProviderExport quad_power_export();
+} // namespace shiraz::guest

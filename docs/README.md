@@ -1,6 +1,7 @@
 # Shiraz documentation
 
 - [Tested applications](tested.md): observed compatibility and known limits.
+- [Framework APIs goal](framework_final_goal.md): architecture, verification, and 100% (4,445 / 4,445) Android API 35 class inventory across all 49 areas.
 - [Missing Android libraries](MISSING_ANDROID_LIBRARIES.md): framework classes and NDK libraries not yet provided.
 - [Droidloom comparison and game targets](others/droidloom.md): architecture, translator lessons, and pending acceptance work.
 - [Framework experiments](experiments/README.md): per-platform and per-app investigations.

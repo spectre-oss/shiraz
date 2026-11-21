@@ -8,26 +8,35 @@ import java.util.concurrent.atomic.*;
 public final class BroadcastSmoke {
     private static final class TestContext extends ContextWrapper {
         final HostBroadcasts broadcasts;
+        boolean granted=true;
         TestContext(HostBroadcasts broadcasts) { super(null); this.broadcasts = broadcasts; }
         @Override protected HostBroadcasts shirazBroadcasts() { return broadcasts; }
         @Override public int checkPermission(String permission, int pid, int uid) {
-            return "org.shiraz.fixture.PRIVATE".equals(permission) ? 0 : -1;
+            return granted && ("org.shiraz.fixture.PRIVATE".equals(permission)||"other.GRANTED".equals(permission)) ? 0 : -1;
         }
         @Override public String getPackageName() { return "org.shiraz.fixture"; }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
     private static void pump() { Looper.myLooper().shirazDispatchDue(256); }
     private static void rejected(Runnable action) { try { action.run(); throw new AssertionError("accepted rejected operation"); } catch (IllegalArgumentException | IllegalStateException | UnsupportedOperationException expected) { } }
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         Looper.prepareMainLooper();
         try {
+            InboundBroadcastSmoke.run();
             final HostBroadcasts registry = new HostBroadcasts("org.shiraz.fixture", 30);
             final TestContext context = new TestContext(registry), other = new TestContext(registry);
             final AtomicInteger calls = new AtomicInteger();
             final BroadcastReceiver receiver = new BroadcastReceiver() { public void onReceive(Context owner, Intent value) { check(Thread.currentThread() == Looper.getMainLooper().getThread(), "default main receiver thread"); calls.incrementAndGet(); } };
             try {
                 context.registerReceiver(receiver, new IntentFilter("queued"), Context.RECEIVER_NOT_EXPORTED);
-                context.sendBroadcast(new Intent("queued")); check(calls.get() == 0, "delivery must be asynchronous");
+                for (int id : new int[]{1, -1, -2, Integer.MAX_VALUE}) {
+                    try { context.sendBroadcastAsUser(new Intent("queued"), UserHandle.of(id)); throw new AssertionError("foreign user accepted"); }
+                    catch (SecurityException expected) { }
+                }
+                try { context.sendBroadcastAsUser(new Intent("queued"), null); throw new AssertionError("null user accepted"); }
+                catch (NullPointerException expected) { }
+                pump(); check(calls.get() == 0, "rejected user queued delivery");
+                context.sendBroadcastAsUser(new Intent("queued"), UserHandle.SYSTEM); check(calls.get() == 0, "delivery must be asynchronous");
                 context.unregisterReceiver(receiver); pump(); check(calls.get() == 0, "unregister canceled queued delivery");
                 context.registerReceiver(receiver, new IntentFilter("queued")); other.registerReceiver(receiver, new IntentFilter("queued"));
                 context.sendBroadcast(new Intent("queued")); pump(); check(calls.get() == 2, "receiver registrations owned by distinct contexts");
@@ -71,15 +80,27 @@ public final class BroadcastSmoke {
                 context.registerReceiver(privateReceiver, new IntentFilter("private"), "org.shiraz.fixture.PRIVATE", null);
                 context.sendBroadcast(new Intent("private")); pump();
                 check(privateCalls.get() == 1, "granted app-private receiver permission");
+                context.sendBroadcastAsUser(new Intent("private"), UserHandle.SYSTEM, "org.shiraz.fixture.DENIED");pump();check(privateCalls.get()==1,"missing recipient grant excluded");
+                context.sendBroadcastAsUser(new Intent("private"), UserHandle.SYSTEM, "org.shiraz.fixture.PRIVATE");pump();check(privateCalls.get()==2,"granted recipient receives");
                 context.unregisterReceiver(privateReceiver);
-                rejected(new Runnable() { public void run() { context.registerReceiver(receiver, new IntentFilter("x"), "org.shiraz.fixture.DENIED", null); } });
-                rejected(new Runnable() { public void run() { context.registerReceiver(receiver, new IntentFilter("x"), "other.PRIVATE", null); } });
+                context.registerReceiver(privateReceiver,new IntentFilter("denied"),"org.shiraz.fixture.DENIED",null);
+                context.registerReceiver(privateReceiver,new IntentFilter("foreign-grant"),"other.GRANTED",null);
+                context.sendBroadcast(new Intent("denied"));pump();check(privateCalls.get()==2,"denied sender filtered at dispatch");
+                context.sendBroadcast(new Intent("foreign-grant"));pump();check(privateCalls.get()==3,"permission need not use receiver package prefix");
+                context.granted=false;
+                context.sendBroadcast(new Intent("foreign-grant"));pump();check(privateCalls.get()==3,"grant revoked after registration");
+                context.registerReceiver(privateReceiver,new IntentFilter("public"));
+                context.sendBroadcast(new Intent("public"));pump();check(privateCalls.get()==4,"permission belongs to matching registration");
+                context.granted=true;
+                context.sendBroadcast(new Intent("foreign-grant"));pump();check(privateCalls.get()==5,"grant restored after registration");
+                context.unregisterReceiver(privateReceiver);
+                rejected(new Runnable(){public void run(){context.registerReceiver(receiver,new IntentFilter("x"),"bad/permission",null);}});
                 final Bundle cycle = new Bundle(); cycle.putBundle("self", cycle);
                 rejected(new Runnable() { public void run() { context.sendBroadcast(new Intent("x").putExtras(cycle)); } });
                 context.sendBroadcast(new Intent("x").putExtra("serializable", new java.util.Date())); // In-process Serializable extras are supported.
                 rejected(new Runnable() { public void run() { context.sendBroadcast(new Intent("x").putExtra("oversized", new byte[4 * 1024 * 1024])); } });
                 rejected(new Runnable() { public void run() { context.sendBroadcast(new Intent("x").setComponent(new ComponentName("org.shiraz.fixture", "Receiver"))); } });
-                rejected(new Runnable() { public void run() { context.sendBroadcast(new Intent("x"), "permission"); } });
+                rejected(new Runnable() { public void run() { context.sendBroadcast(new Intent("x"), "bad/permission"); } });
                 rejected(new Runnable() { public void run() { context.sendOrderedBroadcast(new Intent("x"), null); } });
                 rejected(new Runnable() { public void run() { context.registerReceiver(receiver, new IntentFilter("x"), 6); } });
                 HandlerThread stopped = new HandlerThread("stopped-broadcast"); stopped.start(); Handler dead = new Handler(stopped.getLooper()); stopped.quit();

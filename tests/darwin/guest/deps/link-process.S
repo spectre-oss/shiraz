@@ -10,6 +10,11 @@
 .size \name,.-\name
 .endm
 declaration syscall
+declaration timerfd_create
+declaration timerfd_settime
+declaration timerfd_gettime
+declaration sched_setaffinity
+declaration sysinfo
 declaration openlog
 declaration syslog
 declaration closelog

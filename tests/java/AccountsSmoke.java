@@ -10,9 +10,33 @@ public class AccountsSmoke {
         final HostPreferences preferences;
         TestContext(HostPreferences p){super(null);preferences=p;}
         public Context getApplicationContext(){return this;}
+        public String getPackageName(){return "test.local.accounts";}
         public SharedPreferences getSharedPreferences(String name,int mode){return preferences.get(name,mode);}
     }
     static void check(boolean value){if(!value)throw new AssertionError();}
+    static void drain(){for(int i=0;i<4;i++)Looper.getMainLooper().shirazDispatchDue(100);}
+    static void verifyListeners(AccountManager manager,AccountManager writer){
+        final ArrayList<Account[]> seen=new ArrayList<Account[]>();final int[] unrelated={0};
+        OnAccountsUpdateListener listener=new OnAccountsUpdateListener(){public void onAccountsUpdated(Account[] accounts){check(Looper.myLooper()==Looper.getMainLooper());seen.add(accounts);}};
+        OnAccountsUpdateListener other=new OnAccountsUpdateListener(){public void onAccountsUpdated(Account[] accounts){unrelated[0]++;}};
+        Account account=new Account("listener-local","test.type");
+        try{
+            try{manager.addOnAccountsUpdatedListener(null,null,true);throw new AssertionError();}catch(IllegalArgumentException expected){}
+            String[] types={account.type};manager.addOnAccountsUpdatedListener(listener,null,true,types);types[0]="changed";
+            check(seen.isEmpty());drain();check(seen.size()==1&&seen.get(0).length==0);
+            try{manager.addOnAccountsUpdatedListener(listener,null,false);throw new AssertionError();}catch(IllegalStateException expected){}
+            manager.addOnAccountsUpdatedListener(other,null,false,new String[]{"other.type"});
+            check(writer.addAccountExplicitly(account,null,null));drain();check(seen.size()==2&&seen.get(1).length==1&&account.equals(seen.get(1)[0]));
+            seen.get(1)[0]=null;check(account.equals(writer.getAccounts()[0]));
+            check(!writer.addAccountExplicitly(account,null,null));writer.setAuthToken(account,"test","synthetic");writer.setUserData(account,"label","value");drain();check(seen.size()==2&&unrelated[0]==0);
+            check(writer.removeAccountExplicitly(account));drain();check(seen.size()==3&&seen.get(2).length==0);
+            check(writer.addAccountExplicitly(account,null,null));check(writer.removeAccountExplicitly(account));drain();check(seen.size()==4&&seen.get(3).length==0);
+            manager.removeOnAccountsUpdatedListener(listener);
+            manager.addOnAccountsUpdatedListener(listener,null,true);manager.removeOnAccountsUpdatedListener(listener);drain();check(seen.size()==4);
+            manager.addOnAccountsUpdatedListener(listener,null,true,new String[0]);drain();check(seen.size()==5&&seen.get(4).length==0);
+            System.out.println("LOCAL_ACCOUNT_LISTENERS_OK");
+        }finally{manager.removeOnAccountsUpdatedListener(listener);manager.removeOnAccountsUpdatedListener(other);}
+    }
     public static void main(String[] args)throws Exception{
         Looper.prepareMainLooper();Path root=Files.createTempDirectory(Paths.get("build"),"accounts-test-");
         Account account=new Account("test-user","test.type");
@@ -20,6 +44,7 @@ public class AccountsSmoke {
             try(HostPreferences preferences=new HostPreferences(root.toFile())){
                 AccountManager manager=AccountManager.get(new TestContext(preferences));
                 check(manager.getAccounts().length==0);
+                verifyListeners(manager,AccountManager.get(new TestContext(preferences)));
                 Bundle extras=new Bundle();extras.putString("label","test-label");
                 check(manager.addAccountExplicitly(account,null,extras));
                 check(!manager.addAccountExplicitly(account,null,null));
@@ -45,7 +70,8 @@ public class AccountsSmoke {
         } finally {
             Looper.shirazShutdownMain();
             try(java.util.stream.Stream<Path> paths=Files.walk(root)){
-                for(Path path:(Iterable<Path>)paths.sorted(Comparator.reverseOrder())::iterator)Files.delete(path);
+                Iterator<Path> ordered=paths.sorted(Comparator.reverseOrder()).iterator();
+                while(ordered.hasNext())Files.delete(ordered.next());
             }
         }
     }

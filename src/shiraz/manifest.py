@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Read manifest identity and launcher metadata from Android binary XML."""
-import struct
+
 import re
+import struct
 import xml.etree.ElementTree as ET
 
+from .android_attributes import ANDROID_ATTRIBUTE_NAMES
+
 ANDROID = 'http://schemas.android.com/apk/res/android'
-NO_INDEX = 0xffffffff
+NO_INDEX = 0xFFFFFFFF
 
 
 class ManifestError(ValueError):
@@ -16,6 +19,7 @@ class BinaryXml:
     def __init__(self, data):
         self.data = data
         self.strings = []
+        self.resource_ids = []
         self.references = {}
         self.typed_values = {}
         # Resource tables hold modified UTF-8 (CESU-8 surrogates); manifests stay strict.
@@ -48,31 +52,37 @@ class BinaryXml:
             raise ManifestError('invalid string-pool data range')
         result = []
         for i in range(count):
-            offset, = self.unpack('<I', start + header + i * 4, end)
+            (offset,) = self.unpack('<I', start + header + i * 4, end)
             p = start + string_start + offset
+
             def length8(pos):
                 self.need(pos, 1, string_end)
-                value = self.data[pos]; pos += 1
+                value = self.data[pos]
+                pos += 1
                 if value & 128:
                     self.need(pos, 1, string_end)
-                    value = ((value & 127) << 8) | self.data[pos]; pos += 1
+                    value = ((value & 127) << 8) | self.data[pos]
+                    pos += 1
                 return value, pos
+
             if flags & 0x100:
                 _, p = length8(p)
                 length, p = length8(p)
                 self.need(p, length + 1, string_end)
                 if self.data[p + length] != 0:
                     raise ManifestError('unterminated UTF-8 string')
-                result.append(self.data[p:p + length].decode('utf-8', self.utf8_errors))
+                result.append(self.data[p : p + length].decode('utf-8', self.utf8_errors))
             else:
-                length, = self.unpack('<H', p, string_end); p += 2
+                (length,) = self.unpack('<H', p, string_end)
+                p += 2
                 if length & 0x8000:
-                    low, = self.unpack('<H', p, string_end); p += 2
-                    length = ((length & 0x7fff) << 16) | low
+                    (low,) = self.unpack('<H', p, string_end)
+                    p += 2
+                    length = ((length & 0x7FFF) << 16) | low
                 self.need(p, length * 2 + 2, string_end)
-                if self.data[p + length * 2:p + length * 2 + 2] != b'\0\0':
+                if self.data[p + length * 2 : p + length * 2 + 2] != b'\0\0':
                     raise ManifestError('unterminated UTF-16 string')
-                result.append(self.data[p:p + length * 2].decode('utf-16-le'))
+                result.append(self.data[p : p + length * 2].decode('utf-16-le'))
         self.strings = result
 
     def parse(self):
@@ -90,6 +100,12 @@ class BinaryXml:
             self.need(pos, length)
             if kind == 1:
                 self.pool(pos, size, end)
+            elif kind == 0x180:
+                if size != 8 or (length - size) % 4 or (length - size) // 4 > len(self.strings):
+                    raise ManifestError('invalid XML resource map')
+                self.resource_ids = list(
+                    self.unpack('<%dI' % ((length - size) // 4), pos + size, end)
+                )
             elif kind == 0x102:
                 if size != 16:
                     raise ManifestError('unsupported XML node header')
@@ -105,16 +121,33 @@ class BinaryXml:
                 self.need(first, attr_size * count, end)
                 for i in range(count):
                     a = first + i * attr_size
-                    ans, aname, raw, value_size, reserved, dtype, value = self.unpack('<IIIHBBI', a, end)
+                    ans, aname, raw, value_size, reserved, dtype, value = self.unpack(
+                        '<IIIHBBI', a, end
+                    )
                     if value_size != 8 or reserved:
                         raise ManifestError('invalid typed attribute value')
                     namespace, name = self.string(ans), self.string(aname)
                     if name is None:
                         raise ManifestError('attribute without name')
+                    # Android matches attributes by resource ID first; the
+                    # name and namespace strings are optional for mapped names.
+                    ident = self.resource_ids[aname] if aname < len(self.resource_ids) else 0
+                    if ident >> 24 == 1:
+                        namespace = ANDROID
+                        name = ANDROID_ATTRIBUTE_NAMES.get(ident) or name or f'@0x{ident:08x}'
+                    elif ident and not name:
+                        name = f'@0x{ident:08x}'
                     key = '{' + namespace + '}' + name if namespace else name
                     if key in element.attrib:
+                        # Lookup by ID returns the first match, as here.
+                        if ident:
+                            continue
                         raise ManifestError('duplicate XML attribute')
-                    self.typed_values[(id(element), key)] = (dtype, value, self.string(value) if dtype == 3 else None)
+                    self.typed_values[(id(element), key)] = (
+                        dtype,
+                        value,
+                        self.string(value) if dtype == 3 else None,
+                    )
                     if dtype in (1, 7):
                         self.references[(id(element), key)] = value
                     if raw != NO_INDEX:
@@ -167,12 +200,21 @@ def inspect_manifest(data):
     if root.tag != 'manifest' or not root.get('package'):
         raise ManifestError('manifest requires a package name')
     package = root.get('package')
+
     def attr(element, name):
         return element.get('{' + ANDROID + '}' + name)
+
     def qualify(name):
         if not name:
             return None
-        return package + name if name.startswith('.') else package + '.' + name if '.' not in name else name
+        return (
+            package + name
+            if name.startswith('.')
+            else package + '.' + name
+            if '.' not in name
+            else name
+        )
+
     sdk = root.find('uses-sdk')
     app = root.find('application')
     cleartext = attr(app, 'usesCleartextTraffic') if app is not None else None
@@ -186,45 +228,117 @@ def inspect_manifest(data):
             for intent in activity.findall('intent-filter'):
                 actions = {attr(x, 'name') for x in intent.findall('action')}
                 categories = {attr(x, 'name') for x in intent.findall('category')}
-                if 'android.intent.action.MAIN' in actions and 'android.intent.category.LAUNCHER' in categories:
-                    launchers.append({'name': qualify(attr(activity, 'name')), 'target': qualify(attr(activity, 'targetActivity') or attr(activity, 'name'))})
+                if (
+                    'android.intent.action.MAIN' in actions
+                    and 'android.intent.category.LAUNCHER' in categories
+                ):
+                    launchers.append(
+                        {
+                            'name': qualify(attr(activity, 'name')),
+                            'target': qualify(
+                                attr(activity, 'targetActivity') or attr(activity, 'name')
+                            ),
+                        }
+                    )
     activities = []
     seen_activities = set()
-    config_bits = {'mcc': 1, 'mnc': 2, 'locale': 4, 'touchscreen': 8, 'keyboard': 16,
-                   'keyboardHidden': 32, 'navigation': 64, 'orientation': 128, 'screenLayout': 256,
-                   'uiMode': 512, 'screenSize': 1024, 'smallestScreenSize': 2048, 'density': 4096,
-                   'layoutDirection': 8192, 'colorMode': 16384, 'fontScale': 0x40000000}
-    orientations = dict(zip(('unspecified', 'landscape', 'portrait', 'user', 'behind', 'sensor', 'nosensor',
-                             'sensorLandscape', 'sensorPortrait', 'reverseLandscape', 'reversePortrait',
-                             'fullSensor', 'userLandscape', 'userPortrait', 'fullUser', 'locked'), range(-1, 15)))
+    config_bits = {
+        'mcc': 1,
+        'mnc': 2,
+        'locale': 4,
+        'touchscreen': 8,
+        'keyboard': 16,
+        'keyboardHidden': 32,
+        'navigation': 64,
+        'orientation': 128,
+        'screenLayout': 256,
+        'uiMode': 512,
+        'screenSize': 1024,
+        'smallestScreenSize': 2048,
+        'density': 4096,
+        'layoutDirection': 8192,
+        'colorMode': 16384,
+        'fontScale': 0x40000000,
+    }
+    orientations = dict(
+        zip(
+            (
+                'unspecified',
+                'landscape',
+                'portrait',
+                'user',
+                'behind',
+                'sensor',
+                'nosensor',
+                'sensorLandscape',
+                'sensorPortrait',
+                'reverseLandscape',
+                'reversePortrait',
+                'fullSensor',
+                'userLandscape',
+                'userPortrait',
+                'fullUser',
+                'locked',
+            ),
+            range(-1, 15),
+        )
+    )
+
     def enum_value(element, field, names, default, flags=False):
         raw = attr(element, field)
-        if raw is None: return default
+        if raw is None:
+            return default
         typed = typed_values.get((id(element), '{' + ANDROID + '}' + field))
         if typed:
-            if typed[0] not in (0x10, 0x11): raise ManifestError('unsupported activity ' + field + ' type')
+            if typed[0] not in (0x10, 0x11):
+                raise ManifestError('unsupported activity ' + field + ' type')
             value = typed[1]
         elif re.fullmatch(r'-?(0x[0-9a-fA-F]+|[0-9]+)', raw):
             value = int(raw, 16 if '0x' in raw else 10)
         else:
             parts = raw.split('|') if flags else [raw]
-            if any(part not in names for part in parts): raise ManifestError('unknown activity ' + field)
+            if any(part not in names for part in parts):
+                raise ManifestError('unknown activity ' + field)
             value = 0
-            for part in parts: value |= names[part]
-        if not -0x80000000 <= value <= 0xffffffff: raise ManifestError('activity enum range')
+            for part in parts:
+                value |= names[part]
+        if not -0x80000000 <= value <= 0xFFFFFFFF:
+            raise ManifestError('activity enum range')
         return value if value < 0x80000000 else value - 0x100000000
+
     if app is not None:
         for activity in app.findall('activity'):
             name = qualify(attr(activity, 'name'))
-            if not name or name in seen_activities or len(activities) >= 256:
+            if not name or name in seen_activities or len(activities) >= 512:
                 raise ManifestError('invalid, duplicate or excessive activity declarations')
             seen_activities.add(name)
             orientation = enum_value(activity, 'screenOrientation', orientations, -1)
-            if not -1 <= orientation <= 14: raise ManifestError('invalid activity orientation')
-            launch_mode = enum_value(activity, 'launchMode', {'standard': 0, 'singleTop': 1, 'singleTask': 2, 'singleInstance': 3, 'singleInstancePerTask': 4}, 0)
-            if not 0 <= launch_mode <= 4: raise ManifestError('invalid activity launch mode')
-            activities.append({'name': name, 'launch_mode': launch_mode, 'config_changes': enum_value(activity, 'configChanges', config_bits, 0, True),
-                               'screen_orientation': orientation, 'theme': references.get((id(activity), '{' + ANDROID + '}theme'), 0)})
+            if not -1 <= orientation <= 14:
+                raise ManifestError('invalid activity orientation')
+            launch_mode = enum_value(
+                activity,
+                'launchMode',
+                {
+                    'standard': 0,
+                    'singleTop': 1,
+                    'singleTask': 2,
+                    'singleInstance': 3,
+                    'singleInstancePerTask': 4,
+                },
+                0,
+            )
+            if not 0 <= launch_mode <= 4:
+                raise ManifestError('invalid activity launch mode')
+            activities.append(
+                {
+                    'name': name,
+                    'launch_mode': launch_mode,
+                    'config_changes': enum_value(activity, 'configChanges', config_bits, 0, True),
+                    'screen_orientation': orientation,
+                    'theme': references.get((id(activity), '{' + ANDROID + '}theme'), 0),
+                }
+            )
+
     def metadata_value(element):
         resource = attr(element, 'resource')
         value = attr(element, 'value')
@@ -237,26 +351,38 @@ def inspect_manifest(data):
             kind, bits, text = typed
             if field == 'resource':
                 return ('resource', bits) if kind == 1 else ('unsupported', kind)
-            if kind == 1: return 'reference', bits
-            if kind == 3: return 'string', text
-            if kind == 4: return 'float_bits', bits
-            if kind == 0x12: return 'boolean', 'true' if bits else 'false'
-            if 0x10 <= kind <= 0x1f: return 'integer', bits if bits < 0x80000000 else bits - 0x100000000
+            if kind == 1:
+                return 'reference', bits
+            if kind == 3:
+                return 'string', text
+            if kind == 4:
+                return 'float_bits', bits
+            if kind == 0x12:
+                return 'boolean', 'true' if bits else 'false'
+            if 0x10 <= kind <= 0x1F:
+                return 'integer', bits if bits < 0x80000000 else bits - 0x100000000
             return 'unsupported', kind
         if raw.startswith('@'):
             target = raw[1:]
             kind = 'resource' if field == 'resource' else 'reference'
-            if re.fullmatch(r'0x[0-9a-fA-F]+|[0-9]+', target): return kind, int(target, 16 if target.startswith('0x') else 10)
+            if re.fullmatch(r'0x[0-9a-fA-F]+|[0-9]+', target):
+                return kind, int(target, 16 if target.startswith('0x') else 10)
             return kind + '_name', target
-        if field == 'resource': return 'unsupported', 'non-reference resource'
-        if raw in ('true', 'false'): return 'boolean', raw
+        if field == 'resource':
+            return 'unsupported', 'non-reference resource'
+        if raw in ('true', 'false'):
+            return 'boolean', raw
         if re.fullmatch(r'-?(0x[0-9a-fA-F]+|[0-9]+)', raw):
             value = int(raw, 16 if '0x' in raw else 10)
-            if not -0x80000000 <= value <= 0xffffffff: raise ManifestError('metadata integer range')
+            if not -0x80000000 <= value <= 0xFFFFFFFF:
+                raise ManifestError('metadata integer range')
             return 'integer', value if value < 0x80000000 else value - 0x100000000
-        if re.fullmatch(r'[-+]?[0-9]+\.[0-9]+([eE][-+]?[0-9]+)?', raw): return 'float', raw
+        if re.fullmatch(r'[-+]?[0-9]+\.[0-9]+([eE][-+]?[0-9]+)?', raw):
+            return 'float', raw
         return 'string', raw
+
     metadata_entries = metadata_bytes = 0
+
     def component_metadata(element):
         nonlocal metadata_entries, metadata_bytes
         metadata = []
@@ -269,15 +395,38 @@ def inspect_manifest(data):
             metadata_bytes += len(key.encode('utf-8')) + len(str(value).encode('utf-8'))
             if metadata_entries > 4096 or metadata_bytes > 4 * 1024 * 1024:
                 raise ManifestError('component metadata budget exceeded')
-            metadata.append({'name': key, 'name_resource': references.get((id(item), '{' + ANDROID + '}name')),
-                             'kind': kind, 'value': value})
+            metadata.append(
+                {
+                    'name': key,
+                    'name_resource': references.get((id(item), '{' + ANDROID + '}name')),
+                    'kind': kind,
+                    'value': value,
+                }
+            )
         return metadata
+
     def activity_filters(element):
         result = []
         for node in element.findall('intent-filter'):
             if len(result) >= 128:
                 raise ManifestError('activity filter limit')
-            record = {'priority': attr(node, 'priority') or '0'}
+            raw_priority = attr(node, 'priority')
+            typed_priority = typed_values.get((id(node), '{' + ANDROID + '}priority'))
+            if typed_priority is not None:
+                if typed_priority[0] not in (0x10, 0x11):
+                    raise ManifestError('intent filter priority must be an integer')
+                priority = typed_priority[1]
+                if priority >= 0x80000000:
+                    priority -= 0x100000000
+            elif raw_priority is None:
+                priority = 0
+            elif re.fullmatch(r'-?(0x[0-9a-fA-F]+|[0-9]+)', raw_priority):
+                priority = int(raw_priority, 16 if '0x' in raw_priority else 10)
+            else:
+                raise ManifestError('invalid intent filter priority')
+            if not -0x80000000 <= priority <= 0x7FFFFFFF:
+                raise ManifestError('intent filter priority out of range')
+            record = {'priority': str(priority)}
             for tag in ('action', 'category'):
                 names = [attr(item, 'name') for item in node.findall(tag)]
                 if len(names) > 128 or any(not name or len(name) > 4096 for name in names):
@@ -286,57 +435,167 @@ def inspect_manifest(data):
             data = node.findall('data')
             if len(data) > 4096:
                 raise ManifestError('activity filter data limit')
-            record['scheme'] = list(dict.fromkeys(attr(item, 'scheme') for item in data if attr(item, 'scheme') is not None))
-            record['mime'] = list(dict.fromkeys(attr(item, 'mimeType') for item in data if attr(item, 'mimeType') is not None))
-            record['unsupported_data'] = any(key not in ('{' + ANDROID + '}scheme', '{' + ANDROID + '}mimeType') for item in data for key in item.attrib)
+            record['scheme'] = list(
+                dict.fromkeys(
+                    attr(item, 'scheme') for item in data if attr(item, 'scheme') is not None
+                )
+            )
+            record['mime'] = list(
+                dict.fromkeys(
+                    attr(item, 'mimeType') for item in data if attr(item, 'mimeType') is not None
+                )
+            )
+            record['unsupported_data'] = any(
+                key not in ('{' + ANDROID + '}scheme', '{' + ANDROID + '}mimeType')
+                for item in data
+                for key in item.attrib
+            )
             result.append(record)
         return result
+
     if app is not None:
         for activity, record in zip(app.findall('activity'), activities):
-            record.update({'filters': activity_filters(activity), 'label': attr(activity, 'label'),
-                           'labelRes': references.get((id(activity), '{' + ANDROID + '}label')),
-                           'enabled': attr(activity, 'enabled'),
-                           'enabledRes': references.get((id(activity), '{' + ANDROID + '}enabled')),
-                           'exportedRes': references.get((id(activity), '{' + ANDROID + '}exported')),
-                           'exported': attr(activity, 'exported') if attr(activity, 'exported') is not None else ('true' if activity.findall('intent-filter') else 'false'),
-                           'directBootAware': attr(activity, 'directBootAware') or attr(app, 'directBootAware'),
-                           'process': attr(activity, 'process') or attr(app, 'process') or package,
-                           'permission': attr(activity, 'permission') if attr(activity, 'permission') is not None else attr(app, 'permission'),
-                           'parentActivityName': qualify(attr(activity, 'parentActivityName')),
-                           'metadata': component_metadata(activity)})
+            record.update(
+                {
+                    'filters': activity_filters(activity),
+                    'label': attr(activity, 'label'),
+                    'labelRes': references.get((id(activity), '{' + ANDROID + '}label')),
+                    'enabled': attr(activity, 'enabled'),
+                    'enabledRes': references.get((id(activity), '{' + ANDROID + '}enabled')),
+                    'exportedRes': references.get((id(activity), '{' + ANDROID + '}exported')),
+                    'exported': attr(activity, 'exported')
+                    if attr(activity, 'exported') is not None
+                    else ('true' if activity.findall('intent-filter') else 'false'),
+                    'directBootAware': attr(activity, 'directBootAware')
+                    or attr(app, 'directBootAware'),
+                    'process': attr(activity, 'process') or attr(app, 'process') or package,
+                    'permission': attr(activity, 'permission')
+                    if attr(activity, 'permission') is not None
+                    else attr(app, 'permission'),
+                    'parentActivityName': qualify(attr(activity, 'parentActivityName')),
+                    'metadata': component_metadata(activity),
+                }
+            )
+    aliases = []
+    if app is not None:
+        seen_aliases = set()
+        for alias in app.findall('activity-alias'):
+            name = qualify(attr(alias, 'name'))
+            target = qualify(attr(alias, 'targetActivity'))
+            if (
+                not name
+                or not target
+                or name in seen_aliases
+                or name in seen_activities
+                or len(aliases) >= 256
+            ):
+                raise ManifestError('invalid, duplicate or excessive activity aliases')
+            seen_aliases.add(name)
+            aliases.append(
+                {
+                    'name': name,
+                    'target': target,
+                    'enabled': attr(alias, 'enabled'),
+                    'exported': attr(alias, 'exported')
+                    if attr(alias, 'exported') is not None
+                    else ('true' if alias.findall('intent-filter') else 'false'),
+                    'permission': attr(alias, 'permission'),
+                    'filters': activity_filters(alias),
+                }
+            )
+
+    def foreground_type(service):
+        value = attr(service, 'foregroundServiceType')
+        if value is None:
+            return 0
+        if len(value) > 256:
+            raise ManifestError('foreground service type length')
+        flags = {
+            'none': 0,
+            'dataSync': 1,
+            'mediaPlayback': 2,
+            'phoneCall': 4,
+            'location': 8,
+            'connectedDevice': 16,
+            'mediaProjection': 32,
+            'camera': 64,
+            'microphone': 128,
+            'health': 256,
+            'remoteMessaging': 512,
+            'systemExempted': 1024,
+            'shortService': 2048,
+            'specialUse': 0x40000000,
+        }
+        if value.isascii() and (value.isdecimal() or value.startswith('0x')):
+            try:
+                result = int(value, 16 if value.startswith('0x') else 10)
+            except ValueError as error:
+                raise ManifestError('invalid foreground service type') from error
+            if 0 <= result <= 0x7FFFFFFF:
+                return result
+        else:
+            result = 0
+            for name in value.split('|'):
+                if name not in flags:
+                    raise ManifestError('unsupported foreground service type')
+                result |= flags[name]
+            return result
+        raise ManifestError('invalid foreground service type')
+
     services = []
     seen_services = set()
     if app is not None:
         for service in app.findall('service'):
             name = qualify(attr(service, 'name'))
-            if not name or name in seen_services or len(services) >= 256:
+            if not name or name in seen_services or len(services) >= 512:
                 raise ManifestError('invalid, duplicate or excessive service declarations')
             seen_services.add(name)
             metadata = component_metadata(service)
-            services.append({'name': name, 'enabled': attr(service, 'enabled'),
-                             'enabledRes': references.get((id(service), '{' + ANDROID + '}enabled')),
-                             'exportedRes': references.get((id(service), '{' + ANDROID + '}exported')),
-                             'process': attr(service, 'process') or attr(app, 'process') or package,
-                             'isolated': attr(service, 'isolatedProcess'),
-                             'exported': attr(service, 'exported') if attr(service, 'exported') is not None else ('true' if service.findall('intent-filter') else 'false'),
-                             'permission': attr(service, 'permission') if attr(service, 'permission') is not None else attr(app, 'permission'),
-                             'directBootAware': attr(service, 'directBootAware'),
-                             'stopWithTask': attr(service, 'stopWithTask'), 'externalService': attr(service, 'externalService'),
-                             'singleUser': attr(service, 'singleUser'), 'useAppZygote': attr(service, 'useAppZygote'),
-                             'allowSharedIsolatedProcess': attr(service, 'allowSharedIsolatedProcess'),
-                             'filters': activity_filters(service),
-                             'metadata': metadata})
+            services.append(
+                {
+                    'name': name,
+                    'enabled': attr(service, 'enabled'),
+                    'enabledRes': references.get((id(service), '{' + ANDROID + '}enabled')),
+                    'exportedRes': references.get((id(service), '{' + ANDROID + '}exported')),
+                    'process': attr(service, 'process') or attr(app, 'process') or package,
+                    'isolated': attr(service, 'isolatedProcess'),
+                    'exported': attr(service, 'exported')
+                    if attr(service, 'exported') is not None
+                    else ('true' if service.findall('intent-filter') else 'false'),
+                    'permission': attr(service, 'permission')
+                    if attr(service, 'permission') is not None
+                    else attr(app, 'permission'),
+                    'directBootAware': attr(service, 'directBootAware'),
+                    'foregroundServiceType': foreground_type(service),
+                    'stopWithTask': attr(service, 'stopWithTask'),
+                    'externalService': attr(service, 'externalService'),
+                    'singleUser': attr(service, 'singleUser'),
+                    'useAppZygote': attr(service, 'useAppZygote'),
+                    'allowSharedIsolatedProcess': attr(service, 'allowSharedIsolatedProcess'),
+                    'filters': activity_filters(service),
+                    'metadata': metadata,
+                }
+            )
     receivers = []
     if app is not None:
         for receiver in app.findall('receiver'):
             name = qualify(attr(receiver, 'name'))
             if not name or len(receivers) >= 256:
                 raise ManifestError('invalid or excessive receiver declarations')
-            record = {field: attr(receiver, field) for field in ('enabled', 'exported', 'permission', 'directBootAware')}
-            record.update({'name': name, 'process': attr(receiver, 'process') or attr(app, 'process') or package,
-                           'enabledRes': references.get((id(receiver), '{' + ANDROID + '}enabled')),
-                           'exportedRes': references.get((id(receiver), '{' + ANDROID + '}exported')),
-                           'metadata': component_metadata(receiver), 'filters': activity_filters(receiver)})
+            record = {
+                field: attr(receiver, field)
+                for field in ('enabled', 'exported', 'permission', 'directBootAware')
+            }
+            record.update(
+                {
+                    'name': name,
+                    'process': attr(receiver, 'process') or attr(app, 'process') or package,
+                    'enabledRes': references.get((id(receiver), '{' + ANDROID + '}enabled')),
+                    'exportedRes': references.get((id(receiver), '{' + ANDROID + '}exported')),
+                    'metadata': component_metadata(receiver),
+                    'filters': activity_filters(receiver),
+                }
+            )
             receivers.append(record)
     providers = []
     if app is not None:
@@ -344,29 +603,71 @@ def inspect_manifest(data):
             name = qualify(attr(provider, 'name'))
             if not name or len(providers) >= 256:
                 raise ManifestError('invalid or excessive provider declarations')
-            providers.append({'name': name, 'filters': activity_filters(provider), 'authorities': attr(provider, 'authorities'), 'enabled': attr(provider, 'enabled'),
-                              'exported': attr(provider, 'exported'), 'grantUriPermissions': attr(provider, 'grantUriPermissions'), 'multiprocess': attr(provider, 'multiprocess'), 'initOrder': attr(provider, 'initOrder'), 'metadata': component_metadata(provider),
-                              'process': attr(provider, 'process') or attr(app, 'process') or package})
+            permission = attr(provider, 'permission')
+            if permission is None:
+                permission = attr(app, 'permission')
+            read_permission = attr(provider, 'readPermission')
+            write_permission = attr(provider, 'writePermission')
+            providers.append(
+                {
+                    'name': name,
+                    'filters': activity_filters(provider),
+                    'authorities': attr(provider, 'authorities'),
+                    'enabled': attr(provider, 'enabled'),
+                    'access_metadata_version': 1,
+                    'permission': permission,
+                    'readPermission': permission if read_permission is None else read_permission,
+                    'writePermission': permission if write_permission is None else write_permission,
+                    'has_path_permissions': bool(provider.findall('path-permission')),
+                    'exported': attr(provider, 'exported'),
+                    'grantUriPermissions': attr(provider, 'grantUriPermissions'),
+                    'multiprocess': attr(provider, 'multiprocess'),
+                    'initOrder': attr(provider, 'initOrder'),
+                    'metadata': component_metadata(provider),
+                    'process': attr(provider, 'process') or attr(app, 'process') or package,
+                }
+            )
+
     def feature_record(item, grouped=False):
         required = attr(item, 'required')
         if required not in (None, 'true', 'false'):
             raise ManifestError('unsupported feature required value')
-        return {'name': attr(item, 'name'), 'version': enum_value(item, 'version', {}, 0),
-                'reqGlEsVersion': enum_value(item, 'glEsVersion', {}, 0),
-                'flags': 1 if grouped or required != 'false' else 0}
+        return {
+            'name': attr(item, 'name'),
+            'version': enum_value(item, 'version', {}, 0),
+            'reqGlEsVersion': enum_value(item, 'glEsVersion', {}, 0),
+            'flags': 1 if grouped or required != 'false' else 0,
+        }
+
     features = [feature_record(item) for item in root.findall('uses-feature')]
-    feature_groups = [[feature_record(item, True) for item in group.findall('uses-feature')] for group in root.findall('feature-group')]
+    feature_groups = [
+        [feature_record(item, True) for item in group.findall('uses-feature')]
+        for group in root.findall('feature-group')
+    ]
     if len(features) > 256 or len(feature_groups) > 64 or sum(map(len, feature_groups)) > 256:
         raise ManifestError('feature declaration limit')
     configurations = []
     for item in root.findall('uses-configuration'):
-        keyboard = attr(item, 'reqHardKeyboard'); navigation = attr(item, 'reqFiveWayNav')
+        keyboard = attr(item, 'reqHardKeyboard')
+        navigation = attr(item, 'reqFiveWayNav')
         if keyboard not in (None, 'true', 'false') or navigation not in (None, 'true', 'false'):
             raise ManifestError('unsupported configuration boolean')
-        configurations.append({'reqTouchScreen': enum_value(item, 'reqTouchScreen', {'notouch': 1, 'stylus': 2, 'finger': 3}, 0),
-            'reqKeyboardType': enum_value(item, 'reqKeyboardType', {'nokeys': 1, 'qwerty': 2, 'twelvekey': 3}, 0),
-            'reqNavigation': enum_value(item, 'reqNavigation', {'nonav': 1, 'dpad': 2, 'trackball': 3, 'wheel': 4}, 0),
-            'reqInputFeatures': (1 if keyboard == 'true' else 0) | (2 if navigation == 'true' else 0), 'reqGlEsVersion': 0})
+        configurations.append(
+            {
+                'reqTouchScreen': enum_value(
+                    item, 'reqTouchScreen', {'notouch': 1, 'stylus': 2, 'finger': 3}, 0
+                ),
+                'reqKeyboardType': enum_value(
+                    item, 'reqKeyboardType', {'nokeys': 1, 'qwerty': 2, 'twelvekey': 3}, 0
+                ),
+                'reqNavigation': enum_value(
+                    item, 'reqNavigation', {'nonav': 1, 'dpad': 2, 'trackball': 3, 'wheel': 4}, 0
+                ),
+                'reqInputFeatures': (1 if keyboard == 'true' else 0)
+                | (2 if navigation == 'true' else 0),
+                'reqGlEsVersion': 0,
+            }
+        )
     for feature in features:
         if feature['name'] is None and feature['reqGlEsVersion']:
             configurations.append({'reqGlEsVersion': feature['reqGlEsVersion']})
@@ -380,7 +681,10 @@ def inspect_manifest(data):
         if not name or not target or name in seen_instrumentation or len(instrumentation) >= 256:
             raise ManifestError('invalid, duplicate or excessive instrumentation declarations')
         seen_instrumentation.add(name)
-        record = {field: attr(item, field) for field in ('targetProcesses', 'handleProfiling', 'functionalTest', 'label')}
+        record = {
+            field: attr(item, field)
+            for field in ('targetProcesses', 'handleProfiling', 'functionalTest', 'label')
+        }
         record.update({'name': name, 'targetPackage': target, 'metadata': component_metadata(item)})
         for field in ('icon', 'logo', 'banner', 'label'):
             record[field + 'Res'] = references.get((id(item), '{' + ANDROID + '}' + field), 0)
@@ -394,35 +698,98 @@ def inspect_manifest(data):
         process = attr(app, 'process') or package
         application_info['processName'] = package + process if process.startswith(':') else process
         affinity = attr(app, 'taskAffinity')
-        application_info['taskAffinity'] = package if affinity is None else (package + affinity if affinity.startswith(':') else affinity)
-        application_info['descriptionRes'] = references.get((id(app), '{' + ANDROID + '}description'), 0)
-        application_info['uiOptions'] = enum_value(app, 'uiOptions', {'none': 0, 'splitActionBarWhenNarrow': 1}, 0)
-        application_info['category'] = enum_value(app, 'appCategory', {'game': 0, 'audio': 1, 'video': 2, 'image': 3, 'social': 4, 'news': 5, 'maps': 6, 'productivity': 7, 'accessibility': 8}, -1)
+        application_info['taskAffinity'] = (
+            package
+            if affinity is None
+            else (package + affinity if affinity.startswith(':') else affinity)
+        )
+        application_info['descriptionRes'] = references.get(
+            (id(app), '{' + ANDROID + '}description'), 0
+        )
+        application_info['uiOptions'] = enum_value(
+            app, 'uiOptions', {'none': 0, 'splitActionBarWhenNarrow': 1}, 0
+        )
+        application_info['category'] = enum_value(
+            app,
+            'appCategory',
+            {
+                'game': 0,
+                'audio': 1,
+                'video': 2,
+                'image': 3,
+                'social': 4,
+                'news': 5,
+                'maps': 6,
+                'productivity': 7,
+                'accessibility': 8,
+            },
+            -1,
+        )
     for field in ('requiresSmallestWidthDp', 'compatibleWidthLimitDp', 'largestWidthLimitDp'):
         application_info[field] = enum_value(screens, field, {}, 0) if screens is not None else 0
+    application_info['targetSandboxVersion'] = enum_value(root, 'targetSandboxVersion', {}, 1)
     application_info['compileSdkVersion'] = enum_value(root, 'compileSdkVersion', {}, 0)
     application_info['compileSdkVersionCodename'] = attr(root, 'compileSdkVersionCodename')
-    return {'features': features, 'feature_groups': feature_groups, 'configurations': configurations, 'instrumentation': instrumentation, 'application_info': application_info, 'shared_user_id': attr(root, 'sharedUserId'),
-            'shared_user_label': references.get((id(root), '{' + ANDROID + '}sharedUserLabel'), 0),
-            'revision_code': enum_value(root, 'revisionCode', {}, 0),
-            'install_location': enum_value(root, 'installLocation', {'auto': 0, 'internalOnly': 1, 'preferExternal': 2}, -1),
-            'package': package, 'version_code': attr(root, 'versionCode'), 'version_code_major': attr(root, 'versionCodeMajor'), 'version_name': attr(root, 'versionName'),
-            'min_sdk': attr(sdk, 'minSdkVersion') if sdk is not None else None,
-            'target_sdk': attr(sdk, 'targetSdkVersion') if sdk is not None else None,
-            'application_class': qualify(attr(app, 'name')) if app is not None else None,
-            'application_metadata': component_metadata(app) if app is not None else [],
-            'application_label': attr(app, 'label') if app is not None else None,
-            'application_icon': references.get((id(app), '{' + ANDROID + '}icon'), 0),
-            'application_logo': references.get((id(app), '{' + ANDROID + '}logo'), 0),
-            'application_banner': references.get((id(app), '{' + ANDROID + '}banner'), 0),
-            'application_theme': references.get((id(app), '{' + ANDROID + '}theme'), 0),
-            'application_label_resource': references.get((id(app), '{' + ANDROID + '}label')),
-            'version_name_resource': references.get((id(root), '{' + ANDROID + '}versionName')),
-            'application_enabled': attr(app, 'enabled') if app is not None else None,
-            'application_debuggable': attr(app, 'debuggable') if app is not None else None,
-            'application_has_code': attr(app, 'hasCode') if app is not None else None,
-            'application_uses_cleartext_traffic': cleartext,
-            'application_network_security_config': attr(app, 'networkSecurityConfig') if app is not None else None,
-            'launcher_activities': launchers, 'services': services, 'receivers': receivers, 'providers': providers, 'activities': activities,
-            'defined_permissions': [{'name': attr(x, 'name'), 'protection': enum_value(x, 'protectionLevel', {'normal': 0, 'dangerous': 1, 'signature': 2, 'signatureOrSystem': 3, 'privileged': 16}, 0, True)} for x in root.findall('permission')],
-            'permissions': sorted({attr(x, 'name') for x in root.findall('uses-permission') if attr(x, 'name')})}
+    return {
+        'features': features,
+        'feature_groups': feature_groups,
+        'configurations': configurations,
+        'instrumentation': instrumentation,
+        'application_info': application_info,
+        'shared_user_id': attr(root, 'sharedUserId'),
+        'shared_user_label': references.get((id(root), '{' + ANDROID + '}sharedUserLabel'), 0),
+        'revision_code': enum_value(root, 'revisionCode', {}, 0),
+        'install_location': enum_value(
+            root, 'installLocation', {'auto': 0, 'internalOnly': 1, 'preferExternal': 2}, -1
+        ),
+        'package': package,
+        'version_code': attr(root, 'versionCode'),
+        'version_code_major': attr(root, 'versionCodeMajor'),
+        'version_name': attr(root, 'versionName'),
+        'min_sdk': attr(sdk, 'minSdkVersion') if sdk is not None else None,
+        'target_sdk': attr(sdk, 'targetSdkVersion') if sdk is not None else None,
+        'application_class': qualify(attr(app, 'name')) if app is not None else None,
+        'application_metadata': component_metadata(app) if app is not None else [],
+        'application_label': attr(app, 'label') if app is not None else None,
+        'application_icon': references.get((id(app), '{' + ANDROID + '}icon'), 0),
+        'application_logo': references.get((id(app), '{' + ANDROID + '}logo'), 0),
+        'application_banner': references.get((id(app), '{' + ANDROID + '}banner'), 0),
+        'application_theme': references.get((id(app), '{' + ANDROID + '}theme'), 0),
+        'application_label_resource': references.get((id(app), '{' + ANDROID + '}label')),
+        'version_name_resource': references.get((id(root), '{' + ANDROID + '}versionName')),
+        'application_enabled': attr(app, 'enabled') if app is not None else None,
+        'application_debuggable': attr(app, 'debuggable') if app is not None else None,
+        'application_has_code': attr(app, 'hasCode') if app is not None else None,
+        'application_uses_cleartext_traffic': cleartext,
+        'application_network_security_config': attr(app, 'networkSecurityConfig')
+        if app is not None
+        else None,
+        'activity_aliases': aliases,
+        'launcher_activities': launchers,
+        'services': services,
+        'receivers': receivers,
+        'providers': providers,
+        'activities': activities,
+        'defined_permissions': [
+            {
+                'name': attr(x, 'name'),
+                'protection': enum_value(
+                    x,
+                    'protectionLevel',
+                    {
+                        'normal': 0,
+                        'dangerous': 1,
+                        'signature': 2,
+                        'signatureOrSystem': 3,
+                        'privileged': 16,
+                    },
+                    0,
+                    True,
+                ),
+            }
+            for x in root.findall('permission')
+        ],
+        'permissions': sorted(
+            {attr(x, 'name') for x in root.findall('uses-permission') if attr(x, 'name')}
+        ),
+    }

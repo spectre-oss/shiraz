@@ -3,5 +3,6 @@
 #include "shiraz/darwin/guest/providers.hpp"
 #include "shiraz/darwin/guest/lifecycle.hpp"
 namespace shiraz::guest {
-Provider opensles_provider(CodeValidator validate, std::function<void()>& shutdown);
+Provider opensles_provider(CodeValidator validate, std::function<void()>& shutdown,
+                           std::shared_ptr<Lifecycle> lifecycle = {});
 }

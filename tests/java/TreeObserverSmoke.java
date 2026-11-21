@@ -2,6 +2,7 @@
 import android.view.*;
 public final class TreeObserverSmoke {
  public static void main(String[] args){
+  android.os.Looper.prepareMainLooper();
   android.content.Context context=new android.content.ContextWrapper(null);org.shiraz.fixture.TreeObserverFixture.check(context);
   final ViewTreeObserver tree=new View(context).getViewTreeObserver();ViewTreeObserver.OnDrawListener bad=new ViewTreeObserver.OnDrawListener(){public void onDraw(){throw new IllegalArgumentException("expected listener failure");}};tree.addOnDrawListener(bad);try{tree.dispatchOnDraw();throw new AssertionError("listener failure swallowed");}catch(IllegalArgumentException expected){}tree.removeOnDrawListener(bad);tree.dispatchOnDraw();
   android.widget.FrameLayout root=new android.widget.FrameLayout(context);View child=new View(context);ViewTreeObserver window=ViewTreeObserver.shirazCreateWindowObserver();root.shirazAttachTree(window);ViewTreeObserver parent=root.getViewTreeObserver(),pending=child.getViewTreeObserver();for(int i=0;i<1024;i++)parent.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener(){public boolean onPreDraw(){return true;}});pending.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener(){public boolean onPreDraw(){return true;}});try{root.addView(child);throw new AssertionError("merge listener budget accepted");}catch(IllegalStateException expected){}if(child.getParent()!=null||root.getChildCount()!=0||!pending.isAlive())throw new AssertionError("failed merge changed hierarchy");

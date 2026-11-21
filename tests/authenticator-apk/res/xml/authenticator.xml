@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<account-authenticator xmlns:android="http://schemas.android.com/apk/res/android"
+ android:accountType="@string/account_type" android:label="@string/account_label"
+ android:customTokens="@bool/custom_tokens"/>

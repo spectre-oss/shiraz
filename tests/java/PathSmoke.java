@@ -153,7 +153,7 @@ public final class PathSmoke {
         turnCanvas.rotate(360);turnCanvas.drawRect(2,0,4,2,paint);check(turn.getPixel(2,0)==Color.BLUE,"full turn identity");
         Bitmap clipped=Bitmap.createBitmap(24,24,Bitmap.Config.ARGB_8888);Canvas clipCanvas=new Canvas(clipped);
         Path hole=new Path();hole.addCircle(12,12,5,Path.Direction.CW);int clipSave=clipCanvas.save();
-        check(clipCanvas.clipPath(hole,Region.Op.DIFFERENCE),"difference clip nonempty");clipCanvas.drawColor(Color.RED);
+        check(clipCanvas.clipOutPath(hole),"clipOutPath nonempty");clipCanvas.drawColor(Color.RED);
         check(clipped.getPixel(12,12)==0 && clipped.getPixel(1,1)==Color.RED,"difference clips color fill");
         check(!clipCanvas.clipRect(10,10,14,14),"rectangle entirely inside excluded hole is empty");clipCanvas.drawColor(Color.BLUE);
         check(clipped.getPixel(12,12)==0,"rect intersection preserves path hole");clipCanvas.restoreToCount(clipSave);

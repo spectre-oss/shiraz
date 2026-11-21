@@ -5,6 +5,15 @@ package org.shiraz.processfixture;
 public final class ProcessApplication extends android.app.Application {
     private static final Object thread;
     static {
+        try {
+            java.io.FileInputStream input = new java.io.FileInputStream("/proc/self/cmdline");
+            java.io.ByteArrayOutputStream name = new java.io.ByteArrayOutputStream();
+            try { int value; while ((value = input.read()) > 0) name.write(value); }
+            finally { input.close(); }
+            if (!"org.shiraz.processfixture".equals(name.toString("UTF-8")))
+                throw new AssertionError("Native process name missing during app initialization");
+            System.out.println("PROCESS_INITIAL_ARGV_IDENTITY_OK");
+        } catch (java.io.IOException error) { throw new AssertionError(error); }
         thread = query("currentActivityThread");
         if (thread == null) throw new AssertionError("ActivityThread missing during app initialization");
         if (query("currentApplication") != null) throw new AssertionError("Application published before construction");

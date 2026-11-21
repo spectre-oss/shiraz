@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/prctl.h>
+#include <sys/ptrace.h>
 #include <assert.h>
 #include <fcntl.h>
 extern char** environ;
@@ -78,6 +79,10 @@ int run_core_services(void) {
     CHECK(setenv("bad=name", "x", 1) == -1 && errno == EINVAL);
     tzset();
     CHECK(tzname[0] && tzname[1] && timezone > -86400 && timezone < 86400);
+    errno = 0;
+    CHECK(ptrace(PTRACE_TRACEME, 0, 0, 0) == -1 && errno == ENOSYS);
+    errno = 0;
+    CHECK(ptrace(PTRACE_ATTACH, 123, 0, 0) == -1 && errno == ENOSYS);
     char thread_name[16];
     CHECK(!prctl(PR_SET_NAME, "m5-core-test") && !prctl(PR_GET_NAME, thread_name) &&
           !strcmp(thread_name, "m5-core-test"));

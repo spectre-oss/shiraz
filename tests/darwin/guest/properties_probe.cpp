@@ -3,33 +3,112 @@
 #include <cstdio>
 #include <stdexcept>
 using namespace shiraz::guest;
-static void require(bool value, const char *message) { if (!value) throw std::runtime_error(message); }
+static void require(bool value, const char* message) {
+    if (!value)
+        throw std::runtime_error(message);
+}
 int main() {
-  try {
-    auto exports = property_exports(api27_properties());
-    void *entry = reinterpret_cast<void *>(exports.at(0).address);
-    char output[96];
-    auto get = [&](const char *name) {
-      std::memset(output, 0x7a, sizeof(output));
-      return int(int32_t(invoke(entry, {Argument::integer(reinterpret_cast<uintptr_t>(name), ArgumentType::Int64),
-        Argument::integer(reinterpret_cast<uintptr_t>(output), ArgumentType::Int64)}).result_integers[0]));
-    };
-    errno = EBUSY; *guest_errno_location() = 73;
-    require(get("ro.build.version.sdk") == 2 && !std::strcmp(output, "27"), "nominal SDK profile");
-    require(get("ro.product.cpu.abi") == 9 && !std::strcmp(output, "arm64-v8a"), "actual guest ABI");
-    require(get("no.such.property") == 0 && output[0] == 0 && output[1] == 0x7a, "missing property semantics");
-    require(errno == EBUSY && *guest_errno_location() == 73, "property lookup preserves errno");
-    auto custom = property_exports({{"bounded", std::string(91, 'a')}});
-    auto result = invoke(reinterpret_cast<void *>(custom.at(0).address),
-      {Argument::integer(reinterpret_cast<uintptr_t>("bounded"), ArgumentType::Int64),
-       Argument::integer(reinterpret_cast<uintptr_t>(output), ArgumentType::Int64)});
-    require(result.result_integers[0] == 91 && output[91] == 0 && output[92] == 0x7a, "PROP_VALUE_MAX boundary");
-    unsigned rejected = 0;
-    for (auto values : {PropertyMap{{"", "bad"}}, PropertyMap{{"x", std::string(92, 'x')}},
-                        PropertyMap{{"x", std::string("a\0b", 3)}}}) {
-      try { property_exports(std::move(values)); } catch (const ElfError &) { ++rejected; }
+    try {
+        auto exports = property_exports(api27_properties());
+        void* entry = reinterpret_cast<void*>(exports.at(0).address);
+        char output[96];
+        auto get = [&](const char* name) {
+            std::memset(output, 0x7a, sizeof(output));
+            return int(int32_t(invoke(entry, {Argument::integer(reinterpret_cast<uintptr_t>(name),
+                                                                ArgumentType::Int64),
+                                              Argument::integer(reinterpret_cast<uintptr_t>(output),
+                                                                ArgumentType::Int64)})
+                                   .result_integers[0]));
+        };
+        errno = EBUSY;
+        *guest_errno_location() = 73;
+        require(get("ro.build.version.sdk") == 2 && !std::strcmp(output, "27"),
+                "nominal SDK profile");
+        require(get("ro.product.cpu.abi") == 9 && !std::strcmp(output, "arm64-v8a"),
+                "actual guest ABI");
+        require(get("no.such.property") == 0 && output[0] == 0 && output[1] == 0x7a,
+                "missing property semantics");
+        require(errno == EBUSY && *guest_errno_location() == 73, "property lookup preserves errno");
+        auto address = [&](const char* name) {
+            for (const auto& item : exports)
+                if (item.name == name)
+                    return reinterpret_cast<void*>(item.address);
+            throw std::runtime_error("missing property export");
+        };
+        auto number = [](uintptr_t value) { return Argument::integer(value, ArgumentType::Int64); };
+        auto nth = address("__system_property_find_nth");
+        auto read = address("__system_property_read");
+        auto handle = invoke(nth, {Argument::integer(0)}).result_integers[0];
+        require(handle && !invoke(nth, {Argument::integer(9999)}).result_integers[0],
+                "bounded opaque enumeration");
+        char name[32]{};
+        auto length = invoke(read, {number(handle), number(reinterpret_cast<uintptr_t>(name)),
+                                    number(reinterpret_cast<uintptr_t>(output))})
+                          .result_integers[0];
+        auto expected_values = api27_properties();
+        auto expected = expected_values.begin();
+        require(std::strcmp(name, expected->first.c_str()) == 0 &&
+                    std::strcmp(output, expected->second.c_str()) == 0 &&
+                    length == expected->second.size(),
+                "opaque property read");
+        auto invalid = invoke(read, {number(1), number(reinterpret_cast<uintptr_t>(name)),
+                                     number(reinterpret_cast<uintptr_t>(output))})
+                           .result_integers[0];
+        require(int32_t(invalid) == -1 && *guest_errno_location() == 22,
+                "foreign property handle rejected");
+        void* callback = nullptr;
+        unsigned visited = 0;
+        void* cookie = &visited;
+        callback = closure([&](Capture& capture) {
+            CallCursor cursor(capture, Convention::Aapcs64);
+            auto property = cursor.read<uintptr_t>();
+            auto supplied = cursor.read<void*>();
+            if (property && supplied == cookie)
+                ++visited;
+        });
+        auto enumerable =
+            property_exports(api27_properties(), [&](const void* p) { return p == callback; });
+        void* foreach = reinterpret_cast<void*>(enumerable.at(3).address);
+        require(!invoke(foreach, {number(reinterpret_cast<uintptr_t>(callback)),
+                                  number(reinterpret_cast<uintptr_t>(cookie))})
+                        .result_integers[0] &&
+                    visited == api27_properties().size(),
+                "validated callback visits every property");
+        require(int32_t(invoke(foreach, {number(1), number(0)}).result_integers[0]) == -1 &&
+                    *guest_errno_location() == 22 && visited == api27_properties().size(),
+                "foreign callback rejected");
+        auto long_name = property_exports({{std::string(50, 'n'), "value"}});
+        auto long_handle =
+            invoke(reinterpret_cast<void*>(long_name.at(1).address), {Argument::integer(0)})
+                .result_integers[0];
+        std::memset(name, '?', sizeof(name));
+        require(invoke(reinterpret_cast<void*>(long_name.at(2).address),
+                       {number(long_handle), number(reinterpret_cast<uintptr_t>(name)),
+                        number(reinterpret_cast<uintptr_t>(output))})
+                            .result_integers[0] == 5 &&
+                    std::strlen(name) == 31 && name[31] == 0,
+                "legacy property name truncation");
+        auto custom = property_exports({{"bounded", std::string(91, 'a')}});
+        auto result =
+            invoke(reinterpret_cast<void*>(custom.at(0).address),
+                   {Argument::integer(reinterpret_cast<uintptr_t>("bounded"), ArgumentType::Int64),
+                    Argument::integer(reinterpret_cast<uintptr_t>(output), ArgumentType::Int64)});
+        require(result.result_integers[0] == 91 && output[91] == 0 && output[92] == 0x7a,
+                "PROP_VALUE_MAX boundary");
+        unsigned rejected = 0;
+        for (auto values : {PropertyMap{{"", "bad"}}, PropertyMap{{"x", std::string(92, 'x')}},
+                            PropertyMap{{"x", std::string("a\0b", 3)}}}) {
+            try {
+                property_exports(std::move(values));
+            } catch (const ElfError&) {
+                ++rejected;
+            }
+        }
+        require(rejected == 3, "invalid property namespaces rejected");
+        std::puts("M5_PROPERTIES_PASS profile=27 guest_abi=arm64-v8a missing=empty length=91 "
+                  "rejected=3 errno_preserved=1");
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "properties-probe: %s\n", error.what());
+        return 1;
     }
-    require(rejected == 3, "invalid property namespaces rejected");
-    std::puts("M5_PROPERTIES_PASS profile=27 guest_abi=arm64-v8a missing=empty length=91 rejected=3 errno_preserved=1");
-  } catch (const std::exception &error) { std::fprintf(stderr, "properties-probe: %s\n", error.what()); return 1; }
 }

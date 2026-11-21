@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.servicefixture" android:versionCode="1" android:versionName="1">
+ <permission android:name="org.shiraz.servicefixture.NORMAL" android:protectionLevel="normal"/>
+ <permission android:name="org.shiraz.servicefixture.SIGNATURE" android:protectionLevel="signature"/>
+ <permission android:name="org.shiraz.servicefixture.DANGEROUS" android:protectionLevel="dangerous"/>
+ <uses-permission android:name="org.shiraz.servicefixture.NORMAL"/>
+ <uses-permission android:name="org.shiraz.servicefixture.SIGNATURE"/>
+ <uses-permission android:name="org.shiraz.servicefixture.DANGEROUS"/>
+ <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="27"/>
+ <application android:label="Service-only fixture">
+  <activity android:name=".CoexistActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+  <service android:name=".Redelivery" android:process=":redelivery" android:exported="true"/>
+  <service android:name=".IntentQueue" android:process=":intentqueue" android:exported="true"/>
+  <service android:name=".Sticky" android:process=":sticky" android:exported="true"/>
+  <service android:name=".Private" android:exported="false"/>
+  <service android:name=".Missing" android:exported="true"/>
+  <service android:name=".Worker" android:process=":worker" android:exported="true"><intent-filter><action android:name="org.shiraz.servicefixture.BIND"/></intent-filter><intent-filter><action android:name="org.shiraz.servicefixture.TYPED"/><category android:name="org.shiraz.servicefixture.CLIENT"/><data android:scheme="content" android:mimeType="text/*"/></intent-filter></service>
+ </application>
+</manifest>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<resources>
+ <string name="account_type">org.shiraz.fixture.account</string>
+ <string name="account_label">Fixture account</string>
+ <bool name="custom_tokens">false</bool>
+</resources>

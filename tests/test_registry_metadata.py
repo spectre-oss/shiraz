@@ -39,6 +39,28 @@ class RegistryMetadata(unittest.TestCase):
             'installer=', properties_text(registry_metadata(Path('/a.apk'), report(), None))
         )
 
+    def test_alias_preserves_component_separately_from_target(self):
+        value = report()
+        value['manifest']['launcher_activities'][0]['name'] = 'org.example.app.Alias'
+        value['manifest']['activity_aliases'] = [
+            dict(
+                name='org.example.app.Alias',
+                target='org.example.app.Main',
+                enabled='false',
+                exported='true',
+                permission='org.example.OPEN',
+            )
+        ]
+        facts = registry_metadata(Path('/a.apk'), value)
+        self.assertEqual(facts['launchActivity'], 'org.example.app.Main')
+        self.assertEqual(facts['launchComponent'], 'org.example.app.Alias')
+        self.assertEqual(facts['launcher.0.name'], 'org.example.app.Alias')
+        self.assertEqual(facts['alias.0.enabled'], 'false')
+        self.assertEqual(facts['alias.0.permission'], 'org.example.OPEN')
+        value['manifest']['launcher_activities'][0]['name'] = '../invalid'
+        with self.assertRaises(FormatError):
+            registry_metadata(Path('/a.apk'), value)
+
     def test_app_without_launcher_has_no_launch_activity(self):
         self.assertIsNone(
             registry_metadata(Path('/a.apk'), report(activity=None))['launchActivity']

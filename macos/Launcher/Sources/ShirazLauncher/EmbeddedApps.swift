@@ -17,7 +17,9 @@ final class EmbeddedSession {
     private(set) var frameRevision: UInt64 = 0
     /// The app's window size in points, as last sent with `resize`.
     private(set) var windowSize: CGSize
-    private(set) var detached = false
+    private var placement = EmbeddedPlacement()
+    var detached: Bool { placement.detached }
+    var placementPending: Bool { placement.pending }
     private(set) var failure: String?
     /// nil fills the stage; true/false keep a phone shape (Rotate).
     var portrait: Bool? = true
@@ -27,6 +29,7 @@ final class EmbeddedSession {
     private var poller: Task<Void, Never>?
     private var pendingResize: Task<Void, Never>?
     private var area: CGSize = .zero
+    private var stageVisibility = EmbeddedVisibility()
 
     private let ownsFiles: Bool
 
@@ -42,6 +45,7 @@ final class EmbeddedSession {
         do {
             writer = try LiveInputWriter(url: paths.input)
             reader = try FrameReader(url: paths.frame)
+            setVisible(false)
         } catch {
             failure = error.localizedDescription
             return
@@ -68,7 +72,7 @@ final class EmbeddedSession {
 
     private func apply(_ frame: EmbeddedFrame) {
         frameRevision = frame.revision
-        detached = frame.detached
+        placement.observe(detached: frame.detached)
         guard let provider = CGDataProvider(data: frame.pixels as CFData),
               let space = CGColorSpace(name: CGColorSpace.sRGB) else { return }
         let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
@@ -77,12 +81,32 @@ final class EmbeddedSession {
                         decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
-    func send(_ commands: [LiveCommand]) {
-        guard let writer, !detached else { return }
+    func setVisible(_ visible: Bool) {
+        send(stageVisibility.surface(visible))
+    }
+
+    func setSelected(_ selected: Bool) {
+        send(stageVisibility.select(selected))
+    }
+
+    func setWindowState(visible: Bool, focused: Bool) {
+        send(stageVisibility.window(visible: visible, focused: focused))
+    }
+
+    @discardableResult
+    func send(_ commands: [LiveCommand]) -> Bool {
+        guard !detached else { return false }
+        return write(commands)
+    }
+
+    private func write(_ commands: [LiveCommand]) -> Bool {
+        guard let writer else { return false }
         do {
             try writer.send(commands)
+            return true
         } catch {
             failure = error.localizedDescription
+            return false
         }
     }
 
@@ -115,13 +139,15 @@ final class EmbeddedSession {
     func back() { send([.keyDown("AC Back"), .keyUp("AC Back")]) }
 
     func detach() {
-        send([.focus(false), .embed(false)])
-        detached = true
+        guard !placementPending, !detached,
+              write([.focus(false), .embed(false)]) else { return }
+        placement.request(detached: true)
     }
 
     func attach() {
-        detached = false
-        send([.embed(true), .focus(true)])
+        guard !placementPending, detached,
+              write([.embed(true)] + stageVisibility.resend()) else { return }
+        placement.request(detached: false)
         let current = area
         area = .zero
         if current != .zero { layout(in: current) }
@@ -177,15 +203,15 @@ final class EmbedHub {
 
     func show(_ package: String) {
         guard sessions[package] != nil else { return }
-        if let current = shown, current != package { sessions[current]?.send([.focus(false)]) }
+        if let current = shown, current != package { sessions[current]?.setSelected(false) }
         shown = package
         recents.removeAll { $0 == package }
         recents.insert(package, at: 0)
-        sessions[package]?.send([.focus(true)])
+        sessions[package]?.setSelected(true)
     }
 
     func home() {
-        if let current = shown { sessions[current]?.send([.focus(false)]) }
+        if let current = shown { sessions[current]?.setSelected(false) }
         shown = nil
     }
 
@@ -240,6 +266,7 @@ struct EmbeddedStage: View {
                 Button("Bring Back Here", systemImage: "rectangle.inset.filled.and.person.filled") { session.attach() }
                     .buttonStyle(.glassProminent)
                     .tint(HomePalette.amber)
+                    .disabled(session.placementPending)
             }
             .foregroundStyle(HomePalette.secondary)
         } else {
@@ -282,6 +309,7 @@ struct EmbeddedStage: View {
                     .foregroundStyle(HomePalette.onAmber)
             }
             .buttonStyle(.plain)
+            .disabled(session.placementPending)
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
@@ -413,7 +441,13 @@ struct FrameHost: NSViewRepresentable {
 }
 
 final class FrameView: NSView {
-    weak var session: EmbeddedSession?
+    weak var session: EmbeddedSession? {
+        didSet {
+            guard oldValue !== session else { return }
+            oldValue?.setVisible(false)
+            updateVisibility()
+        }
+    }
     private var window_: CGSize = .zero
     private var revision: UInt64 = 0
     private let surface = CALayer()
@@ -431,6 +465,32 @@ final class FrameView: NSView {
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        if let window {
+            for name in [NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification,
+                         NSWindow.didChangeOcclusionStateNotification,
+                         NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(updateVisibility),
+                                                       name: name, object: window)
+            }
+            for name in [NSApplication.didHideNotification, NSApplication.didUnhideNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(updateVisibility),
+                                                       name: name, object: NSApp)
+            }
+        }
+        updateVisibility()
+    }
+
+    @objc private func updateVisibility() {
+        let visible = window.map { $0.isVisible && !$0.isMiniaturized &&
+            $0.occlusionState.contains(.visible) && !NSApp.isHidden
+        } ?? false
+        if !visible { pressed = false }
+        session?.setWindowState(visible: visible, focused: window?.isKeyWindow == true)
+    }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }

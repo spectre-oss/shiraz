@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Link-only declarations. Every executable body traps.
 .text
+.global fscanf
+.type fscanf, %function
+fscanf:
+ brk #0
+.size fscanf, .-fscanf
+.global vfscanf
+.type vfscanf, %function
+vfscanf:
+ brk #0
+.size vfscanf, .-vfscanf
 .global fopen
 .type fopen, %function
 fopen:
@@ -11,6 +21,11 @@ fopen:
 fopen64:
  brk #0
 .size fopen64, .-fopen64
+.global fdopen
+.type fdopen, %function
+fdopen:
+ brk #0
+.size fdopen, .-fdopen
 .global fclose
 .type fclose, %function
 fclose:

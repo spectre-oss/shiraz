@@ -93,6 +93,7 @@ def main():
                 'style/Theme.Material.Light.NoActionBar',
                 'style/Theme.Material.NoActionBar',
                 'style/Theme.Light.NoTitleBar',
+                'style/Theme.Translucent.NoTitleBar',
                 'style/Theme.Black.NoTitleBar',
                 'style/Theme.Black.NoTitleBar.Fullscreen',
                 'style/Theme.NoTitleBar.Fullscreen',
@@ -139,10 +140,13 @@ def main():
     source_count = len(index.nodes)
     if not args.seed:
         # Apps reference public @android:color values (holo_*, white) and
-        # android.R.layout rows (simple_spinner_item, simple_list_item_1)
-        # directly; seed every public color and layout so the closure keeps them.
+        # android.R.layout rows (simple_spinner_item, simple_list_item_1), and
+        # public dimensions (notification large icons) directly. Retain these
+        # public resources even when no theme in the closure references them.
         seeds += sorted(
-            key for key in index.public if key[0] in ('color', 'layout') and key not in seeds
+            key
+            for key in index.public
+            if key[0] in ('color', 'layout', 'dimen') and key not in seeds
         )
     selected, generated = index.closure(seeds)
     outputs, provenance = index.emit(selected, generated)

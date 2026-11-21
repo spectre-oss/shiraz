@@ -29,12 +29,16 @@ public final class TypedResourceFixture {
         near(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_PT,72,metrics),144,"pt unit");
         near(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_IN,1,metrics),144,"inch unit");
         near(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_MM,25.4f,metrics),144,"mm unit");
+        near(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_PX,2,null),2,"pixel unit does not use metrics");
+        near(TypedValue.applyDimension(99,2,null),0,"unknown dimension unit");
+        try { TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,2,null); throw new AssertionError("dp needs metrics"); } catch (NullPointerException expected) { }
         int positive=(1600 << 8)|16|TypedValue.COMPLEX_UNIT_PX, negative=(-1600 << 8)|16;
         check(TypedValue.complexToDimensionPixelOffset(positive,metrics) == 12 && TypedValue.complexToDimensionPixelSize(positive,metrics) == 13,"offset truncates while size rounds");
         check(TypedValue.complexToDimensionPixelOffset(negative,metrics) == -12 && TypedValue.complexToDimensionPixelSize(negative,metrics) == -13,"negative pixel rounding");
         check(TypedValue.complexToDimensionPixelSize((1 << 8)|32,metrics) == 1 && TypedValue.complexToDimensionPixelSize((-1 << 8)|32,metrics) == -1,"nonzero dimensions retain minimum pixel");
         near(TypedValue.complexToFraction((1 << 30)|48,20,30),10,"base fraction");
         near(TypedValue.complexToFraction((1 << 30)|48|1,20,30),15,"parent fraction");
+        near(TypedValue.complexToFraction((1 << 30)|48|2,20,30),0,"unknown fraction unit");
     }
     public static void check(Resources resources) {
         units(); TypedValue out=new TypedValue(),saved=new TypedValue();

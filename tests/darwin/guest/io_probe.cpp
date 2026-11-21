@@ -108,6 +108,45 @@ int main(int argc, char** argv) {
                     ++imports;
             }
         require(imports >= 30, "binding records cover actual file API imports");
+        {
+            const std::string expected =
+                "00004000-00008000 ---p 00000000 00:00 0 [shiraz:host-reserved]\n";
+            unsigned snapshots = 0;
+            Loader maps_loader({fixtures}, file_personality([&](std::string& text) {
+                                   ++snapshots;
+                                   text = expected;
+                                   return 0;
+                               }));
+            auto* maps_module = maps_loader.open("libio.so");
+            auto call = [&](const char* name, std::vector<Argument> arguments) {
+                auto symbol = maps_loader.symbol(maps_module, name);
+                return int64_t(
+                    invoke(reinterpret_cast<void*>(symbol.address), arguments).result_integers[0]);
+            };
+            const char* path = "/proc/self/maps";
+            int mapfd = int(call("openat", {Argument::integer(-42), pointer(path),
+                                            Argument::integer(bionic::kO_RDONLY)}));
+            require(mapfd >= 0 && snapshots == 0,
+                    "absolute proc open ignores dirfd and defers snapshot until read");
+            char buffer[256]{};
+            require(call("read", {Argument::integer(mapfd), pointer(buffer),
+                                  Argument::integer(sizeof(buffer), ArgumentType::Int64)}) ==
+                            int64_t(expected.size()) &&
+                        std::string(buffer, expected.size()) == expected && snapshots == 1,
+                    "guest ABI reads scoped maps descriptor");
+            require(
+                call("lseek", {Argument::integer(mapfd), Argument::integer(0, ArgumentType::Int64),
+                               Argument::integer(SEEK_SET)}) == 0,
+                "guest maps rewind");
+            require(call("read", {Argument::integer(mapfd), pointer(buffer),
+                                  Argument::integer(1, ArgumentType::Int64)}) == 1 &&
+                        snapshots == 2,
+                    "rewind refreshes scoped maps snapshot");
+            require(call("close", {Argument::integer(mapfd)}) == 0, "guest maps close");
+            require(int(call("open", {pointer(path), Argument::integer(bionic::kO_WRONLY)})) == -1,
+                    "guest maps remains read only");
+            std::cout << "M5_IO_MAPS_PASS scoped=1 openat=1 read=1 rewind=1 readonly=1\n";
+        }
         std::cout << "M5_IO_PASS files=1 stat_guards=1 locks=1 nanoseconds=1 "
                      "directories=1 pipe_errno=1 ioctl_width=1 fortify=1 statvfs=1 "
                      "link_stubs_executed=0\n";

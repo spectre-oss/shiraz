@@ -30,3 +30,6 @@ __attribute__((destructor)) static void finish(void) {
     if (finalized)
         ++*finalized;
 }
+void thread_retention_set_observer(void (*callback)(void*)) {
+    observer = callback;
+}

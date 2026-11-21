@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.shiraz.sessiontwo" android:versionCode="1" android:versionName="1">
+ <permission android:name="org.shiraz.sessiontwo.RECEIVE" android:protectionLevel="signature"/>
+ <uses-permission android:name="org.shiraz.sessiontwo.RECEIVE"/>
+ <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="27"/>
+ <application android:label="Shared session fixture" android:theme="@android:style/Theme.Material.NoActionBar">
+  <activity android:name="org.shiraz.sessionfixture.MainActivity" android:exported="false" android:permission="org.shiraz.sessiontwo.PRIVATE"/>
+  <activity-alias android:name=".Launcher" android:targetActivity="org.shiraz.sessionfixture.MainActivity" android:exported="true">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+  </activity-alias>
+  <activity android:name="org.shiraz.sessionfixture.DetailActivity" android:exported="false"/>
+  <activity-alias android:name=".DetailAlias" android:targetActivity="org.shiraz.sessionfixture.DetailActivity" android:exported="false">
+   <intent-filter><action android:name="org.shiraz.sessiontwo.DETAIL"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
+  </activity-alias>
+  <receiver android:name="org.shiraz.sessionfixture.ManifestReceiver" android:exported="false">
+   <intent-filter><action android:name="org.shiraz.LIVE_BROADCAST"/></intent-filter>
+   <intent-filter><action android:name="org.shiraz.sessiontwo.BROADCAST"/><category android:name="org.shiraz.sessiontwo.TEST"/></intent-filter>
+  </receiver>
+  <receiver android:name=".DisabledReceiver" android:enabled="false"/>
+  <receiver android:name="org.shiraz.sessionfixture.RemoteReceiver" android:process=":receiver" android:exported="false">
+   <intent-filter><action android:name="org.shiraz.SECONDARY_BROADCAST"/><category android:name="org.shiraz.SECONDARY_CATEGORY"/></intent-filter>
+  </receiver>
+  <receiver android:name="org.shiraz.sessionfixture.ImplicitReceiver" android:process=":implicit" android:exported="false">
+   <intent-filter><action android:name="org.shiraz.SECONDARY_BROADCAST"/><category android:name="org.shiraz.SECONDARY_CATEGORY"/></intent-filter>
+  </receiver>
+  <receiver android:name="org.shiraz.sessionfixture.TailReceiver" android:exported="false"/>
+  <receiver android:name="org.shiraz.sessionfixture.LiveReceiver" android:exported="true"><intent-filter><action android:name="org.shiraz.LIVE_BROADCAST"/></intent-filter></receiver>
+  <receiver android:name="org.shiraz.sessionfixture.ExportedReceiver" android:process=":events" android:exported="true"/>
+ </application>
+</manifest>

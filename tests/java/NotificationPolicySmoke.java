@@ -78,7 +78,7 @@ public final class NotificationPolicySmoke {
             try { current.getNotificationChannels(); throw new AssertionError("accepted unknown policy version"); } catch (IllegalStateException expected) { } finally { current.shirazClose(); }
         }
         check(before == descriptors(), "failed policy open descriptor lifetime");
-        db = SQLiteDatabase.openOrCreateDatabase(file, null); db.setVersion(1);
+        db = SQLiteDatabase.openOrCreateDatabase(file, null); db.setVersion(2);
         byte[] healthy; String healthyId;
         try (Cursor row = db.rawQuery("SELECT id,payload FROM channels LIMIT 1", null)) { check(row.moveToFirst(), "healthy policy fixture"); healthyId = row.getString(0); healthy = row.getBlob(1); }
         db.execSQL("UPDATE channels SET payload=X'00'"); db.close();
