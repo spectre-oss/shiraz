@@ -16,7 +16,10 @@ NDK_LINUX_LIBS := \
 	build/libOpenSLES.so \
 	build/libaaudio.so \
 	build/liblog.so \
-	build/libicu.so
+	build/libicu.so \
+	build/libamidi.so \
+	build/libcamera2ndk.so \
+	build/libOpenMAXAL.so
 
 NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libandroid.so \
@@ -27,7 +30,10 @@ NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libOpenSLES.so \
 	$(MACOS_OUT)/libaaudio.so \
 	$(MACOS_OUT)/liblog.so \
-	$(MACOS_OUT)/libicu.so
+	$(MACOS_OUT)/libicu.so \
+	$(MACOS_OUT)/libamidi.so \
+	$(MACOS_OUT)/libcamera2ndk.so \
+	$(MACOS_OUT)/libOpenMAXAL.so
 
 # --- Milestone N0: Standalone libmediandk.so, libsync.so, libnativewindow.so, libOpenSLES.so ---
 
@@ -54,6 +60,18 @@ build/libicu.so: native/ndk_icu.cpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(NDK_ICU_CFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_icu.cpp -o $@ $(NDK_ICU_LIBS) -pthread
 
+build/libamidi.so: native/ndk_amidi.cpp include/shiraz/ndk/amidi.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_amidi.cpp -o $@ -pthread
+
+build/libcamera2ndk.so: native/ndk_camera2.cpp include/shiraz/ndk/camera2ndk.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_camera2.cpp -o $@ -pthread
+
+build/libOpenMAXAL.so: native/ndk_openmaxal.cpp include/shiraz/ndk/openmaxal.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_openmaxal.cpp -o $@ -pthread
+
 $(MACOS_OUT)/libnativewindow.so: $(MACOS_OUT)/libandroid.so
 	ln -sfn libandroid.so $@
 
@@ -75,6 +93,15 @@ $(MACOS_OUT)/liblog.so: native/ndk_log.cpp include/shiraz/ndk/log.h $(MACOS_OUT)
 $(MACOS_OUT)/libicu.so: native/ndk_icu.cpp $(MACOS_OUT)/.dir
 	$(MACOS_CXX) $(NDK_MACOS_ICU_CFLAGS) -fPIC $(MACOS_DYLIB) native/ndk_icu.cpp -o $@ $(NDK_MACOS_ICU_LIBS) -pthread
 
+$(MACOS_OUT)/libamidi.so: native/ndk_amidi.cpp include/shiraz/ndk/amidi.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_amidi.cpp -o $@ -pthread
+
+$(MACOS_OUT)/libcamera2ndk.so: native/ndk_camera2.cpp include/shiraz/ndk/camera2ndk.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_camera2.cpp -o $@ -pthread
+
+$(MACOS_OUT)/libOpenMAXAL.so: native/ndk_openmaxal.cpp include/shiraz/ndk/openmaxal.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_openmaxal.cpp -o $@ -pthread
+
 $(MACOS_OUT)/test-ndk-standalone: tests/ndk_standalone.cpp $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_OUT)/libnativewindow.so
 	$(MACOS_CXX) tests/ndk_standalone.cpp -o $@ $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_RPATH) -pthread
 
@@ -92,6 +119,9 @@ $(MACOS_OUT)/test-ndk-aaudio: tests/ndk_aaudio.cpp $(MACOS_OUT)/libaaudio.so
 
 $(MACOS_OUT)/test-ndk-log-icu: tests/ndk_log_icu.cpp $(MACOS_OUT)/liblog.so $(MACOS_OUT)/libicu.so
 	$(MACOS_CXX) $(NDK_MACOS_ICU_CFLAGS) -DU_DISABLE_RENAMING=1 tests/ndk_log_icu.cpp -o $@ $(MACOS_OUT)/liblog.so $(MACOS_OUT)/libicu.so $(MACOS_RPATH) -pthread
+
+$(MACOS_OUT)/test-ndk-midi-camera-xa: tests/ndk_midi_camera_xa.cpp $(MACOS_OUT)/libamidi.so $(MACOS_OUT)/libcamera2ndk.so $(MACOS_OUT)/libOpenMAXAL.so
+	$(MACOS_CXX) tests/ndk_midi_camera_xa.cpp -o $@ $(MACOS_OUT)/libamidi.so $(MACOS_OUT)/libcamera2ndk.so $(MACOS_OUT)/libOpenMAXAL.so $(MACOS_RPATH) -pthread
 
 build/test-ndk-standalone: tests/ndk_standalone.cpp build/libmediandk.so build/libsync.so build/libOpenSLES.so build/libnativewindow.so
 	@mkdir -p build
@@ -117,27 +147,33 @@ build/test-ndk-log-icu: tests/ndk_log_icu.cpp build/liblog.so build/libicu.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(NDK_ICU_CFLAGS) -DU_DISABLE_RENAMING=1 tests/ndk_log_icu.cpp -o $@ -Lbuild -llog -licu -Wl,-rpath,'$$ORIGIN' -pthread
 
+build/test-ndk-midi-camera-xa: tests/ndk_midi_camera_xa.cpp build/libamidi.so build/libcamera2ndk.so build/libOpenMAXAL.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_midi_camera_xa.cpp -o $@ -Lbuild -lamidi -lcamera2ndk -lOpenMAXAL -Wl,-rpath,'$$ORIGIN' -pthread
+
 .PHONY: ndk-build ndk-test macos-ndk-build macos-ndk-test ndk-audit
 
 ndk-build: $(NDK_LINUX_LIBS)
 
-ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk build/test-ndk-aaudio build/test-ndk-log-icu
+ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk build/test-ndk-aaudio build/test-ndk-log-icu build/test-ndk-midi-camera-xa
 	./build/test-ndk-standalone
 	./build/test-ndk-core-app
 	./build/test-ndk-graphics-system
 	./build/test-ndk-mediandk
 	./build/test-ndk-aaudio
 	./build/test-ndk-log-icu
+	./build/test-ndk-midi-camera-xa
 
 macos-ndk-build: $(NDK_MACOS_LIBS)
 
-macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk $(MACOS_OUT)/test-ndk-aaudio $(MACOS_OUT)/test-ndk-log-icu
+macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk $(MACOS_OUT)/test-ndk-aaudio $(MACOS_OUT)/test-ndk-log-icu $(MACOS_OUT)/test-ndk-midi-camera-xa
 	$(MACOS_OUT)/test-ndk-standalone
 	$(MACOS_OUT)/test-ndk-core-app
 	$(MACOS_OUT)/test-ndk-graphics-system
 	$(MACOS_OUT)/test-ndk-mediandk
 	$(MACOS_OUT)/test-ndk-aaudio
 	$(MACOS_OUT)/test-ndk-log-icu
+	$(MACOS_OUT)/test-ndk-midi-camera-xa
 
 ndk-audit:
 	python3 scripts/audit_ndk_apis.py
