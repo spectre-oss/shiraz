@@ -155,8 +155,8 @@ symbol lookup are reusable; the host-facing layer is new.
 | [ ] | OpenSL ES | `native/opensles.cpp` | AudioQueue buffer callbacks ↔ `slAndroidSimpleBufferQueueCallback` | M |
 | [ ] | AAudio | new | AudioUnit render callback | M |
 | [ ] | Media playback | `native/playback.cpp` | Output through the audio backend; AAC via AudioToolbox `AudioConverter` (or keep the existing decoders) | M |
-| [ ] | Video decode (MediaCodec, NDK media) | `native/video_codec.cpp`, `native/media_ndk.cpp` | VideoToolbox `VTDecompressionSession`: H.264, HEVC, VP9 (after `VTRegisterSupplementalVideoDecoderIfAvailable`), AV1 only when `VTIsHardwareDecodeSupported` (M3+); libvpx for VP8; IOSurface/Metal-compatible output via `kCVPixelBufferIOSurfacePropertiesKey` | M |
-| [ ] | Opus | `native/opus_codec.cpp` | In-tree libopus or AudioToolbox Opus | L |
+| [~] | Video decode (MediaCodec, NDK media) | `native/video_codec.cpp`, `native/darwin/video_codec.cpp`, `native/media_ndk.cpp` | `libshiraz-video.so` built with VideoToolbox `VTDecompressionSession` (H.264, HEVC, supplemental VP9, hardware-gated AV1) outputting IOSurface-backed `32BGRA` frames (`make macos-video-check`); libvpx for VP8 still open | M |
+| [x] | Opus | `native/opus_codec.cpp`, `native/darwin/opus_codec.cpp` | AudioToolbox `AudioConverter` (`kAudioFormatOpus` -> 48 kHz PCM16) with RFC 7845 `OpusHead` pre-skip trimming (`make macos-video-check`) | L |
 | [ ] | Camera | `native/capture.cpp`, `Camera.java` | `AVCaptureSession` + `AVCaptureVideoDataOutput`; `NSCameraUsageDescription` | M |
 | [ ] | Microphone | `native/capture.cpp` | `AVAudioEngine` input tap or SDL capture; `NSMicrophoneUsageDescription` | M |
 | [ ] | Text to speech | `native/speech.cpp` | `AVSpeechSynthesizer writeUtterance:toBufferCallback:`; espeak-ng fallback | L |

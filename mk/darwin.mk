@@ -3289,3 +3289,22 @@ $(MACOS_OUT)/test-logind-power: tests/native/logind_power.cpp include/shiraz/log
 .PHONY: macos-logind-power-protocol-test
 macos-logind-power-protocol-test: $(MACOS_OUT)/power-bus-fixture.dylib $(MACOS_OUT)/test-logind-power
 	$(MACOS_OUT)/test-logind-power $(CURDIR)/$(MACOS_OUT)/power-bus-fixture.dylib
+
+# NativeVideo on macOS: VideoToolbox (H.264/HEVC/VP9/AV1) + AudioToolbox Opus.
+MACOS_VIDEO_JAVA := java/shiraz/runtime/NativeVideo.java
+MACOS_VIDEO_SOURCES := native/darwin/video_codec.cpp native/darwin/opus_codec.cpp
+MACOS_VIDEO_FRAMEWORKS := -framework VideoToolbox -framework AudioToolbox -framework CoreMedia -framework CoreVideo -framework CoreFoundation
+$(MACOS_OUT)/libshiraz-video.so: $(MACOS_VIDEO_SOURCES) native/darwin/video.exports $(MACOS_VIDEO_JAVA) include/shiraz/native_window.h scripts/darwin_jni_exports.py mk/darwin.mk $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/.dir
+	@$(call MACOS_EXPORTS_PRECHECK,native/darwin/video.exports,$(MACOS_VIDEO_JAVA))
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -Iinclude -fPIC $(MACOS_DYLIB) $(call MACOS_EXPORTS_FLAGS,native/darwin/video.exports) $(MACOS_VIDEO_SOURCES) -o $@ $(MACOS_LINK_ANDROID) $(MACOS_VIDEO_FRAMEWORKS) -pthread
+	@$(call MACOS_EXPORTS_CHECK,native/darwin/video.exports,$(MACOS_VIDEO_JAVA))
+
+$(MACOS_OUT)/test-video-codec: tests/darwin/video_codec.cpp include/shiraz/native_window.h $(MACOS_OUT)/libshiraz-video.so $(MACOS_OUT)/libandroid.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -Iinclude tests/darwin/video_codec.cpp -o $@ $(MACOS_LINK_ANDROID) $(MACOS_VIDEO_FRAMEWORKS) -pthread
+
+.PHONY: macos-video-check
+macos-video-check: $(MACOS_OUT)/libshiraz-video.so $(MACOS_OUT)/test-video-codec
+	$(MACOS_OUT)/test-video-codec $(CURDIR)/$(MACOS_OUT)/libshiraz-video.so
+
+macos-runtime-libs: $(MACOS_OUT)/libshiraz-video.so
+
