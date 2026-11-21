@@ -2,6 +2,11 @@
 # Android NDK API 35 native library targets for Linux (build/) and macOS (build/macos/).
 # Written for GNU Make 3.81 compatibility on macOS.
 
+NDK_ICU_CFLAGS ?= $(shell pkg-config --cflags icu-uc icu-i18n 2>/dev/null)
+NDK_ICU_LIBS ?= $(shell pkg-config --libs icu-uc icu-i18n 2>/dev/null || echo "-licuuc -licui18n")
+NDK_MACOS_ICU_CFLAGS ?= -I$(CURDIR)/.local/include
+NDK_MACOS_ICU_LIBS ?= -L$(CURDIR)/.local/lib -licuuc -licui18n -Wl,-rpath,$(CURDIR)/.local/lib
+
 NDK_LINUX_LIBS := \
 	build/libandroid.so \
 	build/libnativewindow.so \
@@ -9,7 +14,9 @@ NDK_LINUX_LIBS := \
 	build/libmediandk.so \
 	build/libsync.so \
 	build/libOpenSLES.so \
-	build/libaaudio.so
+	build/libaaudio.so \
+	build/liblog.so \
+	build/libicu.so
 
 NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libandroid.so \
@@ -18,7 +25,9 @@ NDK_MACOS_LIBS := \
 	$(MACOS_OUT)/libmediandk.so \
 	$(MACOS_OUT)/libsync.so \
 	$(MACOS_OUT)/libOpenSLES.so \
-	$(MACOS_OUT)/libaaudio.so
+	$(MACOS_OUT)/libaaudio.so \
+	$(MACOS_OUT)/liblog.so \
+	$(MACOS_OUT)/libicu.so
 
 # --- Milestone N0: Standalone libmediandk.so, libsync.so, libnativewindow.so, libOpenSLES.so ---
 
@@ -37,6 +46,14 @@ build/libaaudio.so: native/ndk_aaudio.cpp include/shiraz/ndk/aaudio.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_aaudio.cpp -o $@ -pthread
 
+build/liblog.so: native/ndk_log.cpp include/shiraz/ndk/log.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_log.cpp -o $@ -pthread
+
+build/libicu.so: native/ndk_icu.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(NDK_ICU_CFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_icu.cpp -o $@ $(NDK_ICU_LIBS) -pthread
+
 $(MACOS_OUT)/libnativewindow.so: $(MACOS_OUT)/libandroid.so
 	ln -sfn libandroid.so $@
 
@@ -52,6 +69,12 @@ $(MACOS_OUT)/libOpenSLES.so: native/opensles.cpp third_party/opensles/SLES/OpenS
 $(MACOS_OUT)/libaaudio.so: native/ndk_aaudio.cpp include/shiraz/ndk/aaudio.h $(MACOS_OUT)/.dir
 	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_aaudio.cpp -o $@ -pthread -framework AudioToolbox -framework CoreFoundation
 
+$(MACOS_OUT)/liblog.so: native/ndk_log.cpp include/shiraz/ndk/log.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC $(MACOS_DYLIB) native/ndk_log.cpp -o $@ -pthread
+
+$(MACOS_OUT)/libicu.so: native/ndk_icu.cpp $(MACOS_OUT)/.dir
+	$(MACOS_CXX) $(NDK_MACOS_ICU_CFLAGS) -fPIC $(MACOS_DYLIB) native/ndk_icu.cpp -o $@ $(NDK_MACOS_ICU_LIBS) -pthread
+
 $(MACOS_OUT)/test-ndk-standalone: tests/ndk_standalone.cpp $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_OUT)/libnativewindow.so
 	$(MACOS_CXX) tests/ndk_standalone.cpp -o $@ $(MACOS_OUT)/libmediandk.so $(MACOS_OUT)/libsync.so $(MACOS_OUT)/libOpenSLES.so $(MACOS_RPATH) -pthread
 
@@ -66,6 +89,9 @@ $(MACOS_OUT)/test-ndk-mediandk: tests/ndk_mediandk.cpp $(MACOS_OUT)/libmediandk.
 
 $(MACOS_OUT)/test-ndk-aaudio: tests/ndk_aaudio.cpp $(MACOS_OUT)/libaaudio.so
 	$(MACOS_CXX) tests/ndk_aaudio.cpp -o $@ $(MACOS_OUT)/libaaudio.so $(MACOS_RPATH) -pthread
+
+$(MACOS_OUT)/test-ndk-log-icu: tests/ndk_log_icu.cpp $(MACOS_OUT)/liblog.so $(MACOS_OUT)/libicu.so
+	$(MACOS_CXX) $(NDK_MACOS_ICU_CFLAGS) -DU_DISABLE_RENAMING=1 tests/ndk_log_icu.cpp -o $@ $(MACOS_OUT)/liblog.so $(MACOS_OUT)/libicu.so $(MACOS_RPATH) -pthread
 
 build/test-ndk-standalone: tests/ndk_standalone.cpp build/libmediandk.so build/libsync.so build/libOpenSLES.so build/libnativewindow.so
 	@mkdir -p build
@@ -87,25 +113,31 @@ build/test-ndk-aaudio: tests/ndk_aaudio.cpp build/libaaudio.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/ndk_aaudio.cpp -o $@ -Lbuild -laaudio -Wl,-rpath,'$$ORIGIN' -pthread
 
+build/test-ndk-log-icu: tests/ndk_log_icu.cpp build/liblog.so build/libicu.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(NDK_ICU_CFLAGS) -DU_DISABLE_RENAMING=1 tests/ndk_log_icu.cpp -o $@ -Lbuild -llog -licu -Wl,-rpath,'$$ORIGIN' -pthread
+
 .PHONY: ndk-build ndk-test macos-ndk-build macos-ndk-test ndk-audit
 
 ndk-build: $(NDK_LINUX_LIBS)
 
-ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk build/test-ndk-aaudio
+ndk-test: build/test-ndk-standalone build/test-ndk-core-app build/test-ndk-graphics-system build/test-ndk-mediandk build/test-ndk-aaudio build/test-ndk-log-icu
 	./build/test-ndk-standalone
 	./build/test-ndk-core-app
 	./build/test-ndk-graphics-system
 	./build/test-ndk-mediandk
 	./build/test-ndk-aaudio
+	./build/test-ndk-log-icu
 
 macos-ndk-build: $(NDK_MACOS_LIBS)
 
-macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk $(MACOS_OUT)/test-ndk-aaudio
+macos-ndk-test: $(MACOS_OUT)/test-ndk-standalone $(MACOS_OUT)/test-ndk-core-app $(MACOS_OUT)/test-ndk-graphics-system $(MACOS_OUT)/test-ndk-mediandk $(MACOS_OUT)/test-ndk-aaudio $(MACOS_OUT)/test-ndk-log-icu
 	$(MACOS_OUT)/test-ndk-standalone
 	$(MACOS_OUT)/test-ndk-core-app
 	$(MACOS_OUT)/test-ndk-graphics-system
 	$(MACOS_OUT)/test-ndk-mediandk
 	$(MACOS_OUT)/test-ndk-aaudio
+	$(MACOS_OUT)/test-ndk-log-icu
 
 ndk-audit:
 	python3 scripts/audit_ndk_apis.py
