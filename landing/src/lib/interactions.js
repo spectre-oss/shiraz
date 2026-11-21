@@ -93,6 +93,9 @@ export function initInteractions() {
   hero?.addEventListener('pointermove', (event) => {
     if (event.pointerType !== 'mouse' || motionPreference.matches) return;
     sunTarget = Math.max(-1, Math.min(1, (event.clientX / innerWidth - .5) * 2));
+    const bounds = hero.getBoundingClientRect();
+    hero.style.setProperty('--mx', `${event.clientX - bounds.left}px`);
+    hero.style.setProperty('--my', `${event.clientY - bounds.top}px`);
     if (!sunFrame) sunFrame = requestAnimationFrame(easeSun);
   }, {passive: true, signal: controller.signal});
   hero?.addEventListener('pointerleave', () => {

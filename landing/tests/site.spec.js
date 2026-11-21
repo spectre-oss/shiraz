@@ -54,7 +54,7 @@ test('responsive site keeps table columns aligned and has no accessibility viola
     await page.goto('/');
     await expect(page.locator('#builder')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const cells = await page.locator('.comparison-table tbody tr').evaluateAll(rows => rows.map(row => [...row.children].map(cell => Math.round(cell.getBoundingClientRect().left))));
+    const cells = await page.locator('.comparison-table tbody tr').evaluateAll(rows => rows.filter(row => row.getClientRects().length).map(row => [...row.children].map(cell => Math.round(cell.getBoundingClientRect().left))));
     cells.forEach(row => expect(row).toEqual(cells[0]));
     await page.addScriptTag({path: require.resolve('axe-core/axe.min.js')});
     const violations = await page.evaluate(async () => (await window.axe.run(document, {runOnly: {type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations);
@@ -285,5 +285,27 @@ test('launcher film loads nothing before play and carries captions', async ({pag
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(width);
     expect(Math.abs(box.width / box.height - 16 / 9)).toBeLessThan(0.02);
+  }
+});
+
+test('comparison shows six approaches and reveals the rest on request', async ({page}) => {
+  await page.goto('/');
+  const rows = page.locator('.comparison-table tbody tr');
+  const visible = () => rows.evaluateAll(all => all.filter(row => row.getClientRects().length).length);
+  expect(await visible()).toBe(6);
+  const toggle = page.getByRole('button', {name: 'Show 8 more approaches'});
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  expect(await visible()).toBe(14);
+  await expect(page.getByRole('button', {name: 'Show fewer'})).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('every route shares one navigation and marks the current page', async ({page}) => {
+  for (const [path, current] of [['/', null], ['/compatibility/', 'Compatibility'], ['/compare/', 'Compare']]) {
+    await page.goto(path);
+    const nav = page.getByRole('navigation', {name: 'Main navigation'});
+    for (const name of ['Builder', 'Compatibility', 'Compare']) await expect(nav.getByRole('link', {name, exact: true})).toHaveCount(1);
+    if (current) await expect(nav.locator('[aria-current=page]')).toHaveText(current);
+    else await expect(nav.locator('[aria-current=page]')).toHaveCount(0);
   }
 });

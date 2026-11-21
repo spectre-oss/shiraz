@@ -74,6 +74,7 @@ p { margin: 0; }
 .site-header nav, .compat-header nav { display: flex; align-items: center; gap: 4px; }
 .site-header nav a, .compat-header nav a { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding-inline: 14px; border-radius: 999px; font-size: 15px; font-weight: 500; color: var(--ink-soft); transition: color .2s ease, background-color .2s ease; }
 .site-header nav a:hover, .compat-header nav a:hover { color: var(--ink); background: #ffffff12; }
+.site-header nav a[aria-current=page], .compat-header nav a[aria-current=page] { color: var(--ink); background: #ffffff12; }
 .site-header nav .icon, .compat-header nav .icon { width: 15px; height: 15px; }
 /* GitHub mark and star count: filled glyphs, unlike the stroked icon set. */
 .site-header nav .github-link, .compat-header nav .github-link { gap: 8px; margin-left: 6px; padding-inline: 12px 14px; border: 1px solid var(--line); color: var(--ink); }
@@ -486,6 +487,78 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
 @keyframes vt-out { to { opacity: 0; } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(10px); } }
 
+/* Browser surfaces carry the palette too. */
+:root { scrollbar-color: var(--line-strong) var(--wine-deep); accent-color: var(--saffron); }
+input, textarea { caret-color: var(--saffron); }
+
+/* A saffron hairline reads how far down the page you are. */
+.scroll-progress { display: none; }
+@supports (animation-timeline: scroll()) {
+  .motion-enabled .scroll-progress { display: block; position: fixed; inset: 0 0 auto; z-index: 25; height: 2px; background: var(--saffron); transform-origin: left; transform: scaleX(0); animation: read-progress linear both; animation-timeline: scroll(root); pointer-events: none; }
+}
+@keyframes read-progress { to { transform: scaleX(1); } }
+
+/* The pointer carries a little warm light across the hero; the tall window drifts against the wide one. */
+.hero::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 0; background: radial-gradient(520px circle at var(--mx, 70%) var(--my, 30%), #ff5d8f1c, transparent 65%); transition: opacity .8s ease; }
+.motion-enabled .hero:hover::after { opacity: 1; }
+.orsi { transform: translateX(calc(var(--sun) * 10px)); }
+
+/* The primary action catches the light once as the pointer arrives. */
+.primary { position: relative; isolation: isolate; overflow: hidden; }
+.primary::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(105deg, transparent 35%, #fff9 50%, transparent 65%); transform: translateX(-110%); pointer-events: none; }
+.motion-enabled .primary:hover::after { transform: translateX(110%); transition: transform .8s var(--ease-out); }
+
+/* Shiraz Web: the host window streams its light to a phone, a packet at a time. */
+.web-art { position: relative; display: grid; grid-template-columns: 1.45fr .8fr .62fr; align-items: center; max-width: 420px; margin-top: clamp(36px, 5vw, 60px); }
+.web-art .host { border: 1px solid #ffffff38; border-radius: 12px; background: #1d0912d9; box-shadow: 0 24px 50px -20px #000c; }
+.web-art .window-bar { padding: 7px 9px; gap: 5px; }
+.web-art .window-bar i { width: 6px; height: 6px; }
+.host-panes, .phone-panes { display: grid; gap: 3px; }
+.host-panes { grid-template-columns: repeat(5, 1fr); padding: 6px; aspect-ratio: 5 / 3; }
+.phone-panes { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(5, 1fr); height: 100%; }
+.host-panes span, .phone-panes span { border-radius: 2px; background: color-mix(in srgb, var(--c) 88%, transparent); box-shadow: 0 0 16px color-mix(in srgb, var(--c) 40%, transparent); }
+.stream { position: relative; height: 2px; margin-inline: 10px; background: repeating-linear-gradient(90deg, var(--line-strong) 0 5px, transparent 5px 10px); }
+.stream i { position: absolute; inset: 0; }
+.stream i::before { content: ""; position: absolute; top: 50%; left: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--saffron); box-shadow: 0 0 12px var(--saffron); transform: translate(-50%, -50%); }
+.stream i:nth-child(1) { transform: translateX(25%); }
+.stream i:nth-child(2) { transform: translateX(50%); }
+.stream i:nth-child(3) { transform: translateX(75%); }
+.phone { aspect-ratio: 9 / 17; padding: 12px 6px; border: 1.5px solid #ffffff38; border-radius: 16px; background: #12050b; box-shadow: 0 24px 50px -20px #000c, 0 0 50px #25c4b426; }
+.live { position: absolute; top: -34px; right: 0; display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--wine-deep); font-size: 12px; color: var(--ink-soft); }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--glass-emerald); }
+@media (prefers-reduced-motion: no-preference) {
+  .stream i { animation: packet 2.4s linear infinite; }
+  .stream i:nth-child(2) { animation-delay: .8s; }
+  .stream i:nth-child(3) { animation-delay: 1.6s; }
+  .stream i::before { animation: packet-fade 2.4s linear infinite; animation-delay: inherit; }
+  .phone-panes span { animation: phone-light 3.6s var(--ease-in-out) infinite; animation-delay: calc(var(--i) * 120ms); }
+  .live i { animation: live-pulse 2s ease-out infinite; }
+}
+@keyframes packet { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes packet-fade { 0%, 100% { opacity: 0; } 15%, 85% { opacity: 1; } }
+@keyframes phone-light { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 #3fbf78aa; } 100% { box-shadow: 0 0 0 9px #3fbf7800; } }
+
+/* The film opens out of the page as it scrolls in. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .mac-film video { animation: film-open linear both; animation-timeline: view(); animation-range: entry 0% cover 35%; }
+  }
+}
+@keyframes film-open { from { clip-path: inset(6% 9% round 32px); transform: scale(.97); } to { clip-path: inset(0 round 14px); transform: none; } }
+
+/* The equation resolves: once the terms meet, the result lights and underlines itself. */
+.packaging-path .term-out { position: relative; text-shadow: 0 0 calc(var(--p) * 56px) #f4b63f59; }
+.packaging-path .term-out::after { content: ""; position: absolute; left: 0; right: 0; bottom: -.04em; height: .055em; border-radius: 1em; background: var(--saffron); transform-origin: left; transform: scaleX(clamp(0, (var(--p) - .55) * 2.4, 1)); }
+
+/* Six approaches by default; the rest on request. */
+.comparison-table:not(.all-peers) .extra-peer { display: none; }
+.comparison-table:not(.all-peers) tbody tr:nth-child(6) > * { border-bottom: 0; }
+.peers-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 12px; padding: 0; border: 0; background: transparent; color: var(--saffron); font-size: 15px; font-weight: 500; }
+.peers-toggle:hover { text-decoration: underline; text-underline-offset: 5px; }
+.peers-toggle .icon { width: 15px; height: 15px; transition: transform .3s var(--ease-out); }
+.peers-toggle[aria-expanded=true] .icon { transform: rotate(45deg); }
+
 /* Wide displays. */
 @media (min-width: 1700px) {
   :root { --page: 1500px; }
@@ -579,7 +652,7 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
 }
 @media (max-width: 450px) {
   .github-word { display: none; }
-  .site-header nav a[href="#approach"] { display: none; }
+  .site-header nav :is(.nav-builder, .nav-compare), .compat-header nav :is(.nav-builder, .nav-compare) { display: none; }
   .architecture-cards { grid-template-columns: 1fr; }
   .verse-line { min-height: 64px; padding-inline: 4px; }
   .limitations-dialog { padding: 26px 22px; }

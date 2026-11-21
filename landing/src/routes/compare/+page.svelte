@@ -5,7 +5,7 @@
   // built or run. Shiraz values come from README.md and docs/tested.md.
   import { resolve } from '$app/paths';
   import Footer from '#lib/Footer.svelte';
-  import GitHubLink from '#lib/GitHubLink.svelte';
+  import SiteNav from '#lib/SiteNav.svelte';
   import '../../styles.css';
 
   const home = resolve('/').replace(/\/$/, '') + '/';
@@ -196,12 +196,14 @@
   <meta property="og:description" content="Seven ways to run Android™ apps off Android, side by side." />
   <meta property="og:url" content="https://spectre-oss.github.io/shiraz/compare/" />
   <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Shiraz" />
   <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
 </svelte:head>
 
 <a class="skip-link" href="#compare-main">Skip to the comparison</a>
-<header id="top" class="compat-header wrap"><a class="brand" href={resolve('/')}><img src={home + 'spectre.svg'} width="42" height="42" alt="" /><span>shiraz</span></a><nav aria-label="Main navigation"><a class="nav-home" href={resolve('/')}>Home</a><a href={resolve('/compatibility/')}>Compatibility</a><GitHubLink /></nav></header>
+<header id="top" class="compat-header wrap"><a class="brand" href={resolve('/')}><img src={home + 'spectre.svg'} width="42" height="42" alt="" /><span>shiraz</span></a><SiteNav /></header>
 
 <main id="compare-main">
   <section class="peers-hero wrap">
@@ -405,7 +407,6 @@
   @keyframes pillar-rise { from { transform: scaleY(.2); opacity: 0; } }
 
   /* The brand already links home; drop the duplicate so the bar fits a phone. */
-  @media (max-width: 760px) { .nav-home { display: none !important; } }
   @media (max-width: 900px) {
     .peers-hero { grid-template-columns: 1fr; }
     .hero-glass { height: 240px; }

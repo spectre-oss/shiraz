@@ -3,7 +3,7 @@
   import { tick } from 'svelte';
   import { resolve } from '$app/paths';
   import Footer from '#lib/Footer.svelte';
-  import GitHubLink from '#lib/GitHubLink.svelte';
+  import SiteNav from '#lib/SiteNav.svelte';
   import AndroidCoverage from '#lib/AndroidCoverage.svelte';
   import { applications } from '#lib/compatibility.js';
   import '../../styles.css';
@@ -41,11 +41,13 @@
   <meta property="og:description" content="What has been tested, what is partial, and what is still blocked." />
   <meta property="og:url" content="https://spectre-oss.github.io/shiraz/compatibility/" />
   <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Shiraz" />
   <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
 </svelte:head>
 <a class="skip-link" href="#compatibility-main">Skip to app results</a>
-<header id="top" class="compat-header wrap"><a class="brand" href={resolve('/')}><img src={resolve('/').replace(/\/$/, '') + '/spectre.svg'} width="42" height="42" alt="" /><span>shiraz</span></a><nav aria-label="Main navigation"><a href={resolve('/')}>Home</a><a href={resolve('/') + '#builder'}>Open the builder <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg></a><GitHubLink /></nav></header>
+<header id="top" class="compat-header wrap"><a class="brand" href={resolve('/')}><img src={resolve('/').replace(/\/$/, '') + '/spectre.svg'} width="42" height="42" alt="" /><span>shiraz</span></a><SiteNav /></header>
 <main id="compatibility-main" class="compat-main wrap">
   <div class="compat-hero">
   <header class="compat-intro"><h1>A little clarity.<br><span>Before you build.</span></h1><p>Explore what has been observed running with Shiraz.<br>Real test notes, with the unfinished parts left in.</p><p class="compat-invitation">You can add to the experiment, too. <a href="https://github.com/spectre-oss/shiraz/edit/main/landing/src/lib/compatibility.json">Add your app’s test results</a> through a pull request.</p></header>
