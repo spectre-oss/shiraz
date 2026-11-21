@@ -134,7 +134,7 @@ MACOS_ANDROIDFW_LIB_DIR := $(MACOS_ANDROIDFW_TREE)/out/host/darwin-x86/lib64
 MACOS_ANDROIDFW_INCLUDE := $(MACOS_ANDROIDFW_TREE)/libandroidfw/include
 MACOS_ANDROIDFW_HEADER := $(MACOS_ANDROIDFW_INCLUDE)/androidfw/androidfw_c_api.h
 MACOS_LINK_ANDROID = $(MACOS_OUT)/libandroid.so $(MACOS_RPATH)
-MACOS_PRESENTATION_HEADERS := include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/evdev_key_codes.h include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/display_geometry.hpp
+MACOS_PRESENTATION_HEADERS := include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/evdev_key_codes.h include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/display_geometry.hpp include/shiraz/darwin/metal_probe.hpp
 MACOS_TESTS := test-compositor test-window-aspect test-pointer test-keyboard test-archive-path test-native-window test-shared-frame test-choreographer test-sensors test-shared-memory test-image-reader test-hardware-buffer test-system-fonts test-media-crypto test-media-ndk test-ipc-channel test-sync-fence
 MACOS_SDL_TESTS := test-presentation test-live-input
 
@@ -321,9 +321,12 @@ $(MACOS_OUT)/libshiraz-image.so: native/image.cpp native/darwin/image.exports $(
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) $(MACOS_IMAGE_CFLAGS) -fPIC $(MACOS_DYLIB) $(call MACOS_EXPORTS_FLAGS,native/darwin/image.exports) native/image.cpp -o $@ $(MACOS_IMAGE_LIBS)
 	@$(call MACOS_EXPORTS_CHECK,native/darwin/image.exports,$(MACOS_IMAGE_JAVA))
 
+$(MACOS_OUT)/metal_probe.o: native/darwin/metal_probe.mm include/shiraz/darwin/metal_probe.hpp $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -fPIC -fobjc-arc -c native/darwin/metal_probe.mm -o $@
+
 # Links libshiraz-gpu like the Linux shiraz-preview (SDL_LIBS -lshiraz-gpu).
-$(MACOS_OUT)/shiraz-preview: native/main.cpp native/presentation.cpp $(MACOS_PRESENTATION_HEADERS) build/version.hpp $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG)
-	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) native/main.cpp native/presentation.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS)
+$(MACOS_OUT)/shiraz-preview: native/main.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o $(MACOS_PRESENTATION_HEADERS) build/version.hpp $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG)
+	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) native/main.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS) -framework Metal -framework Foundation
 
 # Java surface bridge loaded by dalvikvm through java.library.path.
 MACOS_JNI_HEADERS := include/shiraz/window_snapshot.hpp include/shiraz/native_window.h include/shiraz/gpu.hpp build/version.hpp $(MACOS_PRESENTATION_HEADERS)
@@ -453,8 +456,8 @@ macos-egl-shim-no-angle-test: $(MACOS_OUT)/test-egl-shim-no-angle $(MACOS_OUT)/l
 
 # SDL is linked statically here and its public API stays exported, so test
 # helpers bind to this SDL instance instead of linking a second copy.
-$(MACOS_OUT)/libshiraz-jni.so: native/jni_surface.cpp native/presentation.cpp include/shiraz/window_aspect.hpp $(MACOS_JNI_HEADERS) mk/darwin.mk $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_SDL_ARCHIVE)
-	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/jni_surface.cpp native/presentation.cpp -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS)
+$(MACOS_OUT)/libshiraz-jni.so: native/jni_surface.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o include/shiraz/window_aspect.hpp $(MACOS_JNI_HEADERS) mk/darwin.mk $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_SDL_ARCHIVE)
+	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/jni_surface.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o -o $@ $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS) -framework Metal -framework Foundation
 
 $(MACOS_OUT)/libshiraz-test-input.so: tests/native/input_injector.cpp $(MACOS_OUT)/libshiraz-jni.so $(MACOS_SDL_CONFIG)
 	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) tests/native/input_injector.cpp -o $@ $(MACOS_OUT)/libshiraz-jni.so $(MACOS_RPATH)
@@ -568,10 +571,10 @@ $(MACOS_OUT)/test-media-ndk: tests/media_ndk.cpp $(MACOS_OUT)/libandroid.so
 	$(MACOS_CXX) tests/media_ndk.cpp -o $@ $(MACOS_LINK_ANDROID)
 $(MACOS_OUT)/test-sync-fence: tests/darwin/sync_fence.cpp $(MACOS_OUT)/libandroid.so
 	$(MACOS_CXX) tests/darwin/sync_fence.cpp -o $@ $(MACOS_LINK_ANDROID) -pthread
-$(MACOS_OUT)/test-presentation: tests/presentation.cpp native/presentation.cpp $(MACOS_PRESENTATION_HEADERS) $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_OUT)/.dir
-	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/presentation.cpp native/presentation.cpp -o $@ $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS)
-$(MACOS_OUT)/test-live-input: tests/live_input.cpp native/presentation.cpp $(MACOS_PRESENTATION_HEADERS) $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_OUT)/.dir
-	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/live_input.cpp native/presentation.cpp -o $@ $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS)
+$(MACOS_OUT)/test-presentation: tests/presentation.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o $(MACOS_PRESENTATION_HEADERS) $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/presentation.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o -o $@ $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS) -framework Metal -framework Foundation
+$(MACOS_OUT)/test-live-input: tests/live_input.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o $(MACOS_PRESENTATION_HEADERS) $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_SDL_CONFIG) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/live_input.cpp native/presentation.cpp $(MACOS_OUT)/metal_probe.o -o $@ $(MACOS_OUT)/libshiraz-gpu.so $(MACOS_RPATH) $(MACOS_SDL_LIBS) -framework Metal -framework Foundation
 
 # macos-build (and so macos-check) needs SDL only. libshiraz-resources links
 # libandroidfw from the ART host tree, so it is built by macos-runtime-libs.
@@ -3331,6 +3334,10 @@ macos-notifications-check: $(MACOS_OUT)/libshiraz-notifications.so $(MACOS_OUT)/
 
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-notifications.so
 
+$(MACOS_OUT)/test-metal-probe: tests/darwin/metal_probe.cpp $(MACOS_OUT)/metal_probe.o include/shiraz/darwin/metal_probe.hpp $(MACOS_SDL_CONFIG) $(MACOS_OUT)/.dir
+	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/darwin/metal_probe.cpp $(MACOS_OUT)/metal_probe.o -o $@ -framework Metal -framework Foundation
 
-
+.PHONY: macos-metal-probe-check
+macos-metal-probe-check: $(MACOS_OUT)/test-metal-probe
+	$(MACOS_OUT)/test-metal-probe
 

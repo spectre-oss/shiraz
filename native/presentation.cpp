@@ -8,6 +8,7 @@
 #include <atomic>
 #include "shiraz/live_input.hpp"
 #if defined(__APPLE__)
+#include "shiraz/darwin/metal_probe.hpp"
 #include "shiraz/frame_export.hpp"
 #endif
 #include "shiraz/window_aspect.hpp"
@@ -488,6 +489,7 @@ void present(const Surface& initial, const std::string& title, int frames,
              const std::function<void(Surface&, const DisplayGeometry&)>& displayChanged) {
     LiveInput live(std::getenv("SHIRAZ_LIVE_INPUT"));
 #if defined(__APPLE__)
+    DarwinAppNapGuard appNapGuard;
     // Embedded: frames go to the launcher's shared file, the window stays hidden
     // until "embed 0" detaches it. Visibility follows the embedding, not the window.
     std::unique_ptr<FrameExport> exporter;
@@ -604,6 +606,17 @@ void present(const Surface& initial, const std::string& title, int frames,
             checked(SDL_GetRendererInfo(renderer.get(), &rendererInfo));
         }
     }
+#if defined(__APPLE__)
+    if ((rendererInfo.flags & SDL_RENDERER_ACCELERATED) && !SDL_GL_GetCurrentContext()) {
+        char metalDevice[256] = {};
+        char metalVendor[128] = {};
+        if (darwin_metal_device_info(metalDevice, sizeof(metalDevice), metalVendor,
+                                     sizeof(metalVendor))) {
+            deviceName = metalDevice;
+            vendorName = metalVendor;
+        }
+    }
+#endif
     if (rendererMode == "gpu" && !(rendererInfo.flags & SDL_RENDERER_ACCELERATED))
         throw std::runtime_error("GPU presentation requested but SDL selected software");
     std::cerr << "SHIRAZ_PRESENTATION renderer="
@@ -1161,6 +1174,11 @@ void present(const Surface& initial, const std::string& title, int frames,
             if ((event.type == SDL_FINGERDOWN || event.type == SDL_FINGERMOTION ||
                  event.type == SDL_FINGERUP) &&
                 ownWindow(event.tfinger.windowID) && event.tfinger.touchId != SDL_MOUSE_TOUCHID) {
+#if defined(__APPLE__)
+                if (!darwin_allow_touch_device_type(
+                        int(SDL_GetTouchDeviceType(event.tfinger.touchId))))
+                    continue;
+#endif
                 if (!pointer.active()) {
                     int w, h;
                     SDL_GetWindowSize(window.get(), &w, &h);

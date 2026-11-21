@@ -103,7 +103,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
 | [~] | Window and layer | `native/presentation.cpp`, `patches/sdl-cocoa-gles-layer-scale.patch` | SDL Cocoa window. With ANGLE built, a Cocoa window uses SDL's `opengles2` renderer (Cocoa EGL on ANGLE Metal); without it, the `metal` renderer. The SDL patch sets the GL view layer's `contentsScale` from the window's backing scale; without it a 1x display kept a stale 2.0, so ANGLE's drawable was 720x1280 under a 360x640 SDL output and the frame filled one quarter of the window. Under `__APPLE__` the presenter logs `SHIRAZ_EGL_SURFACE` (SDL output vs EGL surface size), which the windowed smokes require equal. Metal-layer handle and live resize still open | M |
-| [ ] | GPU capability probe | `native/presentation.cpp` | `MTLCreateSystemDefaultDevice().name` instead of `glGetString`; Metal-device gate instead of GL-context gate | L |
+| [x] | GPU capability probe | `native/presentation.cpp`, `native/darwin/metal_probe.mm` | `MTLCreateSystemDefaultDevice().name` (`SHIRAZ_GPU device=Apple M2 Pro vendor=Apple` under Metal; ANGLE GLES continues to report via `glGetString`; `make macos-metal-probe-check`) | L |
 | [ ] | Live resize | `native/presentation.cpp` | Render from an `SDL_AddEventWatch` callback during Cocoa live resize, or `presentsWithTransaction`; relayout on every size change | M |
 | [x] | GPU canvas | `native/gpu.cpp`, `include/shiraz/gpu.hpp`, `scripts/bootstrap_skia.py` | M4a: unchanged `native/gpu.cpp`, Skia Ganesh GL on SDL's ANGLE Metal context (`SHIRAZ_CANVAS backend=skia-ganesh`, no fallback, checked by the opengles2 window smokes). Ganesh-Metal is not used (see GLES and GPU canvas (M4a)) | M |
 | [x] | Symbol exports | `native/gpu.exports`, `native/darwin/*.exports`, `native/darwin/gpu.cxx-symbols` | ld64 `-exported_symbols_list`; each list is generated and checked by `scripts/darwin_jni_exports.py` against the sources before linking and against `nm -gU` after | L |
@@ -125,13 +125,13 @@ symbol lookup are reusable; the host-facing layer is new.
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
 | [ ] | Pointer mapping | `include/shiraz/pointer.hpp`, `display_geometry.hpp` | Unchanged math; Retina density (2x → 320 dpi) and fractional scaled modes verified | L |
-| [ ] | Touch events | `native/presentation.cpp` | Accept only `SDL_TOUCH_DEVICE_DIRECT`; trackpad (indirect) fingers must not become Android touches | L |
+| [x] | Touch events | `native/presentation.cpp`, `include/shiraz/darwin/metal_probe.hpp` | Reject indirect trackpad devices (`SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE` / `SDL_TOUCH_DEVICE_INDIRECT_RELATIVE`) under `__APPLE__` so trackpad fingers never become Android touches; allow direct touchscreens (`make macos-metal-probe-check`) | L |
 | [ ] | Trackpad gestures | `native/presentation.cpp` | Pinch/magnify and two-finger scroll → Android scale gestures and scroll events | M |
 | [~] | Keyboard | `include/shiraz/sdl_keyboard.hpp`, `include/shiraz/keyboard.hpp` | In-tree `KEY_*` table (record provenance and license); Command-key shortcut policy | L |
 | [ ] | IME | `native/presentation.cpp` | `NSTextInputClient` via SDL text input, including preedit (`SDL_TEXTEDITING`) | M |
 | [ ] | Clipboard | framework | `NSPasteboard` via SDL clipboard | L |
 | [ ] | Main-thread rule | `native/presentation.cpp`, `native/jni_surface.cpp`, `ActivityRunner.java` | All Cocoa/SDL video work on the primordial thread; Android main Looper integrated with the Cocoa run loop | M |
-| [ ] | App Nap | launcher | `NSProcessInfo beginActivityWithOptions:` while navigating or playing audio | L |
+| [x] | App Nap | `native/presentation.cpp`, `native/darwin/metal_probe.mm` | RAII `DarwinAppNapGuard` (`NSProcessInfo beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep \| NSActivityLatencyCritical`) held during interactive presentation (`make macos-metal-probe-check`) | L |
 
 ### 5. OS primitives
 
