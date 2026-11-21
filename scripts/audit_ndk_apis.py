@@ -1078,8 +1078,13 @@ def audit_directory(lib_dir: Path) -> dict:
             }
         )
 
+    try:
+        display_dir = str(lib_dir.resolve().relative_to(ROOT))
+    except ValueError:
+        display_dir = str(lib_dir)
+
     return {
-        "lib_dir": str(lib_dir),
+        "lib_dir": display_dir,
         "libraries_present": libs_present,
         "libraries_total": len(NDK_CATALOG),
         "symbols_present": total_present,

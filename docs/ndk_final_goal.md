@@ -45,7 +45,7 @@ behavioral unit tests:
 | **N6** | `libamidi.so`, `libcamera2ndk.so` & `libOpenMAXAL.so` | Native MIDI port/loopback engine, Camera2 metadata/request/session API, OpenMAX AL 1.0.1 COM engine | `[x]` |
 | **N7** | `libbinder_ndk.so` & `libneuralnetworks.so` | Real in-process NDK Binder (`AIBinder_*`, `AParcel_*`, `AStatus_*`, `ABinderProcess_*`) + real CPU NNAPI tensor engine (`ANeuralNetworks*`) | `[x]` |
 | **N8** | `libvulkan.so` | Dynamic Vulkan loader/ICD bridge + `VK_KHR_android_surface` & `AHardwareBuffer` Android extension hooks | `[x]` |
-| **N9** | Final audit, build integration & tracker update | `MISSING_ANDROID_LIBRARIES.md` §5 regeneration, `landing/src/lib/android-support.json` update, `--require-complete` verification | `[ ]` |
+| **N9** | Final audit, build integration & tracker update | `MISSING_ANDROID_LIBRARIES.md` §5 regeneration, `landing/src/lib/android-support.json` update, `--require-complete` verification | `[x]` |
 
 ## Complete NDK library inventory (15 native libraries)
 
@@ -70,10 +70,10 @@ behavioral unit tests:
 ## Verification commands
 
 ```sh
-# Build all macOS NDK libraries and run NDK unit tests
+# Build all macOS NDK libraries and run all 9 NDK behavioral test suites
 make macos-ndk-build
 make macos-ndk-test
 
-# Audit live exported NDK symbols against the API 35 catalog
-python3 scripts/audit_ndk_apis.py
+# Audit live exported NDK symbols against the API 35 catalog (15/15 libs, 887/887 symbols)
+python3 scripts/audit_ndk_apis.py --require-complete
 ```

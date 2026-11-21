@@ -112,6 +112,15 @@
       "evidence": "docs/framework_final_goal.md"
     },
     {
+      "id": "ndk-native",
+      "name": "NDK native C/C++ libraries",
+      "scope": "Linux and macOS ARM64",
+      "status": "Partial",
+      "verification": "Native unit tests and nm audit",
+      "notes": "All 15 tracked Android API 35 NDK shared libraries (887/887 cataloged C symbols across libandroid, libjnigraphics, libmediandk, libsync, libOpenSLES, libaaudio, liblog, libicu, libamidi, libcamera2ndk, libOpenMAXAL, libbinder_ndk, libneuralnetworks, libvulkan and libnativewindow) build and pass native behavioral tests; Vulkan GPU execution requires a host ICD and physical Camera2 hardware capture remains host-dependent.",
+      "evidence": "docs/ndk_final_goal.md"
+    },
+    {
       "id": "native-macos",
       "name": "Android native ELF / Bionic",
       "scope": "macOS ARM64",

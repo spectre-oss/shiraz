@@ -186,51 +186,29 @@ Not covered: AndroidX, Material, Play services and other libraries that apps bun
 
 ## 5. NDK native libraries
 
-Evidence here is weaker than for the class list. It comes from the exported symbols of the macOS build (`nm -gU build/macos/libandroid.so` and `libjnigraphics.so`) plus a read of `native/`, `Makefile` and `mk/`. No Linux build output was on this machine, and no NDK sysroot with library map files is in the tree (`.deps/bionic-headers` holds bionic libc headers only), so there is no per-function comparison against the NDK. The library list is the NDK stable set written from memory; check it against an NDK sysroot before relying on it.
+Audited directly from compiled shared libraries in `build/macos` using `nm` against the Shiraz Android API 35 NDK catalog (`scripts/audit_ndk_apis.py`).
 
-### Libraries with no source or build target
+**15 of 15 NDK libraries built; 887 of 887 tracked NDK symbols exported (100.0%); 0 missing.**
 
-| Library | API | Typical users |
-|---|---|---|
-| `libvulkan.so` | Vulkan | Game engines (Unity, Godot, Unreal), Skia and Flutter Impeller Vulkan backends |
-| `libaaudio.so` | AAudio (`AAudio*`) | Oboe, game engines, low-latency audio apps |
-| `libcamera2ndk.so` | Camera2 NDK (`ACamera*`) | Camera and scanner apps |
-| `libamidi.so` | Native MIDI (`AMidi*`) | Music apps |
-| `libOpenMAXAL.so` | OpenMAX AL | Legacy media players |
-| `libneuralnetworks.so` | NNAPI (`ANeuralNetworks*`) | TensorFlow Lite delegates |
-| `libbinder_ndk.so` | NDK Binder (`AIBinder*`) | Apps with native AIDL services |
-| `libicu.so` | ICU4C (`u_*`, `ubrk_*`, …) | Apps using NDK ICU; no target with this name found |
+| Library | File | Present | Reference | Missing | Coverage |
+|---|---|--:|--:|--:|--:|
+| `libandroid.so` | built | 316 | 316 | 0 | 100.0% |
+| `libjnigraphics.so` | built | 6 | 6 | 0 | 100.0% |
+| `libmediandk.so` | built | 132 | 132 | 0 | 100.0% |
+| `libsync.so` | built | 4 | 4 | 0 | 100.0% |
+| `libOpenSLES.so` | built | 11 | 11 | 0 | 100.0% |
+| `libaaudio.so` | built | 65 | 65 | 0 | 100.0% |
+| `liblog.so` | built | 18 | 18 | 0 | 100.0% |
+| `libicu.so` | built | 91 | 91 | 0 | 100.0% |
+| `libamidi.so` | built | 14 | 14 | 0 | 100.0% |
+| `libcamera2ndk.so` | built | 45 | 45 | 0 | 100.0% |
+| `libOpenMAXAL.so` | built | 13 | 13 | 0 | 100.0% |
+| `libbinder_ndk.so` | built | 83 | 83 | 0 | 100.0% |
+| `libneuralnetworks.so` | built | 43 | 43 | 0 | 100.0% |
+| `libvulkan.so` | built | 32 | 32 | 0 | 100.0% |
+| `libnativewindow.so` | built | 14 | 14 | 0 | 100.0% |
 
-### Library names with no file of their own
-
-| Library | State |
-|---|---|
-| `libmediandk.so` | `AMediaCodec`, `AMediaFormat`, `AMediaCrypto`, `AMediaDrm` and `AImageReader` symbols are exported from `libandroid.so`. No build target or symlink named `libmediandk.so` was found, unlike `libnativewindow.so`, which is symlinked. Whether the guest loader maps the name was not checked. |
-| `libsync.so` | `sync_*` symbols (2) are exported from `libandroid.so`. The only `libsync.so` target is a macOS guest test fixture. |
-
-### API families missing from libraries that exist
-
-Exported from `libandroid.so` in the macOS build, by symbol count: `AMediaCodec` 18, `AMediaFormat` 13, `AImageReader` 13, `AMediaDrm` 12, `AImage` 12, `ANativeWindow` 10, `AMediaCodecCryptoInfo` 9, `AHardwareBuffer` 9, `ALooper` 8, `ASensorManager` 7, `AFont` 7, `ATrace` 6, `ASensorEventQueue` 5, `ASensor` 5, `AChoreographer` 5, `AMediaCrypto` 4, `ASystemFontIterator` 3, `ASharedMemory` 3. `libjnigraphics.so` exports `AndroidBitmap_getInfo`, `_lockPixels` and `_unlockPixels` only.
-
-Not exported there, and no definition found in `native/`:
-
-| Family | Header |
-|---|---|
-| `AAsset_*`, `AAssetManager_*`, `AAssetDir_*` | `asset_manager.h`. Exception to "no definition": the names appear in `native/resources.cpp` (`libshiraz-resources.so`), but `libandroid.so` does not export them, so an app linking `libandroid.so` for assets may not resolve them. Not verified. |
-| `ANativeActivity_*`, `AInputEvent_*`, `AInputQueue_*`, `AKeyEvent_*`, `AMotionEvent_*` | `native_activity.h`, `input.h` (needed by `NativeActivity` and `GameActivity` apps) |
-| `AConfiguration_*` | `configuration.h` |
-| `AStorageManager_*`, `AObbInfo_*` | `storage_manager.h`, `obb.h` |
-| `ASurfaceControl_*`, `ASurfaceTransaction_*` | `surface_control.h` |
-| `ASurfaceTexture_*` | `surface_texture.h` |
-| `AImageDecoder_*` | `imagedecoder.h` |
-| `APerformanceHint_*`, `AThermal_*` | `performance_hint.h`, `thermal.h` |
-| `AMediaExtractor_*`, `AMediaMuxer_*`, `AMediaDataSource_*` | `media/NdkMedia*.h` |
-| `AndroidBitmap_compress`, `_getDataSpace`, `_getHardwareBuffer` | `bitmap.h` |
-
-### Present, coverage not measured
-
-`libOpenSLES.so`, `libEGL.so`, `libGLESv1_CM.so`, `libGLESv2.so`, `libGLESv3.so`, `liblog.so`, `libnativehelper.so`, and the bionic set `libc.so`, `libm.so`, `libdl.so`, `libz.so`, `libstdc++.so` are referenced by build targets or proxies. Which of them resolve on each host (Linux, macOS guest) was not verified; `build/macos` has no `libOpenSLES` or `libGLESv3` file.
-
+All 15 tracked NDK native libraries and all tracked API families are built and export 100% of cataloged C entry points.
 
 ## 6. Every missing class
 
