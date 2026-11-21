@@ -1746,6 +1746,7 @@ bootstrap-patch-check:
 include mk/launcher.mk
 
 include mk/pending-intent.mk
+include mk/ndk.mk
 
 # Optional upstream Apache HTTP compatibility; inputs and notices stay local.
 .PHONY: legacy-http

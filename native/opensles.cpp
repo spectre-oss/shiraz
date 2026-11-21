@@ -742,3 +742,17 @@ extern "C" SLresult slCreateEngine(SLObjectItf* out, SLuint32 options, const SLE
     *out = reinterpret_cast<SLObjectItf>(&o->object);
     return SL_RESULT_SUCCESS;
 }
+
+extern "C" SLresult slQueryNumSupportedEngineInterfaces(SLuint32* pNumSupportedInterfaces) {
+    if (!pNumSupportedInterfaces)
+        return SL_RESULT_PARAMETER_INVALID;
+    *pNumSupportedInterfaces = 1;
+    return SL_RESULT_SUCCESS;
+}
+
+extern "C" SLresult slQuerySupportedEngineInterfaces(SLuint32 index, SLInterfaceID* pInterfaceId) {
+    if (!pInterfaceId || index != 0)
+        return SL_RESULT_PARAMETER_INVALID;
+    *pInterfaceId = SL_IID_ENGINE;
+    return SL_RESULT_SUCCESS;
+}

@@ -214,3 +214,104 @@ extern "C" int sync_wait(int fd, int timeout) {
     }
     return 0;
 }
+
+#include <cstdlib>
+#include <cstdint>
+#include <time.h>
+
+#if defined(__APPLE__)
+struct shiraz_sync_fence_info {
+    char obj_name[32];
+    char driver_name[32];
+    int32_t status;
+    uint32_t flags;
+    uint64_t timestamp_ns;
+};
+struct shiraz_sync_file_info {
+    char name[32];
+    int32_t status;
+    uint32_t flags;
+    uint32_t num_fences;
+    uint32_t pad;
+    uint64_t sync_fence_info;
+};
+
+extern "C" shiraz_sync_file_info* sync_file_info(int32_t fd) {
+    if (check(fd, EBADF, ENOTTY))
+        return nullptr;
+    auto* block = static_cast<char*>(
+        std::calloc(1, sizeof(shiraz_sync_file_info) + sizeof(shiraz_sync_fence_info)));
+    if (!block) {
+        errno = ENOMEM;
+        return nullptr;
+    }
+    auto* info = reinterpret_cast<shiraz_sync_file_info*>(block);
+    auto* fence = reinterpret_cast<shiraz_sync_fence_info*>(block + sizeof(shiraz_sync_file_info));
+    const int signaled = ready(fd) ? 1 : 0;
+    std::strncpy(info->name, "shiraz-fence", sizeof(info->name) - 1);
+    info->status = signaled;
+    info->flags = 0;
+    info->num_fences = 1;
+    info->sync_fence_info = reinterpret_cast<uintptr_t>(fence);
+    std::strncpy(fence->obj_name, "shiraz-fence", sizeof(fence->obj_name) - 1);
+    std::strncpy(fence->driver_name, "shiraz-pipe", sizeof(fence->driver_name) - 1);
+    fence->status = signaled;
+    fence->flags = 0;
+    if (signaled) {
+        struct timespec ts{};
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+            fence->timestamp_ns = static_cast<uint64_t>(ts.tv_sec) * UINT64_C(1000000000) +
+                                  static_cast<uint64_t>(ts.tv_nsec);
+    }
+    return info;
+}
+
+extern "C" void sync_file_info_free(shiraz_sync_file_info* info) {
+    std::free(info);
+}
+#else
+extern "C" struct sync_file_info* sync_file_info(int32_t fd) {
+    struct sync_file_info* info =
+        static_cast<struct sync_file_info*>(std::calloc(1, sizeof(struct sync_file_info)));
+    if (!info) {
+        errno = ENOMEM;
+        return nullptr;
+    }
+    int err;
+    do {
+        err = ioctl(fd, SYNC_IOC_FILE_INFO, info);
+    } while (err < 0 && errno == EINTR);
+    if (err < 0) {
+        std::free(info);
+        return nullptr;
+    }
+    if (info->num_fences > 0) {
+        const uint32_t count = info->num_fences;
+        auto* fences = static_cast<struct sync_fence_info*>(
+            std::calloc(count, sizeof(struct sync_fence_info)));
+        if (!fences) {
+            std::free(info);
+            errno = ENOMEM;
+            return nullptr;
+        }
+        info->sync_fence_info = reinterpret_cast<uintptr_t>(fences);
+        do {
+            err = ioctl(fd, SYNC_IOC_FILE_INFO, info);
+        } while (err < 0 && errno == EINTR);
+        if (err < 0) {
+            std::free(fences);
+            std::free(info);
+            return nullptr;
+        }
+    }
+    return info;
+}
+
+extern "C" void sync_file_info_free(struct sync_file_info* info) {
+    if (!info)
+        return;
+    if (info->num_fences > 0 && info->sync_fence_info)
+        std::free(reinterpret_cast<void*>(static_cast<uintptr_t>(info->sync_fence_info)));
+    std::free(info);
+}
+#endif

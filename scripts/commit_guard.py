@@ -30,6 +30,7 @@ PUBLIC_DOCS = {
     'docs/others/droidloom.md',
     'docs/macos_final_goal.md',
     'docs/framework_final_goal.md',
+    'docs/ndk_final_goal.md',
     'docs/MISSING_ANDROID_LIBRARIES.md',
     'docs/experiments/README.md',
     'docs/experiments/flutter/README.md',
