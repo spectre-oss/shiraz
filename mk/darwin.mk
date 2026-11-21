@@ -3345,3 +3345,22 @@ macos-metal-probe-check: $(MACOS_OUT)/test-metal-probe
 macos-app-bundle-check:
 	python3 -m unittest -v tests.test_build_macos_app
 
+# DarwinLocation on macOS: CoreLocation (CLLocationManager).
+MACOS_LOCATION_JAVA := java/shiraz/runtime/DarwinLocation.java
+MACOS_LOCATION_FRAMEWORKS := -framework CoreLocation -framework Foundation
+$(MACOS_OUT)/libshiraz-location.so: native/darwin/location.mm native/darwin/location.exports $(MACOS_LOCATION_JAVA) scripts/darwin_jni_exports.py mk/darwin.mk $(MACOS_OUT)/.dir
+	@$(call MACOS_EXPORTS_PRECHECK,native/darwin/location.exports,$(MACOS_LOCATION_JAVA))
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC -fobjc-arc $(MACOS_DYLIB) $(call MACOS_EXPORTS_FLAGS,native/darwin/location.exports) native/darwin/location.mm -o $@ $(MACOS_LOCATION_FRAMEWORKS) -pthread
+	@$(call MACOS_EXPORTS_CHECK,native/darwin/location.exports,$(MACOS_LOCATION_JAVA))
+
+$(MACOS_OUT)/test-location: tests/darwin/location.cpp $(MACOS_OUT)/libshiraz-location.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) tests/darwin/location.cpp -o $@ -Wl,-headerpad_max_install_names -pthread
+
+.PHONY: macos-location-check
+macos-location-check: $(MACOS_OUT)/libshiraz-location.so $(MACOS_OUT)/test-location scripts/build_macos_app.py
+	$(MACOS_OUT)/test-location $(CURDIR)/$(MACOS_OUT)/libshiraz-location.so
+	python3 scripts/build_macos_app.py --executable $(MACOS_OUT)/test-location --output $(MACOS_OUT)/test-location.app --name test-location --bundle-id org.shiraz.test.location --lib $(MACOS_OUT)/libshiraz-location.so
+	$(MACOS_OUT)/test-location.app/Contents/MacOS/test-location $(CURDIR)/$(MACOS_OUT)/test-location.app/Contents/Frameworks/libshiraz-location.so --bundled
+
+macos-runtime-libs: $(MACOS_OUT)/libshiraz-location.so
+

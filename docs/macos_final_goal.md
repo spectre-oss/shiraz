@@ -167,7 +167,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
 | [x] | Notifications | `native/notifications.cpp`, `native/darwin/notifications.mm`, `DesktopNotifications.java` | `libshiraz-notifications.so` over `UNUserNotificationCenter` with safe unbundled `.app` guard (`CFBundleIdentifier` check avoiding `NSInternalInconsistencyException` abort), urgency -> `interruptionLevel`, sound suppression, and active delivered-notification reconciliation (`make macos-notifications-check`) | M |
-| [ ] | Location | `LocationManager.java` | `CLLocationManager`; Info.plist `NSLocationUsageDescription`; Android fine/coarse → accuracy | M |
+| [~] | Location | `native/darwin/location.mm`, `DarwinLocation.java`, `LocationManager.java` | `libshiraz-location.so` over `CLLocationManager` on a dedicated `CFRunLoop` worker thread with safe unbundled/`.app` + `NSLocationUsageDescription` guard, fine/coarse accuracy (`kCLLocationAccuracyBest` vs `kCLLocationAccuracyHundredMeters`), distance filter, and authorization status mapping (`make macos-location-check`); wiring live fixes into `LocationManager` open | M |
 | [x] | System fonts | `native/system_fonts.cpp` | CoreText enumeration (`CTFontManagerCopyAvailableFontURLs`, `.ttc` face index); bundled Android fonts first | M |
 | [x] | Text shaping | `native/text.cpp` | In-tree FreeType, HarfBuzz, fontconfig and ICU (system ICU has no public headers); in-tree `fonts.conf` prefers the bundled Noto fonts | M |
 | [ ] | Connectivity | `HostConnectivity.java` | `getifaddrs`, `NWPathMonitor`; no `/proc/net`, `/sys/class/net`, `/etc/resolv.conf` assumptions | L |
