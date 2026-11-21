@@ -3341,3 +3341,7 @@ $(MACOS_OUT)/test-metal-probe: tests/darwin/metal_probe.cpp $(MACOS_OUT)/metal_p
 macos-metal-probe-check: $(MACOS_OUT)/test-metal-probe
 	$(MACOS_OUT)/test-metal-probe
 
+.PHONY: macos-app-bundle-check
+macos-app-bundle-check:
+	python3 -m unittest -v tests.test_build_macos_app
+
