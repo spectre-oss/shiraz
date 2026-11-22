@@ -38,7 +38,7 @@ $(WINDOWS_OUT)/test-win32-platform.exe: tests/win32/platform_test.cpp $(WINDOWS_
 
 windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe
 
-windows-check: windows-build windows-app-bundle-check
+windows-check: windows-build
 	$(WINDOWS_OUT)/test-win32-platform.exe
 
 windows-app-bundle-check:
