@@ -47,7 +47,7 @@ public final class HostContentPicker {
   if(!file.isFile()||!file.canRead()){System.err.println("SHIRAZ_PICK_UNREADABLE "+path);return null;}
   return Uri.fromFile(file.getAbsoluteFile());
  }
- /** The host's native file dialog: AppKit through osascript on macOS, zenity elsewhere. */
+ /** The host's native file dialog: AppKit through osascript on macOS, WinForms OpenFileDialog on Windows, zenity elsewhere. */
  public static ArrayList<String> command(String mimeType){
   boolean images=mimeType!=null&&mimeType.startsWith("image/");
   ArrayList<String> command=new ArrayList<String>();
@@ -55,6 +55,15 @@ public final class HostContentPicker {
    command.add("/usr/bin/osascript");
    command.add("-e");
    command.add("POSIX path of (choose file with prompt \"Select file\""+(images?" of type {\"public.image\"}":"")+")");
+   return command;
+  }
+  if(HostOs.windows()){
+   command.add("powershell.exe");
+   command.add("-NoProfile");
+   command.add("-STA");
+   command.add("-Command");
+   String filter=images?"Images|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp|All Files|*.*":"All Files|*.*";
+   command.add("Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Select file'; $d.Filter = '"+filter+"'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.FileName }");
    return command;
   }
   command.add("zenity");
@@ -68,7 +77,7 @@ public final class HostContentPicker {
   try{
    ProcessBuilder builder=new ProcessBuilder(command);
    Map<String,String> environment=builder.environment();for(String key:new ArrayList<String>(environment.keySet()))if(key.startsWith("LD_")||key.startsWith("DYLD_"))environment.remove(key);
-   builder.redirectError(ProcessBuilder.Redirect.to(new File("/dev/null")));
+   builder.redirectError(ProcessBuilder.Redirect.to(new File(HostOs.nullDevicePath())));
    Process process=builder.start();
    String line;
    try(BufferedReader reader=new BufferedReader(new InputStreamReader(process.getInputStream(),StandardCharsets.UTF_8))){

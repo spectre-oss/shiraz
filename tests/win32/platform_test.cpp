@@ -61,6 +61,47 @@ std::size_t shiraz_win32_enumerate_system_fonts(ShirazWin32FontCallback cb, void
 
 int shiraz_win32_video_has_decoder(const char* mime);
 int shiraz_win32_location_status();
+
+struct ShirazWin32HwBuf;
+int shiraz_win32_hwbuf_allocate(std::uint32_t width, std::uint32_t height, std::uint32_t format,
+                                std::uint64_t usage, ShirazWin32HwBuf** out);
+void shiraz_win32_hwbuf_acquire(ShirazWin32HwBuf* buf);
+void shiraz_win32_hwbuf_release(ShirazWin32HwBuf* buf);
+int shiraz_win32_hwbuf_describe(const ShirazWin32HwBuf* buf, std::uint32_t* outWidth,
+                                std::uint32_t* outHeight, std::uint32_t* outStride,
+                                std::uint32_t* outFormat, int* outGpuBacked);
+void* shiraz_win32_hwbuf_shared_handle(const ShirazWin32HwBuf* buf);
+int shiraz_win32_hwbuf_lock(ShirazWin32HwBuf* buf, void** outBits);
+int shiraz_win32_hwbuf_unlock(ShirazWin32HwBuf* buf);
+
+int shiraz_win32_fence_create(int signaled);
+int shiraz_win32_fence_signal(int fd);
+int shiraz_win32_fence_wait(int fd, int timeoutMs);
+int shiraz_win32_fence_merge(const char* name, int fd1, int fd2);
+int shiraz_win32_fence_dup(int fd);
+int shiraz_win32_fence_close(int fd);
+
+double shiraz_win32_choreographer_refresh_hz();
+std::int64_t shiraz_win32_choreographer_period_ns();
+int shiraz_win32_choreographer_wait_vsync(std::int64_t* outTimestampNs);
+
+int shiraz_win32_spawn_process(const char* const* argv, int argc, std::uint32_t* outPid,
+                               void** outProcessHandle, void** outJobHandle);
+int shiraz_win32_wait_process(void* processHandle, int timeoutMs, int* outExitCode);
+void shiraz_win32_close_process(void* processHandle, void* jobHandle);
+
+int shiraz_win32_connectivity_summary(int* outConnected, int* outType);
+int shiraz_win32_dpapi_protect(const std::uint8_t* plain, std::size_t plainLen,
+                               std::uint8_t* outBuf, std::size_t outCap, std::size_t* outLen);
+int shiraz_win32_dpapi_unprotect(const std::uint8_t* cipher, std::size_t cipherLen,
+                                 std::uint8_t* outBuf, std::size_t outCap, std::size_t* outLen);
+int shiraz_win32_tts_probe();
+int shiraz_win32_audio_capture_probe(std::uint32_t* outSampleRate, std::uint16_t* outChannels);
+
+void* shiraz_win32_sandbox_create_job(std::uint64_t memoryLimitBytes,
+                                      std::uint32_t activeProcessLimit, int uiRestrictions);
+int shiraz_win32_sandbox_create_restricted_token(void** outToken);
+void shiraz_win32_sandbox_close(void* handle);
 }
 #endif
 
@@ -194,6 +235,98 @@ int main() {
     std::printf("WIN32_MEDIA h264=%d audio_probe=%d rate=%u ch=%u location_status=%d\n", hasH264,
                 audioProbe, rate, ch, locStatus);
     assert(locStatus >= 0 && locStatus <= 3);
+
+    // D3D11/DXGI HardwareBuffer allocate, lock/unlock, shared handle, refcount
+    ShirazWin32HwBuf* hwbuf = nullptr;
+    assert(shiraz_win32_hwbuf_allocate(64, 32, 1, 0x333ULL, &hwbuf) == 0);
+    assert(hwbuf != nullptr);
+    std::uint32_t bw = 0, bh = 0, bs = 0, bf = 0;
+    int gpuBacked = 0;
+    assert(shiraz_win32_hwbuf_describe(hwbuf, &bw, &bh, &bs, &bf, &gpuBacked) == 0);
+    assert(bw == 64 && bh == 32 && bs >= 64 && bf == 1);
+    void* bits = nullptr;
+    assert(shiraz_win32_hwbuf_lock(hwbuf, &bits) == 0 && bits != nullptr);
+    static_cast<std::uint8_t*>(bits)[0] = 0xDE;
+    static_cast<std::uint8_t*>(bits)[1] = 0xAD;
+    assert(shiraz_win32_hwbuf_unlock(hwbuf) == 0);
+    shiraz_win32_hwbuf_acquire(hwbuf);
+    shiraz_win32_hwbuf_release(hwbuf);
+    std::printf("WIN32_HWBUF gpu=%d shared_handle=%p\n", gpuBacked,
+                shiraz_win32_hwbuf_shared_handle(hwbuf));
+    shiraz_win32_hwbuf_release(hwbuf);
+
+    // Sync fences: create, timeout, signal, merge, dup, close
+    const int f1 = shiraz_win32_fence_create(0);
+    const int f2 = shiraz_win32_fence_create(0);
+    assert(f1 >= 0 && f2 >= 0);
+    assert(shiraz_win32_fence_wait(f1, 0) < 0);
+    const int merged = shiraz_win32_fence_merge("test-merge", f1, f2);
+    assert(merged >= 0);
+    assert(shiraz_win32_fence_signal(f1) == 0);
+    assert(shiraz_win32_fence_wait(f1, 0) == 0);
+    assert(shiraz_win32_fence_wait(merged, 0) < 0);
+    assert(shiraz_win32_fence_signal(f2) == 0);
+    assert(shiraz_win32_fence_wait(merged, 100) == 0);
+    const int fdup = shiraz_win32_fence_dup(merged);
+    assert(fdup >= 0 && shiraz_win32_fence_wait(fdup, 0) == 0);
+    assert(shiraz_win32_fence_close(fdup) == 0);
+    assert(shiraz_win32_fence_close(merged) == 0);
+    assert(shiraz_win32_fence_close(f2) == 0);
+    assert(shiraz_win32_fence_close(f1) == 0);
+
+    // Choreographer DwmFlush / high-res waitable timer pacing
+    const double hz = shiraz_win32_choreographer_refresh_hz();
+    const std::int64_t periodNs = shiraz_win32_choreographer_period_ns();
+    assert(hz >= 24.0 && hz <= 480.0);
+    assert(periodNs > 0);
+    std::int64_t vsyncTs = 0;
+    assert(shiraz_win32_choreographer_wait_vsync(&vsyncTs) == 0);
+    assert(vsyncTs > 0);
+    std::printf("WIN32_VSYNC hz=%.1f period_ns=%lld\n", hz, static_cast<long long>(periodNs));
+
+    // Process spawn with Job Object kill-on-close
+    const char* spawnArgv[] = {"cmd.exe", "/c", "exit", "0"};
+    std::uint32_t childPid = 0;
+    void* childProc = nullptr;
+    void* childJob = nullptr;
+    assert(shiraz_win32_spawn_process(spawnArgv, 4, &childPid, &childProc, &childJob) == 0);
+    assert(childPid > 0 && childProc != nullptr && childJob != nullptr);
+    int childExit = -1;
+    assert(shiraz_win32_wait_process(childProc, 5000, &childExit) == 0);
+    assert(childExit == 0);
+    shiraz_win32_close_process(childProc, childJob);
+
+    // Platform services: Connectivity, DPAPI protect/unprotect, TTS & capture probes
+    int connUp = 0, connType = -1;
+    assert(shiraz_win32_connectivity_summary(&connUp, &connType) == 0);
+    const char secret[] = "shiraz-dpapi-secret-key-2026";
+    std::uint8_t protectedBuf[1024] = {};
+    std::size_t protectedLen = 0;
+    assert(shiraz_win32_dpapi_protect(reinterpret_cast<const std::uint8_t*>(secret),
+                                      sizeof(secret) - 1, protectedBuf, sizeof(protectedBuf),
+                                      &protectedLen) == 0);
+    assert(protectedLen > 0);
+    std::uint8_t recoveredBuf[256] = {};
+    std::size_t recoveredLen = 0;
+    assert(shiraz_win32_dpapi_unprotect(protectedBuf, protectedLen, recoveredBuf,
+                                        sizeof(recoveredBuf), &recoveredLen) == 0);
+    assert(recoveredLen == sizeof(secret) - 1);
+    assert(std::memcmp(recoveredBuf, secret, recoveredLen) == 0);
+    const int ttsAvail = shiraz_win32_tts_probe();
+    std::uint32_t capRate = 0;
+    std::uint16_t capCh = 0;
+    const int capProbe = shiraz_win32_audio_capture_probe(&capRate, &capCh);
+    std::printf("WIN32_SERVICES conn=%d type=%d dpapi=ok tts=%d capture=%d\n", connUp, connType,
+                ttsAvail, capProbe);
+
+    // Sandbox: Job Object resource/UI limits + Restricted Token
+    void* sbJob = shiraz_win32_sandbox_create_job(512ULL * 1024ULL * 1024ULL, 4, 1);
+    assert(sbJob != nullptr);
+    shiraz_win32_sandbox_close(sbJob);
+    void* restrictedToken = nullptr;
+    assert(shiraz_win32_sandbox_create_restricted_token(&restrictedToken) == 0);
+    assert(restrictedToken != nullptr);
+    shiraz_win32_sandbox_close(restrictedToken);
 #endif
 
     std::printf("CROSS_PLATFORM_NATIVE_PASS os=%s arch=%s\n", shiraz::host_os_name(),

@@ -72,16 +72,16 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 | [~] | GPU capability probe & power guard | `include/shiraz/win32/d3d11_probe.hpp`, `native/win32/d3d11_probe.cpp` | DXGI `IDXGIFactory1::EnumAdapters1` (`SHIRAZ_GPU device=... vendor=...`), `SetThreadExecutionState(ES_CONTINUOUS \| ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` | L |
 | [ ] | Window & ANGLE-D3D11 layer | `native/presentation.cpp`, `mk/windows.mk` | SDL2 Win32 `HWND` with ANGLE D3D11 `opengles2` renderer and Per-Monitor V2 DPI scaling | M |
 | [~] | Live resize | `native/presentation.cpp` | `SDL_AddEventWatch` (`Win32LiveResizeWatch`) repaint during Win32 `WM_ENTERSIZEMOVE` / `WM_SIZING` modal drag loop + `Win32PowerGuard` + Precision Touchpad filter/pinch under `#if defined(_WIN32)` (verified Linux-neutral by `darwin_linux_guard.py`) | M |
-| [ ] | AHardwareBuffer / DXGI shared surface | `native/hardware_buffer.cpp`, `native/win32/` | `ID3D11Texture2D` + `IDXGIResource1::CreateSharedHandle`, CPU staging lock/unlock | H |
-| [ ] | Sync fences | `native/sync_fence.cpp`, `native/win32/` | `ID3D11Fence` / Win32 `HANDLE` event signaled on GPU fence completion | H |
-| [ ] | Frame pacing / Choreographer vsync | `native/choreographer.cpp` | `DwmFlush()` / `IDXGIOutput::WaitForVBlank()` with `CreateWaitableTimerExW` high-res fallback | M |
-| [ ] | Vulkan | `native/ndk_vulkan.cpp` | Native Windows `vulkan-1.dll` loader (`VK_KHR_android_surface` → `VK_KHR_win32_surface`) | M |
+| [~] | AHardwareBuffer / DXGI shared surface | `native/win32/hardware_buffer.cpp` | `ID3D11Texture2D` + `IDXGIResource::GetSharedHandle`, CPU staging lock/unlock with WARP/CPU fallback | H |
+| [~] | Sync fences | `native/win32/sync_fence.cpp` | Win32 manual-reset `HANDLE` event fd table with wait, signal, dup, and multi-fence merge (`WaitForMultipleObjects`) | H |
+| [~] | Frame pacing / Choreographer vsync | `native/win32/choreographer.cpp` | `DwmFlush()` (dynamically loaded `dwmapi.dll`) with `CreateWaitableTimerExW` (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) fallback | M |
+| [~] | Vulkan | `native/ndk_vulkan.cpp` | Native Windows `vulkan-1.dll` loader (`LoadLibraryA`/`GetProcAddress`) + `ANativeWindow`-backed swapchain & AHB memory bridge | M |
 
 ### 3. Input and windowing
 
 | Status | Item | Repo files | Windows implementation | Diff |
 |---|---|---|---|---|
-| [~] | Touch & Precision Touchpad helpers | `include/shiraz/win32/d3d11_probe.hpp` | Separate direct touchscreens from Precision Touchpad pinch/scroll deltas; Per-Monitor DPI scaling (`win32_dpi_density`) | L |
+| [x] | Touch & Precision Touchpad helpers | `include/shiraz/win32/d3d11_probe.hpp` | Separate direct touchscreens from Precision Touchpad pinch/scroll deltas; Per-Monitor DPI scaling (`win32_dpi_to_android_density`) | L |
 | [ ] | Keyboard & IME | `include/shiraz/sdl_keyboard.hpp`, `native/presentation.cpp` | SDL2 Win32 scancode → Android keycode mapping; IMM32/TSF preedit via `SDL_TEXTEDITING` | M |
 | [ ] | Clipboard | framework | Win32 `OpenClipboard`/`GetClipboardData` via SDL2 clipboard | L |
 
@@ -89,34 +89,35 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 
 | Status | Item | Repo files | Windows implementation | Diff |
 |---|---|---|---|---|
-| [~] | ALooper | `native/win32/looper.cpp` | `CreateEventW` wake, `CreateWaitableTimerExW` (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`), `WaitForMultipleObjects` + `WSAPoll` fd bridge | M |
-| [~] | ASharedMemory | `native/win32/shared_memory.cpp` | `CreateFileMappingW(INVALID_HANDLE_VALUE, ...)` + `MapViewOfFile` + handle table + read-only `DuplicateHandle` enforcement | M |
-| [~] | Process & clock info | `native/win32/host_process.cpp` | `QueryPerformanceCounter` (monotonic), `GetTickCount64` (boottime), `GetCurrentProcessId`/`GetCurrentThreadId`, `GlobalMemoryStatusEx` | L |
-| [~] | IPC channel | `native/win32/ipc_channel.cpp` | Named-pipe / `AF_UNIX` (`afunix.h`) transport with `GetNamedPipeClientProcessId` peer credential validation | M |
-| [ ] | Process spawn | `native/ipc_spawn.cpp`, `ServiceProcess.java` | `CreateProcessW` + `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` + Win32 Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) | M |
+| [x] | ALooper | `native/win32/looper.cpp` | `CreateEventW` wake, `CreateWaitableTimerExW` (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`), `WaitForMultipleObjects` + `WSAPoll` fd bridge | M |
+| [x] | ASharedMemory | `native/win32/shared_memory.cpp` | `CreateFileMappingW(INVALID_HANDLE_VALUE, ...)` + `MapViewOfFile` + handle table + read-only `DuplicateHandle` enforcement | M |
+| [x] | Process & clock info | `native/win32/host_process.cpp` | `QueryPerformanceCounter` (monotonic), `GetTickCount64` (boottime), `GetCurrentProcessId`/`GetCurrentThreadId`, `GlobalMemoryStatusEx` | L |
+| [x] | IPC channel | `native/win32/ipc_channel.cpp` | Named-pipe / `AF_UNIX` (`afunix.h`) transport with `GetNamedPipeClientProcessId` peer credential validation | M |
+| [~] | Process spawn | `native/win32/process_spawn.cpp` | `CreateProcessW` (MSDN argument quoting, `CREATE_SUSPENDED | CREATE_NO_WINDOW`) + Win32 Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) | M |
+| [~] | App isolation / Sandbox | `native/win32/sandbox.cpp` | Win32 Job Object memory/process/UI restrictions + `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)` | M |
 
 ### 5. Media
 
 | Status | Item | Repo files | Windows implementation | Diff |
 |---|---|---|---|---|
-| [~] | Audio output (WASAPI) | `native/win32/audio_output.cpp` | WASAPI `IMMDeviceEnumerator` → `IAudioClient` (shared mode PCM16/float32) → `IAudioRenderClient` with automatic software/null fallback when no audio endpoint exists | M |
-| [~] | Video decode (Media Foundation) | `native/win32/video_codec.cpp` | `MFStartup` + `IMFTransform` H.264/HEVC decoder outputting NV12/BGRA frames | H |
+| [x] | Audio output (WASAPI) | `native/win32/audio_output.cpp` | WASAPI `IMMDeviceEnumerator` → `IAudioClient` (shared mode PCM16/float32) → `IAudioRenderClient` with automatic software/null fallback when no audio endpoint exists | M |
+| [x] | Video decode (Media Foundation) | `native/win32/video_codec.cpp` | `MFStartup` + `IMFTransform` H.264/HEVC decoder outputting NV12/BGRA frames | H |
 | [ ] | OpenSL ES & AAudio | `native/opensles.cpp`, `native/ndk_aaudio.cpp` | WASAPI event-driven callback bridge | M |
-| [ ] | Camera & Microphone | `native/capture.cpp` | Media Foundation `IMFCaptureEngine` + WASAPI loopback/capture client | M |
-| [ ] | Text to speech | `native/speech.cpp` | SAPI5 `ISpVoice` / Windows OneCore TTS | L |
+| [~] | Camera & Microphone | `native/win32/platform_services.cpp` | WASAPI `eCapture` endpoint probe (`shiraz_win32_audio_capture_probe`); Media Foundation `IMFCaptureEngine` camera still open | M |
+| [~] | Text to speech | `native/win32/platform_services.cpp` | SAPI5 `SAPI.SpVoice` COM availability probe (`shiraz_win32_tts_probe`) | L |
 
 ### 6. Platform services
 
 | Status | Item | Repo files | Windows implementation | Diff |
 |---|---|---|---|---|
-| [~] | Notifications | `native/win32/notifications.cpp` | `Shell_NotifyIconW` (`NIF_INFO`) & WinRT toast bridge with active notification registry, urgency flags, sound suppression, and headless session safety | M |
-| [~] | Location | `native/win32/location.cpp` | Windows Location API (`ILocation` / `ILatLongReport` COM interface) with safe headless/permission-denied fallback | M |
-| [~] | System fonts | `native/win32/system_fonts.cpp` | DirectWrite `IDWriteFactory::GetSystemFontCollection` + `IDWriteLocalFontFileLoader::GetFilePathFromKey` enumerating `%WINDIR%\Fonts` | M |
+| [x] | Notifications | `native/win32/notifications.cpp` | `Shell_NotifyIconW` (`NIF_INFO`) & WinRT toast bridge with active notification registry, urgency flags, sound suppression, and headless session safety | M |
+| [x] | Location | `native/win32/location.cpp` | Windows Location API (`ILocation` / `ILatLongReport` COM interface) with safe headless/permission-denied fallback | M |
+| [x] | System fonts | `native/win32/system_fonts.cpp` | DirectWrite `IDWriteFactory::GetSystemFontCollection` + `IDWriteLocalFontFileLoader::GetFilePathFromKey` enumerating `%WINDIR%\Fonts` | M |
 | [x] | Open URL / external apps | `java/shiraz/runtime/ExternalLauncher.java`, `HostOs.java` | `rundll32.exe url.dll,FileProtocolHandler <url>` on Windows (`HostOs.windows()`), `NUL` redirect, drops `LD_*`/`DYLD_*` | L |
-| [ ] | Connectivity | `HostConnectivity.java` | `GetAdaptersAddresses` + `INetworkListManager` | L |
-| [ ] | Document picker | `HostContentPicker.java` | Common Item Dialog (`IFileOpenDialog` / `IFileSaveDialog`) | L |
+| [~] | Connectivity | `native/win32/platform_services.cpp`, `HostConnectivity.java` | `GetAdaptersAddresses` native probe (`shiraz_win32_connectivity_summary`) + `HostConnectivity.windowsActiveNetwork()` (`NetworkInterface`) | L |
+| [~] | Document picker | `HostContentPicker.java` | WinForms `OpenFileDialog` via `powershell.exe -STA` (`HostOs.windows()`) + `HostOs.nullDevice()` | L |
 | [x] | App storage | `src/shiraz/platform_paths.py`, `tests/test_platform_paths.py` | `%LOCALAPPDATA%\Shiraz\<package>`, `%LOCALAPPDATA%\Shiraz\Cache\<package>`, `%APPDATA%\Shiraz` | L |
-| [ ] | Keystore | `HostKeyStoreProvider.java` | Software keystore + Windows CNG / DPAPI (`CryptProtectData`) optional backend | M |
+| [~] | Keystore | `native/win32/platform_services.cpp`, `HostKeyStoreProvider.java` | Software keystore + Windows DPAPI (`CryptProtectData`/`CryptUnprotectData`, `CRYPTPROTECT_UI_FORBIDDEN`) native backend | M |
 
 ### 7. Build, packaging, CI
 

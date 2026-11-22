@@ -28,6 +28,7 @@ public final class HostConnectivity {
             return info;
         }
         if (HostOs.darwin()) return darwinActiveNetwork();
+        if (HostOs.windows()) return windowsActiveNetwork();
         android.os.StrictMode.ThreadPolicy old = android.os.StrictMode.allowThreadDiskReads();
         try {
             return read(new File("/proc/net"), new File("/sys/class/net"));
@@ -40,7 +41,37 @@ public final class HostConnectivity {
 
     static NetworkInfo darwinActiveNetwork() { return DarwinConnectivity.active(); }
 
+    static NetworkInfo windowsActiveNetwork() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> ifaces =
+                    java.net.NetworkInterface.getNetworkInterfaces();
+            boolean hasWifi = false;
+            boolean hasEthernet = false;
+            while (ifaces != null && ifaces.hasMoreElements()) {
+                java.net.NetworkInterface nif = ifaces.nextElement();
+                if (!nif.isUp() || nif.isLoopback() || nif.isVirtual()) continue;
+                if (!nif.getInetAddresses().hasMoreElements()) continue;
+                String name = (nif.getDisplayName() + " " + nif.getName()).toLowerCase(java.util.Locale.ROOT);
+                if (name.contains("wi-fi") || name.contains("wifi") || name.contains("wireless") || name.contains("wlan")) {
+                    hasWifi = true;
+                } else {
+                    hasEthernet = true;
+                }
+            }
+            if (!hasWifi && !hasEthernet) return null;
+            int type = hasEthernet ? ConnectivityManager.TYPE_ETHERNET : ConnectivityManager.TYPE_WIFI;
+            String label = hasEthernet ? "ETHERNET" : "WIFI";
+            NetworkInfo info = new NetworkInfo(type, 0, label, "");
+            info.setIsAvailable(true);
+            info.setDetailedState(NetworkInfo.DetailedState.CONNECTED, null, null);
+            return info;
+        } catch (IOException error) {
+            return null;
+        }
+    }
+
     public static android.net.LinkProperties linkProperties(){
+        if (HostOs.windows()) return new android.net.LinkProperties();
         android.os.StrictMode.ThreadPolicy old=android.os.StrictMode.allowThreadDiskReads();
         try{return resolver(text(new File("/etc/resolv.conf")));}
         catch(IOException error){throw new IllegalStateException("Cannot read host resolver configuration",error);}
@@ -72,7 +103,7 @@ public final class HostConnectivity {
     }
 
     /** Whether a wireless interface is administratively up; no scan or network identifiers. */
-    public static boolean wifiEnabled(){if(DeviceProfile.selected()){HostAppInstaller.recordAccess("connectivity:wifiEnabled");return Boolean.parseBoolean(DeviceProfile.get("wifi.enabled","false"));}if(HostOs.darwin()){NetworkInfo active=darwinActiveNetwork();return active!=null&&active.getType()==ConnectivityManager.TYPE_WIFI;}android.os.StrictMode.ThreadPolicy old=android.os.StrictMode.allowThreadDiskReads();try{return wifiEnabled(new File("/sys/class/net"));}catch(IOException error){throw new IllegalStateException("Cannot read Wi-Fi interface status",error);}finally{android.os.StrictMode.setThreadPolicy(old);}}
+    public static boolean wifiEnabled(){if(DeviceProfile.selected()){HostAppInstaller.recordAccess("connectivity:wifiEnabled");return Boolean.parseBoolean(DeviceProfile.get("wifi.enabled","false"));}if(HostOs.darwin()){NetworkInfo active=darwinActiveNetwork();return active!=null&&active.getType()==ConnectivityManager.TYPE_WIFI;}if(HostOs.windows()){NetworkInfo active=windowsActiveNetwork();return active!=null&&active.getType()==ConnectivityManager.TYPE_WIFI;}android.os.StrictMode.ThreadPolicy old=android.os.StrictMode.allowThreadDiskReads();try{return wifiEnabled(new File("/sys/class/net"));}catch(IOException error){throw new IllegalStateException("Cannot read Wi-Fi interface status",error);}finally{android.os.StrictMode.setThreadPolicy(old);}}
     static boolean wifiEnabled(File sysNet)throws IOException{
         File[] links=sysNet.listFiles();if(links==null)throw new IOException("Network interfaces unavailable");
         for(File link:links){if(!new File(link,"wireless").isDirectory())continue;String flags=text(new File(link,"flags")).trim();long value=number(flags.startsWith("0x")?flags.substring(2):flags,16);if((value&1)!=0)return true;}return false;

@@ -16,13 +16,19 @@ WINDOWS_HOST_SOURCES := \
 	native/win32/audio_output.cpp \
 	native/win32/system_fonts.cpp \
 	native/win32/video_codec.cpp \
-	native/win32/location.cpp
+	native/win32/location.cpp \
+	native/win32/hardware_buffer.cpp \
+	native/win32/sync_fence.cpp \
+	native/win32/choreographer.cpp \
+	native/win32/process_spawn.cpp \
+	native/win32/platform_services.cpp \
+	native/win32/sandbox.cpp
 
 WINDOWS_HOST_HEADERS := \
 	include/shiraz/platform.hpp \
 	include/shiraz/win32/d3d11_probe.hpp
 
-WINDOWS_LIBS := -lole32 -ldxgi -ldwrite -lmfplat -lmfuuid -lshell32 -luser32 -lkernel32 -luuid
+WINDOWS_LIBS := -lole32 -ld3d11 -ldxgi -ldwrite -lmfplat -lmfuuid -lshell32 -luser32 -lkernel32 -ladvapi32 -liphlpapi -lcrypt32 -luuid
 
 .PHONY: windows-build windows-check windows-app-bundle-check cross-platform-native-check
 
