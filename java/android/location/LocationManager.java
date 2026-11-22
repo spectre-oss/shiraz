@@ -21,9 +21,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
+import shiraz.runtime.DarwinLocation;
 import shiraz.runtime.TestLocationConfig;
 
-/** Optional, explicitly configured mock GPS source and test provider registry. */
+/** Optional mock GPS source, test provider registry, and macOS CoreLocation bridge. */
 public class LocationManager {
     public static final String NETWORK_PROVIDER = "network";
     public static final String GPS_PROVIDER = "gps";
@@ -58,9 +59,19 @@ public class LocationManager {
                     .setAccuracy(ProviderProperties.ACCURACY_FINE)
                     .build();
 
+    private static final ProviderProperties DEFAULT_COARSE_PROPERTIES =
+            new ProviderProperties.Builder()
+                    .setHasNetworkRequirement(true)
+                    .setPowerUsage(ProviderProperties.POWER_USAGE_LOW)
+                    .setAccuracy(ProviderProperties.ACCURACY_COARSE)
+                    .build();
+
     private static final boolean TRACE = "1".equals(System.getenv("SHIRAZ_TRACE_LOCATION"));
 
     private final Context context;
+    private final boolean darwinLive;
+    private long darwinHandle;
+    private boolean darwinFineActive;
     private TestLocationConfig fix;
     private Location last;
     private boolean foreground = true;
@@ -113,23 +124,65 @@ public class LocationManager {
         }
     }
 
-    private LocationManager(Context context, TestLocationConfig fix) {
+    private LocationManager(Context context, TestLocationConfig fix, boolean allowDarwinLive) {
         if (context == null) {
             throw new NullPointerException("context");
         }
         this.context = context;
         this.fix = fix;
+        this.darwinLive =
+                allowDarwinLive
+                        && fix == null
+                        && DarwinLocation.isAvailable()
+                        && DarwinLocation.locationServicesEnabled();
         if (fix != null) {
             last = sample();
         }
     }
 
     public static LocationManager shirazForProcess(Context context) {
-        return new LocationManager(context, TestLocationConfig.fromEnvironment());
+        return new LocationManager(context, TestLocationConfig.fromEnvironment(), true);
     }
 
     public static LocationManager shirazForTest(Context context, TestLocationConfig fix) {
-        return new LocationManager(context, fix);
+        return new LocationManager(context, fix, false);
+    }
+
+    private static boolean isDarwinProvider(String provider) {
+        return GPS_PROVIDER.equals(provider)
+                || NETWORK_PROVIDER.equals(provider)
+                || FUSED_PROVIDER.equals(provider);
+    }
+
+    private boolean hasDarwinProvider(String provider) {
+        return darwinLive && isDarwinProvider(provider);
+    }
+
+    private void ensureDarwinSession(String provider, float minDistance) {
+        if (!hasDarwinProvider(provider)) {
+            return;
+        }
+        boolean wantFine = !NETWORK_PROVIDER.equals(provider);
+        if (darwinHandle != 0L && (!wantFine || darwinFineActive)) {
+            return;
+        }
+        if (darwinHandle != 0L) {
+            DarwinLocation.stop(darwinHandle);
+            darwinHandle = 0L;
+        }
+        long handle = DarwinLocation.start(wantFine, Math.max(0.0f, minDistance));
+        if (handle != 0L) {
+            darwinHandle = handle;
+            darwinFineActive = wantFine;
+        }
+    }
+
+    private void stopDarwinIfIdle() {
+        if (darwinHandle != 0L && subscriptions.isEmpty() && pendingSubscriptions.isEmpty()) {
+            DarwinLocation.stop(darwinHandle);
+            darwinHandle = 0L;
+            darwinFineActive = false;
+        }
     }
 
     private static void provider(String value) {
@@ -143,8 +196,16 @@ public class LocationManager {
         if (closed) {
             return providers;
         }
-        if (fix != null && !testProviders.containsKey(GPS_PROVIDER)) {
+        if ((fix != null || darwinLive) && !testProviders.containsKey(GPS_PROVIDER)) {
             providers.add(GPS_PROVIDER);
+        }
+        if (darwinLive) {
+            if (!testProviders.containsKey(NETWORK_PROVIDER)) {
+                providers.add(NETWORK_PROVIDER);
+            }
+            if (!testProviders.containsKey(FUSED_PROVIDER)) {
+                providers.add(FUSED_PROVIDER);
+            }
         }
         providers.addAll(testProviders.keySet());
         return providers;
@@ -158,8 +219,16 @@ public class LocationManager {
         if (closed) {
             return result;
         }
-        if (fix != null && !testProviders.containsKey(GPS_PROVIDER)) {
+        if ((fix != null || darwinLive) && !testProviders.containsKey(GPS_PROVIDER)) {
             result.add(GPS_PROVIDER);
+        }
+        if (darwinLive) {
+            if (!testProviders.containsKey(NETWORK_PROVIDER)) {
+                result.add(NETWORK_PROVIDER);
+            }
+            if (!testProviders.containsKey(FUSED_PROVIDER)) {
+                result.add(FUSED_PROVIDER);
+            }
         }
         for (TestProviderState tp : testProviders.values()) {
             if (tp.enabled) {
@@ -218,7 +287,9 @@ public class LocationManager {
         if (closed) {
             return false;
         }
-        return testProviders.containsKey(provider) || (fix != null && GPS_PROVIDER.equals(provider));
+        return testProviders.containsKey(provider)
+                || (fix != null && GPS_PROVIDER.equals(provider))
+                || hasDarwinProvider(provider);
     }
 
     @Deprecated
@@ -242,6 +313,11 @@ public class LocationManager {
         if (fix != null && GPS_PROVIDER.equals(provider)) {
             return DEFAULT_GPS_PROPERTIES;
         }
+        if (hasDarwinProvider(provider)) {
+            return NETWORK_PROVIDER.equals(provider)
+                    ? DEFAULT_COARSE_PROPERTIES
+                    : DEFAULT_GPS_PROPERTIES;
+        }
         throw new IllegalArgumentException("Provider \"" + provider + "\" does not exist");
     }
 
@@ -254,14 +330,14 @@ public class LocationManager {
         if (tp != null) {
             return tp.enabled;
         }
-        return GPS_PROVIDER.equals(provider) && fix != null;
+        return (GPS_PROVIDER.equals(provider) && fix != null) || hasDarwinProvider(provider);
     }
 
     public synchronized boolean isLocationEnabled() {
         if (closed) {
             return false;
         }
-        if (fix != null) {
+        if (fix != null || darwinLive) {
             return true;
         }
         for (TestProviderState tp : testProviders.values()) {
@@ -286,6 +362,11 @@ public class LocationManager {
             return context.checkCallingOrSelfPermission("android.permission.ACCESS_COARSE_LOCATION")
                     == PackageManager.PERMISSION_GRANTED;
         }
+        if (hasDarwinProvider(providerName)
+                && (NETWORK_PROVIDER.equals(providerName) || FUSED_PROVIDER.equals(providerName))) {
+            return context.checkCallingOrSelfPermission("android.permission.ACCESS_COARSE_LOCATION")
+                    == PackageManager.PERMISSION_GRANTED;
+        }
         return false;
     }
 
@@ -296,7 +377,7 @@ public class LocationManager {
         if (closed) {
             throw new IllegalStateException("Location service is closed");
         }
-        if (testProviders.containsKey(provider)) {
+        if (testProviders.containsKey(provider) || hasDarwinProvider(provider)) {
             return;
         }
         if (fix == null) {
@@ -319,7 +400,7 @@ public class LocationManager {
         if (closed) {
             throw new IllegalStateException("Location service is closed");
         }
-        if (fix == null && testProviders.isEmpty()) {
+        if (fix == null && !darwinLive && testProviders.isEmpty()) {
             throw new UnsupportedOperationException("No configured location backend");
         }
         String best = getBestProvider(criteria, false);
@@ -368,6 +449,15 @@ public class LocationManager {
             last = sample();
             return new Location(last);
         }
+        if (hasDarwinProvider(providerName)) {
+            ensureDarwinSession(providerName, 0.0f);
+            Location polled = DarwinLocation.toLocation(providerName, DarwinLocation.pollFix(darwinHandle));
+            if (polled != null) {
+                last = polled;
+                return new Location(polled);
+            }
+            return last != null ? new Location(last) : null;
+        }
         return null;
     }
 
@@ -389,6 +479,9 @@ public class LocationManager {
                 return null;
             }
             return new Location(tp.location);
+        }
+        if (hasDarwinProvider(provider)) {
+            return sampleForProvider(provider);
         }
         Location result = new Location(last);
         trace("last-known", result);
@@ -656,6 +749,7 @@ public class LocationManager {
                     + " listener=" + ((Object) listener).getClass().getName());
         }
         subscriptions.put(listener, subscription);
+        ensureDarwinSession(provider, minDistance);
         if (deliveryAllowed()) {
             if (handler != null) {
                 if (effectiveInterval != Long.MAX_VALUE && !handler.post(subscription)) {
@@ -759,6 +853,7 @@ public class LocationManager {
         if (subscription != null && subscription.handler != null) {
             subscription.handler.removeCallbacks(subscription);
         }
+        stopDarwinIfIdle();
     }
 
     public synchronized void removeUpdates(PendingIntent pendingIntent) {
@@ -769,6 +864,7 @@ public class LocationManager {
         if (sub != null && sub.handler != null) {
             sub.handler.removeCallbacks(sub);
         }
+        stopDarwinIfIdle();
     }
 
     public void addTestProvider(
@@ -1122,6 +1218,11 @@ public class LocationManager {
             }
         }
         pendingSubscriptions.clear();
+        if (darwinHandle != 0L) {
+            DarwinLocation.stop(darwinHandle);
+            darwinHandle = 0L;
+            darwinFineActive = false;
+        }
         proximityAlerts.clear();
         testProviders.clear();
         last = null;
