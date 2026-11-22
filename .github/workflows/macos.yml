@@ -49,6 +49,7 @@ jobs:
       - name: Run macOS native service and codec checks
         run: |
           make macos-metal-probe-check
+          make macos-platform-extras-check
           make macos-notifications-check
           make macos-location-check
           make macos-app-bundle-check

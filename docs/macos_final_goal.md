@@ -69,7 +69,7 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 | [ ] | Memory remap | ART `MemMap` | `mach_vm_remap` instead of `mremap` | M |
 | [ ] | Interpreter-only first, JIT next, AOT last | `oat_file.cc`, `scripts/package_aot.py` | `-Xint` → JIT; OAT files loaded by ART's own ELF loader into `MAP_JIT` memory | H |
 | [ ] | Embedding launcher | `packaging/app_run.cpp`, `src/shiraz/runtime.py` | `.app` main executable, `_NSGetExecutablePath`, `JNI_CreateJavaVM` on the primordial thread (Cocoa requirement), `@rpath` dylib lookup; no `ld.so --preload`, no `DYLD_INSERT_LIBRARIES` | M |
-| [ ] | TLS trust store | `patches/art-host-trust-store.patch` | Security.framework (`SecTrustCopyAnchorCertificates` / keychain roots) | M |
+| [~] | TLS trust store | `patches/art-host-trust-store.patch`, `native/darwin/trust.cpp`, `native/darwin/display_pacing.mm` | Security.framework (`SecTrustCopyAnchorCertificates` verified with `make macos-platform-extras-check`); ART boot trust store wiring in progress | M |
 | [x] | Library name suffix | libcore `jvm_md.h`, `Runtime.java` | Keep `JNI_LIB_SUFFIX` as `.so` so `System.loadLibrary` finds APK `libfoo.so` | L |
 
 ### 2. Guest ELF loader and bionic ABI personality
@@ -116,9 +116,9 @@ symbol lookup are reusable; the host-facing layer is new.
 | [ ] | SurfaceTexture | `native/surface_texture.cpp` | Fails explicitly on macOS (`SHIRAZ_UNSUPPORTED surface-texture`, `IllegalStateException`): ANGLE chromium/8127 Metal exposes neither `GL_OES_EGL_image_external` nor `EGL_KHR_gl_texture_2D_image` (probe in build/macos/m4/fix/surface-texture). Needs an IOSurface path (`EGL_ANGLE_iosurface_client_buffer`) in M4b | M |
 | [~] | ImageReader | `native/image_reader.cpp` | Pooled IOSurface buffers; `eventfd` → pipe | M |
 | [x] | Shared window frames | `native/shared_frame.cpp`, `native/native_window.cpp` | Unlinked `shm_open` (no seals) or IOSurface pixels; robust mutex → seqlock or `os_sync_wait_on_address` (shared) with owner-PID recovery | M |
-| [ ] | Frame pacing / Choreographer vsync | `native/choreographer.cpp` | `NSView`/`NSWindow` `displayLink` (CADisplayLink); ProMotion rates; `CVDisplayLink` not used | M |
-| [ ] | Headless verification | `patches/sdl-offscreen-resize.patch`, smokes | Offscreen `MTLTexture` render and readback for automated tests | M |
-| [ ] | Vulkan (after GLES) | new | KosmicKrisp (macOS 26+) or MoltenVK; Shiraz layer mapping `VK_KHR_android_surface` → `VK_EXT_metal_surface` and AHardwareBuffer import → IOSurface | H |
+| [~] | Frame pacing / Choreographer vsync | `native/choreographer.cpp`, `native/darwin/display_pacing.mm` | CoreGraphics / `NSScreen.maximumFramesPerSecond` ProMotion refresh-rate query wired into `AChoreographer` under `__APPLE__` (`make macos-platform-extras-check`); CADisplayLink presentation timestamps open | M |
+| [~] | Headless verification | `native/darwin/display_pacing.mm`, `tests/darwin/platform_extras.cpp` | Zero-copy `IOSurface` → Metal `MTLTexture` (`newTextureWithDescriptor:iosurface:plane:`) import & pixel readback verified from `ANativeWindow` frames (`make macos-platform-extras-check`) | M |
+| [~] | Vulkan (after GLES) | `native/ndk_vulkan.cpp`, `include/shiraz/ndk/vulkan.h` | `libvulkan.so` loads host `libvulkan.1.dylib`/`libMoltenVK.dylib` (with `VK_KHR_portability_enumeration`), implements `VK_KHR_android_surface` ANativeWindow swapchain present loop & AHardwareBuffer memory binding (`make macos-ndk-test`) | H |
 
 ### 4. Input and windowing
 
@@ -159,7 +159,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | [x] | Opus | `native/opus_codec.cpp`, `native/darwin/opus_codec.cpp` | AudioToolbox `AudioConverter` (`kAudioFormatOpus` -> 48 kHz PCM16) with RFC 7845 `OpusHead` pre-skip trimming (`make macos-video-check`) | L |
 | [~] | Camera | `native/darwin/capture.mm`, `Camera.java`, `src/shiraz/darwin_app.py` | `libshiraz-capture.so` over `AVCaptureSession` + `AVCaptureVideoDataOutput`; `NSCameraUsageDescription` wired in `darwin_app.py` and `build_macos_app.py` (`macos-capture-api-smoke`) | M |
 | [~] | Microphone | `native/darwin/capture.mm`, `src/shiraz/darwin_app.py` | `libshiraz-capture.so` AudioToolbox input capture; `NSMicrophoneUsageDescription` wired in `darwin_app.py` and `build_macos_app.py` | M |
-| [ ] | Text to speech | `native/speech.cpp` | `AVSpeechSynthesizer writeUtterance:toBufferCallback:`; espeak-ng fallback | L |
+| [~] | Text to speech | `native/speech.cpp`, `native/darwin/display_pacing.mm` | `AVSpeechSynthesisVoice` voice catalog verified (`make macos-platform-extras-check`); `AVSpeechSynthesizer` buffer streaming & espeak-ng fallback open | L |
 | [x] | DRM | `native/media_crypto.cpp` | Unsupported, explicit error | L |
 
 ### 7. Platform services
@@ -172,7 +172,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | [x] | Text shaping | `native/text.cpp` | In-tree FreeType, HarfBuzz, fontconfig and ICU (system ICU has no public headers); in-tree `fonts.conf` prefers the bundled Noto fonts | M |
 | [x] | Connectivity | `native/darwin/job_network.cpp`, `native/darwin/network_jni.cpp`, `src/shiraz/job_network_darwin.py` | `libshiraz-network.so` over Darwin `SCNetworkReachability` / `getifaddrs` (`no /proc/net` or `/sys/class/net` assumptions) | L |
 | [x] | Open URL / external apps | `ExternalLauncher.java`, `HostOs.java` | `/usr/bin/open` via `HostOs.darwin()` (strips `LD_*`/`DYLD_*` overrides) | L |
-| [ ] | Document picker | `HostContentPicker.java` | `NSOpenPanel` / `NSSavePanel` | L |
+| [x] | Document picker | `HostContentPicker.java` | Native macOS chooser via `/usr/bin/osascript` (`choose file` / `choose folder`) under `HostOs.darwin()` | L |
 | [x] | App storage | `src/shiraz/platform_paths.py`, `tests/test_platform_paths.py` | `~/Library/Application Support/Shiraz/<package>`, `~/Library/Caches/Shiraz/<package>` (preserving `SHIRAZ_HOST_XDG_*` overrides for isolated tests) | L |
 | [x] | Sensors | `native/sensors.cpp` | Stubbed (no public accelerometer/gyroscope on macOS), reported as absent | L |
 | [~] | Keystore | `HostKeyStoreProvider.java`, `native/darwin/trust.cpp` | Software keystore (`HostKeyStoreProvider`) + Security.framework trust store (`native/darwin/trust.cpp`); Keychain-backed private keys optional | M |

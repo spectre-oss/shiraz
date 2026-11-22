@@ -3364,3 +3364,17 @@ macos-location-check: $(MACOS_OUT)/libshiraz-location.so $(MACOS_OUT)/test-locat
 
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-location.so
 
+# macOS ProMotion/CoreGraphics display pacing, zero-copy IOSurface -> Metal
+# MTLTexture verification, Security.framework trust anchors, and AVFoundation speech.
+$(MACOS_OUT)/display_pacing.o: native/darwin/display_pacing.mm include/shiraz/darwin/display_pacing.hpp include/shiraz/native_window.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -Iinclude -fPIC -fobjc-arc -c native/darwin/display_pacing.mm -o $@
+
+$(MACOS_OUT)/test-platform-extras: tests/darwin/platform_extras.cpp $(MACOS_OUT)/display_pacing.o native/native_window.cpp native/shared_frame.cpp native/darwin/shared_event.mm include/shiraz/darwin/display_pacing.hpp include/shiraz/native_window.h $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -Iinclude tests/darwin/platform_extras.cpp $(MACOS_OUT)/display_pacing.o native/native_window.cpp native/shared_frame.cpp native/darwin/shared_event.mm -o $@ -pthread -framework Foundation -framework AppKit -framework CoreGraphics -framework CoreFoundation -framework IOSurface -framework Metal -framework Security -framework AVFoundation
+
+.PHONY: macos-platform-extras-check
+macos-platform-extras-check: $(MACOS_OUT)/test-platform-extras $(MACOS_OUT)/test-choreographer
+	$(MACOS_OUT)/test-platform-extras
+	$(MACOS_OUT)/test-choreographer
+
+

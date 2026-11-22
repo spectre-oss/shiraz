@@ -2,6 +2,7 @@
 // Software frame pacing for the host display. Callbacks run on the owning
 // ALooper; this is not a compositor presentation-timestamp implementation.
 #if defined(__APPLE__)
+#include <dlfcn.h>
 #include <sys/types.h>
 #include <sys/event.h>
 #include <sys/time.h>
@@ -27,7 +28,35 @@ int ALooper_addFd(ALooper*, int, int, int, int (*)(int, int, void*), void*);
 int ALooper_removeFd(ALooper*, int);
 }
 namespace {
+#if defined(__APPLE__)
+int64_t darwin_frame_period_ns() {
+    void* cg = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+                      RTLD_LAZY | RTLD_LOCAL);
+    if (cg) {
+        using MainDisplayFn = uint32_t (*)();
+        using CopyModeFn = void* (*)(uint32_t);
+        using GetRateFn = double (*)(void*);
+        using ReleaseModeFn = void (*)(void*);
+        auto* mainDisplay = reinterpret_cast<MainDisplayFn>(dlsym(cg, "CGMainDisplayID"));
+        auto* copyMode = reinterpret_cast<CopyModeFn>(dlsym(cg, "CGDisplayCopyDisplayMode"));
+        auto* getRate = reinterpret_cast<GetRateFn>(dlsym(cg, "CGDisplayModeGetRefreshRate"));
+        auto* releaseMode = reinterpret_cast<ReleaseModeFn>(dlsym(cg, "CGDisplayModeRelease"));
+        if (mainDisplay && copyMode && getRate && releaseMode) {
+            void* mode = copyMode(mainDisplay());
+            if (mode) {
+                const double hz = getRate(mode);
+                releaseMode(mode);
+                if (hz >= 24.0 && hz <= 480.0)
+                    return static_cast<int64_t>(1000000000.0 / hz);
+            }
+        }
+    }
+    return 16666667;
+}
+const int64_t period = darwin_frame_period_ns();
+#else
 constexpr int64_t period = 16666667;
+#endif
 int64_t now() {
     timespec value{};
     clock_gettime(CLOCK_MONOTONIC, &value);
