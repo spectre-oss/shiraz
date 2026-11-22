@@ -29,6 +29,8 @@ PUBLIC_DOCS = {
     'docs/tested.md',
     'docs/others/droidloom.md',
     'docs/macos_final_goal.md',
+    'docs/windows_final_goal.md',
+    'docs/cross_platform.md',
     'docs/framework_final_goal.md',
     'docs/ndk_final_goal.md',
     'docs/MISSING_ANDROID_LIBRARIES.md',
