@@ -3,11 +3,11 @@
 Shiraz targets **100% native host OS support** across all three major desktop
 platforms without virtual machines, containers, or emulators:
 
-| Platform | Architectures | Graphics | Audio | Video Decode | OS Primitives | Packaging | Goal Spec |
+| Platform | Architectures | Graphics | Audio | Video Decode | OS Primitives & Isolation | Packaging | Goal Spec |
 |---|---|---|---|---|---|---|---|
-| **Linux** | `x86_64`, `aarch64` | SDL2 + EGL/GLES + Skia Ganesh + GBM/DMA-BUF + Vulkan | PulseAudio / PipeWire / ALSA | FFmpeg / VA-API | `epoll`, `eventfd`, `timerfd`, `memfd_create`, Unix sockets | AppImage, `.deb`, desktop `.desktop` | [framework_final_goal.md](framework_final_goal.md) |
-| **macOS** | `arm64` (Apple Silicon) | SDL2 Cocoa + ANGLE Metal + Skia Ganesh + IOSurface + Metal probe | CoreAudio / AudioToolbox (`AudioQueue`, `AudioConverter`) | VideoToolbox (`VTDecompressionSession`) + AudioToolbox Opus | `kqueue`, `EVFILT_USER`/`TIMER`, `shm_open`, `LOCAL_PEERPID`, `posix_spawn` | Signed `Shiraz.app` (`scripts/build_macos_app.py`) | [macos_final_goal.md](macos_final_goal.md) |
-| **Windows** | `x86_64` (`AMD64`), `arm64` (`ARM64`) | SDL2 Win32 + ANGLE D3D11 + DXGI shared textures + Vulkan | WASAPI (`IAudioClient`) | Media Foundation (`IMFTransform`) | `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `CreateFileMappingW`, Named Pipes/`AF_UNIX` | Portable `Shiraz\` + MSIX (`scripts/build_windows_app.py`) | [windows_final_goal.md](windows_final_goal.md) |
+| **Linux** | `x86_64`, `aarch64` | SDL2 + EGL/GLES + Skia Ganesh + GBM/DMA-BUF + Vulkan (`VK_KHR_android_surface` / AHB) | PulseAudio / PipeWire / ALSA | FFmpeg / VA-API | `epoll`, `eventfd`, `timerfd`, `memfd_create`, Unix sockets, Landlock LSM + `PR_SET_NO_NEW_PRIVS` + optional `--no-internet` seccomp | AppImage, `.deb`, desktop `.desktop` | [framework_final_goal.md](framework_final_goal.md) |
+| **macOS** | `arm64` (Apple Silicon) | SDL2 Cocoa + ANGLE Metal + Skia Ganesh + zero-copy `IOSurface`→`MTLTexture` + ProMotion (`CoreGraphics`) pacing | CoreAudio / AudioToolbox (`AudioQueue`, `AudioConverter`) | VideoToolbox (`VTDecompressionSession`) + AudioToolbox Opus | `kqueue`, `EVFILT_USER`/`TIMER`, `shm_open`, `LOCAL_PEERPID`, `posix_spawn`, Seatbelt SBPL + App Sandbox entitlements | Signed `Shiraz.app` (`scripts/build_macos_app.py --sandbox`) | [macos_final_goal.md](macos_final_goal.md) |
+| **Windows** | `x86_64` (`AMD64`), `arm64` (`ARM64`) | SDL2 Win32 + ANGLE D3D11 + DXGI shared buffer pool + `DwmFlush` choreographer + Vulkan | WASAPI (`IAudioClient`) | Media Foundation (`IMFTransform`) | `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `CreateFileMappingW`, Named Pipes, Win32 sync fences, Job Object + Restricted Token sandbox | Portable `Shiraz\` + MSIX (`scripts/build_windows_app.py`) | [windows_final_goal.md](windows_final_goal.md) |
 
 ## Shared Cross-Platform Layers
 
@@ -21,19 +21,43 @@ platforms without virtual machines, containers, or emulators:
      `host_page_size()` and `elf_needs_copy_load()`.
    - `host_layout.py`: maps build host tags (`linux-x86`, `darwin-x86`,
      `windows-x86`).
-2. **Java runtime host detection (`java/shiraz/runtime/`)**
+   - `sandbox.py`: unified cross-platform `SandboxPolicy` and backend resolver
+     generating Linux Landlock rules, macOS Seatbelt SBPL profiles / App Sandbox
+     entitlements, and Windows Job Object + Restricted Token configurations.
+2. **Java runtime & embedded WebView (`java/shiraz/runtime/`, `java/android/webkit/`)**
    - `HostOs.java`: reliable runtime detection for `linux()`, `darwin()`, and
      `windows()` under both ART (where `os.name` reports `Linux`) and standard
      host JVMs, plus `sharedLibraryName()` and `nullDevicePath()`.
    - `ExternalLauncher.java`: delegates URLs/mailto/tel to `xdg-open` (Linux),
      `/usr/bin/open` (macOS), or `rundll32.exe url.dll,FileProtocolHandler`
      (Windows).
-3. **Native C/C++ platform split (`include/shiraz/platform.hpp`, `native/{darwin,win32}/`, `mk/{darwin,windows}.mk`)**
+   - `HostContentPicker.java` & `HostConnectivity.java`: native file picker and
+     connectivity hooks across Linux, macOS, and Windows.
+   - `ShirazWebDom.java`, `ShirazJsEngine.java`, and `WebView.java`: pure-Java
+     HTML5 DOM parser, CSS selector matcher, step-budgeted JavaScript evaluator,
+     `@JavascriptInterface` reflection bridge (blocking unannotated methods),
+     `postWebMessage`, `findAllAsync`, and multi-entry back/forward history.
+3. **Native C/C++ platform split (`include/shiraz/`, `native/`, `mk/`)**
    - Linux stays the clean baseline; `scripts/darwin_linux_guard.py` guarantees
      shared C/C++ files compile identically on Linux.
-   - macOS host modules live in `native/darwin/` (`mk/darwin.mk`).
-   - Windows host modules live in `native/win32/` (`mk/windows.mk`).
+   - `native/vulkan_bridge.cpp`: `VK_KHR_android_surface` ANativeWindow
+     swapchain bridge, acquire/present loop, and `AHardwareBuffer` memory
+     binding.
+   - `native/sandbox_linux.cpp` (`include/shiraz/sandbox.hpp`): raw Linux
+     Landlock LSM syscalls + `PR_SET_NO_NEW_PRIVS` with explicit `-ENOSYS`
+     fallback on non-Linux hosts.
+   - macOS host modules live in `native/darwin/` (`mk/darwin.mk`), including
+     ProMotion/CoreGraphics display pacing (`display_pacing.mm`), zero-copy
+     `IOSurface`→`MTLTexture` readback, `Security.framework` trust anchors, and
+     `AVFoundation` speech voices.
+   - Windows host modules live in `native/win32/` (`mk/windows.mk`), including
+     DXGI shared buffers, Win32 sync fences, `DwmFlush` choreographer,
+     `CreateProcessW` spawn, `IFileOpenDialog`/WinHTTP/CryptoAPI/SAPI services,
+     and Job Object + Restricted Token sandboxing.
 4. **Cross-Platform CI (`.github/workflows/`)**
    - `quality.yml`: Linux lint, C++ static analysis, Go/WASM, Python tests, web checks.
-   - `macos.yml`: Apple Silicon (`macos-15`) native libraries, `MAP_JIT` verification, `.app` bundle builder, Python tests.
-   - `cross-platform.yml`: 3-OS matrix (`ubuntu-24.04`, `macos-15`, `windows-latest`) running cross-platform Python, Java, packaging, and native host tests on every push and PR.
+   - `macos.yml`: Apple Silicon (`macos-15`) native libraries, `MAP_JIT`
+     verification, `macos-platform-extras-check`, `.app` bundle builder, Python tests.
+   - `cross-platform.yml`: 3-OS matrix (`ubuntu-24.04`, `macos-15`,
+     `windows-latest`) running cross-platform Python, Java, sandbox, packaging,
+     and native host tests on every push and PR.

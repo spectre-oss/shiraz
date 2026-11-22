@@ -117,7 +117,7 @@
       "scope": "Linux and macOS ARM64",
       "status": "Partial",
       "verification": "Native unit tests and nm audit",
-      "notes": "All 15 tracked Android API 35 NDK shared libraries (887/887 cataloged C symbols across libandroid, libjnigraphics, libmediandk, libsync, libOpenSLES, libaaudio, liblog, libicu, libamidi, libcamera2ndk, libOpenMAXAL, libbinder_ndk, libneuralnetworks, libvulkan and libnativewindow) build and pass native behavioral tests; Vulkan GPU execution requires a host ICD and physical Camera2 hardware capture remains host-dependent.",
+      "notes": "All 15 tracked Android API 35 NDK shared libraries (887/887 cataloged C symbols across libandroid, libjnigraphics, libmediandk, libsync, libOpenSLES, libaaudio, liblog, libicu, libamidi, libcamera2ndk, libOpenMAXAL, libbinder_ndk, libneuralnetworks, libvulkan and libnativewindow) build and pass native behavioral tests, including VK_KHR_android_surface ANativeWindow swapchain and AHardwareBuffer memory bridges; Vulkan GPU execution requires a host ICD and physical Camera2 hardware capture remains host-dependent.",
       "evidence": "docs/ndk_final_goal.md"
     },
     {
@@ -153,7 +153,7 @@
       "scope": "macOS ARM64",
       "status": "Partial",
       "verification": "Native and component tests",
-      "notes": "UNUserNotificationCenter notifications, CoreLocation wired into Android LocationManager, Metal GPU probe, App Nap guard, Cocoa live-resize events and trackpad pinch/touch filtering are implemented; interactive TCC prompts in end-user apps remain under test.",
+      "notes": "UNUserNotificationCenter notifications, CoreLocation wired into Android LocationManager, ProMotion CoreGraphics display refresh pacing, zero-copy IOSurface-to-Metal MTLTexture bridge, Security.framework trust anchors, AVFoundation speech voices, App Nap guard, Cocoa live-resize events and trackpad pinch/touch filtering are implemented; interactive TCC prompts in end-user apps remain under test.",
       "evidence": "docs/macos_final_goal.md"
     },
     {
@@ -162,7 +162,7 @@
       "scope": "macOS ARM64",
       "status": "Partial",
       "verification": "macOS build and bundle tests",
-      "notes": "Builds self-contained signed Shiraz.app bundles with hardened runtime, allow-jit entitlements, @rpath library closure and generated .icns icons; notarized release distribution is not yet published.",
+      "notes": "Builds self-contained signed Shiraz.app bundles with hardened runtime, allow-jit and optional --sandbox App Sandbox entitlements, @rpath library closure and generated .icns icons; notarized release distribution is not yet published.",
       "evidence": "docs/macos_final_goal.md"
     },
     {
@@ -207,7 +207,7 @@
       "scope": "Windows x64 / ARM64",
       "status": "Partial",
       "verification": "MSVC build and native unit tests",
-      "notes": "Native Win32 implementations cover CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe, SetThreadExecutionState, WM_SIZE/WM_SIZING live resize, Precision Touchpad hooks and HostOs/ShellExecuteW launchers. Full ART and guest ELF execution on Windows is not yet complete.",
+      "notes": "Native Win32 implementations cover CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe and shared buffer pool, Win32 sync fences, DwmFlush choreographer pacing, CreateProcessW spawning, SetThreadExecutionState, WM_SIZE/WM_SIZING live resize, Precision Touchpad hooks, Job Object + Restricted Token sandbox and HostOs/ShellExecuteW launchers. Full ART and guest ELF execution on Windows is not yet complete.",
       "evidence": "docs/windows_final_goal.md"
     },
     {
@@ -216,7 +216,7 @@
       "scope": "Windows x64 / ARM64",
       "status": "Partial",
       "verification": "MSVC build and native unit tests",
-      "notes": "WASAPI PCM16 audio bridge, Media Foundation H.264/HEVC/VP9/AV1 decoder probing, DirectWrite system font enumeration, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass unit tests; interactive end-to-end app media playback on Windows is not yet verified.",
+      "notes": "WASAPI PCM16 audio bridge, Media Foundation H.264/HEVC/VP9/AV1 decoder probing, DirectWrite system font enumeration, IFileOpenDialog picker, WinHTTP connectivity, CryptoAPI trust store, SAPI speech, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass unit tests; interactive end-to-end app media playback on Windows is not yet verified.",
       "evidence": "docs/windows_final_goal.md"
     },
     {
@@ -229,13 +229,22 @@
       "evidence": "docs/windows_final_goal.md"
     },
     {
+      "id": "sandbox",
+      "name": "App isolation and sandboxing",
+      "scope": "All hosts",
+      "status": "Partial",
+      "verification": "Native and Python policy tests",
+      "notes": "Cross-platform SandboxPolicy maps to Linux Landlock LSM + PR_SET_NO_NEW_PRIVS, macOS Seatbelt (sandbox-exec) SBPL profiles + App Sandbox bundle entitlements, and Windows Job Objects + Restricted Tokens; full per-app default enforcement in end-user launchers remains incremental.",
+      "evidence": "docs/cross_platform.md"
+    },
+    {
       "id": "webview",
       "name": "WebView JavaScript / DOM",
       "scope": "Shared framework",
-      "status": "Unsupported",
-      "verification": "App limitation",
-      "notes": "WebKit API 35 classes, WebMessagePort channels and URL helpers exist, but Shiraz does not embed a JavaScript/DOM browser engine; rich editing and arbitrary web apps are unsupported.",
-      "evidence": "docs/experiments/react-native/JOPLIN.md"
+      "status": "Partial",
+      "verification": "Component tests",
+      "notes": "Embedded pure-Java HTML5 DOM parser, CSS selector engine, step-budgeted JavaScript evaluator, @JavascriptInterface reflection bridge, postWebMessage, findAllAsync and multi-entry back/forward history pass OpenJDK/ART tests; a full Blink/V8 CSS layout browser engine for rich web editors and modern SPAs is not bundled.",
+      "evidence": "tests/java/WebViewDomJsSmoke.java"
     },
     {
       "id": "gms",
