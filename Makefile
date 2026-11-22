@@ -1537,6 +1537,13 @@ webview-progress-smoke: framework build/libshiraz-host.so build/libshiraz-image.
 	$(JAVA) -Djava.library.path=build -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -cp build/webview-progress-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar WebViewProgressSmoke
 check: webview-progress-smoke
 
+.PHONY: webview-dom-js-smoke
+webview-dom-js-smoke: framework build/libshiraz-host.so build/libshiraz-image.so
+	mkdir -p build/webview-dom-js-smoke
+	javac --release 8 -cp build/framework/classes -d build/webview-dom-js-smoke tests/java/WebViewDomJsSmoke.java
+	$(JAVA) -Djava.library.path=build -Dshiraz.frameworkResources=build/framework-res/framework-res.apk -cp build/webview-dom-js-smoke:build/framework/classes:context/art_standalone/out/host/common/obj/JAVA_LIBRARIES/core-libart-hostdex_intermediates/classes.jar WebViewDomJsSmoke
+check: webview-dom-js-smoke
+
 .PHONY: signing-metadata-smoke
 signing-metadata-smoke: framework build/libshiraz-host.so
 	mkdir -p build/signing-metadata-smoke
