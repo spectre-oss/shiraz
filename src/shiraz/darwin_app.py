@@ -78,16 +78,23 @@ def prepare_app_bundle(
         directory.mkdir(parents=True, exist_ok=True)
     display = name.strip() if name and name.strip() and "\0" not in name else "Shiraz"
     identity = hashlib.sha256(package.encode("utf-8")).hexdigest()[:24]
+    version_file = Path(__file__).resolve().parents[2] / 'VERSION'
+    short_version = (
+        version_file.read_text(encoding='utf-8').strip() if version_file.is_file() else '0.0.0'
+    )
     info = {
         "CFBundleIdentifier": "org.shiraz.apk." + identity,
         "CFBundleName": display[:64],
         "CFBundleDisplayName": display[:64],
         "CFBundleExecutable": "ShirazHost",
         "CFBundlePackageType": "APPL",
-        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": short_version,
+        "CFBundleVersion": short_version,
         "NSHighResolutionCapable": True,
         "NSCameraUsageDescription": "Shiraz provides camera access to this Android app after you grant it camera permission.",
         "NSMicrophoneUsageDescription": "Shiraz provides microphone access to this Android app after you grant it microphone permission.",
+        "NSLocationUsageDescription": "Shiraz provides location access to this Android app after you grant it location permission.",
+        "NSLocationWhenInUseUsageDescription": "Shiraz provides location access to this Android app while in use after you grant it location permission.",
     }
     if icon is not None and icon.is_file():
         if icon.stat().st_size > MAX_ICON or icon.read_bytes()[:4] != b"icns":

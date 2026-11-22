@@ -10,10 +10,15 @@ from pathlib import Path
 def host_tag(system=None):
     """AOSP HOST_PREBUILT_TAG of the build host.
 
-    The darwin-arm64 combo keeps the historical darwin-x86 tag, exactly as
-    linux-arm64 hosts keep linux-x86, so the make rules stay unchanged.
+    The darwin-arm64 combo keeps the historical darwin-x86 tag, and linux-arm64
+    keeps linux-x86, so the make rules stay unchanged. Windows uses windows-x86.
     """
-    return 'darwin-x86' if (system or platform.system()) == 'Darwin' else 'linux-x86'
+    name = (system or platform.system()).strip().lower()
+    if name == 'darwin':
+        return 'darwin-x86'
+    if name.startswith('win'):
+        return 'windows-x86'
+    return 'linux-x86'
 
 
 def host_out_dir(tree=None, system=None):

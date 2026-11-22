@@ -151,14 +151,14 @@ symbol lookup are reusable; the host-facing layer is new.
 
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
-| [ ] | Audio output | `native/audio_output.cpp`, `native/speech_output.cpp` | SDL audio (CoreAudio backend) or AudioUnit `kAudioUnitSubType_DefaultOutput` | M |
-| [ ] | OpenSL ES | `native/opensles.cpp` | AudioQueue buffer callbacks ↔ `slAndroidSimpleBufferQueueCallback` | M |
-| [ ] | AAudio | new | AudioUnit render callback | M |
-| [ ] | Media playback | `native/playback.cpp` | Output through the audio backend; AAC via AudioToolbox `AudioConverter` (or keep the existing decoders) | M |
+| [x] | Audio output | `native/darwin/audio_output.cpp`, `native/darwin/audio_decode.cpp` | `libshiraz-audio.so` over AudioToolbox AudioQueue + AudioConverter decode/mix (`build/macos/test-audio`: `AUDIO_DECODE_MIX_OK`) | M |
+| [~] | OpenSL ES | `native/opensles.cpp`, `native/darwin/guest/` | Guest OpenSL ES bindings over Shiraz audio output; AudioQueue buffer callback bridge | M |
+| [ ] | AAudio | `native/ndk_aaudio.cpp` | AudioUnit render callback | M |
+| [~] | Media playback | `native/darwin/playback.cpp` | `libshiraz-playback.so` outputting through CoreAudio/AudioToolbox with AAC decode (`macos-playback-api-smoke`) | M |
 | [~] | Video decode (MediaCodec, NDK media) | `native/video_codec.cpp`, `native/darwin/video_codec.cpp`, `native/media_ndk.cpp` | `libshiraz-video.so` built with VideoToolbox `VTDecompressionSession` (H.264, HEVC, supplemental VP9, hardware-gated AV1) outputting IOSurface-backed `32BGRA` frames (`make macos-video-check`); libvpx for VP8 still open | M |
 | [x] | Opus | `native/opus_codec.cpp`, `native/darwin/opus_codec.cpp` | AudioToolbox `AudioConverter` (`kAudioFormatOpus` -> 48 kHz PCM16) with RFC 7845 `OpusHead` pre-skip trimming (`make macos-video-check`) | L |
-| [ ] | Camera | `native/capture.cpp`, `Camera.java` | `AVCaptureSession` + `AVCaptureVideoDataOutput`; `NSCameraUsageDescription` | M |
-| [ ] | Microphone | `native/capture.cpp` | `AVAudioEngine` input tap or SDL capture; `NSMicrophoneUsageDescription` | M |
+| [~] | Camera | `native/darwin/capture.mm`, `Camera.java`, `src/shiraz/darwin_app.py` | `libshiraz-capture.so` over `AVCaptureSession` + `AVCaptureVideoDataOutput`; `NSCameraUsageDescription` wired in `darwin_app.py` and `build_macos_app.py` (`macos-capture-api-smoke`) | M |
+| [~] | Microphone | `native/darwin/capture.mm`, `src/shiraz/darwin_app.py` | `libshiraz-capture.so` AudioToolbox input capture; `NSMicrophoneUsageDescription` wired in `darwin_app.py` and `build_macos_app.py` | M |
 | [ ] | Text to speech | `native/speech.cpp` | `AVSpeechSynthesizer writeUtterance:toBufferCallback:`; espeak-ng fallback | L |
 | [x] | DRM | `native/media_crypto.cpp` | Unsupported, explicit error | L |
 
@@ -170,26 +170,26 @@ symbol lookup are reusable; the host-facing layer is new.
 | [x] | Location | `native/darwin/location.mm`, `DarwinLocation.java`, `LocationManager.java` | `libshiraz-location.so` over `CLLocationManager` on a dedicated `CFRunLoop` worker thread with safe unbundled/`.app` + `NSLocationUsageDescription` guard, wired into `LocationManager` (`gps`/`network`/`fused`, fine vs coarse accuracy + permissions, idle/close teardown; `make macos-location-check`) | M |
 | [x] | System fonts | `native/system_fonts.cpp` | CoreText enumeration (`CTFontManagerCopyAvailableFontURLs`, `.ttc` face index); bundled Android fonts first | M |
 | [x] | Text shaping | `native/text.cpp` | In-tree FreeType, HarfBuzz, fontconfig and ICU (system ICU has no public headers); in-tree `fonts.conf` prefers the bundled Noto fonts | M |
-| [ ] | Connectivity | `HostConnectivity.java` | `getifaddrs`, `NWPathMonitor`; no `/proc/net`, `/sys/class/net`, `/etc/resolv.conf` assumptions | L |
-| [ ] | Open URL / external apps | `ExternalLauncher.java` | `/usr/bin/open` or `NSWorkspace openURL:` | L |
+| [x] | Connectivity | `native/darwin/job_network.cpp`, `native/darwin/network_jni.cpp`, `src/shiraz/job_network_darwin.py` | `libshiraz-network.so` over Darwin `SCNetworkReachability` / `getifaddrs` (`no /proc/net` or `/sys/class/net` assumptions) | L |
+| [x] | Open URL / external apps | `ExternalLauncher.java`, `HostOs.java` | `/usr/bin/open` via `HostOs.darwin()` (strips `LD_*`/`DYLD_*` overrides) | L |
 | [ ] | Document picker | `HostContentPicker.java` | `NSOpenPanel` / `NSSavePanel` | L |
-| [ ] | App storage | runtime, launcher | `~/Library/Application Support/Shiraz/<package>`, `~/Library/Caches/Shiraz/<package>` | L |
+| [x] | App storage | `src/shiraz/platform_paths.py`, `tests/test_platform_paths.py` | `~/Library/Application Support/Shiraz/<package>`, `~/Library/Caches/Shiraz/<package>` (preserving `SHIRAZ_HOST_XDG_*` overrides for isolated tests) | L |
 | [x] | Sensors | `native/sensors.cpp` | Stubbed (no public accelerometer/gyroscope on macOS), reported as absent | L |
-| [ ] | Keystore | framework | Software keystore first; Security.framework keychain optional | M |
+| [~] | Keystore | `HostKeyStoreProvider.java`, `native/darwin/trust.cpp` | Software keystore (`HostKeyStoreProvider`) + Security.framework trust store (`native/darwin/trust.cpp`); Keychain-backed private keys optional | M |
 
 ### 8. Build, packaging, signing, CI
 
 | Status | Item | Repo files | macOS implementation | Diff |
 |---|---|---|---|---|
-| [~] | Makefile platform split | `Makefile` | `include/darwin` JNI headers; `-dynamiclib -install_name @rpath/...`; `-Wl,-rpath,@loader_path` instead of `$ORIGIN`; ld64 default `-undefined error` instead of `-z,defs`; no `--wrap` (test seams instead); `-exported_symbols_list` | M |
+| [~] | Makefile platform split | `Makefile`, `mk/darwin.mk` | `include/darwin` JNI headers; `-dynamiclib -install_name @rpath/...`; `-Wl,-rpath,@loader_path` instead of `$ORIGIN`; ld64 default `-undefined error` instead of `-z,defs`; no `--wrap` (test seams instead); `-exported_symbols_list` | M |
 | [~] | In-tree dependencies | `scripts/bootstrap_sdl.py`, `bootstrap_skia.py`, `bootstrap_angle.py` | Pinned SDL with Cocoa/Metal/EGL; ANGLE chromium/8127 Metal dylibs and Skia Ganesh-GL archives (`skia_use_metal=false`) built in-tree by `make macos-gpu-deps` from clean, pinned checkouts, reused only by build record or a `ninja -n` "no work to do"; no Homebrew runtime dependency. Metal's shader caches live outside the checkout, per user (see GLES and GPU canvas (M4a)) | M |
-| [ ] | Host ABI detection | `src/shiraz/architecture.py` | `arm64` → `arm64-v8a`; flag `p_align < 16384` libraries for copy-load | L |
+| [x] | Host ABI detection | `src/shiraz/architecture.py`, `tests/test_platform_paths.py` | `arm64` → `arm64-v8a`; `host_page_size` (16 KiB on Darwin arm64) and `elf_needs_copy_load` flag `p_align < 16384` libraries for copy-load | L |
 | [x] | `.app` bundle builder | `scripts/build_macos_app.py`, `tests/test_build_macos_app.py` | `Contents/MacOS`, `Contents/Frameworks`, `Contents/Resources`, `Info.plist` (`CFBundleIdentifier`, `VERSION`, camera/microphone/location usage strings), PNG-to-`.icns` via `sips` + `iconutil`, recursive `otool -L` closure, `install_name_tool` `@rpath` rewriting (`make macos-app-bundle-check`) | M |
 | [~] | Code signing | `scripts/build_macos_app.py` | Ad-hoc `codesign --force --sign - --options runtime` with `com.apple.security.cs.allow-jit` (and `disable-library-validation` for local ad-hoc bundled dylibs), verified with `codesign --verify --deep --strict`; Developer ID + `notarytool` notarization optional | M |
 | [ ] | Browser Builder | `go-wasm/` | Do not append to a signed Mach-O; emit an unchanged signed `Shiraz.app` plus APK sidecar, or prove an in-browser ad-hoc signer | H |
 | [ ] | Desktop integration | `packaging/desktop_install.h` | Per-APK wrapper `.app` in `~/Applications` | L |
-| [ ] | CI | `.github/workflows/` | macOS arm64 runner job: deps, build, headless smokes; verify `MAP_JIT` works on runner VMs | M |
-| [ ] | Version exposure | CLI, native app | `--version` on the macOS binaries and in `Info.plist` | L |
+| [x] | CI | `.github/workflows/macos.yml` | `macos-15` arm64 runner job: verifies 16 KiB page size and `MAP_JIT`, runs `macos-metal-probe-check`, `macos-video-check`, `macos-notifications-check`, `macos-location-check`, `macos-app-bundle-check`, `darwin_linux_guard.py`, and Python unit tests | M |
+| [x] | Version exposure | `build/macos/shiraz-preview`, `src/shiraz/cli.py`, `scripts/build_macos_app.py`, `src/shiraz/darwin_app.py` | `--version` on macOS binaries (`Shiraz 0.353.0`) and CLI, plus `CFBundleShortVersionString`/`CFBundleVersion` in `Info.plist` | L |
 
 ### 9. Licensing and provenance
 

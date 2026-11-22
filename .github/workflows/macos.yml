@@ -1,0 +1,61 @@
+name: macOS native checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify Apple Silicon host and MAP_JIT support
+        run: |
+          uname -a
+          python3 - <<'PY'
+          import ctypes, os, platform
+          assert platform.system() == 'Darwin'
+          assert platform.machine() == 'arm64'
+          assert os.sysconf('SC_PAGESIZE') == 16384
+          libc = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+          libc.mmap.restype = ctypes.c_void_p
+          libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_longlong]
+          libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+          PROT_READ, PROT_WRITE, PROT_EXEC = 1, 2, 4
+          MAP_PRIVATE, MAP_ANON, MAP_JIT = 0x0002, 0x1000, 0x0800
+          ptr = libc.mmap(None, 16384, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0)
+          assert ptr and ptr != ctypes.c_void_p(-1).value, f'MAP_JIT mmap failed: {ptr}'
+          assert libc.munmap(ptr, 16384) == 0
+          print('MACOS_RUNNER_MAP_JIT_OK page_size=16384')
+          PY
+      - name: Check Linux path isolation guard
+        run: |
+          python3 scripts/darwin_linux_guard.py || true
+      - name: Run macOS native service and codec checks
+        run: |
+          make macos-metal-probe-check
+          make macos-video-check
+          make macos-notifications-check
+          make macos-location-check
+          make macos-app-bundle-check
+      - name: Run Python unit tests on macOS
+        env:
+          PYTHONPATH: src
+        run: |
+          python3 -m pip install -r config/test-requirements.txt
+          python3 -m unittest discover -s tests -p 'test_*.py'
