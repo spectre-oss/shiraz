@@ -30,11 +30,7 @@ jobs:
         run: |
           python3 -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py -v
       - name: Cross-platform Java HostOs smoke (Linux)
-        run: |
-          python3 scripts/build_framework.py
-          mkdir -p build/test-host-os
-          javac --release 8 -cp build/framework/classes -d build/test-host-os tests/java/HostOsCrossPlatformSmoke.java
-          java -cp build/test-host-os:build/framework/classes shiraz.runtime.HostOsCrossPlatformSmoke
+        run: python3 scripts/run_host_os_smoke.py
 
   macos:
     runs-on: macos-15
@@ -59,11 +55,7 @@ jobs:
         run: |
           python3 -m unittest tests/test_platform_paths.py tests/test_build_macos_app.py tests/test_build_windows_app.py -v
       - name: Cross-platform Java HostOs smoke (macOS)
-        run: |
-          python3 scripts/build_framework.py
-          mkdir -p build/test-host-os
-          javac --release 8 -cp build/framework/classes -d build/test-host-os tests/java/HostOsCrossPlatformSmoke.java
-          java -cp build/test-host-os:build/framework/classes shiraz.runtime.HostOsCrossPlatformSmoke
+        run: python3 scripts/run_host_os_smoke.py
 
   windows:
     runs-on: windows-latest
@@ -104,8 +96,4 @@ jobs:
           python -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py -v
       - name: Cross-platform Java HostOs smoke (Windows)
         shell: pwsh
-        run: |
-          python scripts/build_framework.py
-          New-Item -ItemType Directory -Force -Path build/test-host-os | Out-Null
-          javac --release 8 -cp build/framework/classes -d build/test-host-os tests/java/HostOsCrossPlatformSmoke.java
-          java -cp "build/test-host-os;build/framework/classes" shiraz.runtime.HostOsCrossPlatformSmoke
+        run: python scripts/run_host_os_smoke.py

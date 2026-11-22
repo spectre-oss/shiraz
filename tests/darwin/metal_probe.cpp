@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/metal_probe.hpp"
 
+#if __has_include(<SDL.h>)
 #include <SDL.h>
+#else
+enum {
+    SDL_TOUCH_DEVICE_INVALID = -1,
+    SDL_TOUCH_DEVICE_DIRECT = 0,
+    SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE = 1,
+    SDL_TOUCH_DEVICE_INDIRECT_RELATIVE = 2,
+};
+#endif
 
 #include <cassert>
 #include <cstring>
