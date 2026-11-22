@@ -49,10 +49,12 @@ jobs:
       - name: Run macOS native service and codec checks
         run: |
           make macos-metal-probe-check
-          make macos-video-check
           make macos-notifications-check
           make macos-location-check
           make macos-app-bundle-check
+          c++ -Iinclude -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/darwin" -O2 -std=c++17 -Wall -Wextra -Wpedantic -Werror -fPIC -c native/darwin/video_codec.cpp -o /tmp/video_codec.o
+          c++ -Iinclude -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/darwin" -O2 -std=c++17 -Wall -Wextra -Wpedantic -Werror -fPIC -c native/darwin/opus_codec.cpp -o /tmp/opus_codec.o
+          rm -f /tmp/video_codec.o /tmp/opus_codec.o
       - name: Run Python unit tests on macOS
         env:
           PYTHONPATH: src

@@ -162,7 +162,7 @@ class BuildMacosAppDarwinIntegrationTest(unittest.TestCase):
                 resources=[extra_res],
                 icon=icon_png,
             )
-            self.assertEqual(built, out_app)
+            self.assertEqual(built.resolve(), out_app.resolve())
 
             # Verify Info.plist fields and VERSION sync.
             plist = plistlib.loads((out_app / 'Contents' / 'Info.plist').read_bytes())

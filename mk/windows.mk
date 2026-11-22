@@ -3,6 +3,7 @@
 
 WINDOWS_OUT ?= build/windows
 WINDOWS_CXX ?= g++
+WINDOWS_PYTHON ?= $(shell command -v python3 >/dev/null 2>&1 && echo python3 || echo python)
 WINDOWS_CXXFLAGS ?= -O2 -g -std=c++17 -Wall -Wextra -Wpedantic -Werror -Iinclude -Ibuild
 
 WINDOWS_HOST_SOURCES := \
@@ -41,7 +42,7 @@ windows-check: windows-build windows-app-bundle-check
 	$(WINDOWS_OUT)/test-win32-platform.exe
 
 windows-app-bundle-check:
-	PYTHONPATH=src:tests python3 -m unittest tests/test_build_windows_app.py -v
+	$(WINDOWS_PYTHON) -c "import sys, unittest; sys.path[:0]=['src','tests']; res=unittest.main(module='test_build_windows_app', argv=['unittest','-v'], exit=False); sys.exit(0 if res.result.wasSuccessful() else 1)"
 
 build/test-cross-platform-native: tests/win32/platform_test.cpp $(WINDOWS_HOST_HEADERS)
 	@mkdir -p build
