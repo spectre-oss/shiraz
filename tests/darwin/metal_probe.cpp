@@ -22,6 +22,13 @@ int main() {
     assert(!shiraz::darwin_allow_touch_device_type(SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE));
     assert(!shiraz::darwin_allow_touch_device_type(SDL_TOUCH_DEVICE_INDIRECT_RELATIVE));
 
+    // 1b. Verify trackpad pinch-to-scroll conversion.
+    assert(shiraz::darwin_pinch_scroll_delta(2, 0.05f) > 0.5f);
+    assert(shiraz::darwin_pinch_scroll_delta(2, -0.05f) < -0.5f);
+    assert(shiraz::darwin_pinch_scroll_delta(2, 0.0f) == 0.0f);
+    assert(shiraz::darwin_pinch_scroll_delta(3, 0.1f) == 0.0f);
+    assert(shiraz::darwin_pinch_scroll_delta(2, 0.0f / 0.0f) == 0.0f);
+
     // 2. Verify Metal GPU device probe returns the real Apple Silicon GPU.
     char device[256] = {};
     char vendor[128] = {};

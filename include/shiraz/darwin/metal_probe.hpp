@@ -27,6 +27,17 @@ inline bool darwin_allow_touch_device_type(int touchDeviceType) {
     return touchDeviceType != 1 && touchDeviceType != 2;
 }
 
+// Translates a macOS trackpad two-finger pinch gesture (SDL_MULTIGESTURE dDist)
+// into a vertical scroll delta suitable for Android MotionEvent.ACTION_SCROLL
+// zoom handlers. Returns 0.0f for non-two-finger, tiny, or non-finite deltas.
+inline float darwin_pinch_scroll_delta(int numFingers, float dDist) {
+    if (numFingers != 2 || !(dDist > -10.0f && dDist < 10.0f))
+        return 0.0f;
+    if (dDist > -1e-4f && dDist < 1e-4f)
+        return 0.0f;
+    return dDist * 18.0f;
+}
+
 class DarwinAppNapGuard {
   public:
     explicit DarwinAppNapGuard(const char* reason = "Shiraz interactive presentation")

@@ -657,6 +657,55 @@ void present(const Surface& initial, const std::string& title, int frames,
     uint64_t uploadedRevision = contentRevision ? contentRevision() : 0, uploads = 1,
              skippedUploads = 0;
     bool repaint = true;
+#if defined(__APPLE__)
+    struct DarwinLiveResizeWatch {
+        SDL_Window* window;
+        SDL_Renderer* renderer;
+        std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* texture;
+        Surface* image;
+        bool* embedded;
+        bool* repaint;
+        bool active = false;
+        static int SDLCALL onEvent(void* userdata, SDL_Event* event) {
+            auto* self = static_cast<DarwinLiveResizeWatch*>(userdata);
+            if (!self || self->active || !event || event->type != SDL_WINDOWEVENT ||
+                event->window.windowID != SDL_GetWindowID(self->window))
+                return 0;
+            if (event->window.event != SDL_WINDOWEVENT_EXPOSED &&
+                event->window.event != SDL_WINDOWEVENT_RESIZED &&
+                event->window.event != SDL_WINDOWEVENT_SIZE_CHANGED)
+                return 0;
+            if ((self->embedded && *self->embedded) || !self->texture || !self->texture->get())
+                return 0;
+            self->active = true;
+            int outW = 0, outH = 0;
+            if (SDL_GetRendererOutputSize(self->renderer, &outW, &outH) == 0 && outW > 0 &&
+                outH > 0) {
+                auto v = fit(self->image->width, self->image->height, outW, outH);
+                SDL_Rect rect{int(v.x), int(v.y), int(v.width), int(v.height)};
+                SDL_SetRenderDrawColor(self->renderer, 16, 18, 22, 255);
+                SDL_RenderClear(self->renderer);
+                SDL_RenderCopy(self->renderer, self->texture->get(), nullptr, &rect);
+                SDL_RenderPresent(self->renderer);
+                if (self->repaint)
+                    *self->repaint = true;
+            }
+            self->active = false;
+            return 0;
+        }
+        DarwinLiveResizeWatch(SDL_Window* w, SDL_Renderer* r,
+                              std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* t,
+                              Surface* img, bool* emb, bool* rep)
+            : window(w), renderer(r), texture(t), image(img), embedded(emb), repaint(rep) {
+            SDL_AddEventWatch(&DarwinLiveResizeWatch::onEvent, this);
+        }
+        ~DarwinLiveResizeWatch() {
+            SDL_DelEventWatch(&DarwinLiveResizeWatch::onEvent, this);
+        }
+    };
+    DarwinLiveResizeWatch darwinLiveResizeWatch(window.get(), renderer.get(), &texture, &image,
+                                                &embedded, &repaint);
+#endif
     int presentedWidth = -1, presentedHeight = -1;
     uint64_t presents = 0, skippedPresents = 0;
     auto upload = [&](bool reset = false) {
@@ -1152,6 +1201,26 @@ void present(const Surface& initial, const std::string& title, int frames,
                     input({PointerAction::Scroll, *mapped, mouse_source,
                            eventTime(event.common.timestamp), dx, dy});
             }
+#if defined(__APPLE__)
+            if (event.type == SDL_MULTIGESTURE && input && !pointer.active() && !touches.active() &&
+                (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS)) {
+                const float pinchDy =
+                    darwin_pinch_scroll_delta(event.mgesture.numFingers, event.mgesture.dDist);
+                if (pinchDy != 0.0f) {
+                    int w, h;
+                    SDL_GetWindowSize(window.get(), &w, &h);
+                    int mx, my;
+                    SDL_GetMouseState(&mx, &my);
+                    auto mapped = map_pointer(
+                        {double(mx), double(my)},
+                        input_viewport(image.width, image.height, w, h, bool(displayChanged)),
+                        image.width, image.height);
+                    if (mapped)
+                        input({PointerAction::Scroll, *mapped, mouse_source,
+                               eventTime(event.common.timestamp), 0.0f, pinchDy});
+                }
+            }
+#endif
             if (!touches.active() && event.type == SDL_MOUSEMOTION &&
                 ownWindow(event.motion.windowID) && event.motion.which != SDL_TOUCH_MOUSEID) {
                 if (pointer.active() && event.motion.which == mouse)
