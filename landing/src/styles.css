@@ -454,6 +454,15 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
 .android-coverage > p { max-width: 74ch; margin-bottom: 12px; font-size: 16px; color: var(--ink-soft); }
 .android-coverage strong { color: var(--ink); font-weight: 600; }
 .android-coverage .coverage-date { font-size: 14px; color: var(--ink-faint); }
+.host-platform-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-block: 20px 24px; }
+.host-platform-card { display: grid; gap: 10px; align-content: start; padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--wine-deep); }
+.host-platform-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.host-platform-card h4 { margin: 0; font-size: 24px; }
+.host-platform-arch { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink-faint); }
+.host-platform-card p { margin: 0; font-size: 15px; line-height: 1.55; color: var(--ink-soft); }
+.host-platform-card a { justify-self: start; display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; }
+.host-matrix-table tbody th { width: 18%; }
+.host-matrix-table tbody td { width: 27.33%; min-width: 220px; }
 .coverage-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 20px; margin-block: 24px 12px; }
 .coverage-table tbody th { width: 20%; font-weight: 600; }
 .coverage-table tbody td:nth-child(4) { min-width: 330px; }
@@ -604,7 +613,7 @@ input, textarea { caret-color: var(--saffron); }
   .hero-inner { grid-template-columns: 1fr; }
   .hero-art { justify-self: center; width: min(100%, 400px); margin-top: 16px; }
   .hero h1 { font-size: clamp(2rem, 10.6vw, 6rem); }
-  .experimental-inner, .shiraz-web, .builder { grid-template-columns: 1fr; }
+  .experimental-inner, .shiraz-web, .builder, .host-platform-cards { grid-template-columns: 1fr; }
   .experimental-notice h2 { grid-row: auto; margin-bottom: 8px; }
   .builder-heading { position: static; }
   .table-hint { display: block; }

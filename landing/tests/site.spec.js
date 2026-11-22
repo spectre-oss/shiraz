@@ -232,6 +232,16 @@ test('Android tracker separates class inventory, subsystem support and historica
   await coverage.getByLabel('Support status').selectOption('Unsupported');
   await expect(table.getByRole('rowheader',{name:'Video recording',exact:true})).toBeVisible();
   await expect(table.getByRole('rowheader',{name:'Files and preferences',exact:true})).toHaveCount(0);
+  await coverage.getByLabel('Support status').selectOption('Partial');
+  await expect(table.getByRole('rowheader',{name:'VideoToolbox hardware decode',exact:true})).toBeVisible();
+  await expect(table.getByRole('rowheader',{name:'Signed macOS .app bundle builder',exact:true})).toBeVisible();
+  await coverage.getByLabel('Host scope').selectOption('Windows x64 / ARM64');
+  await expect(table.getByRole('rowheader',{name:'Windows Win32 host primitives and IPC',exact:true})).toBeVisible();
+  await expect(table.getByRole('rowheader',{name:'Windows portable and MSIX bundler',exact:true})).toBeVisible();
+  await expect(coverage.getByRole('heading',{name:'Host OS compatibility'})).toBeVisible();
+  const hostMatrix = coverage.getByRole('region',{name:'Host OS capability matrix'});
+  await expect(hostMatrix).toContainText('VideoToolbox');
+  await expect(hostMatrix).toContainText('WASAPI');
   await expect(coverage.getByRole('heading',{name:'Historical targeted network run'})).toBeVisible();
   await expect(coverage.getByRole('list',{name:'Recorded probe status totals'})).toContainText('NOT RUN');
   await expect(coverage.getByRole('region',{name:'Historical probe results'})).toContainText('Network');

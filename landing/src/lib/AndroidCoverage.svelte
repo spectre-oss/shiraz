@@ -1,5 +1,6 @@
 <script>
   // SPDX-License-Identifier: GPL-3.0-only
+  import hostPlatforms from './host-platforms.json';
   import inventory from './android-inventory.json';
   import ndk from './ndk-inventory.json';
   import support from './android-support.json';
@@ -21,14 +22,38 @@
 </script>
 <section id="android-tracker" class="android-coverage" aria-labelledby="android-coverage-title">
   <h2 id="android-coverage-title">How much of Android works?</h2>
-  <p class="coverage-intro">Android compatibility has more than one measure. Track the API surface, subsystem limits and recorded tests here. A class existing or a probe passing does not establish complete Android behavior.</p>
+  <p class="coverage-intro">Android compatibility has more than one measure. Track host operating systems, subsystem limits, API 35 framework and NDK coverage, and recorded tests here. A class existing or a probe passing does not establish complete Android behavior.</p>
   <p class="coverage-date">Development snapshot · {inventory.updated} UTC · runtime {inventory.runtimeVersion} · source baseline <a href={'https://github.com/spectre-oss/shiraz/commit/' + inventory.sourceCommit}>{inventory.sourceCommit.slice(0,7)}</a>, with local changes</p>
+
+  <h3 id="host-platforms">Host OS compatibility</h3>
+  <p>{hostPlatforms.note}</p>
+  <p class="coverage-date">Host matrix reviewed {hostPlatforms.updated}.</p>
+  <div class="host-platform-cards" aria-label="Supported host operating systems">
+    {#each hostPlatforms.platforms as platform (platform.id)}
+      <article class="host-platform-card">
+        <header>
+          <h4>{platform.name}</h4>
+          <span class="coverage-state" class:unverified={platform.id === 'windows'}>{platform.maturity}</span>
+        </header>
+        <p class="host-platform-arch">{platform.architectures}</p>
+        <p>{platform.summary}</p>
+        <a href={report(platform.evidence)} aria-label={'Read host specification for ' + platform.name}>Read {platform.name} spec</a>
+      </article>
+    {/each}
+  </div>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to horizontally scrollable table) -->
+  <div class="coverage-scroll" role="region" aria-describedby="android-table-hint" aria-label="Host OS capability matrix" tabindex="0">
+    <table class="coverage-table host-matrix-table"><caption class="visually-hidden">Shiraz native host backend layers across Linux, macOS ARM64 and Windows x64/ARM64</caption>
+      <thead><tr><th scope="col">Layer</th><th scope="col">Linux (x86_64 · ARM64)</th><th scope="col">macOS (Apple Silicon ARM64)</th><th scope="col">Windows (x64 · ARM64)</th></tr></thead>
+      <tbody>{#each hostPlatforms.layers as row (row.id)}<tr><th scope="row">{row.layer}</th><td>{row.linux}</td><td>{row.macos}</td><td>{row.windows}</td></tr>{/each}</tbody>
+    </table>
+  </div>
 
   <h3>Subsystem support</h3>
   <p>{support.note}</p>
   <p class="coverage-date">Support notes reviewed {support.updated}.</p>
   <div class="coverage-filters">
-    <label>Search Android support<input type="search" bind:value={query} placeholder="Networking, media, storage…" /></label>
+    <label>Search Android support<input type="search" bind:value={query} placeholder="Networking, media, macOS, Windows…" /></label>
     <label>Support status<select bind:value={status}><option>All</option><option>Partial</option><option>Unsupported</option><option>Unverified</option></select></label>
     <label>Host scope<select bind:value={scope}><option>All</option>{#each scopes as item}<option>{item}</option>{/each}</select></label>
   </div>
@@ -56,7 +81,7 @@
     <div class="coverage-scroll" role="region" aria-describedby="android-table-hint" aria-label="Android API class inventory" tabindex="0"><table class="coverage-table coverage-numbers"><caption class="visually-hidden">API 35 class-name presence by Android package</caption><thead><tr><th scope="col">Package</th><th scope="col">Present</th><th scope="col">Reference</th><th scope="col">Class names present</th></tr></thead><tbody>{#each classes.packages as item}<tr><th scope="row">{item.package}</th><td>{item.present}</td><td>{item.reference}</td><td><meter min="0" max={item.reference} value={item.present} aria-label={`${item.package}: ${item.present} of ${item.reference} class names`}></meter> {(100*item.present/item.reference).toFixed(1)}%</td></tr>{/each}</tbody></table></div>
   </details>
 
-  <h3>NDK native library inventory</h3>
+  <h3 id="ndk-inventory">NDK native library inventory</h3>
   <p><strong>{ndk.librariesPresent} of {ndk.librariesTotal} NDK libraries built; {ndk.symbolsPresent.toLocaleString('en')} of {ndk.symbolsReference.toLocaleString('en')} cataloged C symbols exported ({ndkPercent}%).</strong> Audited from compiled shared libraries with <code>nm</code> against the Android {ndk.androidVersion} / API {ndk.apiLevel} NDK catalog and exercised by 9 native behavioral test suites. Hardware drivers such as host Vulkan ICDs and physical Camera2 capture remain host-dependent. <a href={report('docs/ndk_final_goal.md')}>Read the NDK roadmap</a>.</p>
   <figure class="coverage-figure">
     <div class="coverage-bar" role="img" aria-label={`${ndk.symbolsPresent} NDK symbols exported; ${ndk.symbolsReference-ndk.symbolsPresent} absent from the API ${ndk.apiLevel} NDK catalog`}><span style:width={ndkPercent + '%'}></span></div>

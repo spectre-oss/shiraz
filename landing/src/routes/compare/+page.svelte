@@ -26,17 +26,17 @@
   const projects = [
     {
       id: 'shiraz', name: 'Shiraz', family: 'app', url: 'https://github.com/spectre-oss/shiraz', tagline: 'This project',
-      host: ['Linux x86-64 and ARM64. Experimental Apple Silicon macOS port.'],
+      host: ['Linux x86-64 and ARM64. Experimental Apple Silicon macOS port and native Windows x64/ARM64 foundation.'],
       code: ['Standalone ART.'],
       framework: ['All 4,445 Android™ API 35 class surfaces in Java + C++ JNI (bounded behavior), plus attributed AOSP code.'],
-      native: ['All 15 tracked API 35 NDK C/C++ libraries (887 audited symbols) built for Linux and macOS ARM64; host-ABI libraries load directly, with a guest ELF loader and bionic adapters on macOS.'],
+      native: ['All 15 tracked API 35 NDK C/C++ libraries (887 audited symbols) built for Linux and macOS ARM64; host-ABI libraries load directly, with a guest ELF loader and VideoToolbox/AudioToolbox/CoreLocation/Metal bridges on macOS, plus Win32/WASAPI/Media Foundation/DirectWrite/DXGI bridges on Windows.'],
       arm: ['Optional Digitalis bridge for ARM64. Developer runs only, not yet in AppImages.', 'warn'],
-      graphics: ['EGL/GLES with software composition; libvulkan.so bridges to a host Vulkan ICD when present (no bundled Vulkan driver yet).', 'warn'],
-      window: ['SDL2. Any desktop, no GTK.', 'good'],
+      graphics: ['EGL/GLES with software composition; libvulkan.so bridges to a host Vulkan ICD when present; Metal GPU probe on macOS and DXGI probe on Windows.', 'warn'],
+      window: ['SDL2 across Linux, macOS and Windows. Any desktop, no GTK.', 'good'],
       binder: ['None needed.', 'good'],
       webview: ['No JavaScript or DOM engine yet.', 'bad'],
       isolation: ['No app sandbox. Optional --no-internet seccomp policy.', 'bad'],
-      dist: ['Browser Builder makes a per-app AppImage; Web streams over WebRTC; CLI.', 'good'],
+      dist: ['Browser Builder makes a per-app AppImage; signed macOS .app and Windows portable/MSIX bundlers; Web streams over WebRTC; CLI.', 'good'],
       license: ['GPL-3.0-only.'],
       repo: [`spectre-oss/shiraz, version ${__SHIRAZ_VERSION__}.`],
       apps: ['Obtainium, Joplin, Unciv, Mindustry, SuperTux, Tiny Crate and 2048, with limits recorded. OsmAnd reached maps and routes; full flows still unverified.']
@@ -173,7 +173,7 @@
     'The only one here that packages an APK into a standalone Linux app inside the browser.',
     'The only one that streams a running app to a browser over WebRTC.',
     'No GTK, no Wayland-only stack, no specific desktop.',
-    'An ARM64 bridge on x86-64 and a native ARM64 macOS port in one codebase.',
+    'Linux x86-64/ARM64, native ARM64 macOS bridges & signed .app bundler, and a native Windows Win32/MSIX foundation in one codebase.',
     'Interactive evidence across Flutter, React Native, Unity, libGDX, Godot, SDL and Arc apps.'
   ];
   const trails = [
@@ -208,7 +208,7 @@
 <main id="compare-main">
   <section class="peers-hero wrap">
     <div class="hero-copy">
-      <p class="eyebrow">Shiraz and its peers · reviewed 21 November 2026</p>
+      <p class="eyebrow">Shiraz and its peers · reviewed 22 November 2026</p>
       <h1>Run the app.<br><span>Not the phone.</span></h1>
       <p class="lede">Seven open projects want Android™ apps on your desktop. Here is how Shiraz is built, why, and where each of the others is ahead of us.</p>
       <div class="hero-actions"><a class="button primary" href="#head-to-head">Compare head to head</a><a class="button secondary" href="#all">See all seven</a></div>

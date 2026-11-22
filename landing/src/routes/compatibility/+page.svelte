@@ -35,10 +35,10 @@
 </script>
 <svelte:head>
   <title>App compatibility — Shiraz</title>
-  <meta name="description" content="Explore recorded Shiraz app compatibility: tested features, known limitations, and public test reports." />
+  <meta name="description" content="Explore recorded Shiraz app compatibility, Linux/macOS/Windows host matrices, API 35 framework and NDK coverage, and public test reports." />
   <link rel="canonical" href="https://spectre-oss.github.io/shiraz/compatibility/" />
   <meta property="og:title" content="Shiraz app compatibility" />
-  <meta property="og:description" content="What has been tested, what is partial, and what is still blocked." />
+  <meta property="og:description" content="What has been tested across apps, Linux, macOS ARM64, Windows, API 35 classes and NDK libraries." />
   <meta property="og:url" content="https://spectre-oss.github.io/shiraz/compatibility/" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Shiraz" />
@@ -56,7 +56,7 @@
     {#each statuses.slice(1) as item}<p><strong>{applications.filter(app => app.status === item).length}</strong><span>{item}</span></p>{/each}
   </div>
   <aside class="compat-caveat"><strong>Experimental, app by app.</strong> These are recorded observations, not fresh tests or full compatibility guarantees. Results depend on the APK version, architecture, runtime, and test environment. Read the report before relying on a feature.</aside>
-  <nav class="compat-section-nav" aria-label="Compatibility sections"><a href="#app-results-title">App results</a><a href="#android-tracker">Android coverage tracker</a></nav>
+  <nav class="compat-section-nav" aria-label="Compatibility sections"><a href="#app-results-title">App results</a><a href="#android-tracker">Android coverage tracker</a><a href="#host-platforms">Host OS matrix</a><a href="#ndk-inventory">NDK libraries</a></nav>
   </div>
   <section aria-labelledby="app-results-title" class="compat-results">
     <h2 id="app-results-title">Find an app</h2>

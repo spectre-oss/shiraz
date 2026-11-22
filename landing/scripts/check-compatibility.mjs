@@ -111,6 +111,39 @@ if (
 ) {
   throw Error('NDK inventory totals disagree');
 }
+const hosts = JSON.parse(readFileSync(`${root}landing/src/lib/host-platforms.json`, 'utf8'));
+if (
+  hosts.schemaVersion !== 1 ||
+  !/^\d{4}-\d{2}-\d{2}$/.test(hosts.updated) ||
+  typeof hosts.note !== 'string' ||
+  !hosts.note.trim() ||
+  !Array.isArray(hosts.platforms) ||
+  hosts.platforms.length < 3 ||
+  !Array.isArray(hosts.layers) ||
+  !hosts.layers.length
+) {
+  throw Error('Invalid host platforms matrix');
+}
+const hostIds = new Set();
+for (const platform of hosts.platforms) {
+  for (const key of ['id', 'name', 'architectures', 'maturity', 'summary', 'evidence']) {
+    if (typeof platform[key] !== 'string' || !platform[key].trim()) throw Error(`Missing host platform ${key}`);
+  }
+  if (!/^[a-z0-9-]+$/.test(platform.id) || hostIds.has(platform.id)) throw Error(`Invalid host platform id: ${platform.id}`);
+  hostIds.add(platform.id);
+  const file = resolve(root, platform.evidence);
+  if (!platform.evidence.startsWith('docs/') || !file.startsWith(root) || !existsSync(file)) {
+    throw Error(`Invalid host platform evidence path: ${platform.evidence}`);
+  }
+}
+const layerIds = new Set();
+for (const row of hosts.layers) {
+  for (const key of ['id', 'layer', 'linux', 'macos', 'windows']) {
+    if (typeof row[key] !== 'string' || !row[key].trim()) throw Error(`Missing host matrix ${key}`);
+  }
+  if (!/^[a-z0-9-]+$/.test(row.id) || layerIds.has(row.id)) throw Error(`Invalid host matrix layer id: ${row.id}`);
+  layerIds.add(row.id);
+}
 console.log(
-  `Validated ${support.areas.length} subsystem notes, ${classes.reference} reference classes, ${ndk.librariesTotal} NDK libraries (${ndk.symbolsPresent}/${ndk.symbolsReference} symbols) and ${planned.total} planned assertions`
+  `Validated ${support.areas.length} subsystem notes, ${hosts.platforms.length} host platforms (${hosts.layers.length} layers), ${classes.reference} reference classes, ${ndk.librariesTotal} NDK libraries (${ndk.symbolsPresent}/${ndk.symbolsReference} symbols) and ${planned.total} planned assertions`
 );

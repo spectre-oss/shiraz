@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-11-21",
+  "updated": "2026-11-22",
   "note": "Maintained subsystem notes describe bounded development support. Partial never means a whole subsystem is complete. Shared framework rows do not certify every host backend.",
   "areas": [
     {
@@ -36,7 +36,7 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "Component tests",
-      "notes": "Committed preferences, queued apply writes, PreferenceScreen hierarchies and DocumentsContract/MediaStore URI models pass OpenJDK/ART tests. Telegram saved-login persistence is still unverified.",
+      "notes": "Committed preferences, queued apply writes, PreferenceScreen hierarchies, unified Linux/macOS/Windows OS data paths and DocumentsContract/MediaStore URI models pass OpenJDK/ART tests. Telegram saved-login persistence is still unverified.",
       "evidence": "docs/tested.md"
     },
     {
@@ -126,17 +126,44 @@
       "scope": "macOS ARM64",
       "status": "Partial",
       "verification": "App and component tests",
-      "notes": "Telegram library initialization and selected libc, socket, TLS and JNI bridges tested. This is not complete syscall or native-ABI compatibility.",
+      "notes": "Telegram library initialization and selected libc, socket, TLS and JNI bridges tested alongside unified 16 KB page-size and ABI policy. This is not complete syscall or native-ABI compatibility.",
       "evidence": "docs/tested.md"
     },
     {
       "id": "playback-macos",
-      "name": "Audio playback and AAC",
+      "name": "Audio playback, AAC and Opus",
       "scope": "macOS ARM64",
       "status": "Partial",
       "verification": "Component tests",
-      "notes": "PCM output, WAV/AAC decode, AAC encode and timestamps tested with synthetic media. Telegram voice messages and calls remain unverified.",
-      "evidence": "docs/tested.md"
+      "notes": "PCM output, WAV/AAC/Opus decode (AudioToolbox), AAC encode and timestamps tested with synthetic media. Telegram voice messages and calls remain unverified.",
+      "evidence": "docs/macos_final_goal.md"
+    },
+    {
+      "id": "video-decode-macos",
+      "name": "VideoToolbox hardware decode",
+      "scope": "macOS ARM64",
+      "status": "Partial",
+      "verification": "Native unit tests",
+      "notes": "libshiraz-video.so decodes H.264, HEVC, VP9 and AV1 through VideoToolbox alongside AudioToolbox Opus; end-to-end app playback and DRM remain unverified.",
+      "evidence": "docs/macos_final_goal.md"
+    },
+    {
+      "id": "desktop-macos",
+      "name": "macOS notifications, location, Metal and gestures",
+      "scope": "macOS ARM64",
+      "status": "Partial",
+      "verification": "Native and component tests",
+      "notes": "UNUserNotificationCenter notifications, CoreLocation wired into Android LocationManager, Metal GPU probe, App Nap guard, Cocoa live-resize events and trackpad pinch/touch filtering are implemented; interactive TCC prompts in end-user apps remain under test.",
+      "evidence": "docs/macos_final_goal.md"
+    },
+    {
+      "id": "packaging-macos",
+      "name": "Signed macOS .app bundle builder",
+      "scope": "macOS ARM64",
+      "status": "Partial",
+      "verification": "macOS build and bundle tests",
+      "notes": "Builds self-contained signed Shiraz.app bundles with hardened runtime, allow-jit entitlements, @rpath library closure and generated .icns icons; notarized release distribution is not yet published.",
+      "evidence": "docs/macos_final_goal.md"
     },
     {
       "id": "capture-macos",
@@ -173,6 +200,33 @@
       "verification": "Explicit limitation",
       "notes": "Only a local default audio route is provided. Remote and cast routing are unavailable.",
       "evidence": "docs/tested.md"
+    },
+    {
+      "id": "host-windows",
+      "name": "Windows Win32 host primitives and IPC",
+      "scope": "Windows x64 / ARM64",
+      "status": "Partial",
+      "verification": "MSVC build and native unit tests",
+      "notes": "Native Win32 implementations cover CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe, SetThreadExecutionState, WM_SIZE/WM_SIZING live resize, Precision Touchpad hooks and HostOs/ShellExecuteW launchers. Full ART and guest ELF execution on Windows is not yet complete.",
+      "evidence": "docs/windows_final_goal.md"
+    },
+    {
+      "id": "media-services-windows",
+      "name": "Windows WASAPI, Media Foundation, DirectWrite and services",
+      "scope": "Windows x64 / ARM64",
+      "status": "Partial",
+      "verification": "MSVC build and native unit tests",
+      "notes": "WASAPI PCM16 audio bridge, Media Foundation H.264/HEVC/VP9/AV1 decoder probing, DirectWrite system font enumeration, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass unit tests; interactive end-to-end app media playback on Windows is not yet verified.",
+      "evidence": "docs/windows_final_goal.md"
+    },
+    {
+      "id": "packaging-windows",
+      "name": "Windows portable and MSIX bundler",
+      "scope": "Windows x64 / ARM64",
+      "status": "Partial",
+      "verification": "Python and Windows CI tests",
+      "notes": "Portable Shiraz\\ directory and MSIX AppxManifest.xml bundler with PE32/PE32+ import closure and .ico generation, validated in 3-OS CI; signed Windows installer releases are not yet published.",
+      "evidence": "docs/windows_final_goal.md"
     },
     {
       "id": "webview",
