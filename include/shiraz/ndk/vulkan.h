@@ -41,9 +41,12 @@ typedef uint32_t VkSampleMask;
 #define VK_KHR_SWAPCHAIN_SPEC_VERSION 70U
 #define VK_KHR_ANDROID_SURFACE_EXTENSION_NAME "VK_KHR_android_surface"
 #define VK_KHR_ANDROID_SURFACE_SPEC_VERSION 6U
+#define VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME "VK_KHR_portability_enumeration"
+#define VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR 0x00000001U
 #define VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME                          \
     "VK_ANDROID_external_memory_android_hardware_buffer"
 #define VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_SPEC_VERSION 5U
+#define VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID 0x00000400U
 
 typedef struct VkInstance_T* VkInstance;
 typedef struct VkPhysicalDevice_T* VkPhysicalDevice;
@@ -93,11 +96,14 @@ typedef enum VkStructureType {
     VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO = 2,
     VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO = 3,
     VK_STRUCTURE_TYPE_SUBMIT_INFO = 4,
+    VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO = 5,
     VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR = 1000001000,
     VK_STRUCTURE_TYPE_PRESENT_INFO_KHR = 1000001001,
     VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR = 1000008000,
+    VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO = 1000072002,
     VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID = 1000129001,
     VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID = 1000129003,
+    VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID = 1000129004,
     VK_STRUCTURE_TYPE_MEMORY_GET_ANDROID_HARDWARE_BUFFER_INFO_ANDROID = 1000129005,
 } VkStructureType;
 
@@ -169,6 +175,11 @@ typedef VkFlags VkSwapchainCreateFlagsKHR;
 typedef VkFlags VkFormatFeatureFlags;
 
 typedef struct VkAllocationCallbacks VkAllocationCallbacks;
+
+typedef struct VkBaseInStructure {
+    VkStructureType sType;
+    const struct VkBaseInStructure* pNext;
+} VkBaseInStructure;
 
 typedef struct VkBaseOutStructure {
     VkStructureType sType;
@@ -548,13 +559,32 @@ typedef struct VkAndroidHardwareBufferFormatPropertiesANDROID {
     uint32_t suggestedYChromaOffset;
 } VkAndroidHardwareBufferFormatPropertiesANDROID;
 
+typedef struct VkMemoryAllocateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkDeviceSize allocationSize;
+    uint32_t memoryTypeIndex;
+} VkMemoryAllocateInfo;
+
+typedef struct VkExportMemoryAllocateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkFlags handleTypes;
+} VkExportMemoryAllocateInfo;
+
+typedef struct VkImportAndroidHardwareBufferInfoANDROID {
+    VkStructureType sType;
+    const void* pNext;
+    struct AHardwareBuffer* buffer;
+} VkImportAndroidHardwareBufferInfoANDROID;
+
 typedef struct VkMemoryGetAndroidHardwareBufferInfoANDROID {
     VkStructureType sType;
     const void* pNext;
     VkDeviceMemory memory;
 } VkMemoryGetAndroidHardwareBufferInfoANDROID;
 
-// --- Exported Vulkan 1.0-1.3 loader & Android extension entry points (32 symbols) ---
+// --- Exported Vulkan 1.0-1.3 loader & Android extension entry points ---
 
 PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance instance, const char* pName);
 PFN_vkVoidFunction vkGetDeviceProcAddr(VkDevice device, const char* pName);
@@ -593,6 +623,9 @@ VkResult vkDeviceWaitIdle(VkDevice device);
 VkResult vkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits,
                        VkFence fence);
 VkResult vkQueueWaitIdle(VkQueue queue);
+VkResult vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo,
+                          const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory);
+void vkFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator);
 
 VkResult vkCreateAndroidSurfaceKHR(VkInstance instance,
                                    const VkAndroidSurfaceCreateInfoKHR* pCreateInfo,
@@ -630,6 +663,11 @@ VkResult
 vkGetMemoryAndroidHardwareBufferANDROID(VkDevice device,
                                         const VkMemoryGetAndroidHardwareBufferInfoANDROID* pInfo,
                                         struct AHardwareBuffer** pBuffer);
+
+// Host helper: acquires a ref to the AHardwareBuffer backing a Shiraz ANativeWindow swapchain slot.
+// Caller releases with AHardwareBuffer_release().
+VkResult shiraz_vulkan_swapchain_image_buffer(VkSwapchainKHR swapchain, uint32_t imageIndex,
+                                              struct AHardwareBuffer** pBuffer);
 
 #ifdef __cplusplus
 }

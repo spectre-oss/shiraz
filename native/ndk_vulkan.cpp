@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Android NDK libvulkan.so dynamic loader/ICD bridge with VK_KHR_android_surface
-// and VK_ANDROID_external_memory_android_hardware_buffer support.
+// Android NDK libvulkan.so dynamic loader/ICD bridge with VK_KHR_android_surface,
+// ANativeWindow-backed swapchain presentation, and
+// VK_ANDROID_external_memory_android_hardware_buffer support.
 #include "shiraz/ndk/vulkan.h"
 
 #include "shiraz/hardware_buffer.h"
@@ -10,11 +11,17 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace {
 
@@ -43,6 +50,9 @@ using PFN_vkGetDeviceQueue = void (*)(VkDevice, uint32_t, uint32_t, VkQueue*);
 using PFN_vkDeviceWaitIdle = VkResult (*)(VkDevice);
 using PFN_vkQueueSubmit = VkResult (*)(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
 using PFN_vkQueueWaitIdle = VkResult (*)(VkQueue);
+using PFN_vkAllocateMemory = VkResult (*)(VkDevice, const VkMemoryAllocateInfo*,
+                                          const VkAllocationCallbacks*, VkDeviceMemory*);
+using PFN_vkFreeMemory = void (*)(VkDevice, VkDeviceMemory, const VkAllocationCallbacks*);
 using PFN_vkCreateSwapchainKHR = VkResult (*)(VkDevice, const VkSwapchainCreateInfoKHR*,
                                               const VkAllocationCallbacks*, VkSwapchainKHR*);
 using PFN_vkDestroySwapchainKHR = void (*)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks*);
@@ -55,7 +65,11 @@ template <typename Fn> Fn load_dlsym(void* handle, const char* name) {
     if (!handle || !name) {
         return nullptr;
     }
+#if defined(_WIN32)
+    FARPROC raw = ::GetProcAddress(static_cast<HMODULE>(handle), name);
+#else
     void* raw = ::dlsym(handle, name);
+#endif
     Fn fn = nullptr;
     if (raw) {
         std::memcpy(&fn, &raw, sizeof(fn));
@@ -81,7 +95,9 @@ struct HostVulkanLoader {
         if (const char* envIcd = std::getenv("SHIRAZ_VULKAN_ICD"); envIcd && *envIcd) {
             candidates.emplace_back(envIcd);
         }
-#if defined(__APPLE__)
+#if defined(_WIN32)
+        candidates.emplace_back("vulkan-1.dll");
+#elif defined(__APPLE__)
         candidates.emplace_back("libvulkan.1.dylib");
         candidates.emplace_back("libvulkan.dylib");
         candidates.emplace_back("libMoltenVK.dylib");
@@ -96,13 +112,21 @@ struct HostVulkanLoader {
         candidates.emplace_back("/usr/lib64/libvulkan.so.1");
 #endif
         for (const auto& path : candidates) {
+#if defined(_WIN32)
+            void* h = static_cast<void*>(::LoadLibraryA(path.c_str()));
+#else
             void* h = ::dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+#endif
             if (!h) {
                 continue;
             }
             auto gipa = load_dlsym<PFN_vkGetInstanceProcAddr>(h, "vkGetInstanceProcAddr");
             if (!gipa) {
+#if defined(_WIN32)
+                ::FreeLibrary(static_cast<HMODULE>(h));
+#else
                 ::dlclose(h);
+#endif
                 continue;
             }
             handle = h;
@@ -146,11 +170,38 @@ struct AndroidSurfaceRecord {
     ANativeWindow* window = nullptr;
 };
 
+struct SwapchainImageSlot {
+    VkImage image = VK_NULL_HANDLE;
+    AHardwareBuffer* buffer = nullptr;
+    bool acquired = false;
+};
+
+struct ShirazSwapchainRecord {
+    VkDevice device = nullptr;
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    ANativeWindow* window = nullptr;
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t nextAcquireIndex = 0;
+    uint64_t presentCount = 0;
+    bool retired = false;
+    std::vector<SwapchainImageSlot> slots;
+};
+
+struct AhbMemoryRecord {
+    VkDevice device = nullptr;
+    AHardwareBuffer* buffer = nullptr;
+    bool hostAllocated = false;
+};
+
 struct VulkanState {
     std::mutex mu;
     std::atomic<uint64_t> nextHandle{1};
+    std::unordered_set<VkDevice> hostDevices;
     std::unordered_map<VkSurfaceKHR, AndroidSurfaceRecord> surfaces;
-    std::unordered_map<VkDeviceMemory, AHardwareBuffer*> ahbMemories;
+    std::unordered_map<VkSwapchainKHR, ShirazSwapchainRecord> swapchains;
+    std::unordered_map<VkDeviceMemory, AhbMemoryRecord> ahbMemories;
 };
 
 VulkanState& vk_state() {
@@ -158,9 +209,32 @@ VulkanState& vk_state() {
     return s;
 }
 
+void release_swapchain_resources(ShirazSwapchainRecord& rec) {
+    for (auto& slot : rec.slots) {
+        if (slot.buffer) {
+            AHardwareBuffer_release(slot.buffer);
+            slot.buffer = nullptr;
+        }
+    }
+    rec.slots.clear();
+    if (rec.window) {
+        ANativeWindow_release(rec.window);
+        rec.window = nullptr;
+    }
+}
+
 bool has_extension(const std::vector<VkExtensionProperties>& list, const char* name) {
     for (const auto& ext : list) {
         if (std::strcmp(ext.extensionName, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool has_extension_name(const std::vector<const char*>& list, const char* name) {
+    for (const char* ext : list) {
+        if (ext && std::strcmp(ext, name) == 0) {
             return true;
         }
     }
@@ -177,6 +251,25 @@ void append_extension(std::vector<VkExtensionProperties>& list, const char* name
     prop.extensionName[VK_MAX_EXTENSION_NAME_SIZE - 1] = '\0';
     prop.specVersion = specVersion;
     list.push_back(prop);
+}
+
+bool host_supports_instance_extension(const char* extName) {
+    const auto& loader = host_loader();
+    auto fn = loader.instanceProc<PFN_vkEnumerateInstanceExtensionProperties>(
+        nullptr, "vkEnumerateInstanceExtensionProperties");
+    if (!fn) {
+        return false;
+    }
+    uint32_t count = 0;
+    if (fn(nullptr, &count, nullptr) != VK_SUCCESS || count == 0) {
+        return false;
+    }
+    std::vector<VkExtensionProperties> props(count);
+    if (fn(nullptr, &count, props.data()) != VK_SUCCESS) {
+        return false;
+    }
+    props.resize(count);
+    return has_extension(props, extName);
 }
 
 // Map Android AHardwareBuffer format constants (hardware_buffer.h / AHardwareBuffer_Format)
@@ -215,6 +308,79 @@ void describe_ahb_format(uint32_t ahbFormat, VkFormat* outVkFormat, uint32_t* ou
     }
 }
 
+constexpr uint32_t kAhbFormatRgba8888 = 1U;
+constexpr uint64_t kAhbUsageCpuReadOften = 0x3ULL;
+constexpr uint64_t kAhbUsageCpuWriteOften = 0x30ULL;
+constexpr uint64_t kAhbUsageGpuSampledImage = 0x100ULL;
+constexpr uint64_t kAhbUsageGpuFramebuffer = 0x200ULL;
+
+bool is_bgra_format(VkFormat fmt) {
+    return fmt == VK_FORMAT_B8G8R8A8_UNORM || fmt == VK_FORMAT_B8G8R8A8_SRGB;
+}
+
+VkResult present_slot_to_window(ANativeWindow* window, AHardwareBuffer* buffer, VkFormat format,
+                                uint32_t width, uint32_t height) {
+    if (!window || !buffer) {
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    const int32_t curW = ANativeWindow_getWidth(window);
+    const int32_t curH = ANativeWindow_getHeight(window);
+    if (curW <= 0 || curH <= 0) {
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    if (static_cast<uint32_t>(curW) != width || static_cast<uint32_t>(curH) != height) {
+        return VK_ERROR_OUT_OF_DATE_KHR;
+    }
+
+    AHardwareBuffer_Desc desc{};
+    AHardwareBuffer_describe(buffer, &desc);
+    void* srcRaw = nullptr;
+    if (AHardwareBuffer_lock(buffer, kAhbUsageCpuReadOften, -1, nullptr, &srcRaw) != 0 || !srcRaw) {
+        return VK_ERROR_DEVICE_LOST;
+    }
+
+    ANativeWindow_Buffer dst{};
+    if (ANativeWindow_lock(window, &dst, nullptr) != 0 || !dst.bits) {
+        AHardwareBuffer_unlock(buffer, nullptr);
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+
+    const uint32_t copyW =
+        std::min<uint32_t>(width, dst.width > 0 ? static_cast<uint32_t>(dst.width) : 0U);
+    const uint32_t copyH =
+        std::min<uint32_t>(height, dst.height > 0 ? static_cast<uint32_t>(dst.height) : 0U);
+    const uint32_t srcStride = desc.stride >= width ? desc.stride : width;
+    const uint32_t dstStride =
+        dst.stride > 0 ? static_cast<uint32_t>(dst.stride) : static_cast<uint32_t>(dst.width);
+    const bool swapRB = is_bgra_format(format);
+
+    const auto* srcBytes = static_cast<const uint8_t*>(srcRaw);
+    auto* dstBytes = static_cast<uint8_t*>(dst.bits);
+
+    for (uint32_t y = 0; y < copyH; ++y) {
+        const uint8_t* srcRow = srcBytes + static_cast<size_t>(y) * srcStride * 4U;
+        uint8_t* dstRow = dstBytes + static_cast<size_t>(y) * dstStride * 4U;
+        if (!swapRB) {
+            std::memcpy(dstRow, srcRow, static_cast<size_t>(copyW) * 4U);
+        } else {
+            for (uint32_t x = 0; x < copyW; ++x) {
+                const uint8_t* sp = srcRow + static_cast<size_t>(x) * 4U;
+                uint8_t* dp = dstRow + static_cast<size_t>(x) * 4U;
+                dp[0] = sp[2]; // R <- B
+                dp[1] = sp[1]; // G <- G
+                dp[2] = sp[0]; // B <- R
+                dp[3] = sp[3]; // A <- A
+            }
+        }
+    }
+
+    AHardwareBuffer_unlock(buffer, nullptr);
+    if (ANativeWindow_unlockAndPost(window) != 0) {
+        return VK_ERROR_SURFACE_LOST_KHR;
+    }
+    return VK_SUCCESS;
+}
+
 PFN_vkVoidFunction lookup_shiraz_export(const char* pName) {
     if (!pName) {
         return nullptr;
@@ -242,6 +408,8 @@ PFN_vkVoidFunction lookup_shiraz_export(const char* pName) {
     SHIRAZ_VK_MATCH(vkDeviceWaitIdle)
     SHIRAZ_VK_MATCH(vkQueueSubmit)
     SHIRAZ_VK_MATCH(vkQueueWaitIdle)
+    SHIRAZ_VK_MATCH(vkAllocateMemory)
+    SHIRAZ_VK_MATCH(vkFreeMemory)
     SHIRAZ_VK_MATCH(vkCreateAndroidSurfaceKHR)
     SHIRAZ_VK_MATCH(vkDestroySurfaceKHR)
     SHIRAZ_VK_MATCH(vkGetPhysicalDeviceSurfaceSupportKHR)
@@ -295,7 +463,8 @@ PFN_vkVoidFunction vkGetDeviceProcAddr(VkDevice device, const char* pName) {
     if (std::strcmp(pName, "vkGetDeviceProcAddr") == 0 ||
         std::strcmp(pName, "vkDestroyDevice") == 0 || std::strcmp(pName, "vkGetDeviceQueue") == 0 ||
         std::strcmp(pName, "vkDeviceWaitIdle") == 0 || std::strcmp(pName, "vkQueueSubmit") == 0 ||
-        std::strcmp(pName, "vkQueueWaitIdle") == 0 ||
+        std::strcmp(pName, "vkQueueWaitIdle") == 0 || std::strcmp(pName, "vkAllocateMemory") == 0 ||
+        std::strcmp(pName, "vkFreeMemory") == 0 ||
         std::strcmp(pName, "vkCreateSwapchainKHR") == 0 ||
         std::strcmp(pName, "vkDestroySwapchainKHR") == 0 ||
         std::strcmp(pName, "vkGetSwapchainImagesKHR") == 0 ||
@@ -399,7 +568,7 @@ VkResult vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo,
 
     // Strip Android-only VK_KHR_android_surface when forwarding to a desktop ICD.
     std::vector<const char*> filteredExts;
-    filteredExts.reserve(pCreateInfo->enabledExtensionCount);
+    filteredExts.reserve(pCreateInfo->enabledExtensionCount + 1);
     for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
         const char* ext = pCreateInfo->ppEnabledExtensionNames[i];
         if (ext && std::strcmp(ext, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME) == 0) {
@@ -408,6 +577,16 @@ VkResult vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo,
         filteredExts.push_back(ext);
     }
     VkInstanceCreateInfo forwarded = *pCreateInfo;
+#if defined(__APPLE__)
+    // MoltenVK / Vulkan-Loader on macOS requires VK_KHR_portability_enumeration to expose
+    // Apple Silicon / Metal physical devices.
+    if (host_supports_instance_extension(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+        if (!has_extension_name(filteredExts, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+            filteredExts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        }
+        forwarded.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    }
+#endif
     forwarded.enabledExtensionCount = static_cast<uint32_t>(filteredExts.size());
     forwarded.ppEnabledExtensionNames = filteredExts.empty() ? nullptr : filteredExts.data();
     return fn(&forwarded, pAllocator, pInstance);
@@ -417,19 +596,23 @@ void vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAlloca
     if (!instance) {
         return;
     }
+    std::vector<ANativeWindow*> windowsToRelease;
     {
         auto& st = vk_state();
         std::lock_guard<std::mutex> lock(st.mu);
         for (auto it = st.surfaces.begin(); it != st.surfaces.end();) {
             if (it->second.instance == instance) {
                 if (it->second.window) {
-                    ANativeWindow_release(it->second.window);
+                    windowsToRelease.push_back(it->second.window);
                 }
                 it = st.surfaces.erase(it);
             } else {
                 ++it;
             }
         }
+    }
+    for (ANativeWindow* w : windowsToRelease) {
+        ANativeWindow_release(w);
     }
     const auto& loader = host_loader();
     if (auto fn = loader.instanceProc<PFN_vkDestroyInstance>(instance, "vkDestroyInstance")) {
@@ -582,16 +765,56 @@ VkResult vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInf
     VkDeviceCreateInfo forwarded = *pCreateInfo;
     forwarded.enabledExtensionCount = static_cast<uint32_t>(filteredExts.size());
     forwarded.ppEnabledExtensionNames = filteredExts.empty() ? nullptr : filteredExts.data();
-    return fn(physicalDevice, &forwarded, pAllocator, pDevice);
+    VkResult res = fn(physicalDevice, &forwarded, pAllocator, pDevice);
+    if (res == VK_SUCCESS && *pDevice) {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        st.hostDevices.insert(*pDevice);
+    }
+    return res;
 }
 
 void vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* pAllocator) {
     if (!device) {
         return;
     }
-    const auto& loader = host_loader();
-    if (auto fn = loader.deviceProc<PFN_vkDestroyDevice>(device, "vkDestroyDevice")) {
-        fn(device, pAllocator);
+    bool wasHostDevice = false;
+    std::vector<ShirazSwapchainRecord> orphanedSwapchains;
+    std::vector<AHardwareBuffer*> orphanedAhbs;
+    {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        wasHostDevice = st.hostDevices.erase(device) > 0;
+        for (auto it = st.swapchains.begin(); it != st.swapchains.end();) {
+            if (it->second.device == device) {
+                orphanedSwapchains.push_back(std::move(it->second));
+                it = st.swapchains.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        for (auto it = st.ahbMemories.begin(); it != st.ahbMemories.end();) {
+            if (it->second.device == device) {
+                if (it->second.buffer) {
+                    orphanedAhbs.push_back(it->second.buffer);
+                }
+                it = st.ahbMemories.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& rec : orphanedSwapchains) {
+        release_swapchain_resources(rec);
+    }
+    for (AHardwareBuffer* buf : orphanedAhbs) {
+        AHardwareBuffer_release(buf);
+    }
+    if (wasHostDevice) {
+        const auto& loader = host_loader();
+        if (auto fn = loader.deviceProc<PFN_vkDestroyDevice>(device, "vkDestroyDevice")) {
+            fn(device, pAllocator);
+        }
     }
 }
 
@@ -642,6 +865,140 @@ VkResult vkQueueWaitIdle(VkQueue queue) {
         return fn(queue);
     }
     return VK_ERROR_INCOMPATIBLE_DRIVER;
+}
+
+VkResult vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo,
+                          const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory) {
+    if (!device || !pAllocateInfo || !pMemory ||
+        pAllocateInfo->sType != VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    *pMemory = VK_NULL_HANDLE;
+
+    AHardwareBuffer* importedAhb = nullptr;
+    bool exportAhb = false;
+    const auto* next = static_cast<const VkBaseInStructure*>(pAllocateInfo->pNext);
+    while (next) {
+        if (next->sType == VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID) {
+            const auto* importInfo =
+                reinterpret_cast<const VkImportAndroidHardwareBufferInfoANDROID*>(next);
+            importedAhb = importInfo->buffer;
+        } else if (next->sType == VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO) {
+            const auto* exportInfo = reinterpret_cast<const VkExportMemoryAllocateInfo*>(next);
+            if ((exportInfo->handleTypes &
+                 VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID) != 0) {
+                exportAhb = true;
+            }
+        }
+        next = next->pNext;
+    }
+
+    if (importedAhb || exportAhb) {
+        AHardwareBuffer* boundAhb = nullptr;
+        if (importedAhb) {
+            AHardwareBuffer_Desc desc{};
+            AHardwareBuffer_describe(importedAhb, &desc);
+            if (desc.width == 0 || desc.height == 0) {
+                return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+            }
+            AHardwareBuffer_acquire(importedAhb);
+            boundAhb = importedAhb;
+        } else {
+            const uint64_t bytes =
+                pAllocateInfo->allocationSize > 0 ? pAllocateInfo->allocationSize : 4096ULL;
+            const uint64_t pixels = (bytes + 3ULL) / 4ULL;
+            uint32_t width = static_cast<uint32_t>(std::min<uint64_t>(pixels, 8192ULL));
+            uint32_t height = static_cast<uint32_t>((pixels + width - 1ULL) / width);
+            if (width == 0) {
+                width = 1;
+            }
+            if (height == 0) {
+                height = 1;
+            }
+            AHardwareBuffer_Desc desc{};
+            desc.width = width;
+            desc.height = height;
+            desc.layers = 1;
+            desc.format = kAhbFormatRgba8888;
+            desc.usage = kAhbUsageCpuReadOften | kAhbUsageCpuWriteOften;
+            if (AHardwareBuffer_allocate(&desc, &boundAhb) != 0 || !boundAhb) {
+                return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+            }
+        }
+
+        auto& st = vk_state();
+        bool isHostDevice = false;
+        {
+            std::lock_guard<std::mutex> lock(st.mu);
+            isHostDevice = st.hostDevices.count(device) > 0;
+        }
+
+        VkDeviceMemory memHandle = VK_NULL_HANDLE;
+        bool hostAllocated = false;
+        if (isHostDevice) {
+            const auto& loader = host_loader();
+            if (auto fn = loader.deviceProc<PFN_vkAllocateMemory>(device, "vkAllocateMemory")) {
+                VkMemoryAllocateInfo stripped = *pAllocateInfo;
+                stripped.pNext = nullptr;
+                if (stripped.allocationSize == 0) {
+                    AHardwareBuffer_Desc desc{};
+                    AHardwareBuffer_describe(boundAhb, &desc);
+                    VkFormat vkFmt = VK_FORMAT_UNDEFINED;
+                    uint32_t bpp = 4;
+                    describe_ahb_format(desc.format, &vkFmt, &bpp);
+                    const uint64_t rowPixels = desc.stride >= desc.width ? desc.stride : desc.width;
+                    const uint64_t layers = desc.layers > 0 ? desc.layers : 1;
+                    stripped.allocationSize = rowPixels * desc.height * layers * bpp;
+                }
+                if (fn(device, &stripped, pAllocator, &memHandle) == VK_SUCCESS &&
+                    memHandle != VK_NULL_HANDLE) {
+                    hostAllocated = true;
+                }
+            }
+        }
+        if (memHandle == VK_NULL_HANDLE) {
+            memHandle = st.nextHandle.fetch_add(1, std::memory_order_relaxed) | (1ULL << 62);
+        }
+        {
+            std::lock_guard<std::mutex> lock(st.mu);
+            st.ahbMemories[memHandle] = AhbMemoryRecord{device, boundAhb, hostAllocated};
+        }
+        *pMemory = memHandle;
+        return VK_SUCCESS;
+    }
+
+    const auto& loader = host_loader();
+    if (auto fn = loader.deviceProc<PFN_vkAllocateMemory>(device, "vkAllocateMemory")) {
+        return fn(device, pAllocateInfo, pAllocator, pMemory);
+    }
+    return VK_ERROR_INCOMPATIBLE_DRIVER;
+}
+
+void vkFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator) {
+    if (!device || memory == VK_NULL_HANDLE) {
+        return;
+    }
+    AHardwareBuffer* ahbToRelease = nullptr;
+    bool forwardHostFree = true;
+    {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        auto it = st.ahbMemories.find(memory);
+        if (it != st.ahbMemories.end()) {
+            ahbToRelease = it->second.buffer;
+            forwardHostFree = it->second.hostAllocated;
+            st.ahbMemories.erase(it);
+        }
+    }
+    if (ahbToRelease) {
+        AHardwareBuffer_release(ahbToRelease);
+    }
+    if (forwardHostFree) {
+        const auto& loader = host_loader();
+        if (auto fn = loader.deviceProc<PFN_vkFreeMemory>(device, "vkFreeMemory")) {
+            fn(device, memory, pAllocator);
+        }
+    }
 }
 
 // --- VK_KHR_android_surface & VK_KHR_surface ---
@@ -704,7 +1061,7 @@ VkResult vkGetPhysicalDeviceSurfaceSupportKHR(VkPhysicalDevice physicalDevice,
         *pSupported = VK_FALSE;
         return VK_ERROR_SURFACE_LOST_KHR;
     }
-    *pSupported = host_loader().available() ? VK_TRUE : VK_FALSE;
+    *pSupported = VK_TRUE;
     return VK_SUCCESS;
 }
 
@@ -814,7 +1171,7 @@ VkResult vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice physicalDevi
     return toCopy < kCount ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
-// --- VK_KHR_swapchain ---
+// --- VK_KHR_swapchain (ANativeWindow bridge + host ICD passthrough) ---
 
 VkResult vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo,
                               const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
@@ -823,6 +1180,82 @@ VkResult vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* p
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     *pSwapchain = VK_NULL_HANDLE;
+
+    ANativeWindow* window = nullptr;
+    {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        auto it = st.surfaces.find(pCreateInfo->surface);
+        if (it != st.surfaces.end() && it->second.window) {
+            window = it->second.window;
+            ANativeWindow_acquire(window);
+        }
+    }
+
+    if (window) {
+        const int32_t winW = ANativeWindow_getWidth(window);
+        const int32_t winH = ANativeWindow_getHeight(window);
+        uint32_t width = pCreateInfo->imageExtent.width;
+        uint32_t height = pCreateInfo->imageExtent.height;
+        if (width == 0 && winW > 0) {
+            width = static_cast<uint32_t>(winW);
+        }
+        if (height == 0 && winH > 0) {
+            height = static_cast<uint32_t>(winH);
+        }
+        if (width == 0 || height == 0) {
+            ANativeWindow_release(window);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        const uint32_t imageCount = std::clamp<uint32_t>(pCreateInfo->minImageCount, 2U, 4U);
+
+        ShirazSwapchainRecord rec{};
+        rec.device = device;
+        rec.surface = pCreateInfo->surface;
+        rec.window = window;
+        rec.format = pCreateInfo->imageFormat != VK_FORMAT_UNDEFINED ? pCreateInfo->imageFormat
+                                                                     : VK_FORMAT_R8G8B8A8_UNORM;
+        rec.width = width;
+        rec.height = height;
+        rec.slots.reserve(imageCount);
+
+        auto& st = vk_state();
+        for (uint32_t i = 0; i < imageCount; ++i) {
+            AHardwareBuffer_Desc ahbDesc{};
+            ahbDesc.width = width;
+            ahbDesc.height = height;
+            ahbDesc.layers = 1;
+            ahbDesc.format = kAhbFormatRgba8888;
+            ahbDesc.usage = kAhbUsageCpuReadOften | kAhbUsageCpuWriteOften |
+                            kAhbUsageGpuSampledImage | kAhbUsageGpuFramebuffer;
+            AHardwareBuffer* buf = nullptr;
+            if (AHardwareBuffer_allocate(&ahbDesc, &buf) != 0 || !buf) {
+                release_swapchain_resources(rec);
+                return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+            }
+            SwapchainImageSlot slot{};
+            slot.image = st.nextHandle.fetch_add(1, std::memory_order_relaxed) | (1ULL << 60);
+            slot.buffer = buf;
+            slot.acquired = false;
+            rec.slots.push_back(slot);
+        }
+
+        const VkSwapchainKHR handle =
+            st.nextHandle.fetch_add(1, std::memory_order_relaxed) | (1ULL << 61);
+        {
+            std::lock_guard<std::mutex> lock(st.mu);
+            if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE) {
+                auto oldIt = st.swapchains.find(pCreateInfo->oldSwapchain);
+                if (oldIt != st.swapchains.end()) {
+                    oldIt->second.retired = true;
+                }
+            }
+            st.swapchains[handle] = std::move(rec);
+        }
+        *pSwapchain = handle;
+        return VK_SUCCESS;
+    }
+
     const auto& loader = host_loader();
     if (auto fn = loader.deviceProc<PFN_vkCreateSwapchainKHR>(device, "vkCreateSwapchainKHR")) {
         return fn(device, pCreateInfo, pAllocator, pSwapchain);
@@ -835,6 +1268,22 @@ void vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
     if (!device || swapchain == VK_NULL_HANDLE) {
         return;
     }
+    ShirazSwapchainRecord removed{};
+    bool foundLocal = false;
+    {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        auto it = st.swapchains.find(swapchain);
+        if (it != st.swapchains.end()) {
+            removed = std::move(it->second);
+            st.swapchains.erase(it);
+            foundLocal = true;
+        }
+    }
+    if (foundLocal) {
+        release_swapchain_resources(removed);
+        return;
+    }
     const auto& loader = host_loader();
     if (auto fn = loader.deviceProc<PFN_vkDestroySwapchainKHR>(device, "vkDestroySwapchainKHR")) {
         fn(device, swapchain, pAllocator);
@@ -845,6 +1294,24 @@ VkResult vkGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain,
                                  uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages) {
     if (!device || swapchain == VK_NULL_HANDLE || !pSwapchainImageCount) {
         return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        auto it = st.swapchains.find(swapchain);
+        if (it != st.swapchains.end()) {
+            const uint32_t total = static_cast<uint32_t>(it->second.slots.size());
+            if (!pSwapchainImages) {
+                *pSwapchainImageCount = total;
+                return VK_SUCCESS;
+            }
+            const uint32_t toCopy = std::min<uint32_t>(*pSwapchainImageCount, total);
+            for (uint32_t i = 0; i < toCopy; ++i) {
+                pSwapchainImages[i] = it->second.slots[i].image;
+            }
+            *pSwapchainImageCount = toCopy;
+            return toCopy < total ? VK_INCOMPLETE : VK_SUCCESS;
+        }
     }
     const auto& loader = host_loader();
     if (auto fn =
@@ -860,6 +1327,39 @@ VkResult vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64
     if (!device || swapchain == VK_NULL_HANDLE || !pImageIndex) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        auto it = st.swapchains.find(swapchain);
+        if (it != st.swapchains.end()) {
+            auto& rec = it->second;
+            if (rec.retired || !rec.window || rec.slots.empty()) {
+                return VK_ERROR_OUT_OF_DATE_KHR;
+            }
+            const int32_t winW = ANativeWindow_getWidth(rec.window);
+            const int32_t winH = ANativeWindow_getHeight(rec.window);
+            if (winW <= 0 || winH <= 0) {
+                return VK_ERROR_SURFACE_LOST_KHR;
+            }
+            if (static_cast<uint32_t>(winW) != rec.width ||
+                static_cast<uint32_t>(winH) != rec.height) {
+                return VK_ERROR_OUT_OF_DATE_KHR;
+            }
+            const uint32_t count = static_cast<uint32_t>(rec.slots.size());
+            uint32_t chosen = rec.nextAcquireIndex % count;
+            for (uint32_t probe = 0; probe < count; ++probe) {
+                const uint32_t idx = (rec.nextAcquireIndex + probe) % count;
+                if (!rec.slots[idx].acquired) {
+                    chosen = idx;
+                    break;
+                }
+            }
+            rec.slots[chosen].acquired = true;
+            rec.nextAcquireIndex = (chosen + 1U) % count;
+            *pImageIndex = chosen;
+            return VK_SUCCESS;
+        }
+    }
     const auto& loader = host_loader();
     if (auto fn = loader.deviceProc<PFN_vkAcquireNextImageKHR>(device, "vkAcquireNextImageKHR")) {
         return fn(device, swapchain, timeout, semaphore, fence, pImageIndex);
@@ -871,11 +1371,118 @@ VkResult vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) 
     if (!queue || !pPresentInfo || pPresentInfo->sType != VK_STRUCTURE_TYPE_PRESENT_INFO_KHR) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    if (pPresentInfo->swapchainCount == 0) {
+        return VK_SUCCESS;
+    }
+    if (!pPresentInfo->pSwapchains || !pPresentInfo->pImageIndices) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    struct PendingPresent {
+        uint32_t index = 0;
+        VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+        uint32_t imageIndex = 0;
+        ANativeWindow* window = nullptr;
+        AHardwareBuffer* buffer = nullptr;
+        VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        VkResult preError = VK_SUCCESS;
+    };
+
+    std::vector<PendingPresent> localPresents;
+    bool anyHostSwapchains = false;
+    {
+        auto& st = vk_state();
+        std::lock_guard<std::mutex> lock(st.mu);
+        for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
+            const VkSwapchainKHR sc = pPresentInfo->pSwapchains[i];
+            const uint32_t imgIdx = pPresentInfo->pImageIndices[i];
+            auto it = st.swapchains.find(sc);
+            if (it == st.swapchains.end()) {
+                anyHostSwapchains = true;
+                continue;
+            }
+            auto& rec = it->second;
+            PendingPresent item{};
+            item.index = i;
+            item.swapchain = sc;
+            item.imageIndex = imgIdx;
+            item.format = rec.format;
+            item.width = rec.width;
+            item.height = rec.height;
+            if (rec.retired || !rec.window) {
+                item.preError = VK_ERROR_OUT_OF_DATE_KHR;
+            } else if (imgIdx >= rec.slots.size() || !rec.slots[imgIdx].buffer) {
+                item.preError = VK_ERROR_INITIALIZATION_FAILED;
+            } else {
+                item.window = rec.window;
+                item.buffer = rec.slots[imgIdx].buffer;
+                ANativeWindow_acquire(item.window);
+                AHardwareBuffer_acquire(item.buffer);
+                rec.slots[imgIdx].acquired = false;
+                rec.presentCount++;
+            }
+            localPresents.push_back(item);
+        }
+    }
+
+    if (!localPresents.empty() && !anyHostSwapchains) {
+        VkResult overall = VK_SUCCESS;
+        for (auto& item : localPresents) {
+            VkResult res = item.preError;
+            if (res == VK_SUCCESS) {
+                res = present_slot_to_window(item.window, item.buffer, item.format, item.width,
+                                             item.height);
+            }
+            if (item.buffer) {
+                AHardwareBuffer_release(item.buffer);
+            }
+            if (item.window) {
+                ANativeWindow_release(item.window);
+            }
+            if (pPresentInfo->pResults) {
+                pPresentInfo->pResults[item.index] = res;
+            }
+            if (res != VK_SUCCESS && overall == VK_SUCCESS) {
+                overall = res;
+            }
+        }
+        return overall;
+    }
+
+    for (auto& item : localPresents) {
+        if (item.buffer) {
+            AHardwareBuffer_release(item.buffer);
+        }
+        if (item.window) {
+            ANativeWindow_release(item.window);
+        }
+    }
+
     const auto& loader = host_loader();
     if (auto fn = load_dlsym<PFN_vkQueuePresentKHR>(loader.handle, "vkQueuePresentKHR")) {
         return fn(queue, pPresentInfo);
     }
     return VK_ERROR_INCOMPATIBLE_DRIVER;
+}
+
+VkResult shiraz_vulkan_swapchain_image_buffer(VkSwapchainKHR swapchain, uint32_t imageIndex,
+                                              AHardwareBuffer** pBuffer) {
+    if (swapchain == VK_NULL_HANDLE || !pBuffer) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    *pBuffer = nullptr;
+    auto& st = vk_state();
+    std::lock_guard<std::mutex> lock(st.mu);
+    auto it = st.swapchains.find(swapchain);
+    if (it == st.swapchains.end() || imageIndex >= it->second.slots.size() ||
+        !it->second.slots[imageIndex].buffer) {
+        return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    }
+    AHardwareBuffer_acquire(it->second.slots[imageIndex].buffer);
+    *pBuffer = it->second.slots[imageIndex].buffer;
+    return VK_SUCCESS;
 }
 
 // --- VK_ANDROID_external_memory_android_hardware_buffer ---
@@ -934,11 +1541,11 @@ vkGetMemoryAndroidHardwareBufferANDROID(VkDevice device,
     auto& st = vk_state();
     std::lock_guard<std::mutex> lock(st.mu);
     auto it = st.ahbMemories.find(pInfo->memory);
-    if (it == st.ahbMemories.end() || !it->second) {
+    if (it == st.ahbMemories.end() || !it->second.buffer) {
         return VK_ERROR_INVALID_EXTERNAL_HANDLE;
     }
-    AHardwareBuffer_acquire(it->second);
-    *pBuffer = it->second;
+    AHardwareBuffer_acquire(it->second.buffer);
+    *pBuffer = it->second.buffer;
     return VK_SUCCESS;
 }
 

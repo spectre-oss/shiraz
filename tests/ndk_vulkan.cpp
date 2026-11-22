@@ -145,6 +145,123 @@ int main() {
 
     VkBool32 supported = VK_FALSE;
     assert(vkGetPhysicalDeviceSurfaceSupportKHR(nullptr, 0, surface, &supported) == VK_SUCCESS);
+    assert(supported == VK_TRUE);
+
+    // 5b. Full ANativeWindow-backed swapchain lifecycle & pixel presentation.
+    auto fakeQueue = reinterpret_cast<VkQueue>(0x3000);
+    VkSwapchainCreateInfoKHR scInfo{};
+    scInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    scInfo.surface = surface;
+    scInfo.minImageCount = 3;
+    scInfo.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    scInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    scInfo.imageExtent = {800, 480};
+    scInfo.imageArrayLayers = 1;
+    scInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    scInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    assert(vkCreateSwapchainKHR(fakeDevice, &scInfo, nullptr, &swapchain) == VK_SUCCESS);
+    assert(swapchain != VK_NULL_HANDLE);
+
+    uint32_t imgCount = 0;
+    assert(vkGetSwapchainImagesKHR(fakeDevice, swapchain, &imgCount, nullptr) == VK_SUCCESS);
+    assert(imgCount == 3);
+
+    VkImage oneImage = VK_NULL_HANDLE;
+    uint32_t partialImgCount = 1;
+    assert(vkGetSwapchainImagesKHR(fakeDevice, swapchain, &partialImgCount, &oneImage) ==
+           VK_INCOMPLETE);
+    assert(partialImgCount == 1 && oneImage != VK_NULL_HANDLE);
+
+    std::vector<VkImage> scImages(imgCount, VK_NULL_HANDLE);
+    assert(vkGetSwapchainImagesKHR(fakeDevice, swapchain, &imgCount, scImages.data()) ==
+           VK_SUCCESS);
+    assert(scImages[0] != scImages[1] && scImages[1] != scImages[2]);
+
+    uint32_t acquired0 = 99;
+    assert(vkAcquireNextImageKHR(fakeDevice, swapchain, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 &acquired0) == VK_SUCCESS);
+    assert(acquired0 == 0);
+
+    // Write RGBA=(0x11, 0x22, 0x33, 0xFF) into slot 0 and present to ANativeWindow.
+    constexpr uint64_t kCpuWriteOften = 0x30ULL;
+    AHardwareBuffer* slotBuf = nullptr;
+    assert(shiraz_vulkan_swapchain_image_buffer(swapchain, acquired0, &slotBuf) == VK_SUCCESS);
+    assert(slotBuf != nullptr);
+    void* mapped = nullptr;
+    assert(AHardwareBuffer_lock(slotBuf, kCpuWriteOften, -1, nullptr, &mapped) == 0);
+    assert(mapped != nullptr);
+    auto* rgba = static_cast<uint8_t*>(mapped);
+    rgba[0] = 0x11;
+    rgba[1] = 0x22;
+    rgba[2] = 0x33;
+    rgba[3] = 0xFF;
+    assert(AHardwareBuffer_unlock(slotBuf, nullptr) == 0);
+    AHardwareBuffer_release(slotBuf);
+
+    const uint64_t revBefore = shiraz_window_revision(win);
+    VkResult presentResult = VK_ERROR_UNKNOWN;
+    VkPresentInfoKHR presentInfo{};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &swapchain;
+    presentInfo.pImageIndices = &acquired0;
+    presentInfo.pResults = &presentResult;
+    assert(vkQueuePresentKHR(fakeQueue, &presentInfo) == VK_SUCCESS);
+    assert(presentResult == VK_SUCCESS);
+    assert(shiraz_window_revision(win) > revBefore);
+
+    std::vector<uint32_t> argb(800U * 480U, 0);
+    assert(shiraz_window_copy_argb(win, argb.data(), argb.size()) == 0);
+    assert(argb[0] == 0xFF112233U);
+
+    // Second acquire advances round-robin to slot 1.
+    uint32_t acquired1 = 99;
+    assert(vkAcquireNextImageKHR(fakeDevice, swapchain, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 &acquired1) == VK_SUCCESS);
+    assert(acquired1 == 1);
+
+    // BGRA swapchain replacement retires oldSwapchain and converts BGRA -> ARGB on present.
+    VkSwapchainCreateInfoKHR bgraInfo = scInfo;
+    bgraInfo.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+    bgraInfo.oldSwapchain = swapchain;
+    VkSwapchainKHR bgraSwapchain = VK_NULL_HANDLE;
+    assert(vkCreateSwapchainKHR(fakeDevice, &bgraInfo, nullptr, &bgraSwapchain) == VK_SUCCESS);
+    assert(bgraSwapchain != VK_NULL_HANDLE);
+
+    // Retired swapchain reports VK_ERROR_OUT_OF_DATE_KHR.
+    uint32_t retiredIdx = 0;
+    assert(vkAcquireNextImageKHR(fakeDevice, swapchain, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                 &retiredIdx) == VK_ERROR_OUT_OF_DATE_KHR);
+    vkDestroySwapchainKHR(fakeDevice, swapchain, nullptr);
+
+    uint32_t bgraIdx = 99;
+    assert(vkAcquireNextImageKHR(fakeDevice, bgraSwapchain, UINT64_MAX, VK_NULL_HANDLE,
+                                 VK_NULL_HANDLE, &bgraIdx) == VK_SUCCESS);
+    AHardwareBuffer* bgraBuf = nullptr;
+    assert(shiraz_vulkan_swapchain_image_buffer(bgraSwapchain, bgraIdx, &bgraBuf) == VK_SUCCESS);
+    void* bgraMapped = nullptr;
+    assert(AHardwareBuffer_lock(bgraBuf, kCpuWriteOften, -1, nullptr, &bgraMapped) == 0);
+    auto* bgraBytes = static_cast<uint8_t*>(bgraMapped);
+    bgraBytes[0] = 0xAA; // B
+    bgraBytes[1] = 0xBB; // G
+    bgraBytes[2] = 0xCC; // R
+    bgraBytes[3] = 0xFF; // A
+    assert(AHardwareBuffer_unlock(bgraBuf, nullptr) == 0);
+    AHardwareBuffer_release(bgraBuf);
+
+    presentInfo.pSwapchains = &bgraSwapchain;
+    presentInfo.pImageIndices = &bgraIdx;
+    assert(vkQueuePresentKHR(fakeQueue, &presentInfo) == VK_SUCCESS);
+    assert(shiraz_window_copy_argb(win, argb.data(), argb.size()) == 0);
+    assert(argb[0] == 0xFFCCBBAAU);
+
+    // Resizing ANativeWindow marks the active swapchain out of date.
+    assert(shiraz_window_resize(win, 320, 240) == 0);
+    assert(vkAcquireNextImageKHR(fakeDevice, bgraSwapchain, UINT64_MAX, VK_NULL_HANDLE,
+                                 VK_NULL_HANDLE, &bgraIdx) == VK_ERROR_OUT_OF_DATE_KHR);
+    vkDestroySwapchainKHR(fakeDevice, bgraSwapchain, nullptr);
 
     vkDestroySurfaceKHR(instance, surface, nullptr);
     assert(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(nullptr, surface, &caps) ==
@@ -179,6 +296,65 @@ int main() {
     assert(ahbProps.memoryTypeBits != 0);
     assert(fmtProps.format == VK_FORMAT_R8G8B8A8_UNORM);
     assert(fmtProps.externalFormat == 0);
+
+    // Import AHardwareBuffer into VkDeviceMemory and retrieve it back.
+    VkImportAndroidHardwareBufferInfoANDROID importInfo{};
+    importInfo.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
+    importInfo.buffer = ahb;
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.pNext = &importInfo;
+    allocInfo.allocationSize = ahbProps.allocationSize;
+    allocInfo.memoryTypeIndex = 0;
+
+    VkDeviceMemory importedMem = VK_NULL_HANDLE;
+    assert(vkAllocateMemory(fakeDevice, &allocInfo, nullptr, &importedMem) == VK_SUCCESS);
+    assert(importedMem != VK_NULL_HANDLE);
+
+    VkMemoryGetAndroidHardwareBufferInfoANDROID getImported{};
+    getImported.sType = VK_STRUCTURE_TYPE_MEMORY_GET_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
+    getImported.memory = importedMem;
+    AHardwareBuffer* fetchedAhb = nullptr;
+    assert(vkGetMemoryAndroidHardwareBufferANDROID(fakeDevice, &getImported, &fetchedAhb) ==
+           VK_SUCCESS);
+    assert(fetchedAhb == ahb);
+    AHardwareBuffer_release(fetchedAhb);
+
+    vkFreeMemory(fakeDevice, importedMem, nullptr);
+    fetchedAhb = nullptr;
+    assert(vkGetMemoryAndroidHardwareBufferANDROID(fakeDevice, &getImported, &fetchedAhb) ==
+           VK_ERROR_INVALID_EXTERNAL_HANDLE);
+    assert(fetchedAhb == nullptr);
+
+    // Exportable AHB memory allocation creates a retrievable AHardwareBuffer.
+    VkExportMemoryAllocateInfo exportInfo{};
+    exportInfo.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+    exportInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
+
+    VkMemoryAllocateInfo exportAlloc{};
+    exportAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    exportAlloc.pNext = &exportInfo;
+    exportAlloc.allocationSize = 4096;
+    exportAlloc.memoryTypeIndex = 0;
+
+    VkDeviceMemory exportedMem = VK_NULL_HANDLE;
+    assert(vkAllocateMemory(fakeDevice, &exportAlloc, nullptr, &exportedMem) == VK_SUCCESS);
+    assert(exportedMem != VK_NULL_HANDLE);
+
+    VkMemoryGetAndroidHardwareBufferInfoANDROID getExported{};
+    getExported.sType = VK_STRUCTURE_TYPE_MEMORY_GET_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
+    getExported.memory = exportedMem;
+    AHardwareBuffer* exportedAhb = nullptr;
+    assert(vkGetMemoryAndroidHardwareBufferANDROID(fakeDevice, &getExported, &exportedAhb) ==
+           VK_SUCCESS);
+    assert(exportedAhb != nullptr);
+    AHardwareBuffer_Desc expDesc{};
+    AHardwareBuffer_describe(exportedAhb, &expDesc);
+    assert(static_cast<uint64_t>(expDesc.width) * expDesc.height * 4ULL >= 4096ULL);
+    assert(expDesc.format == 1U);
+    AHardwareBuffer_release(exportedAhb);
+    vkFreeMemory(fakeDevice, exportedMem, nullptr);
 
     // Invalid memory handle must fail explicitly.
     VkMemoryGetAndroidHardwareBufferInfoANDROID memInfo{};
