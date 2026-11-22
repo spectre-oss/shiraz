@@ -71,7 +71,7 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 |---|---|---|---|---|
 | [~] | GPU capability probe & power guard | `include/shiraz/win32/d3d11_probe.hpp`, `native/win32/d3d11_probe.cpp` | DXGI `IDXGIFactory1::EnumAdapters1` (`SHIRAZ_GPU device=... vendor=...`), `SetThreadExecutionState(ES_CONTINUOUS \| ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` | L |
 | [ ] | Window & ANGLE-D3D11 layer | `native/presentation.cpp`, `mk/windows.mk` | SDL2 Win32 `HWND` with ANGLE D3D11 `opengles2` renderer and Per-Monitor V2 DPI scaling | M |
-| [ ] | Live resize | `native/presentation.cpp` | `SDL_AddEventWatch` repaint during Win32 `WM_ENTERSIZEMOVE` / `WM_SIZING` modal drag loop | M |
+| [~] | Live resize | `native/presentation.cpp` | `SDL_AddEventWatch` (`Win32LiveResizeWatch`) repaint during Win32 `WM_ENTERSIZEMOVE` / `WM_SIZING` modal drag loop + `Win32PowerGuard` + Precision Touchpad filter/pinch under `#if defined(_WIN32)` (verified Linux-neutral by `darwin_linux_guard.py`) | M |
 | [ ] | AHardwareBuffer / DXGI shared surface | `native/hardware_buffer.cpp`, `native/win32/` | `ID3D11Texture2D` + `IDXGIResource1::CreateSharedHandle`, CPU staging lock/unlock | H |
 | [ ] | Sync fences | `native/sync_fence.cpp`, `native/win32/` | `ID3D11Fence` / Win32 `HANDLE` event signaled on GPU fence completion | H |
 | [ ] | Frame pacing / Choreographer vsync | `native/choreographer.cpp` | `DwmFlush()` / `IDXGIOutput::WaitForVBlank()` with `CreateWaitableTimerExW` high-res fallback | M |

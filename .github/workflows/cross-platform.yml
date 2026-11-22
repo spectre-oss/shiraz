@@ -1,0 +1,111 @@
+name: Cross-platform matrix
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Cross-platform native check (Linux)
+        run: make cross-platform-native-check
+      - name: Cross-platform Python and Windows bundler tests (Linux)
+        env:
+          PYTHONPATH: src:tests
+        run: |
+          python3 -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py -v
+      - name: Cross-platform Java HostOs smoke (Linux)
+        run: |
+          python3 scripts/build_framework.py
+          mkdir -p build/test-host-os
+          javac --release 8 -cp build/framework/classes -d build/test-host-os tests/java/HostOsCrossPlatformSmoke.java
+          java -cp build/test-host-os:build/framework/classes shiraz.runtime.HostOsCrossPlatformSmoke
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Cross-platform native and macOS host checks
+        run: |
+          make cross-platform-native-check
+          make macos-metal-probe-check
+          make macos-app-bundle-check
+      - name: Cross-platform Python and bundler tests (macOS)
+        env:
+          PYTHONPATH: src:tests
+        run: |
+          python3 -m unittest tests/test_platform_paths.py tests/test_build_macos_app.py tests/test_build_windows_app.py -v
+      - name: Cross-platform Java HostOs smoke (macOS)
+        run: |
+          python3 scripts/build_framework.py
+          mkdir -p build/test-host-os
+          javac --release 8 -cp build/framework/classes -d build/test-host-os tests/java/HostOsCrossPlatformSmoke.java
+          java -cp build/test-host-os:build/framework/classes shiraz.runtime.HostOsCrossPlatformSmoke
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            make
+      - name: Build and run native Win32 host DLL and test suite
+        shell: msys2 {0}
+        run: |
+          make windows-check
+      - name: Package Win32 test executable with Windows app bundler
+        shell: pwsh
+        run: |
+          python scripts/build_windows_app.py `
+            --executable build/windows/test-win32-platform.exe `
+            --output build/windows/ShirazPortable `
+            --dll-dir build/windows `
+            --extra-dll build/windows/shiraz-win32-host.dll
+      - name: Cross-platform Python and Windows bundler tests (Windows)
+        shell: pwsh
+        env:
+          PYTHONPATH: src;tests
+        run: |
+          python -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py -v
+      - name: Cross-platform Java HostOs smoke (Windows)
+        shell: pwsh
+        run: |
+          python scripts/build_framework.py
+          New-Item -ItemType Directory -Force -Path build/test-host-os | Out-Null
+          javac --release 8 -cp build/framework/classes -d build/test-host-os tests/java/HostOsCrossPlatformSmoke.java
+          java -cp "build/test-host-os;build/framework/classes" shiraz.runtime.HostOsCrossPlatformSmoke

@@ -23,7 +23,7 @@ WINDOWS_HOST_HEADERS := \
 
 WINDOWS_LIBS := -lole32 -ldxgi -ldwrite -lmfplat -lmfuuid -lshell32 -luser32 -lkernel32 -luuid
 
-.PHONY: windows-build windows-check cross-platform-native-check
+.PHONY: windows-build windows-check windows-app-bundle-check cross-platform-native-check
 
 $(WINDOWS_OUT)/.dir:
 	@mkdir -p $(WINDOWS_OUT)
@@ -37,8 +37,11 @@ $(WINDOWS_OUT)/test-win32-platform.exe: tests/win32/platform_test.cpp $(WINDOWS_
 
 windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe
 
-windows-check: windows-build
+windows-check: windows-build windows-app-bundle-check
 	$(WINDOWS_OUT)/test-win32-platform.exe
+
+windows-app-bundle-check:
+	PYTHONPATH=src:tests python3 -m unittest tests/test_build_windows_app.py -v
 
 build/test-cross-platform-native: tests/win32/platform_test.cpp $(WINDOWS_HOST_HEADERS)
 	@mkdir -p build

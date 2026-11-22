@@ -21,8 +21,10 @@ def git(*args, check=True):
 
 
 def linux_view(source):
-    # Both revisions may already contain Apple branches. Compare like with like.
-    result = subprocess.run(['unifdef', '-U__APPLE__'], input=source, capture_output=True)
+    # Both revisions may already contain Apple or Win32 branches. Compare like with like.
+    result = subprocess.run(
+        ['unifdef', '-U__APPLE__', '-U_WIN32'], input=source, capture_output=True
+    )
     if result.returncode not in (0, 1):
         raise ValueError(result.stderr.decode(errors='replace').strip())
     return result.stdout
