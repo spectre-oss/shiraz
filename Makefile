@@ -1747,6 +1747,7 @@ include mk/launcher.mk
 
 include mk/pending-intent.mk
 include mk/ndk.mk
+include mk/windows.mk
 
 # Optional upstream Apache HTTP compatibility; inputs and notices stay local.
 .PHONY: legacy-http
