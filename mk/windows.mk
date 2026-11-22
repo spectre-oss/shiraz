@@ -56,3 +56,11 @@ build/test-cross-platform-native: tests/win32/platform_test.cpp $(WINDOWS_HOST_H
 
 cross-platform-native-check: build/test-cross-platform-native
 	./build/test-cross-platform-native
+
+build/test-sandbox-linux: tests/sandbox_linux.cpp native/sandbox_linux.cpp include/shiraz/sandbox.hpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/sandbox_linux.cpp native/sandbox_linux.cpp -o $@
+
+.PHONY: sandbox-linux-check
+sandbox-linux-check: build/test-sandbox-linux
+	./build/test-sandbox-linux

@@ -105,6 +105,26 @@ class BuildMacosAppUnitTest(unittest.TestCase):
             {'com.apple.security.cs.allow-jit': True},
         )
         self.assertEqual(builder.build_entitlements_plist(allow_jit=False), {})
+        self.assertEqual(
+            builder.build_entitlements_plist(
+                allow_jit=True, app_sandbox=True, allow_network_client=True
+            ),
+            {
+                'com.apple.security.app-sandbox': True,
+                'com.apple.security.network.client': True,
+                'com.apple.security.files.user-selected.read-write': True,
+                'com.apple.security.cs.allow-jit': True,
+            },
+        )
+        self.assertEqual(
+            builder.build_entitlements_plist(
+                allow_jit=False, app_sandbox=True, allow_network_client=False
+            ),
+            {
+                'com.apple.security.app-sandbox': True,
+                'com.apple.security.files.user-selected.read-write': True,
+            },
+        )
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'macOS-only end-to-end bundle signing test')

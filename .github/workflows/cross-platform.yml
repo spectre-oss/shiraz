@@ -23,12 +23,14 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Cross-platform native check (Linux)
-        run: make cross-platform-native-check
+        run: |
+          make cross-platform-native-check
+          make sandbox-linux-check
       - name: Cross-platform Python and Windows bundler tests (Linux)
         env:
           PYTHONPATH: src:tests
         run: |
-          python3 -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py -v
+          python3 -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py tests/test_sandbox.py -v
       - name: Cross-platform Java HostOs smoke (Linux)
         run: python3 scripts/run_host_os_smoke.py
 
@@ -47,13 +49,15 @@ jobs:
       - name: Cross-platform native and macOS host checks
         run: |
           make cross-platform-native-check
+          make sandbox-linux-check
           make macos-metal-probe-check
+          make macos-platform-extras-check
           make macos-app-bundle-check
       - name: Cross-platform Python and bundler tests (macOS)
         env:
           PYTHONPATH: src:tests
         run: |
-          python3 -m unittest tests/test_platform_paths.py tests/test_build_macos_app.py tests/test_build_windows_app.py -v
+          python3 -m unittest tests/test_platform_paths.py tests/test_build_macos_app.py tests/test_build_windows_app.py tests/test_sandbox.py -v
       - name: Cross-platform Java HostOs smoke (macOS)
         run: python3 scripts/run_host_os_smoke.py
 
@@ -93,7 +97,7 @@ jobs:
         env:
           PYTHONPATH: src;tests
         run: |
-          python -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py -v
+          python -m unittest tests/test_platform_paths.py tests/test_build_windows_app.py tests/test_sandbox.py -v
       - name: Cross-platform Java HostOs smoke (Windows)
         shell: pwsh
         run: python scripts/run_host_os_smoke.py

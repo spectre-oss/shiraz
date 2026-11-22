@@ -191,8 +191,21 @@ def build_info_plist(
     return plist
 
 
-def build_entitlements_plist(*, allow_jit=True, disable_library_validation=False):
+def build_entitlements_plist(
+    *,
+    allow_jit=True,
+    disable_library_validation=False,
+    app_sandbox=False,
+    allow_network_client=True,
+    allow_user_selected_files=True,
+):
     entitlements = {}
+    if app_sandbox:
+        entitlements['com.apple.security.app-sandbox'] = True
+        if allow_network_client:
+            entitlements['com.apple.security.network.client'] = True
+        if allow_user_selected_files:
+            entitlements['com.apple.security.files.user-selected.read-write'] = True
     if allow_jit:
         entitlements['com.apple.security.cs.allow-jit'] = True
     if disable_library_validation:
@@ -349,6 +362,8 @@ def build_macos_app(
     sign_identity='-',
     hardened_runtime=True,
     allow_jit=True,
+    app_sandbox=False,
+    allow_network_client=True,
     entitlements=None,
 ):
     executable_src = Path(executable).resolve()
@@ -451,6 +466,8 @@ def build_macos_app(
                 ent_dict = build_entitlements_plist(
                     allow_jit=allow_jit,
                     disable_library_validation=disable_lib_val,
+                    app_sandbox=app_sandbox,
+                    allow_network_client=allow_network_client,
                 )
                 if ent_dict:
                     ent_file = Path(tmp) / 'entitlements.plist'
@@ -524,6 +541,16 @@ def main(argv=None):
         action='store_true',
         help='Omit com.apple.security.cs.allow-jit entitlement',
     )
+    parser.add_argument(
+        '--sandbox',
+        action='store_true',
+        help='Enable com.apple.security.app-sandbox entitlements',
+    )
+    parser.add_argument(
+        '--no-network',
+        action='store_true',
+        help='Omit com.apple.security.network.client when --sandbox is set',
+    )
     parser.add_argument('--entitlements', type=Path, default=None, help='Custom entitlements plist')
     args = parser.parse_args(argv)
 
@@ -543,6 +570,8 @@ def main(argv=None):
             sign_identity=args.sign_identity,
             hardened_runtime=not args.no_hardened_runtime,
             allow_jit=not args.no_jit_entitlement,
+            app_sandbox=args.sandbox,
+            allow_network_client=not args.no_network,
             entitlements=args.entitlements,
         )
     except BundleError as exc:
