@@ -784,7 +784,6 @@ void present(const Surface& initial, const std::string& title, int frames,
         SDL_Renderer* renderer;
         std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* texture;
         Surface* image;
-        bool* embedded;
         bool* repaint;
         bool active = false;
         static int SDLCALL onEvent(void* userdata, SDL_Event* event) {
@@ -796,7 +795,7 @@ void present(const Surface& initial, const std::string& title, int frames,
                 event->window.event != SDL_WINDOWEVENT_RESIZED &&
                 event->window.event != SDL_WINDOWEVENT_SIZE_CHANGED)
                 return 0;
-            if ((self->embedded && *self->embedded) || !self->texture || !self->texture->get())
+            if (!self->texture || !self->texture->get())
                 return 0;
             self->active = true;
             int outW = 0, outH = 0;
@@ -816,8 +815,8 @@ void present(const Surface& initial, const std::string& title, int frames,
         }
         Win32LiveResizeWatch(SDL_Window* w, SDL_Renderer* r,
                              std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* t,
-                             Surface* img, bool* emb, bool* rep)
-            : window(w), renderer(r), texture(t), image(img), embedded(emb), repaint(rep) {
+                             Surface* img, bool* rep)
+            : window(w), renderer(r), texture(t), image(img), repaint(rep) {
             SDL_AddEventWatch(&Win32LiveResizeWatch::onEvent, this);
         }
         ~Win32LiveResizeWatch() {
@@ -825,7 +824,7 @@ void present(const Surface& initial, const std::string& title, int frames,
         }
     };
     Win32LiveResizeWatch win32LiveResizeWatch(window.get(), renderer.get(), &texture, &image,
-                                              &embedded, &repaint);
+                                              &repaint);
 #endif
     int presentedWidth = -1, presentedHeight = -1;
     uint64_t presents = 0, skippedPresents = 0;

@@ -1,4 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#if defined(_WIN32)
+#define SDL_MAIN_HANDLED
+#include "shiraz/sdl_keyboard.hpp"
+#include "shiraz/win32/d3d11_probe.hpp"
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+#endif
 #include "shiraz/presentation.hpp"
 #if defined(__APPLE__)
 #include "shiraz/sdl_keyboard.hpp"
@@ -14,6 +22,21 @@
 #include <unistd.h>
 
 namespace {
+#if defined(_WIN32)
+int setenv(const char* name, const char* value, int overwrite) {
+    if (!overwrite && std::getenv(name))
+        return 0;
+    return _putenv_s(name, value ? value : "") == 0 ? 0 : -1;
+}
+int unsetenv(const char* name) {
+    return _putenv_s(name, "") == 0 ? 0 : -1;
+}
+int mkstemp(char* tmpl) {
+    if (_mktemp_s(tmpl, std::strlen(tmpl) + 1) != 0)
+        return -1;
+    return _open(tmpl, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
+}
+#endif
 std::atomic<bool> sent{false};
 Uint32 close_window(Uint32, void*) {
     SDL_Event event{};
@@ -58,6 +81,22 @@ int main() {
         assert((rawMeta & (65536 | 131072)) == (65536 | 131072));
         assert((rawMeta & 4096) == 0);
         assert(!shiraz::editor_text_key(SDLK_c, KMOD_LGUI));
+    }
+#endif
+#if defined(_WIN32)
+    // Verify Windows Per-Monitor DPI scaling, Precision Touchpad pinch/filter,
+    // and SDL keyboard -> Android KeyEvent/evdev scan code mapping.
+    {
+        assert(shiraz::win32_dpi_to_android_density(120) == 200);
+        assert(shiraz::win32_dpi_to_android_density(144) == 240);
+        assert(shiraz::win32_allow_touch_device_type(0));
+        assert(!shiraz::win32_allow_touch_device_type(1));
+        assert(shiraz::win32_pinch_scroll_delta(2, 0.2f) > 1.0f);
+        assert(shiraz::android_key(SDLK_a) == 29);
+        assert(shiraz::android_key(SDLK_RETURN) == 66);
+        assert(shiraz::android_meta(KMOD_LCTRL) == (4096 | 8192));
+        assert(shiraz::editor_text_key(SDLK_a, KMOD_NONE));
+        assert(!shiraz::editor_text_key(SDLK_c, KMOD_LCTRL));
     }
 #endif
     auto mapped = shiraz::map_pointer(

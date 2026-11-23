@@ -29,7 +29,7 @@ MACOS_OUT := build/macos
 # Written by python3 scripts/bootstrap_darwin.py deps (make macos-art-deps,
 # also run by make runtime-art): ICU 78.3, lz4, liblzma and libpng16 in .local.
 MACOS_ART_DEPS_STAMP := $(MACOS_OUT)/deps/deps.stamp
-MACOS_JAVA_HOME := $(shell /usr/libexec/java_home 2>/dev/null)
+MACOS_JAVA_HOME := $(if $(wildcard $(JAVA_HOME)/include/jni.h),$(JAVA_HOME),$(shell /usr/libexec/java_home 2>/dev/null))
 MACOS_JNI_CFLAGS := -I$(MACOS_JAVA_HOME)/include -I$(MACOS_JAVA_HOME)/include/darwin
 MACOS_SDL_CONFIG := .local/bin/sdl2-config
 MACOS_SDL_CFLAGS = $(shell $(MACOS_SDL_CONFIG) --cflags 2>/dev/null)
@@ -209,6 +209,12 @@ $(MACOS_OUT)/libshiraz-bitmap.so: native/bitmap.cpp include/shiraz/color_filter.
 # Linked against the SDK's libsqlite3 (/usr/lib/libsqlite3.dylib).
 $(MACOS_OUT)/libshiraz-sqlite.so: native/sqlite.cpp mk/darwin.mk $(MACOS_OUT)/.dir
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/sqlite.cpp -o $@ -lsqlite3 -pthread
+
+$(MACOS_OUT)/os-primitives-test: tests/darwin/os_primitives_test.cpp native/host_process.cpp native/ipc_spawn.cpp native/fds.cpp native/sqlite.cpp include/shiraz/darwin/thread_identity.hpp include/shiraz/darwin/process_arguments.hpp $(MACOS_OUT)/libshiraz-thread-identity.so $(MACOS_OUT)/.dir
+	$(MACOS_CXX) -Iinclude $(MACOS_JNI_CFLAGS) tests/darwin/os_primitives_test.cpp native/host_process.cpp native/ipc_spawn.cpp native/fds.cpp native/sqlite.cpp $(MACOS_OUT)/libshiraz-thread-identity.so $(MACOS_RPATH) -lsqlite3 -pthread -o $@
+.PHONY: macos-os-primitives-check
+macos-os-primitives-check: $(MACOS_OUT)/os-primitives-test
+	./$(MACOS_OUT)/os-primitives-test
 
 $(MACOS_OUT)/m5/libsqlite-exception-fixture.so: tests/darwin/sqlite_exception_fixture.cpp native/sqlite.cpp
 	mkdir -p $(dir $@)

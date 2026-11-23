@@ -21,4 +21,8 @@ int AHardwareBuffer_recvHandleFromUnixSocket(int, AHardwareBuffer**);
 int AHardwareBuffer_isSupported(const AHardwareBuffer_Desc*);
 // Exported descriptor belongs to caller. Used by the EGL native-buffer bridge.
 int shiraz_hardware_buffer_export(AHardwareBuffer*, uint32_t* format, uint32_t* pitch);
+#if defined(__APPLE__)
+// Returns a retained IOSurfaceRef (+1, release via CFRelease / shiraz_mtl_release) or nullptr.
+void* shiraz_hardware_buffer_iosurface(const AHardwareBuffer*);
+#endif
 }

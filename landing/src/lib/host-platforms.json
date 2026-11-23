@@ -16,7 +16,7 @@
       "name": "macOS",
       "architectures": "Apple Silicon ARM64",
       "maturity": "Experimental port",
-      "summary": "Standalone ART, guest ELF/Bionic loader, 15/15 NDK libraries, zero-copy IOSurface swapchain & SurfaceTexture (EGL_METAL_TEXTURE_ANGLE + MTLSharedEvent), CoreAudio AAudio/AudioQueue, VideoToolbox H.264/HEVC/VP9/AV1 & AudioToolbox Opus, ProMotion display pacing, Retina & Cmd-key input parity, Security.framework trust, CoreLocation, UNUserNotificationCenter, Seatbelt sandbox, and signed Shiraz.app bundles.",
+      "summary": "Standalone ART, guest ELF/Bionic loader, 15/15 NDK libraries, zero-copy IOSurface swapchain, SurfaceTexture & AHardwareBuffer EGLImage (EGL_METAL_TEXTURE_ANGLE + MTLSharedEvent), CoreAudio AAudio/AudioQueue, VideoToolbox H.264/HEVC/VP9/AV1 & AudioToolbox Opus, ProMotion display pacing, Retina & Cmd-key input parity, CI-verified Darwin clocks/spawn/fds/SQLite, Security.framework trust, CoreLocation, UNUserNotificationCenter, Seatbelt sandbox, and signed Shiraz.app bundles.",
       "evidence": "docs/macos_final_goal.md"
     },
     {
@@ -24,7 +24,7 @@
       "name": "Windows",
       "architectures": "x64 · ARM64",
       "maturity": "Experimental foundation",
-      "summary": "CI-verified native Win32 shared memory, WaitForMultipleObjects looper, Named Pipe IPC, DXGI GPU/display refresh & shared buffer pool, Win32 sync fences, DwmFlush choreographer, WASAPI audio + libaaudio.dll & libOpenSLES.dll, Media Foundation decoder probe, DirectWrite fonts, Shell_NotifyIconW, Windows Location COM, DPAPI/SAPI/GetAdaptersAddresses services, Job Object + Restricted Token sandbox, and portable/MSIX bundler. Full ART + guest ELF execution on Windows is still in progress.",
+      "summary": "CI-verified native Win32 shared memory, WaitForMultipleObjects looper, Named Pipe IPC, DXGI GPU/display refresh & shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer, libvulkan.dll (ANativeWindow swapchain & AHB bridge), SDL2 Win32 presentation/IME/clipboard/keyboard suite, WASAPI audio + libaaudio.dll & libOpenSLES.dll, Media Foundation decoder & camera enumeration, DirectWrite fonts, Shell_NotifyIconW, Windows Location COM, DPAPI/SAPI/GetAdaptersAddresses services, Job Object + Restricted Token sandbox, and portable/MSIX bundler. Full ART + guest ELF execution on Windows is still in progress.",
       "evidence": "docs/windows_final_goal.md"
     }
   ],
@@ -40,21 +40,21 @@
       "id": "graphics-window",
       "layer": "Graphics, windowing & input",
       "linux": "SDL2 windows (Wayland & X11, GTK-free), EGL/GLES, libvulkan.so with VK_KHR_android_surface swapchain & AHardwareBuffer memory bridge, Shiraz Web WebRTC streaming.",
-      "macos": "SDL2 / Cocoa windows, ANGLE Metal GLES, zero-copy IOSurface swapchain & SurfaceTexture (EGL_METAL_TEXTURE_ANGLE + MTLSharedEvent), ProMotion display pacing, live resize watch, Retina 2×/fractional pointer mapping, Cmd→Ctrl shortcuts, trackpad pinch & touch filter.",
-      "windows": "SDL2 / Win32 windows, DXGI adapter probe, EnumDisplaySettingsW refresh rate, shared RGBA buffer pool, Win32 sync fences, DwmFlush choreographer pacing, WM_SIZE/WM_SIZING live resize, portable keyboard table & Precision Touchpad hooks."
+      "macos": "SDL2 / Cocoa windows, ANGLE Metal GLES, zero-copy IOSurface swapchain, SurfaceTexture & AHardwareBuffer EGLImage (EGL_METAL_TEXTURE_ANGLE + MTLSharedEvent), ProMotion display pacing, live resize watch, Retina 2×/fractional pointer mapping, Cmd→Ctrl shortcuts, trackpad pinch & touch filter.",
+      "windows": "CI-verified SDL2 / Win32 presentation (WM_SIZE live resize, IMM32/TSF IME, keyboard & clipboard), libvulkan.dll (VK_KHR_android_surface ANativeWindow swapchain & AHB bridge), DXGI adapter probe, EnumDisplaySettingsW refresh rate, shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing & Precision Touchpad hooks."
     },
     {
       "id": "audio-video",
       "layer": "Audio & video codecs",
       "linux": "ALSA / PulseAudio / PipeWire audio, OpenSL ES & AAudio, MediaCodec / libmediandk software and host codecs.",
       "macos": "AudioToolbox / CoreAudio AudioQueue hardware AAudio, OpenSL ES, PCM, WAV, AAC & Opus; VideoToolbox H.264, HEVC, VP9 & AV1 decode; video recording unsupported.",
-      "windows": "WASAPI PCM16 playback & capture bridge backing libaaudio.dll & libOpenSLES.dll; Media Foundation H.264, HEVC, VP9 & AV1 hardware decoder probe."
+      "windows": "WASAPI PCM16 playback & capture bridge backing libaaudio.dll & libOpenSLES.dll; Media Foundation H.264, HEVC, VP9 & AV1 decoder probe and MFEnumDeviceSources camera device enumeration."
     },
     {
       "id": "os-primitives",
       "layer": "OS primitives, IPC & isolation",
       "linux": "POSIX memfd/ashmem, epoll ALooper, Unix sockets, Linux Landlock LSM filesystem isolation + PR_SET_NO_NEW_PRIVS + optional --no-internet seccomp policy.",
-      "macos": "POSIX/Mach shared memory, kqueue ALooper, Unix sockets, App Nap guard, macOS Seatbelt (sandbox-exec) SBPL profile & App Sandbox bundle entitlements.",
+      "macos": "POSIX/Mach shared memory, kqueue ALooper, CLOCK_UPTIME_RAW/CLOCK_MONOTONIC clocks, POSIX_SPAWN_CLOEXEC_DEFAULT process isolation, FD_CLOEXEC helpers, SDK SQLite, Unix sockets, App Nap guard, macOS Seatbelt (sandbox-exec) SBPL profile & App Sandbox bundle entitlements.",
       "windows": "CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, SetThreadExecutionState, Job Object + Restricted Token sandbox."
     },
     {
@@ -62,14 +62,14 @@
       "layer": "Desktop services, trust & fonts",
       "linux": "XDG directories, Fontconfig, desktop notification, file picker, connectivity & URL/file launcher hooks.",
       "macos": "~/Library paths, CoreText fonts, Security.framework trust anchors, AVFoundation speech voices, UNUserNotificationCenter, CoreLocation, /usr/bin/open & osascript picker.",
-      "windows": "LOCALAPPDATA / APPDATA paths, DirectWrite fonts, DPAPI keystore, SAPI5 speech probe, GetAdaptersAddresses connectivity, Shell_NotifyIconW, Windows Location COM, WinForms picker & rundll32 URL launcher."
+      "windows": "LOCALAPPDATA / APPDATA paths, DirectWrite fonts, native UTF-16/UTF-8 Win32 clipboard, DPAPI keystore, SAPI5 speech probe, GetAdaptersAddresses connectivity, Shell_NotifyIconW, Windows Location COM, WinForms picker & rundll32 URL launcher."
     },
     {
       "id": "packaging-ci",
       "layer": "Packaging & CI",
       "linux": "Browser & CLI per-app AppImage builder, .deb packages, Linux x86_64 & ARM64 CI releases.",
       "macos": "Signed Shiraz.app bundle builder (hardened runtime, allow-jit, optional --sandbox entitlements, @rpath closure, .icns), per-APK install-desktop, macOS ARM64 CI.",
-      "windows": "Portable Shiraz\\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Windows x64 MinGW-w64 CI (make windows-check)."
+      "windows": "Portable Shiraz\\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Windows x64 MinGW-w64 CI (make windows-check & windows-presentation-check)."
     }
   ]
 }

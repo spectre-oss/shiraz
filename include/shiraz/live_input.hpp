@@ -2,6 +2,9 @@
 #pragma once
 #include <SDL.h>
 #include <fcntl.h>
+#if defined(_WIN32)
+#include <io.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cerrno>
@@ -23,7 +26,11 @@ class LiveInput {
     explicit LiveInput(const char* path) {
         if (!path || !*path)
             return;
+#if defined(_WIN32)
+        fd_ = _open(path, _O_RDONLY | _O_BINARY | _O_NOINHERIT);
+#else
         fd_ = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW);
+#endif
         struct stat info{};
         if (fd_ < 0 || fstat(fd_, &info) || !S_ISREG(info.st_mode)) {
             if (fd_ >= 0)
@@ -45,7 +52,13 @@ class LiveInput {
         if (fstat(fd_, &info) || info.st_size < off_t(offset_) || info.st_size > 8 * 1024 * 1024)
             throw std::runtime_error("Live input truncated or exceeds 8MiB");
         char bytes[4096];
+#if defined(_WIN32)
+        if (_lseeki64(fd_, static_cast<long long>(offset_), SEEK_SET) < 0)
+            throw std::runtime_error("Cannot read live input");
+        ssize_t count = _read(fd_, bytes, sizeof(bytes));
+#else
         ssize_t count = pread(fd_, bytes, sizeof(bytes), off_t(offset_));
+#endif
         if (count < 0) {
             if (errno == EINTR)
                 return {};

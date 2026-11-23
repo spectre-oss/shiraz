@@ -62,6 +62,42 @@ void* shiraz_mtl_slot_create(void* device, int32_t width, int32_t height, void**
         return texture;
     }
 }
+#if defined(__APPLE__)
+void* shiraz_mtl_texture_from_iosurface(void* device, void* iosurface, uint32_t androidFormat) {
+    if (!device || !iosurface)
+        return nullptr;
+    MTLPixelFormat pixelFormat = MTLPixelFormatInvalid;
+    switch (androidFormat) {
+    case 1: // AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM
+    case 2: // AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM
+        pixelFormat = MTLPixelFormatRGBA8Unorm;
+        break;
+    case 4: // AHARDWAREBUFFER_FORMAT_R5G6B5_UNORM
+        pixelFormat = MTLPixelFormatB5G6R5Unorm;
+        break;
+    default:
+        return nullptr;
+    }
+    @autoreleasepool {
+        auto surface = static_cast<IOSurfaceRef>(iosurface);
+        const NSUInteger width = IOSurfaceGetWidth(surface);
+        const NSUInteger height = IOSurfaceGetHeight(surface);
+        if (width < 1 || height < 1)
+            return nullptr;
+        MTLTextureDescriptor* descriptor =
+            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
+                                                               width:width
+                                                              height:height
+                                                           mipmapped:NO];
+        descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        descriptor.storageMode = MTLStorageModeShared;
+        id<MTLTexture> texture = [(id<MTLDevice>)device newTextureWithDescriptor:descriptor
+                                                                       iosurface:surface
+                                                                           plane:0];
+        return texture;
+    }
+}
+#endif
 void shiraz_mtl_release(void* object) {
     if (object)
         CFRelease(object);

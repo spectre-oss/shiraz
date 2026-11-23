@@ -12,6 +12,7 @@
 #include <vector>
 
 #if defined(_WIN32)
+#include "shiraz/hardware_buffer.h"
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -202,6 +203,73 @@ SHIRAZ_EXPORT int shiraz_win32_hwbuf_unlock(ShirazWin32HwBuf* buf) {
                                         buf->stride * bpp, 0);
     }
     return 0;
+}
+
+SHIRAZ_EXPORT int AHardwareBuffer_allocate(const AHardwareBuffer_Desc* desc,
+                                           AHardwareBuffer** outBuffer) {
+    if (!desc || !outBuffer || (desc->layers != 0 && desc->layers != 1))
+        return -EINVAL;
+    ShirazWin32HwBuf* raw = nullptr;
+    const int rc =
+        shiraz_win32_hwbuf_allocate(desc->width, desc->height, desc->format, desc->usage, &raw);
+    if (rc != 0)
+        return rc;
+    *outBuffer = reinterpret_cast<AHardwareBuffer*>(raw);
+    return 0;
+}
+
+SHIRAZ_EXPORT void AHardwareBuffer_acquire(AHardwareBuffer* buffer) {
+    shiraz_win32_hwbuf_acquire(reinterpret_cast<ShirazWin32HwBuf*>(buffer));
+}
+
+SHIRAZ_EXPORT void AHardwareBuffer_release(AHardwareBuffer* buffer) {
+    shiraz_win32_hwbuf_release(reinterpret_cast<ShirazWin32HwBuf*>(buffer));
+}
+
+SHIRAZ_EXPORT void AHardwareBuffer_describe(const AHardwareBuffer* buffer,
+                                            AHardwareBuffer_Desc* outDesc) {
+    if (!outDesc)
+        return;
+    std::memset(outDesc, 0, sizeof(*outDesc));
+    const auto* raw = reinterpret_cast<const ShirazWin32HwBuf*>(buffer);
+    if (!raw)
+        return;
+    outDesc->width = raw->width;
+    outDesc->height = raw->height;
+    outDesc->layers = 1;
+    outDesc->format = raw->format;
+    outDesc->usage = raw->usage;
+    outDesc->stride = raw->stride;
+}
+
+SHIRAZ_EXPORT int AHardwareBuffer_lock(AHardwareBuffer* buffer, uint64_t, int32_t, const ARect*,
+                                       void** outVirtualAddress) {
+    return shiraz_win32_hwbuf_lock(reinterpret_cast<ShirazWin32HwBuf*>(buffer), outVirtualAddress);
+}
+
+SHIRAZ_EXPORT int AHardwareBuffer_unlock(AHardwareBuffer* buffer, int32_t* fence) {
+    if (fence)
+        *fence = -1;
+    return shiraz_win32_hwbuf_unlock(reinterpret_cast<ShirazWin32HwBuf*>(buffer));
+}
+
+SHIRAZ_EXPORT int AHardwareBuffer_sendHandleToUnixSocket(const AHardwareBuffer*, int) {
+    return -ENOTSUP;
+}
+
+SHIRAZ_EXPORT int AHardwareBuffer_recvHandleFromUnixSocket(int, AHardwareBuffer**) {
+    return -ENOTSUP;
+}
+
+SHIRAZ_EXPORT int AHardwareBuffer_isSupported(const AHardwareBuffer_Desc* desc) {
+    if (!desc || desc->width == 0 || desc->height == 0 || desc->width > 8192 ||
+        desc->height > 8192 || (desc->layers != 0 && desc->layers != 1))
+        return 0;
+    return bpp_for_format(desc->format) != 0 ? 1 : 0;
+}
+
+SHIRAZ_EXPORT int shiraz_hardware_buffer_export(AHardwareBuffer*, uint32_t*, uint32_t*) {
+    return -ENOTSUP;
 }
 
 } // extern "C"

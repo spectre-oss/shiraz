@@ -52,6 +52,7 @@ jobs:
           make sandbox-linux-check
           make macos-metal-probe-check
           make macos-platform-extras-check
+          make macos-os-primitives-check
           make macos-app-bundle-check
       - name: Cross-platform Python and bundler tests (macOS)
         env:
@@ -79,11 +80,13 @@ jobs:
           update: false
           install: >-
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-SDL2
             make
-      - name: Build and run native Win32 host DLL and test suite
+      - name: Build and run native Win32 host DLL, NDK audio/Vulkan, and SDL2 presentation suite
         shell: msys2 {0}
         run: |
           make windows-check
+          make windows-presentation-check
       - name: Package Win32 test executable with Windows app bundler
         shell: pwsh
         run: |

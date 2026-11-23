@@ -19,6 +19,8 @@
 #include <windows.h>
 #include <wincrypt.h>
 #include <audioclient.h>
+#include <mfapi.h>
+#include <mfidl.h>
 #include <mmdeviceapi.h>
 #include <objbase.h>
 
@@ -171,6 +173,130 @@ SHIRAZ_EXPORT int shiraz_win32_audio_capture_probe(std::uint32_t* outSampleRate,
     if (enumerator)
         enumerator->Release();
     if (needUninit)
+        CoUninitialize();
+    return status;
+}
+
+SHIRAZ_EXPORT int shiraz_win32_clipboard_set_text(const char* utf8) {
+    if (!utf8)
+        return -EINVAL;
+    const int wideLen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+    if (wideLen <= 0)
+        return -EINVAL;
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(wideLen) * sizeof(wchar_t));
+    if (!mem)
+        return -ENOMEM;
+    auto* dst = static_cast<wchar_t*>(GlobalLock(mem));
+    if (!dst) {
+        GlobalFree(mem);
+        return -ENOMEM;
+    }
+    const int written = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, dst, wideLen);
+    GlobalUnlock(mem);
+    if (written <= 0) {
+        GlobalFree(mem);
+        return -EINVAL;
+    }
+    if (!OpenClipboard(nullptr)) {
+        GlobalFree(mem);
+        return -EBUSY;
+    }
+    if (!EmptyClipboard()) {
+        CloseClipboard();
+        GlobalFree(mem);
+        return -EIO;
+    }
+    if (!SetClipboardData(CF_UNICODETEXT, mem)) {
+        CloseClipboard();
+        GlobalFree(mem);
+        return -EIO;
+    }
+    // Ownership of mem transferred to the system on SetClipboardData success.
+    CloseClipboard();
+    return 0;
+}
+
+SHIRAZ_EXPORT int shiraz_win32_clipboard_get_text(char* outBuf, std::size_t outCap,
+                                                  std::size_t* outLen) {
+    if (!outLen)
+        return -EINVAL;
+    *outLen = 0;
+    if (!OpenClipboard(nullptr))
+        return -EBUSY;
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+        CloseClipboard();
+        return -ENOENT;
+    }
+    HANDLE data = GetClipboardData(CF_UNICODETEXT);
+    if (!data) {
+        CloseClipboard();
+        return -ENOENT;
+    }
+    const auto* wide = static_cast<const wchar_t*>(GlobalLock(data));
+    if (!wide) {
+        CloseClipboard();
+        return -EIO;
+    }
+    const int utf8WithNull =
+        WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+    int status = 0;
+    if (utf8WithNull <= 0) {
+        status = -EIO;
+    } else {
+        const std::size_t bytes = static_cast<std::size_t>(utf8WithNull - 1);
+        *outLen = bytes;
+        if (!outBuf || outCap < bytes + 1) {
+            status = -ENOSPC;
+        } else {
+            const int copied = WideCharToMultiByte(CP_UTF8, 0, wide, -1, outBuf,
+                                                   static_cast<int>(outCap), nullptr, nullptr);
+            if (copied <= 0)
+                status = -EIO;
+        }
+    }
+    GlobalUnlock(data);
+    CloseClipboard();
+    return status;
+}
+
+SHIRAZ_EXPORT int shiraz_win32_camera_probe(std::uint32_t* outDeviceCount) {
+    if (outDeviceCount)
+        *outDeviceCount = 0;
+    const HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool needCoUninit = SUCCEEDED(coHr);
+    const HRESULT mfHr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+    if (FAILED(mfHr)) {
+        if (needCoUninit)
+            CoUninitialize();
+        return -EIO;
+    }
+
+    IMFAttributes* attrs = nullptr;
+    IMFActivate** devices = nullptr;
+    UINT32 count = 0;
+    int status = -EIO;
+
+    if (SUCCEEDED(MFCreateAttributes(&attrs, 1)) && attrs &&
+        SUCCEEDED(attrs->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                                 MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID))) {
+        const HRESULT enumHr = MFEnumDeviceSources(attrs, &devices, &count);
+        if (SUCCEEDED(enumHr)) {
+            if (outDeviceCount)
+                *outDeviceCount = static_cast<std::uint32_t>(count);
+            for (UINT32 i = 0; i < count; ++i) {
+                if (devices && devices[i])
+                    devices[i]->Release();
+            }
+            if (devices)
+                CoTaskMemFree(devices);
+            status = 0;
+        }
+    }
+
+    if (attrs)
+        attrs->Release();
+    MFShutdown();
+    if (needCoUninit)
         CoUninitialize();
     return status;
 }

@@ -31,7 +31,7 @@
       framework: ['All 4,445 Android™ API 35 class surfaces in Java + C++ JNI (bounded behavior), plus attributed AOSP code.'],
       native: ['All 15 tracked API 35 NDK C/C++ libraries (887 audited symbols) built for Linux and macOS ARM64; host-ABI libraries load directly, with a guest ELF loader, CoreAudio AAudio/OpenSL ES and VideoToolbox/CoreLocation/Metal bridges on macOS, plus CI-verified Win32/WASAPI (AAudio & OpenSL ES)/Media Foundation/DirectWrite/DXGI bridges on Windows.'],
       arm: ['Optional Digitalis bridge for ARM64. Developer runs only, not yet in AppImages.', 'warn'],
-      graphics: ['EGL/GLES with software composition; libvulkan.so with VK_KHR_android_surface swapchain and AHardwareBuffer bridge; zero-copy IOSurface swapchain & SurfaceTexture (EGL_METAL_TEXTURE_ANGLE) and ProMotion pacing on macOS; DXGI shared buffers and EnumDisplaySettingsW/DwmFlush pacing on Windows.', 'warn'],
+      graphics: ['EGL/GLES with software composition; libvulkan.so/.dll with VK_KHR_android_surface swapchain and AHardwareBuffer bridge; zero-copy IOSurface swapchain, SurfaceTexture & AHardwareBuffer EGLImage (EGL_METAL_TEXTURE_ANGLE) and ProMotion pacing on macOS; SDL2 Win32 presentation, DXGI shared buffers, and EnumDisplaySettingsW/DwmFlush pacing on Windows.', 'warn'],
       window: ['SDL2 across Linux, macOS and Windows. Any desktop, no GTK.', 'good'],
       binder: ['None needed.', 'good'],
       webview: ['Embedded pure-Java HTML5 DOM, CSS selectors, JS evaluator and @JavascriptInterface bridge; no full Blink/V8 layout engine yet.', 'warn'],

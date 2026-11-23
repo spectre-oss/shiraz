@@ -97,6 +97,9 @@ int shiraz_win32_dpapi_unprotect(const std::uint8_t* cipher, std::size_t cipherL
                                  std::uint8_t* outBuf, std::size_t outCap, std::size_t* outLen);
 int shiraz_win32_tts_probe();
 int shiraz_win32_audio_capture_probe(std::uint32_t* outSampleRate, std::uint16_t* outChannels);
+int shiraz_win32_clipboard_set_text(const char* utf8);
+int shiraz_win32_clipboard_get_text(char* outBuf, std::size_t outCap, std::size_t* outLen);
+int shiraz_win32_camera_probe(std::uint32_t* outDeviceCount);
 
 void* shiraz_win32_sandbox_create_job(std::uint64_t memoryLimitBytes,
                                       std::uint32_t activeProcessLimit, int uiRestrictions);
@@ -330,6 +333,24 @@ int main() {
     assert(shiraz_win32_sandbox_create_restricted_token(&restrictedToken) == 0);
     assert(restrictedToken != nullptr);
     shiraz_win32_sandbox_close(restrictedToken);
+
+    // Native Win32 Clipboard UTF-8 <-> UTF-16 round-trip
+    const char clipPayload[] = "Shiraz Win32 Clipboard — café 日本語";
+    const int clipSetRc = shiraz_win32_clipboard_set_text(clipPayload);
+    if (clipSetRc == 0) {
+        char clipOut[256] = {};
+        std::size_t clipLen = 0;
+        assert(shiraz_win32_clipboard_get_text(clipOut, sizeof(clipOut), &clipLen) == 0);
+        assert(clipLen == std::strlen(clipPayload));
+        assert(std::strcmp(clipOut, clipPayload) == 0);
+    }
+    std::printf("WIN32_CLIPBOARD rc=%d\n", clipSetRc);
+
+    // Media Foundation video-capture camera device enumeration (headless-safe: 0 devices is valid)
+    std::uint32_t cameraDevices = 0;
+    const int camRc = shiraz_win32_camera_probe(&cameraDevices);
+    assert(camRc == 0);
+    std::printf("WIN32_CAMERA rc=%d devices=%u\n", camRc, cameraDevices);
 #endif
 
     std::printf("CROSS_PLATFORM_NATIVE_PASS os=%s arch=%s\n", shiraz::host_os_name(),

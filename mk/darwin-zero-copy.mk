@@ -26,7 +26,7 @@ MACOS_ZC_PROTECTED := java/android/graphics/Bitmap.java java/android/graphics/Ca
 MACOS_ZC_HEADER = mkdir -p $(1) && { echo "gate=$(1)"; date; git rev-parse HEAD; git diff --stat; shasum -a 256 $(MACOS_ZC_PROTECTED); \
   env | grep -E '^(SHIRAZ_|SDL_)' | sort; system_profiler SPDisplaysDataType 2>/dev/null | grep -E 'Resolution|Retina|UI Looks like' ; } > $(1)/header.log 2>&1
 
-.PHONY: macos-zero-copy-queue-test macos-zero-copy-ring-test macos-zero-copy-shim-test macos-surface-texture-test macos-apk-gles-anim-fixture \
+.PHONY: macos-zero-copy-queue-test macos-zero-copy-ring-test macos-zero-copy-shim-test macos-surface-texture-test macos-ahb-egl-image-test macos-apk-gles-anim-fixture \
   macos-zero-copy-window-smoke macos-zero-copy-pixels macos-zero-copy-sequence macos-zero-copy-timing \
   macos-zero-copy-negative macos-zero-copy-java-parity macos-zero-copy-check
 
@@ -41,6 +41,11 @@ $(MACOS_OUT)/test-surface-texture: tests/darwin/zero_copy/surface_texture_test.c
 	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -isystem .local/include/angle tests/darwin/zero_copy/surface_texture_test.cpp -o $@.tmp $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) && mv $@.tmp $@
 macos-surface-texture-test: $(MACOS_OUT)/test-surface-texture $(MACOS_OUT)/libEGL.dylib $(MACOS_OUT)/libGLESv2.dylib
 	SHIRAZ_EGL_ZERO_COPY=require SHIRAZ_EGL_LIBRARY=$(CURDIR)/$(MACOS_OUT)/libEGL.dylib $(MACOS_OUT)/test-surface-texture $(CURDIR)/$(MACOS_OUT)
+
+$(MACOS_OUT)/test-ahb-egl-image: tests/darwin/zero_copy/ahb_egl_image_test.cpp native/egl_shim.cpp native/hardware_buffer.cpp $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libEGL_shim.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -isystem .local/include/angle tests/darwin/zero_copy/ahb_egl_image_test.cpp -o $@.tmp $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) && mv $@.tmp $@
+macos-ahb-egl-image-test: $(MACOS_OUT)/test-ahb-egl-image $(MACOS_OUT)/libEGL.dylib $(MACOS_OUT)/libGLESv2.dylib
+	SHIRAZ_EGL_LIBRARY=$(CURDIR)/$(MACOS_OUT)/libEGL.dylib $(MACOS_OUT)/test-ahb-egl-image $(CURDIR)/$(MACOS_OUT)
 
 # T10: the shim on ANGLE over a Shiraz window in all three modes (the existing
 # macos-egl-shim-test binary, extended), then the no-ANGLE fallback test.

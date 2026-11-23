@@ -4,10 +4,11 @@
 WINDOWS_OUT ?= build/windows
 WINDOWS_CXX ?= g++
 WINDOWS_PYTHON ?= $(shell command -v python3 >/dev/null 2>&1 && echo python3 || echo python)
-WINDOWS_CXXFLAGS ?= -O2 -g -std=c++17 -Wall -Wextra -Wpedantic -Werror -Iinclude -Ibuild
+WINDOWS_CXXFLAGS ?= -O2 -g -std=c++17 -Wall -Wextra -Wpedantic -Werror -DNOMINMAX -Iinclude -Ibuild
 
 WINDOWS_HOST_SOURCES := \
 	native/win32/d3d11_probe.cpp \
+	native/win32/native_window.cpp \
 	native/win32/shared_memory.cpp \
 	native/win32/looper.cpp \
 	native/win32/host_process.cpp \
@@ -28,9 +29,9 @@ WINDOWS_HOST_HEADERS := \
 	include/shiraz/platform.hpp \
 	include/shiraz/win32/d3d11_probe.hpp
 
-WINDOWS_LIBS := -lole32 -ld3d11 -ldxgi -ldwrite -lmfplat -lmfuuid -lshell32 -luser32 -lkernel32 -ladvapi32 -liphlpapi -lcrypt32 -luuid
+WINDOWS_LIBS := -lole32 -ld3d11 -ldxgi -ldwrite -lmf -lmfplat -lmfuuid -lshell32 -luser32 -lkernel32 -ladvapi32 -liphlpapi -lcrypt32 -luuid
 
-.PHONY: windows-build windows-check windows-app-bundle-check cross-platform-native-check
+.PHONY: windows-build windows-check windows-presentation-check windows-app-bundle-check cross-platform-native-check
 
 $(WINDOWS_OUT)/.dir:
 	@mkdir -p $(WINDOWS_OUT)
@@ -56,12 +57,30 @@ $(WINDOWS_OUT)/libOpenSLES.dll: native/opensles.cpp third_party/opensles/SLES/Op
 $(WINDOWS_OUT)/test-opensles.exe: tests/opensles.cpp $(WINDOWS_OUT)/libOpenSLES.dll
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) $(WINDOWS_JNI_INCLUDES) -isystem third_party/opensles tests/opensles.cpp -o $@ -L$(WINDOWS_OUT) -lOpenSLES -pthread
 
-windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe
+$(WINDOWS_OUT)/libvulkan.dll: native/ndk_vulkan.cpp include/shiraz/ndk/vulkan.h include/shiraz/native_window.h include/shiraz/hardware_buffer.h $(WINDOWS_OUT)/shiraz-win32-host.dll
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -shared -Wl,--export-all-symbols -Wl,--out-implib,$(WINDOWS_OUT)/libvulkan.dll.a native/ndk_vulkan.cpp -o $@ -L$(WINDOWS_OUT) -lshiraz-win32-host -pthread
+
+$(WINDOWS_OUT)/test-ndk-vulkan.exe: tests/ndk_vulkan.cpp $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/shiraz-win32-host.dll
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/ndk_vulkan.cpp -o $@ -L$(WINDOWS_OUT) -lvulkan -lshiraz-win32-host -pthread
+
+WINDOWS_SDL_CFLAGS = $(shell sdl2-config --cflags 2>/dev/null)
+WINDOWS_SDL_LIBS = $(shell sdl2-config --libs 2>/dev/null | sed 's/-lmingw32//g; s/-lSDL2main//g; s/-mwindows//g')
+
+$(WINDOWS_OUT)/test-presentation.exe: tests/presentation.cpp native/presentation.cpp native/win32/d3d11_probe.cpp native/win32/gpu_stub.cpp include/shiraz/presentation.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/win32/d3d11_probe.hpp $(WINDOWS_OUT)/.dir
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) $(WINDOWS_SDL_CFLAGS) tests/presentation.cpp native/presentation.cpp native/win32/d3d11_probe.cpp native/win32/gpu_stub.cpp -o $@ $(WINDOWS_SDL_LIBS) -ld3d11 -ldxgi -luser32 -lkernel32 -pthread
+
+windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/test-ndk-vulkan.exe
 
 windows-check: windows-build
 	$(WINDOWS_OUT)/test-win32-platform.exe
 	$(WINDOWS_OUT)/test-ndk-aaudio.exe
 	$(WINDOWS_OUT)/test-opensles.exe
+	$(WINDOWS_OUT)/test-ndk-vulkan.exe
+
+windows-presentation-check: $(WINDOWS_OUT)/test-presentation.exe
+	@mkdir -p $(WINDOWS_OUT)/tmp
+	TMPDIR=$(WINDOWS_OUT)/tmp SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software $(WINDOWS_OUT)/test-presentation.exe
+	TMPDIR=$(WINDOWS_OUT)/tmp env -u SDL_VIDEODRIVER -u SDL_RENDER_DRIVER SHIRAZ_HOST_SDL_VIDEODRIVER=dummy SHIRAZ_HOST_SDL_RENDER_DRIVER=software $(WINDOWS_OUT)/test-presentation.exe
 
 windows-app-bundle-check:
 	$(WINDOWS_PYTHON) -c "import sys, unittest; sys.path[:0]=['src','tests']; res=unittest.main(module='test_build_windows_app', argv=['unittest','-v'], exit=False); sys.exit(0 if res.result.wasSuccessful() else 1)"
