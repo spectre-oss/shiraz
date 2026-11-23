@@ -87,6 +87,16 @@ bool win32_d3d11_device_info(char* deviceName, std::size_t deviceCap, char* vend
     return deviceName && deviceName[0] != '\0';
 }
 
+float win32_presentation_refresh_hz() {
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency >= 24 &&
+        dm.dmDisplayFrequency <= 480) {
+        return static_cast<float>(dm.dmDisplayFrequency);
+    }
+    return 60.0f;
+}
+
 bool win32_begin_presentation_activity() {
     return SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED) != 0;
 }

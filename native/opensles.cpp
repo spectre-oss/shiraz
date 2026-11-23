@@ -26,6 +26,17 @@ static const SLInterfaceID_ iid_RECORD = {
 extern "C" const SLInterfaceID SL_IID_RECORD = &iid_RECORD;
 #if defined(__APPLE__)
 #include <AudioToolbox/AudioToolbox.h>
+#elif defined(_WIN32)
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+struct ShirazWin32AudioStream;
+extern "C" {
+ShirazWin32AudioStream* shiraz_win32_audio_open(std::uint32_t sampleRate, std::uint16_t channels);
+int shiraz_win32_audio_write(ShirazWin32AudioStream* s, const std::int16_t* pcm,
+                             std::size_t frames);
+void shiraz_win32_audio_close(ShirazWin32AudioStream* s);
+}
 #else
 #include <alsa/asoundlib.h>
 #endif
@@ -157,6 +168,8 @@ struct Object {
     std::deque<std::vector<unsigned char>> buffers;
 #if defined(__APPLE__)
     AudioQueueRef pcm = nullptr;
+#elif defined(_WIN32)
+    ShirazWin32AudioStream* pcm = nullptr;
 #else
     snd_pcm_t* pcm = nullptr;
 #endif
@@ -176,6 +189,9 @@ struct Object {
 #if defined(__APPLE__)
         if (pcm)
             AudioQueueDispose(pcm, true);
+#elif defined(_WIN32)
+        if (pcm)
+            shiraz_win32_audio_close(pcm);
 #else
         if (pcm)
             snd_pcm_close(pcm);
@@ -252,6 +268,22 @@ void run(Object* o) {
             else
                 AudioQueueFreeBuffer(o->pcm, buffer);
         }
+#elif defined(_WIN32)
+        if (o->pcm && count > 0) {
+            if (o->floating) {
+                const auto* src = reinterpret_cast<const float*>(bytes.data());
+                const size_t samples = count * o->channels;
+                std::vector<std::int16_t> pcm16(samples, 0);
+                for (size_t i = 0; i < samples; ++i)
+                    pcm16[i] =
+                        static_cast<std::int16_t>(std::clamp(src[i], -1.0f, 1.0f) * 32767.0f);
+                shiraz_win32_audio_write(o->pcm, pcm16.data(), count);
+            } else {
+                shiraz_win32_audio_write(
+                    o->pcm, reinterpret_cast<const std::int16_t*>(bytes.data()), count);
+            }
+        }
+        written = count;
 #else
         while (written < count) {
             auto n = snd_pcm_writei(o->pcm, bytes.data() + written * o->channels * (o->bits / 8),
@@ -366,6 +398,10 @@ SLresult realize(SLObjectItf self, SLboolean async) {
             o->pcm = nullptr;
             return SL_RESULT_RESOURCE_ERROR;
         }
+#elif defined(_WIN32)
+        const char* device = std::getenv("SHIRAZ_AUDIO_DEVICE");
+        if (!device || std::strcmp(device, "null") != 0)
+            o->pcm = shiraz_win32_audio_open(o->rate, static_cast<std::uint16_t>(o->channels));
 #else
         const char* device = std::getenv("SHIRAZ_AUDIO_DEVICE");
         if (!device || !*device)
@@ -397,6 +433,9 @@ SLresult realize(SLObjectItf self, SLboolean async) {
         } catch (const std::exception&) {
 #if defined(__APPLE__)
             AudioQueueDispose(o->pcm, true);
+#elif defined(_WIN32)
+            if (o->pcm)
+                shiraz_win32_audio_close(o->pcm);
 #else
             snd_pcm_close(o->pcm);
 #endif

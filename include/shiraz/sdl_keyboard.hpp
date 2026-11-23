@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include <SDL.h>
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
 #include "shiraz/evdev_key_codes.h"
+#if defined(__APPLE__)
+#include <cstdlib>
+#endif
 #else
 #include <linux/input-event-codes.h>
 #endif
@@ -313,12 +316,26 @@ inline int android_meta(SDL_Keymod modifiers) {
     return result;
 }
 #if defined(__APPLE__)
-// macOS Command-key policy: how the Command key (KMOD_LGUI/KMOD_RGUI) reaches
-// Android apps. Android apps expect Ctrl for copy/paste/select-all/undo, while
-// Mac users press Command. The returned modifiers feed android_meta().
+// macOS Command-key policy: Android apps expect Ctrl for copy/paste/cut/select-all/undo,
+// while Mac users press Command. Map LGUI/RGUI to LCTRL/RCTRL by default so desktop
+// shortcuts work naturally in EditText and WebView; set SHIRAZ_MACOS_CMD_AS_META=1 to
+// preserve raw Android META_META_ON bits.
+inline SDL_Keymod macos_shortcut_modifiers(SDL_Keymod mods, bool mapCommandToCtrl) {
+    if (!mapCommandToCtrl)
+        return mods;
+    unsigned raw = static_cast<unsigned>(mods);
+    if (raw & KMOD_LGUI) {
+        raw = (raw & ~static_cast<unsigned>(KMOD_LGUI)) | static_cast<unsigned>(KMOD_LCTRL);
+    }
+    if (raw & KMOD_RGUI) {
+        raw = (raw & ~static_cast<unsigned>(KMOD_RGUI)) | static_cast<unsigned>(KMOD_RCTRL);
+    }
+    return static_cast<SDL_Keymod>(raw);
+}
 inline SDL_Keymod macos_shortcut_modifiers(SDL_Keymod mods) {
-    // TODO(policy): decide the Command-key mapping (see docs/macos_final_goal.md, Input).
-    return mods;
+    const char* rawMeta = std::getenv("SHIRAZ_MACOS_CMD_AS_META");
+    const bool keepMeta = rawMeta && rawMeta[0] == '1' && rawMeta[1] == '\0';
+    return macos_shortcut_modifiers(mods, !keepMeta);
 }
 #endif
 } // namespace shiraz

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/native_window.h"
 #if defined(__APPLE__)
+#include "shiraz/darwin/window_queue.h"
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
+#include <string>
 #else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -19,18 +21,156 @@
 
 namespace {
 #if defined(__APPLE__)
-// The Linux path wraps each frame's texture in an EGLImage (EGL_KHR_gl_texture_2D_image)
-// bound to a GL_TEXTURE_EXTERNAL_OES name (GL_OES_EGL_image_external). ANGLE Metal
-// (chromium/8127) exposes neither: eglCreateImageKHR(EGL_GL_TEXTURE_2D_KHR) fails with
-// EGL_BAD_PARAMETER and binding GL_TEXTURE_EXTERNAL_OES gives GL_INVALID_ENUM
-// (build/macos/m4/fix/surface-texture/ext_probe.out). So every GL-dependent entry point
-// fails explicitly with IllegalStateException and creates no GL objects. Bookkeeping stays.
+// macOS ANGLE Metal exposes EGL_ANGLE_metal_texture_client_buffer (EGL_METAL_TEXTURE_ANGLE)
+// and GL_OES_EGL_image on GL_TEXTURE_2D (used by the M4b zero-copy IOSurface queue).
+// Acquire queued IOSurface/MTLTexture slots zero-copy via EGLImage -> GL_TEXTURE_2D,
+// and fall back to glTexImage2D for CPU-posted ANativeWindow frames (Canvas / ImageReader).
 typedef unsigned int GLuint;
+typedef unsigned int GLenum;
+typedef int GLint;
+typedef int GLsizei;
+using DarwinEglDisplay = void*;
+using DarwinEglContext = void*;
+using DarwinEglImage = void*;
+using DarwinEglSync = void*;
+using DarwinEglInt = int32_t;
+using DarwinEglAttrib = intptr_t;
+using DarwinEglBool = unsigned int;
+
+constexpr GLenum kGlNoError = 0;
+constexpr GLenum kGlTexture2D = 0x0DE1;
+constexpr GLenum kGlTextureBinding2D = 0x8069;
+constexpr GLenum kGlRgba = 0x1908;
+constexpr GLenum kGlUnsignedByte = 0x1401;
+constexpr GLenum kGlTextureMagFilter = 0x2800;
+constexpr GLenum kGlTextureMinFilter = 0x2801;
+constexpr GLenum kGlTextureWrapS = 0x2802;
+constexpr GLenum kGlTextureWrapT = 0x2803;
+constexpr GLint kGlLinear = 0x2601;
+constexpr GLint kGlClampToEdge = 0x812F;
+constexpr DarwinEglInt kEglNone = 0x3038;
+constexpr DarwinEglInt kEglMetalTextureAngle = 0x34A7;
+constexpr DarwinEglInt kEglSyncMetalSharedEventAngle = 0x34D8;
+constexpr DarwinEglInt kEglSyncMetalSharedEventObjectAngle = 0x34D9;
+constexpr DarwinEglInt kEglSyncMetalSharedEventSignalValueLoAngle = 0x34DA;
+constexpr DarwinEglInt kEglSyncMetalSharedEventSignalValueHiAngle = 0x34DB;
+constexpr DarwinEglInt kEglSyncMetalSharedEventSignaledAngle = 0x34DC;
+constexpr DarwinEglInt kEglSyncCondition = 0x30F8;
+
+struct DarwinApi {
+    DarwinEglContext (*getCurrentContext)() = nullptr;
+    DarwinEglDisplay (*getCurrentDisplay)() = nullptr;
+    void* (*getProcAddress)(const char*) = nullptr;
+    DarwinEglImage (*createImage)(DarwinEglDisplay, DarwinEglContext, unsigned int, void*,
+                                  const DarwinEglInt*) = nullptr;
+    DarwinEglBool (*destroyImage)(DarwinEglDisplay, DarwinEglImage) = nullptr;
+    DarwinEglSync (*createSync)(DarwinEglDisplay, unsigned int, const DarwinEglAttrib*) = nullptr;
+    DarwinEglBool (*destroySync)(DarwinEglDisplay, DarwinEglSync) = nullptr;
+    DarwinEglBool (*waitSync)(DarwinEglDisplay, DarwinEglSync, DarwinEglInt) = nullptr;
+    void (*imageTargetTexture)(GLenum, void*) = nullptr;
+    void (*bindTexture)(GLenum, GLuint) = nullptr;
+    void (*deleteTextures)(GLsizei, const GLuint*) = nullptr;
+    void (*texImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum,
+                       const void*) = nullptr;
+    void (*texParameteri)(GLenum, GLenum, GLint) = nullptr;
+    GLenum (*getError)() = nullptr;
+    void (*getIntegerv)(GLenum, GLint*) = nullptr;
+    void (*flush)() = nullptr;
+
+    void* resolveEgl(const char* sym) {
+        if (void* p = dlsym(RTLD_DEFAULT, sym))
+            return p;
+        const char* const candidates[] = {"libEGL_shim.so", "libEGL.dylib", "libGLESv2.dylib"};
+        for (const char* name : candidates) {
+            if (void* lib = dlopen(name, RTLD_NOW | RTLD_NOLOAD)) {
+                if (void* p = dlsym(lib, sym))
+                    return p;
+            }
+        }
+        return nullptr;
+    }
+
+    template <typename Fn> void resolveProc(Fn& out, const char* sym) {
+        void* p = getProcAddress ? getProcAddress(sym) : nullptr;
+        if (!p)
+            p = resolveEgl(sym);
+        out = reinterpret_cast<Fn>(p);
+    }
+
+    void refresh() {
+        if (ready())
+            return;
+        getCurrentContext =
+            reinterpret_cast<DarwinEglContext (*)()>(resolveEgl("eglGetCurrentContext"));
+        getCurrentDisplay =
+            reinterpret_cast<DarwinEglDisplay (*)()>(resolveEgl("eglGetCurrentDisplay"));
+        getProcAddress = reinterpret_cast<void* (*)(const char*)>(resolveEgl("eglGetProcAddress"));
+        resolveProc(createImage, "eglCreateImageKHR");
+        resolveProc(destroyImage, "eglDestroyImageKHR");
+        resolveProc(createSync, "eglCreateSync");
+        resolveProc(destroySync, "eglDestroySync");
+        resolveProc(waitSync, "eglWaitSync");
+        resolveProc(imageTargetTexture, "glEGLImageTargetTexture2DOES");
+        resolveProc(bindTexture, "glBindTexture");
+        resolveProc(deleteTextures, "glDeleteTextures");
+        resolveProc(texImage2D, "glTexImage2D");
+        resolveProc(texParameteri, "glTexParameteri");
+        resolveProc(getError, "glGetError");
+        resolveProc(getIntegerv, "glGetIntegerv");
+        resolveProc(flush, "glFlush");
+    }
+
+    bool ready() const {
+        return getCurrentContext && getCurrentDisplay && bindTexture && deleteTextures &&
+               texImage2D && texParameteri && getError && getIntegerv;
+    }
+
+    bool zeroCopyReady() const {
+        return ready() && createImage && destroyImage && imageTargetTexture;
+    }
+};
+
+DarwinApi& darwinApi() {
+    static DarwinApi value;
+    value.refresh();
+    return value;
+}
+
 struct Texture {
     GLuint name = 0;
     bool attached;
+    DarwinEglContext context = nullptr;
+    DarwinEglDisplay display = nullptr;
+    uint64_t revision = 0;
+    uint64_t frameSerial = 0;
+    ANativeWindow* consumerWindow = nullptr;
+    struct SlotImage {
+        uint64_t generation = 0;
+        DarwinEglImage image = nullptr;
+    } images[SHIRAZ_WINDOW_MAX_SLOTS];
+    std::vector<uint32_t> pixels;
     Texture(GLuint value, bool enabled) : name(value), attached(enabled) {}
 };
+
+uint64_t darwinConsumerToken(const Texture* t) {
+    return reinterpret_cast<uint64_t>(t);
+}
+
+void darwinReleaseImages(Texture* t) {
+    DarwinApi& a = darwinApi();
+    for (auto& slot : t->images) {
+        if (slot.image && a.destroyImage && t->display)
+            a.destroyImage(t->display, slot.image);
+        slot.image = nullptr;
+        slot.generation = 0;
+    }
+    if (t->consumerWindow) {
+        shiraz_window_consumer_detach(t->consumerWindow, darwinConsumerToken(t));
+        ANativeWindow_release(t->consumerWindow);
+        t->consumerWindow = nullptr;
+    }
+    t->revision = 0;
+}
 #else
 struct Api {
     void* library = nullptr;
@@ -88,15 +228,20 @@ void fail(JNIEnv* env, const char* message) {
     }
 }
 #if defined(__APPLE__)
-bool current(JNIEnv* env, Texture*) {
-    static std::atomic<bool> reported{false};
-    if (!reported.exchange(true))
-        std::fprintf(stderr, "SHIRAZ_UNSUPPORTED surface-texture ANGLE Metal has no "
-                             "GL_OES_EGL_image_external or EGL_KHR_gl_texture_2D_image\n");
-    errno = ENOSYS;
-    fail(env,
-         "SurfaceTexture is unsupported on macOS: ANGLE Metal has no GL_OES_EGL_image_external");
-    return false;
+bool current(JNIEnv* env, Texture* t) {
+    DarwinApi& a = darwinApi();
+    if (!a.ready() || !a.getCurrentContext()) {
+        fail(env, "SurfaceTexture requires a current EGL context");
+        return false;
+    }
+    if (t->context &&
+        (t->context != a.getCurrentContext() || t->display != a.getCurrentDisplay())) {
+        fail(env, "SurfaceTexture belongs to another EGL context");
+        return false;
+    }
+    t->context = a.getCurrentContext();
+    t->display = a.getCurrentDisplay();
+    return true;
 }
 #else
 bool current(JNIEnv* env, Texture* t) {
@@ -135,13 +280,26 @@ Java_android_graphics_SurfaceTexture_nativeCreate(JNIEnv*, jclass, jint name, jb
 extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeAttach(JNIEnv* env,
                                                                                     jclass,
                                                                                     jlong value,
-                                                                                    jint) {
+                                                                                    jint name) {
     auto* t = reinterpret_cast<Texture*>(value);
     if (t->attached) {
         fail(env, "SurfaceTexture is already attached");
         return;
     }
-    current(env, t);
+    if (!current(env, t))
+        return;
+    DarwinApi& a = darwinApi();
+    GLint previous = 0;
+    a.getIntegerv(kGlTextureBinding2D, &previous);
+    a.bindTexture(kGlTexture2D, GLuint(name));
+    const GLenum err = a.getError();
+    a.bindTexture(kGlTexture2D, static_cast<GLuint>(previous));
+    if (err != kGlNoError) {
+        fail(env, "Cannot attach SurfaceTexture texture name");
+        return;
+    }
+    t->name = GLuint(name);
+    t->attached = true;
 }
 extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeDetach(JNIEnv* env,
                                                                                     jclass,
@@ -151,21 +309,127 @@ extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeDet
         fail(env, "SurfaceTexture is already detached");
         return;
     }
-    // current() never succeeds here, so no GL objects exist to release.
+    if (t->context) {
+        if (!current(env, t))
+            return;
+        darwinReleaseImages(t);
+        if (t->name)
+            darwinApi().deleteTextures(1, &t->name);
+    }
     t->name = 0;
     t->attached = false;
+    t->context = nullptr;
+    t->display = nullptr;
 }
-extern "C" JNIEXPORT jboolean JNICALL Java_android_graphics_SurfaceTexture_nativeUpdate(JNIEnv* env,
-                                                                                        jclass,
-                                                                                        jlong value,
-                                                                                        jlong) {
+extern "C" JNIEXPORT jboolean JNICALL
+Java_android_graphics_SurfaceTexture_nativeUpdate(JNIEnv* env, jclass, jlong value, jlong window) {
     auto* t = reinterpret_cast<Texture*>(value);
+    auto* w = reinterpret_cast<ANativeWindow*>(window);
     if (!t->attached) {
         fail(env, "SurfaceTexture is detached");
-        return false;
+        return JNI_FALSE;
     }
-    current(env, t);
-    return false;
+    if (!current(env, t) || !w)
+        return JNI_FALSE;
+    DarwinApi& a = darwinApi();
+    // 1. Prefer zero-copy IOSurface / MTLTexture slot import via EGL_METAL_TEXTURE_ANGLE.
+    if (a.zeroCopyReady() && shiraz_zero_copy_mode() != 0) {
+        ShirazWindowSlot slot{};
+        const int32_t acq =
+            shiraz_window_acquire_slot(w, darwinConsumerToken(t), ++t->frameSerial, &slot);
+        if (acq == 0 && slot.texture && slot.index < SHIRAZ_WINDOW_MAX_SLOTS) {
+            if (t->consumerWindow != w) {
+                if (t->consumerWindow) {
+                    shiraz_window_consumer_detach(t->consumerWindow, darwinConsumerToken(t));
+                    ANativeWindow_release(t->consumerWindow);
+                }
+                ANativeWindow_acquire(w);
+                t->consumerWindow = w;
+            }
+            const bool changed = !slot.revision || slot.revision != t->revision;
+            if (changed) {
+                if (slot.event && slot.value && !shiraz_event_signaled(slot.event, slot.value)) {
+                    if (a.createSync && a.waitSync && a.destroySync) {
+                        const DarwinEglAttrib attrs[] = {
+                            kEglSyncMetalSharedEventObjectAngle,
+                            reinterpret_cast<DarwinEglAttrib>(slot.event),
+                            kEglSyncMetalSharedEventSignalValueLoAngle,
+                            static_cast<DarwinEglAttrib>(slot.value & 0xffffffffu),
+                            kEglSyncMetalSharedEventSignalValueHiAngle,
+                            static_cast<DarwinEglAttrib>(slot.value >> 32),
+                            kEglSyncCondition,
+                            kEglSyncMetalSharedEventSignaledAngle,
+                            kEglNone};
+                        if (DarwinEglSync sync =
+                                a.createSync(t->display, kEglSyncMetalSharedEventAngle, attrs)) {
+                            a.waitSync(t->display, sync, 0);
+                            a.destroySync(t->display, sync);
+                        }
+                    } else {
+                        shiraz_event_cpu_wait(slot.event, slot.value, 16);
+                    }
+                }
+                auto& cached = t->images[slot.index];
+                if (cached.generation != slot.generation || !cached.image) {
+                    if (cached.image)
+                        a.destroyImage(t->display, cached.image);
+                    const DarwinEglInt none[] = {kEglNone};
+                    cached.image = a.createImage(t->display, nullptr, kEglMetalTextureAngle,
+                                                 slot.texture, none);
+                    cached.generation = cached.image ? slot.generation : 0;
+                }
+                if (cached.image) {
+                    GLint previous = 0;
+                    a.getIntegerv(kGlTextureBinding2D, &previous);
+                    a.bindTexture(kGlTexture2D, t->name);
+                    a.imageTargetTexture(kGlTexture2D, cached.image);
+                    a.texParameteri(kGlTexture2D, kGlTextureMinFilter, kGlLinear);
+                    a.texParameteri(kGlTexture2D, kGlTextureMagFilter, kGlLinear);
+                    a.texParameteri(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+                    a.texParameteri(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+                    a.bindTexture(kGlTexture2D, static_cast<GLuint>(previous));
+                    if (a.flush)
+                        a.flush();
+                    shiraz_window_mark_sampled(w, darwinConsumerToken(t), slot.index,
+                                               slot.generation, 0);
+                    t->revision = slot.revision;
+                    return JNI_TRUE;
+                }
+            }
+            shiraz_window_mark_sampled(w, darwinConsumerToken(t), slot.index, slot.generation, 0);
+            if (!changed)
+                return JNI_FALSE;
+        }
+    }
+    // 2. CPU-backed ANativeWindow frame upload (Canvas, ImageReader, VideoToolbox CPU copies).
+    const uint64_t revision = shiraz_window_revision(w);
+    if (!revision || revision == t->revision)
+        return JNI_FALSE;
+    const int width = ANativeWindow_getWidth(w);
+    const int height = ANativeWindow_getHeight(w);
+    if (width < 1 || height < 1 || width > 8192 || height > 8192 ||
+        uint64_t(width) * height > 16 * 1024 * 1024) {
+        fail(env, "Invalid SurfaceTexture frame dimensions");
+        return JNI_FALSE;
+    }
+    t->pixels.resize(size_t(width) * height);
+    if (shiraz_window_copy_argb(w, t->pixels.data(), t->pixels.size()) ||
+        revision != shiraz_window_revision(w))
+        return JNI_FALSE;
+    for (auto& p : t->pixels)
+        p = (p & 0xff00ff00u) | ((p & 255) << 16) | ((p >> 16) & 255);
+    GLint previous = 0;
+    a.getIntegerv(kGlTextureBinding2D, &previous);
+    a.bindTexture(kGlTexture2D, t->name);
+    a.texImage2D(kGlTexture2D, 0, kGlRgba, width, height, 0, kGlRgba, kGlUnsignedByte,
+                 t->pixels.data());
+    a.texParameteri(kGlTexture2D, kGlTextureMinFilter, kGlLinear);
+    a.texParameteri(kGlTexture2D, kGlTextureMagFilter, kGlLinear);
+    a.texParameteri(kGlTexture2D, kGlTextureWrapS, kGlClampToEdge);
+    a.texParameteri(kGlTexture2D, kGlTextureWrapT, kGlClampToEdge);
+    a.bindTexture(kGlTexture2D, static_cast<GLuint>(previous));
+    t->revision = revision;
+    return JNI_TRUE;
 }
 extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeRelease(JNIEnv*,
                                                                                      jclass,
@@ -173,6 +437,7 @@ extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeRel
     auto* t = reinterpret_cast<Texture*>(value);
     if (!t)
         return;
+    darwinReleaseImages(t);
     delete t;
 }
 #else

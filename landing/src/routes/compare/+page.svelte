@@ -29,9 +29,9 @@
       host: ['Linux x86-64 and ARM64. Experimental Apple Silicon macOS port and native Windows x64/ARM64 foundation.'],
       code: ['Standalone ART.'],
       framework: ['All 4,445 Android™ API 35 class surfaces in Java + C++ JNI (bounded behavior), plus attributed AOSP code.'],
-      native: ['All 15 tracked API 35 NDK C/C++ libraries (887 audited symbols) built for Linux and macOS ARM64; host-ABI libraries load directly, with a guest ELF loader and VideoToolbox/AudioToolbox/CoreLocation/Metal bridges on macOS, plus Win32/WASAPI/Media Foundation/DirectWrite/DXGI bridges on Windows.'],
+      native: ['All 15 tracked API 35 NDK C/C++ libraries (887 audited symbols) built for Linux and macOS ARM64; host-ABI libraries load directly, with a guest ELF loader, CoreAudio AAudio/OpenSL ES and VideoToolbox/CoreLocation/Metal bridges on macOS, plus CI-verified Win32/WASAPI (AAudio & OpenSL ES)/Media Foundation/DirectWrite/DXGI bridges on Windows.'],
       arm: ['Optional Digitalis bridge for ARM64. Developer runs only, not yet in AppImages.', 'warn'],
-      graphics: ['EGL/GLES with software composition; libvulkan.so with VK_KHR_android_surface swapchain and AHardwareBuffer bridge; zero-copy IOSurface-to-Metal and ProMotion pacing on macOS; DXGI shared buffers and DwmFlush pacing on Windows.', 'warn'],
+      graphics: ['EGL/GLES with software composition; libvulkan.so with VK_KHR_android_surface swapchain and AHardwareBuffer bridge; zero-copy IOSurface swapchain & SurfaceTexture (EGL_METAL_TEXTURE_ANGLE) and ProMotion pacing on macOS; DXGI shared buffers and EnumDisplaySettingsW/DwmFlush pacing on Windows.', 'warn'],
       window: ['SDL2 across Linux, macOS and Windows. Any desktop, no GTK.', 'good'],
       binder: ['None needed.', 'good'],
       webview: ['Embedded pure-Java HTML5 DOM, CSS selectors, JS evaluator and @JavascriptInterface bridge; no full Blink/V8 layout engine yet.', 'warn'],
@@ -177,9 +177,9 @@
     'Interactive evidence across Flutter, React Native, Unity, libGDX, Godot, SDL and Arc apps.'
   ];
   const trails = [
-    'No app sandbox; ACL sandboxes by default and Innkeeper uses Flatpak.',
-    'No Vulkan rendering, which blocks some Godot titles.',
-    'WebView has no JavaScript engine; a4l and apklayer have one.',
+    'App sandboxing exists across Linux, macOS and Windows (Landlock/seccomp, Seatbelt, Job Object + Restricted Token), but is not yet enforced by default in every end-user launcher.',
+    'Vulkan ANativeWindow/AHB bridging exists in libvulkan.so, but end-to-end Vulkan titles are still unverified.',
+    'WebView uses an embedded pure-Java HTML5 DOM and JS evaluator rather than a full Blink/V8 browser engine.',
     'OsmAnd+, the first target, is not yet verified end to end.',
     'No 32-bit ARM, and ARM translation is not yet in AppImages.',
     'Fewer verified apps than Mac.apk or apklayer report.'
@@ -208,7 +208,7 @@
 <main id="compare-main">
   <section class="peers-hero wrap">
     <div class="hero-copy">
-      <p class="eyebrow">Shiraz and its peers · reviewed 22 November 2026</p>
+      <p class="eyebrow">Shiraz and its peers · reviewed 23 November 2026</p>
       <h1>Run the app.<br><span>Not the phone.</span></h1>
       <p class="lede">Seven open projects want Android™ apps on your desktop. Here is how Shiraz is built, why, and where each of the others is ahead of us.</p>
       <div class="hero-actions"><a class="button primary" href="#head-to-head">Compare head to head</a><a class="button secondary" href="#all">See all seven</a></div>

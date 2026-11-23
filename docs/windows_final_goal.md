@@ -69,12 +69,12 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 
 | Status | Item | Repo files | Windows implementation | Diff |
 |---|---|---|---|---|
-| [~] | GPU capability probe & power guard | `include/shiraz/win32/d3d11_probe.hpp`, `native/win32/d3d11_probe.cpp` | DXGI `IDXGIFactory1::EnumAdapters1` (`SHIRAZ_GPU device=... vendor=...`), `SetThreadExecutionState(ES_CONTINUOUS \| ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` | L |
+| [x] | GPU capability probe, display refresh & power guard | `include/shiraz/win32/d3d11_probe.hpp`, `native/win32/d3d11_probe.cpp`, `native/presentation.cpp` | DXGI `IDXGIFactory1::EnumAdapters1` (`SHIRAZ_GPU device=... vendor=...`), `EnumDisplaySettingsW` refresh rate (`win32_presentation_refresh_hz`), and `SetThreadExecutionState(ES_CONTINUOUS \| ES_DISPLAY_REQUIRED \| ES_SYSTEM_REQUIRED)` (verified in `windows-latest` CI) | L |
 | [ ] | Window & ANGLE-D3D11 layer | `native/presentation.cpp`, `mk/windows.mk` | SDL2 Win32 `HWND` with ANGLE D3D11 `opengles2` renderer and Per-Monitor V2 DPI scaling | M |
 | [~] | Live resize | `native/presentation.cpp` | `SDL_AddEventWatch` (`Win32LiveResizeWatch`) repaint during Win32 `WM_ENTERSIZEMOVE` / `WM_SIZING` modal drag loop + `Win32PowerGuard` + Precision Touchpad filter/pinch under `#if defined(_WIN32)` (verified Linux-neutral by `darwin_linux_guard.py`) | M |
-| [~] | AHardwareBuffer / DXGI shared surface | `native/win32/hardware_buffer.cpp` | `ID3D11Texture2D` + `IDXGIResource::GetSharedHandle`, CPU staging lock/unlock with WARP/CPU fallback | H |
-| [~] | Sync fences | `native/win32/sync_fence.cpp` | Win32 manual-reset `HANDLE` event fd table with wait, signal, dup, and multi-fence merge (`WaitForMultipleObjects`) | H |
-| [~] | Frame pacing / Choreographer vsync | `native/win32/choreographer.cpp` | `DwmFlush()` (dynamically loaded `dwmapi.dll`) with `CreateWaitableTimerExW` (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) fallback | M |
+| [x] | AHardwareBuffer / DXGI shared surface | `native/win32/hardware_buffer.cpp` | `ID3D11Texture2D` + `IDXGIResource::GetSharedHandle`, CPU staging lock/unlock with WARP/CPU fallback (verified in `windows-latest` CI `win32-platform-test.exe`) | H |
+| [x] | Sync fences | `native/win32/sync_fence.cpp` | Win32 manual-reset `HANDLE` event fd table with wait, signal, dup, and multi-fence merge (`WaitForMultipleObjects`, verified in `windows-latest` CI `win32-platform-test.exe`) | H |
+| [x] | Frame pacing / Choreographer vsync | `native/win32/choreographer.cpp` | `DwmFlush()` (dynamically loaded `dwmapi.dll`) with `CreateWaitableTimerExW` (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) fallback (verified in `windows-latest` CI `win32-platform-test.exe`) | M |
 | [~] | Vulkan | `native/ndk_vulkan.cpp` | Native Windows `vulkan-1.dll` loader (`LoadLibraryA`/`GetProcAddress`) + `ANativeWindow`-backed swapchain & AHB memory bridge | M |
 
 ### 3. Input and windowing
@@ -82,7 +82,7 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 | Status | Item | Repo files | Windows implementation | Diff |
 |---|---|---|---|---|
 | [x] | Touch & Precision Touchpad helpers | `include/shiraz/win32/d3d11_probe.hpp` | Separate direct touchscreens from Precision Touchpad pinch/scroll deltas; Per-Monitor DPI scaling (`win32_dpi_to_android_density`) | L |
-| [ ] | Keyboard & IME | `include/shiraz/sdl_keyboard.hpp`, `native/presentation.cpp` | SDL2 Win32 scancode → Android keycode mapping; IMM32/TSF preedit via `SDL_TEXTEDITING` | M |
+| [~] | Keyboard & IME | `include/shiraz/sdl_keyboard.hpp`, `native/presentation.cpp` | Portable in-tree `KEY_*` table enabled under `_WIN32` (`evdev_key_codes.h`); SDL2 Win32 scancode → Android keycode mapping & IMM32/TSF preedit via `SDL_TEXTEDITING` | M |
 | [ ] | Clipboard | framework | Win32 `OpenClipboard`/`GetClipboardData` via SDL2 clipboard | L |
 
 ### 4. OS primitives
@@ -93,8 +93,8 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 | [x] | ASharedMemory | `native/win32/shared_memory.cpp` | `CreateFileMappingW(INVALID_HANDLE_VALUE, ...)` + `MapViewOfFile` + handle table + read-only `DuplicateHandle` enforcement | M |
 | [x] | Process & clock info | `native/win32/host_process.cpp` | `QueryPerformanceCounter` (monotonic), `GetTickCount64` (boottime), `GetCurrentProcessId`/`GetCurrentThreadId`, `GlobalMemoryStatusEx` | L |
 | [x] | IPC channel | `native/win32/ipc_channel.cpp` | Named-pipe / `AF_UNIX` (`afunix.h`) transport with `GetNamedPipeClientProcessId` peer credential validation | M |
-| [~] | Process spawn | `native/win32/process_spawn.cpp` | `CreateProcessW` (MSDN argument quoting, `CREATE_SUSPENDED | CREATE_NO_WINDOW`) + Win32 Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) | M |
-| [~] | App isolation / Sandbox | `native/win32/sandbox.cpp` | Win32 Job Object memory/process/UI restrictions + `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)` | M |
+| [x] | Process spawn | `native/win32/process_spawn.cpp` | `CreateProcessW` (MSDN argument quoting, `CREATE_SUSPENDED | CREATE_NO_WINDOW`) + Win32 Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, verified in `windows-latest` CI `win32-platform-test.exe`) | M |
+| [x] | App isolation / Sandbox | `native/win32/sandbox.cpp` | Win32 Job Object memory/process/UI restrictions + `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)` (verified in `windows-latest` CI `win32-platform-test.exe`) | M |
 
 ### 5. Media
 
@@ -102,9 +102,9 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 |---|---|---|---|---|
 | [x] | Audio output (WASAPI) | `native/win32/audio_output.cpp` | WASAPI `IMMDeviceEnumerator` → `IAudioClient` (shared mode PCM16/float32) → `IAudioRenderClient` with automatic software/null fallback when no audio endpoint exists | M |
 | [x] | Video decode (Media Foundation) | `native/win32/video_codec.cpp` | `MFStartup` + `IMFTransform` H.264/HEVC decoder outputting NV12/BGRA frames | H |
-| [ ] | OpenSL ES & AAudio | `native/opensles.cpp`, `native/ndk_aaudio.cpp` | WASAPI event-driven callback bridge | M |
-| [~] | Camera & Microphone | `native/win32/platform_services.cpp` | WASAPI `eCapture` endpoint probe (`shiraz_win32_audio_capture_probe`); Media Foundation `IMFCaptureEngine` camera still open | M |
-| [~] | Text to speech | `native/win32/platform_services.cpp` | SAPI5 `SAPI.SpVoice` COM availability probe (`shiraz_win32_tts_probe`) | L |
+| [x] | OpenSL ES & AAudio | `native/opensles.cpp`, `native/ndk_aaudio.cpp`, `mk/windows.mk` | `libOpenSLES.dll` & `libaaudio.dll` wired to WASAPI (`shiraz_win32_audio_*`) with headless fallback and native test binaries (`test-opensles.exe`, `test-ndk-aaudio.exe`) in `make windows-check` | M |
+| [~] | Camera & Microphone | `native/win32/platform_services.cpp` | WASAPI `eCapture` endpoint probe (`shiraz_win32_audio_capture_probe`, verified in `windows-latest` CI); Media Foundation `IMFCaptureEngine` camera still open | M |
+| [x] | Text to speech | `native/win32/platform_services.cpp` | SAPI5 `SAPI.SpVoice` COM availability probe (`shiraz_win32_tts_probe`, verified in `windows-latest` CI) | L |
 
 ### 6. Platform services
 
@@ -114,15 +114,15 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 | [x] | Location | `native/win32/location.cpp` | Windows Location API (`ILocation` / `ILatLongReport` COM interface) with safe headless/permission-denied fallback | M |
 | [x] | System fonts | `native/win32/system_fonts.cpp` | DirectWrite `IDWriteFactory::GetSystemFontCollection` + `IDWriteLocalFontFileLoader::GetFilePathFromKey` enumerating `%WINDIR%\Fonts` | M |
 | [x] | Open URL / external apps | `java/shiraz/runtime/ExternalLauncher.java`, `HostOs.java` | `rundll32.exe url.dll,FileProtocolHandler <url>` on Windows (`HostOs.windows()`), `NUL` redirect, drops `LD_*`/`DYLD_*` | L |
-| [~] | Connectivity | `native/win32/platform_services.cpp`, `HostConnectivity.java` | `GetAdaptersAddresses` native probe (`shiraz_win32_connectivity_summary`) + `HostConnectivity.windowsActiveNetwork()` (`NetworkInterface`) | L |
+| [x] | Connectivity | `native/win32/platform_services.cpp`, `HostConnectivity.java` | `GetAdaptersAddresses` native probe (`shiraz_win32_connectivity_summary`, verified in `windows-latest` CI) + `HostConnectivity.windowsActiveNetwork()` (`NetworkInterface`) | L |
 | [~] | Document picker | `HostContentPicker.java` | WinForms `OpenFileDialog` via `powershell.exe -STA` (`HostOs.windows()`) + `HostOs.nullDevice()` | L |
 | [x] | App storage | `src/shiraz/platform_paths.py`, `tests/test_platform_paths.py` | `%LOCALAPPDATA%\Shiraz\<package>`, `%LOCALAPPDATA%\Shiraz\Cache\<package>`, `%APPDATA%\Shiraz` | L |
-| [~] | Keystore | `native/win32/platform_services.cpp`, `HostKeyStoreProvider.java` | Software keystore + Windows DPAPI (`CryptProtectData`/`CryptUnprotectData`, `CRYPTPROTECT_UI_FORBIDDEN`) native backend | M |
+| [x] | Keystore | `native/win32/platform_services.cpp`, `HostKeyStoreProvider.java` | Software keystore + Windows DPAPI (`CryptProtectData`/`CryptUnprotectData`, `CRYPTPROTECT_UI_FORBIDDEN`) native backend (verified in `windows-latest` CI) | M |
 
 ### 7. Build, packaging, CI
 
 | Status | Item | Repo files | Windows implementation | Diff |
 |---|---|---|---|---|
-| [~] | Makefile Windows rules | `mk/windows.mk`, `Makefile` | MinGW-w64 / Clang-UCRT64 build rules (`-shared`, `.dll`, `.exe`, `-lole32 -ldxgi -ldwrite -lmfplat -lshell32 -lws2_32`) + `make windows-check` | M |
+| [x] | Makefile Windows rules | `mk/windows.mk`, `Makefile` | MinGW-w64 / Clang-UCRT64 build rules (`-shared`, `.dll`, `.exe`, `libaaudio.dll`, `libOpenSLES.dll`, `-lole32 -ldxgi -ldwrite -lmfplat -lshell32 -lws2_32`) + `make windows-check` (verified in `windows-latest` CI) | M |
 | [x] | Portable Windows & MSIX bundler | `scripts/build_windows_app.py`, `tests/test_build_windows_app.py` | Portable `Shiraz/` directory layout, BMP/PNG-to-`.ico` generator, DLL dependency closure, `shiraz-manifest.json`, and MSIX `AppxManifest.xml` generation | M |
 | [x] | Cross-platform CI matrix | `.github/workflows/cross-platform.yml` | GitHub Actions matrix running native builds & tests on `ubuntu-24.04`, `macos-15`, and `windows-latest` | M |

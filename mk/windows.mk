@@ -37,15 +37,29 @@ $(WINDOWS_OUT)/.dir:
 	@touch $@
 
 $(WINDOWS_OUT)/shiraz-win32-host.dll: $(WINDOWS_HOST_SOURCES) $(WINDOWS_HOST_HEADERS) $(WINDOWS_OUT)/.dir
-	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -shared $(WINDOWS_HOST_SOURCES) -o $@ $(WINDOWS_LIBS)
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -shared -Wl,--out-implib,$(WINDOWS_OUT)/libshiraz-win32-host.dll.a $(WINDOWS_HOST_SOURCES) -o $@ $(WINDOWS_LIBS)
 
 $(WINDOWS_OUT)/test-win32-platform.exe: tests/win32/platform_test.cpp $(WINDOWS_HOST_SOURCES) $(WINDOWS_HOST_HEADERS) $(WINDOWS_OUT)/.dir
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/win32/platform_test.cpp $(WINDOWS_HOST_SOURCES) -o $@ $(WINDOWS_LIBS)
 
-windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe
+$(WINDOWS_OUT)/libaaudio.dll: native/ndk_aaudio.cpp include/shiraz/ndk/aaudio.h $(WINDOWS_OUT)/shiraz-win32-host.dll
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -shared -Wl,--export-all-symbols -Wl,--out-implib,$(WINDOWS_OUT)/libaaudio.dll.a native/ndk_aaudio.cpp -o $@ -L$(WINDOWS_OUT) -lshiraz-win32-host -pthread
+
+$(WINDOWS_OUT)/test-ndk-aaudio.exe: tests/ndk_aaudio.cpp $(WINDOWS_OUT)/libaaudio.dll
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/ndk_aaudio.cpp -o $@ -L$(WINDOWS_OUT) -laaudio -pthread
+
+$(WINDOWS_OUT)/libOpenSLES.dll: native/opensles.cpp third_party/opensles/SLES/OpenSLES.h third_party/opensles/SLES/OpenSLES_Android.h $(WINDOWS_OUT)/shiraz-win32-host.dll
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -isystem third_party/opensles -shared -Wl,--export-all-symbols -Wl,--out-implib,$(WINDOWS_OUT)/libOpenSLES.dll.a native/opensles.cpp -o $@ -L$(WINDOWS_OUT) -lshiraz-win32-host -pthread
+
+$(WINDOWS_OUT)/test-opensles.exe: tests/opensles.cpp $(WINDOWS_OUT)/libOpenSLES.dll
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -isystem third_party/opensles tests/opensles.cpp -o $@ -L$(WINDOWS_OUT) -lOpenSLES -pthread
+
+windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe
 
 windows-check: windows-build
 	$(WINDOWS_OUT)/test-win32-platform.exe
+	$(WINDOWS_OUT)/test-ndk-aaudio.exe
+	$(WINDOWS_OUT)/test-opensles.exe
 
 windows-app-bundle-check:
 	$(WINDOWS_PYTHON) -c "import sys, unittest; sys.path[:0]=['src','tests']; res=unittest.main(module='test_build_windows_app', argv=['unittest','-v'], exit=False); sys.exit(0 if res.result.wasSuccessful() else 1)"

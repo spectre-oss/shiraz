@@ -359,6 +359,9 @@ float presentation_refresh_rate() {
 #if defined(__APPLE__)
     const char* driver = active_window ? SDL_GetCurrentVideoDriver() : nullptr;
     const bool isCocoa = driver && std::string(driver) == "cocoa";
+#elif defined(_WIN32)
+    const char* driver = active_window ? SDL_GetCurrentVideoDriver() : nullptr;
+    const bool isWin32 = driver && std::string(driver) == "windows";
 #endif
     if (index >= 0 && SDL_GetCurrentDisplayMode(index, &mode) == 0 && mode.refresh_rate > 0 &&
         mode.refresh_rate <= 1000) {
@@ -368,12 +371,21 @@ float presentation_refresh_rate() {
             if (darwinHz > static_cast<float>(mode.refresh_rate))
                 return darwinHz;
         }
+#elif defined(_WIN32)
+        if (isWin32) {
+            const float win32Hz = win32_presentation_refresh_hz();
+            if (win32Hz > static_cast<float>(mode.refresh_rate))
+                return win32Hz;
+        }
 #endif
         return static_cast<float>(mode.refresh_rate);
     }
 #if defined(__APPLE__)
     if (isCocoa)
         return darwin_presentation_refresh_hz();
+#elif defined(_WIN32)
+    if (isWin32)
+        return win32_presentation_refresh_hz();
 #endif
     return 60.0f;
 }

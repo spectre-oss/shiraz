@@ -64,6 +64,10 @@ inline float win32_pinch_scroll_delta(int numFingers, float dDist) {
 bool win32_d3d11_device_info(char* deviceName, std::size_t deviceCap, char* vendorName,
                              std::size_t vendorCap);
 
+// Queries the active primary display refresh rate via EnumDisplaySettingsW
+// (falls back to 60.0 Hz on headless/remote sessions).
+float win32_presentation_refresh_hz();
+
 // Prevents Windows display/system sleep during active interactive presentation
 // via SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED).
 bool win32_begin_presentation_activity();

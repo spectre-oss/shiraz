@@ -18,6 +18,18 @@
 
 #if defined(__APPLE__)
 #include <AudioToolbox/AudioQueue.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+struct ShirazWin32AudioStream;
+extern "C" {
+ShirazWin32AudioStream* shiraz_win32_audio_open(std::uint32_t sampleRate, std::uint16_t channels);
+int shiraz_win32_audio_write(ShirazWin32AudioStream* s, const std::int16_t* pcm,
+                             std::size_t frames);
+void shiraz_win32_audio_close(ShirazWin32AudioStream* s);
+}
 #endif
 
 namespace {
@@ -49,6 +61,28 @@ int32_t popcount32(uint32_t x) {
 }
 
 int64_t nowNanos(clockid_t clk) {
+#if defined(_WIN32)
+    if (clk == CLOCK_REALTIME) {
+        FILETIME ft{};
+        GetSystemTimeAsFileTime(&ft);
+        ULARGE_INTEGER uli{};
+        uli.LowPart = ft.dwLowDateTime;
+        uli.HighPart = ft.dwHighDateTime;
+        constexpr uint64_t kEpochDiff100ns = 116444736000000000ULL;
+        const uint64_t sinceEpoch100ns =
+            (uli.QuadPart > kEpochDiff100ns) ? (uli.QuadPart - kEpochDiff100ns) : 0ULL;
+        return static_cast<int64_t>(sinceEpoch100ns * 100ULL);
+    }
+    LARGE_INTEGER freq{}, counter{};
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    if (freq.QuadPart <= 0) {
+        return 0;
+    }
+    const int64_t sec = counter.QuadPart / freq.QuadPart;
+    const int64_t rem = counter.QuadPart % freq.QuadPart;
+    return sec * 1000000000LL + (rem * 1000000000LL) / freq.QuadPart;
+#else
     struct timespec ts{};
 #if defined(__APPLE__)
     const clockid_t actual = (clk == CLOCK_REALTIME) ? CLOCK_REALTIME : CLOCK_MONOTONIC;
@@ -59,6 +93,7 @@ int64_t nowNanos(clockid_t clk) {
         ::clock_gettime(CLOCK_MONOTONIC, &ts);
     }
     return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
+#endif
 }
 
 bool isValidFormat(aaudio_format_t fmt) {
@@ -141,6 +176,13 @@ struct AAudioStreamStruct {
     int64_t framesRead = 0;
     int32_t xrunCount = 0;
     int64_t lastTimestampNs = 0;
+#if defined(__APPLE__)
+    std::mutex audioMu;
+    AudioQueueRef audioQueue = nullptr;
+    bool audioQueueStarted = false;
+#elif defined(_WIN32)
+    ShirazWin32AudioStream* win32Audio = nullptr;
+#endif
 
     std::thread worker;
 
@@ -158,6 +200,21 @@ struct AAudioStreamStruct {
         if (worker.joinable()) {
             worker.join();
         }
+#if defined(__APPLE__)
+        {
+            std::lock_guard<std::mutex> audioLock(audioMu);
+            if (audioQueue) {
+                AudioQueueDispose(audioQueue, true);
+                audioQueue = nullptr;
+                audioQueueStarted = false;
+            }
+        }
+#elif defined(_WIN32)
+        if (win32Audio) {
+            shiraz_win32_audio_close(win32Audio);
+            win32Audio = nullptr;
+        }
+#endif
     }
 
     ~AAudioStreamStruct() {
@@ -166,6 +223,109 @@ struct AAudioStreamStruct {
 };
 
 namespace {
+#if defined(__APPLE__) || defined(_WIN32)
+bool hostAudioBackendEnabled() {
+    const char* backend = std::getenv("SHIRAZ_AUDIO_BACKEND");
+    if (backend && std::strcmp(backend, "null") == 0) {
+        return false;
+    }
+    const char* device = std::getenv("SHIRAZ_AUDIO_DEVICE");
+    if (device && std::strcmp(device, "null") == 0) {
+        return false;
+    }
+    return true;
+}
+#endif
+#if defined(__APPLE__)
+void openDarwinAudioQueue(AAudioStreamStruct* s) {
+    if (!s || s->direction != AAUDIO_DIRECTION_OUTPUT || !hostAudioBackendEnabled()) {
+        return;
+    }
+    if (s->format != AAUDIO_FORMAT_PCM_I16 && s->format != AAUDIO_FORMAT_PCM_FLOAT &&
+        s->format != AAUDIO_FORMAT_PCM_I32) {
+        return;
+    }
+    AudioStreamBasicDescription desc{};
+    desc.mSampleRate = static_cast<Float64>(s->sampleRate);
+    desc.mFormatID = kAudioFormatLinearPCM;
+    desc.mFormatFlags = kAudioFormatFlagIsPacked |
+                        ((s->format == AAUDIO_FORMAT_PCM_FLOAT) ? kAudioFormatFlagIsFloat
+                                                                : kAudioFormatFlagIsSignedInteger);
+    desc.mBytesPerPacket = static_cast<UInt32>(s->frameSizeBytes);
+    desc.mFramesPerPacket = 1;
+    desc.mBytesPerFrame = static_cast<UInt32>(s->frameSizeBytes);
+    desc.mChannelsPerFrame = static_cast<UInt32>(s->channelCount);
+    desc.mBitsPerChannel = static_cast<UInt32>(bytesPerSample(s->format) * 8);
+    if (AudioQueueNewOutput(
+            &desc,
+            [](void*, AudioQueueRef q, AudioQueueBufferRef buf) { AudioQueueFreeBuffer(q, buf); },
+            nullptr, nullptr, nullptr, 0, &s->audioQueue) != noErr) {
+        s->audioQueue = nullptr;
+    }
+}
+
+void submitDarwinAudio(AAudioStreamStruct* s, const uint8_t* data, size_t byteLen) {
+    if (!s || !data || byteLen == 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> audioLock(s->audioMu);
+    if (!s->audioQueue) {
+        return;
+    }
+    AudioQueueBufferRef buf = nullptr;
+    if (AudioQueueAllocateBuffer(s->audioQueue, static_cast<UInt32>(byteLen), &buf) != noErr ||
+        !buf) {
+        return;
+    }
+    std::memcpy(buf->mAudioData, data, byteLen);
+    buf->mAudioDataByteSize = static_cast<UInt32>(byteLen);
+    if (AudioQueueEnqueueBuffer(s->audioQueue, buf, 0, nullptr) != noErr) {
+        AudioQueueFreeBuffer(s->audioQueue, buf);
+        return;
+    }
+    if (!s->audioQueueStarted) {
+        if (AudioQueueStart(s->audioQueue, nullptr) == noErr) {
+            s->audioQueueStarted = true;
+        }
+    }
+}
+#elif defined(_WIN32)
+void openWin32Audio(AAudioStreamStruct* s) {
+    if (!s || s->direction != AAUDIO_DIRECTION_OUTPUT || !hostAudioBackendEnabled()) {
+        return;
+    }
+    s->win32Audio = shiraz_win32_audio_open(static_cast<std::uint32_t>(s->sampleRate),
+                                            static_cast<std::uint16_t>(s->channelCount));
+}
+
+void submitWin32Audio(AAudioStreamStruct* s, const uint8_t* data, int32_t frames) {
+    if (!s || !s->win32Audio || !data || frames <= 0) {
+        return;
+    }
+    const size_t samples = static_cast<size_t>(frames) * static_cast<size_t>(s->channelCount);
+    if (s->format == AAUDIO_FORMAT_PCM_I16) {
+        shiraz_win32_audio_write(s->win32Audio, reinterpret_cast<const std::int16_t*>(data),
+                                 static_cast<std::size_t>(frames));
+        return;
+    }
+    std::vector<std::int16_t> converted(samples, 0);
+    if (s->format == AAUDIO_FORMAT_PCM_FLOAT) {
+        const auto* src = reinterpret_cast<const float*>(data);
+        for (size_t i = 0; i < samples; ++i) {
+            const float clamped = std::clamp(src[i], -1.0f, 1.0f);
+            converted[i] = static_cast<std::int16_t>(clamped * 32767.0f);
+        }
+    } else if (s->format == AAUDIO_FORMAT_PCM_I32) {
+        const auto* src = reinterpret_cast<const int32_t*>(data);
+        for (size_t i = 0; i < samples; ++i) {
+            converted[i] = static_cast<std::int16_t>(src[i] >> 16);
+        }
+    } else {
+        return;
+    }
+    shiraz_win32_audio_write(s->win32Audio, converted.data(), static_cast<std::size_t>(frames));
+}
+#endif
 
 void workerLoop(AAudioStreamStruct* s) {
     const int32_t burst =
@@ -210,6 +370,15 @@ void workerLoop(AAudioStreamStruct* s) {
         if (cb) {
             std::memset(scratch.data(), 0, scratch.size());
             const aaudio_data_callback_result_t res = cb(s, ud, scratch.data(), burst);
+#if defined(__APPLE__)
+            if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
+                submitDarwinAudio(s, scratch.data(), scratch.size());
+            }
+#elif defined(_WIN32)
+            if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
+                submitWin32Audio(s, scratch.data(), burst);
+            }
+#endif
             std::lock_guard<std::mutex> lock(s->mu);
             if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
                 s->framesWritten += burst;
@@ -223,13 +392,30 @@ void workerLoop(AAudioStreamStruct* s) {
             }
         } else {
             // Blocking write/read mode: drain output ring or feed input silence.
+#if defined(__APPLE__) || defined(_WIN32)
+            int32_t drainedFrames = 0;
+            std::unique_lock<std::mutex> lock(s->mu);
+#else
             std::lock_guard<std::mutex> lock(s->mu);
+#endif
             if (s->state != AAUDIO_STREAM_STATE_STARTED) {
                 continue;
             }
             if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
                 const int32_t drain = std::min(burst, s->ringUsedFrames);
                 if (drain > 0) {
+#if defined(__APPLE__) || defined(_WIN32)
+                    for (int32_t i = 0; i < drain; ++i) {
+                        const int32_t idx = (s->ringReadIdx + i) % s->bufferCapacityInFrames;
+                        const size_t srcOff =
+                            static_cast<size_t>(idx) * static_cast<size_t>(s->frameSizeBytes);
+                        const size_t dstOff =
+                            static_cast<size_t>(i) * static_cast<size_t>(s->frameSizeBytes);
+                        std::memcpy(scratch.data() + dstOff, s->ring.data() + srcOff,
+                                    static_cast<size_t>(s->frameSizeBytes));
+                    }
+                    drainedFrames = drain;
+#endif
                     s->ringReadIdx = (s->ringReadIdx + drain) % s->bufferCapacityInFrames;
                     s->ringUsedFrames -= drain;
                     s->framesRead += drain;
@@ -255,6 +441,19 @@ void workerLoop(AAudioStreamStruct* s) {
                     s->cv.notify_all();
                 }
             }
+#if defined(__APPLE__)
+            lock.unlock();
+            if (drainedFrames > 0) {
+                submitDarwinAudio(s, scratch.data(),
+                                  static_cast<size_t>(drainedFrames) *
+                                      static_cast<size_t>(s->frameSizeBytes));
+            }
+#elif defined(_WIN32)
+            lock.unlock();
+            if (drainedFrames > 0) {
+                submitWin32Audio(s, scratch.data(), drainedFrames);
+            }
+#endif
         }
     }
 }
@@ -535,6 +734,11 @@ aaudio_result_t AAudioStreamBuilder_openStream(AAudioStreamBuilder* b, AAudioStr
                    static_cast<size_t>(s->frameSizeBytes));
     s->lastTimestampNs = nowNanos(CLOCK_MONOTONIC);
     s->state = AAUDIO_STREAM_STATE_OPEN;
+#if defined(__APPLE__)
+    openDarwinAudioQueue(s);
+#elif defined(_WIN32)
+    openWin32Audio(s);
+#endif
     s->worker = std::thread(workerLoop, s);
 
     *outStream = s;
@@ -592,6 +796,15 @@ aaudio_result_t AAudioStream_requestPause(AAudioStream* s) {
     if (s->released || s->state == AAUDIO_STREAM_STATE_CLOSED) {
         return AAUDIO_ERROR_INVALID_STATE;
     }
+#if defined(__APPLE__)
+    {
+        std::lock_guard<std::mutex> audioLock(s->audioMu);
+        if (s->audioQueue && s->audioQueueStarted) {
+            AudioQueuePause(s->audioQueue);
+            s->audioQueueStarted = false;
+        }
+    }
+#endif
     s->setStateLocked(AAUDIO_STREAM_STATE_PAUSED);
     return AAUDIO_OK;
 }
@@ -610,6 +823,14 @@ aaudio_result_t AAudioStream_requestFlush(AAudioStream* s) {
     s->ringReadIdx = 0;
     s->ringWriteIdx = 0;
     s->ringUsedFrames = 0;
+#if defined(__APPLE__)
+    {
+        std::lock_guard<std::mutex> audioLock(s->audioMu);
+        if (s->audioQueue) {
+            AudioQueueReset(s->audioQueue);
+        }
+    }
+#endif
     s->setStateLocked(AAUDIO_STREAM_STATE_FLUSHED);
     return AAUDIO_OK;
 }
@@ -622,6 +843,15 @@ aaudio_result_t AAudioStream_requestStop(AAudioStream* s) {
     if (s->released || s->state == AAUDIO_STREAM_STATE_CLOSED) {
         return AAUDIO_ERROR_INVALID_STATE;
     }
+#if defined(__APPLE__)
+    {
+        std::lock_guard<std::mutex> audioLock(s->audioMu);
+        if (s->audioQueue && s->audioQueueStarted) {
+            AudioQueueStop(s->audioQueue, true);
+            s->audioQueueStarted = false;
+        }
+    }
+#endif
     s->setStateLocked(AAUDIO_STREAM_STATE_STOPPED);
     return AAUDIO_OK;
 }

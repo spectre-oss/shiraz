@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/presentation.hpp"
+#if defined(__APPLE__)
+#include "shiraz/sdl_keyboard.hpp"
+#endif
 #include <SDL.h>
 #include <atomic>
 #include <cassert>
@@ -29,6 +32,34 @@ int main() {
     assert(hdpi.densityDpi == 320);
     auto fractional = shiraz::DisplayGeometry::from(800, 600, 1000, 750);
     assert(fractional.densityDpi == 200);
+#if defined(__APPLE__)
+    // Verify Retina 1.5x (240 dpi), 1.75x (280 dpi), and 2x (320 dpi) pointer/touch geometry
+    // plus macOS Command-key -> Android Ctrl shortcut policy (with raw Meta opt-out).
+    {
+        auto scale150 = shiraz::DisplayGeometry::from(600, 800, 900, 1200);
+        auto scale175 = shiraz::DisplayGeometry::from(400, 800, 700, 1400);
+        assert(scale150.densityDpi == 240);
+        assert(scale175.densityDpi == 280);
+        auto vp150 = shiraz::input_viewport(scale150.pixelWidth, scale150.pixelHeight,
+                                            scale150.logicalWidth, scale150.logicalHeight, true);
+        auto pt150 =
+            shiraz::map_pointer({200, 400}, vp150, scale150.pixelWidth, scale150.pixelHeight);
+        assert(pt150 && pt150->x == 300 && pt150->y == 600);
+
+        const int cmdMeta = shiraz::android_meta(shiraz::macos_shortcut_modifiers(KMOD_LGUI, true));
+        assert((cmdMeta & (4096 | 8192)) == (4096 | 8192));
+        assert((cmdMeta & (65536 | 131072)) == 0);
+        const int cmdShiftMeta = shiraz::android_meta(
+            shiraz::macos_shortcut_modifiers(SDL_Keymod(KMOD_RGUI | KMOD_LSHIFT), true));
+        assert((cmdShiftMeta & (4096 | 16384 | 1 | 64)) == (4096 | 16384 | 1 | 64));
+        assert((cmdShiftMeta & (65536 | 262144)) == 0);
+        const int rawMeta =
+            shiraz::android_meta(shiraz::macos_shortcut_modifiers(KMOD_LGUI, false));
+        assert((rawMeta & (65536 | 131072)) == (65536 | 131072));
+        assert((rawMeta & 4096) == 0);
+        assert(!shiraz::editor_text_key(SDLK_c, KMOD_LGUI));
+    }
+#endif
     auto mapped = shiraz::map_pointer(
         {270, 538},
         shiraz::fit(hdpi.pixelWidth, hdpi.pixelHeight, hdpi.logicalWidth, hdpi.logicalHeight),

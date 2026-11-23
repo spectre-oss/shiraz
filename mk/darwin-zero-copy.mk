@@ -26,7 +26,7 @@ MACOS_ZC_PROTECTED := java/android/graphics/Bitmap.java java/android/graphics/Ca
 MACOS_ZC_HEADER = mkdir -p $(1) && { echo "gate=$(1)"; date; git rev-parse HEAD; git diff --stat; shasum -a 256 $(MACOS_ZC_PROTECTED); \
   env | grep -E '^(SHIRAZ_|SDL_)' | sort; system_profiler SPDisplaysDataType 2>/dev/null | grep -E 'Resolution|Retina|UI Looks like' ; } > $(1)/header.log 2>&1
 
-.PHONY: macos-zero-copy-queue-test macos-zero-copy-ring-test macos-zero-copy-shim-test macos-apk-gles-anim-fixture \
+.PHONY: macos-zero-copy-queue-test macos-zero-copy-ring-test macos-zero-copy-shim-test macos-surface-texture-test macos-apk-gles-anim-fixture \
   macos-zero-copy-window-smoke macos-zero-copy-pixels macos-zero-copy-sequence macos-zero-copy-timing \
   macos-zero-copy-negative macos-zero-copy-java-parity macos-zero-copy-check
 
@@ -36,6 +36,11 @@ $(MACOS_OUT)/test-zero-copy-queue: tests/darwin/zero_copy/window_queue_test.mm $
 macos-zero-copy-queue-test: $(MACOS_OUT)/test-zero-copy-queue
 	@$(call MACOS_ZC_HEADER,$(MACOS_ZC_GATES)/queue-test)
 	$(MACOS_OUT)/test-zero-copy-queue > $(MACOS_ZC_GATES)/queue-test/run.log 2>&1; rc=$$?; cat $(MACOS_ZC_GATES)/queue-test/run.log; test $$rc -eq 0
+
+$(MACOS_OUT)/test-surface-texture: tests/darwin/zero_copy/surface_texture_test.cpp native/surface_texture.cpp $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libEGL_shim.so
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -isystem .local/include/angle tests/darwin/zero_copy/surface_texture_test.cpp -o $@.tmp $(MACOS_OUT)/libandroid.so $(MACOS_RPATH) && mv $@.tmp $@
+macos-surface-texture-test: $(MACOS_OUT)/test-surface-texture $(MACOS_OUT)/libEGL.dylib $(MACOS_OUT)/libGLESv2.dylib
+	SHIRAZ_EGL_ZERO_COPY=require SHIRAZ_EGL_LIBRARY=$(CURDIR)/$(MACOS_OUT)/libEGL.dylib $(MACOS_OUT)/test-surface-texture $(CURDIR)/$(MACOS_OUT)
 
 # T10: the shim on ANGLE over a Shiraz window in all three modes (the existing
 # macos-egl-shim-test binary, extended), then the no-ANGLE fallback test.

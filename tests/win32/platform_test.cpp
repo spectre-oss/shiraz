@@ -147,6 +147,9 @@ int main() {
     assert(device[0] != '\0');
     assert(vendor[0] != '\0');
     std::printf("WIN32_GPU device=%s vendor=%s\n", device, vendor);
+    const float displayHz = shiraz::win32_presentation_refresh_hz();
+    assert(displayHz >= 24.0f && displayHz <= 480.0f);
+    std::printf("WIN32_DISPLAY refresh_hz=%.1f\n", displayHz);
     {
         shiraz::Win32PowerGuard guard;
         assert(guard.active());
