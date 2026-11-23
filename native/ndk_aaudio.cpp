@@ -1034,7 +1034,11 @@ int32_t AAudioStream_getChannelCount(AAudioStream* s) {
     return s ? s->channelCount : AAUDIO_ERROR_NULL;
 }
 aaudio_channel_mask_t AAudioStream_getChannelMask(AAudioStream* s) {
+#if defined(_WIN32)
+    return s ? s->channelMask : static_cast<aaudio_channel_mask_t>(AAUDIO_UNSPECIFIED);
+#else
     return s ? s->channelMask : AAUDIO_UNSPECIFIED;
+#endif
 }
 aaudio_direction_t AAudioStream_getDirection(AAudioStream* s) {
     return s ? s->direction : AAUDIO_ERROR_NULL;
