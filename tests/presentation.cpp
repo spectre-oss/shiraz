@@ -3,9 +3,6 @@
 #define SDL_MAIN_HANDLED
 #include "shiraz/sdl_keyboard.hpp"
 #include "shiraz/win32/d3d11_probe.hpp"
-#include <fcntl.h>
-#include <io.h>
-#include <sys/stat.h>
 #endif
 #include "shiraz/presentation.hpp"
 #if defined(__APPLE__)
@@ -30,11 +27,6 @@ int setenv(const char* name, const char* value, int overwrite) {
 }
 int unsetenv(const char* name) {
     return _putenv_s(name, "") == 0 ? 0 : -1;
-}
-int mkstemp(char* tmpl) {
-    if (_mktemp_s(tmpl, std::strlen(tmpl) + 1) != 0)
-        return -1;
-    return _open(tmpl, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
 }
 #endif
 std::atomic<bool> sent{false};
