@@ -48,11 +48,13 @@ $(WINDOWS_OUT)/libaaudio.dll: native/ndk_aaudio.cpp include/shiraz/ndk/aaudio.h 
 $(WINDOWS_OUT)/test-ndk-aaudio.exe: tests/ndk_aaudio.cpp $(WINDOWS_OUT)/libaaudio.dll
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/ndk_aaudio.cpp -o $@ -L$(WINDOWS_OUT) -laaudio -pthread
 
+WINDOWS_JNI_INCLUDES := $(if $(JAVA_HOME),-isystem "$(JAVA_HOME)/include" -isystem "$(JAVA_HOME)/include/win32",)
+
 $(WINDOWS_OUT)/libOpenSLES.dll: native/opensles.cpp third_party/opensles/SLES/OpenSLES.h third_party/opensles/SLES/OpenSLES_Android.h $(WINDOWS_OUT)/shiraz-win32-host.dll
-	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -isystem third_party/opensles -shared -Wl,--export-all-symbols -Wl,--out-implib,$(WINDOWS_OUT)/libOpenSLES.dll.a native/opensles.cpp -o $@ -L$(WINDOWS_OUT) -lshiraz-win32-host -pthread
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) $(WINDOWS_JNI_INCLUDES) -isystem third_party/opensles -shared -Wl,--export-all-symbols -Wl,--out-implib,$(WINDOWS_OUT)/libOpenSLES.dll.a native/opensles.cpp -o $@ -L$(WINDOWS_OUT) -lshiraz-win32-host -pthread
 
 $(WINDOWS_OUT)/test-opensles.exe: tests/opensles.cpp $(WINDOWS_OUT)/libOpenSLES.dll
-	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -isystem third_party/opensles tests/opensles.cpp -o $@ -L$(WINDOWS_OUT) -lOpenSLES -pthread
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) $(WINDOWS_JNI_INCLUDES) -isystem third_party/opensles tests/opensles.cpp -o $@ -L$(WINDOWS_OUT) -lOpenSLES -pthread
 
 windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe
 
