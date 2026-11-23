@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Experimental activity startup using standalone host ART and the local framework."""
 
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import hashlib
 import json
 import os
@@ -35,7 +38,7 @@ def native_build_environment(profile_values):
         device='linux',
         product='shiraz',
         board='linux',
-        hardware=os.uname().machine,
+        hardware=os.uname().machine if hasattr(os, 'uname') else platform.machine(),
         bootloader='unknown',
         serial='unknown',
         host='shiraz',
@@ -784,6 +787,8 @@ def package_session(data, digest, process=None):
     data = Path(data)
     if not re.fullmatch(r'[0-9a-f]{64}', digest):
         raise FormatError('Invalid package fingerprint')
+    if fcntl is None:
+        raise FormatError('Host session file locking requires POSIX fcntl support')
     with ExitStack() as held:
         # Serialize admission/generation updates only; app execution holds the
         # generation lock and its own process lock, not this short-lived guard.
