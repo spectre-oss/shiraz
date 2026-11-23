@@ -2,6 +2,7 @@
 #include <jni.h>
 #include <dbus/dbus.h>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -336,7 +337,9 @@ extern "C" JNIEXPORT jlong JNICALL Java_shiraz_runtime_DesktopNotifications_post
         DBusMessageIter args, array, hints;
         dbus_message_iter_init_append(request.get(), &args);
         const char* app = c->application.c_str();
-        const char* icon = "";
+        const char* desktopEntry = std::getenv("SHIRAZ_DESKTOP_ENTRY");
+        const bool hasDesktopEntry = desktopEntry && *desktopEntry;
+        const char* icon = hasDesktopEntry ? desktopEntry : "";
         const char* titleText = title.c_str();
         const char* bodyText = content.c_str();
         require(dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &app));
@@ -350,6 +353,9 @@ extern "C" JNIEXPORT jlong JNICALL Java_shiraz_runtime_DesktopNotifications_post
         dbus_bool_t quiet = suppressSound;
         hint(&hints, "urgency", DBUS_TYPE_BYTE, "y", &level);
         hint(&hints, "suppress-sound", DBUS_TYPE_BOOLEAN, "b", &quiet);
+        if (hasDesktopEntry) {
+            hint(&hints, "desktop-entry", DBUS_TYPE_STRING, "s", &desktopEntry);
+        }
         require(dbus_message_iter_close_container(&args, &hints));
         dbus_int32_t expiration = timeout;
         require(dbus_message_iter_append_basic(&args, DBUS_TYPE_INT32, &expiration));

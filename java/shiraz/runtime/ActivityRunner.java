@@ -206,11 +206,21 @@ public final class ActivityRunner {
         @Override public synchronized android.content.res.Resources getResources() {
             if (resources == null) {
                 resources = android.content.res.Resources.shirazOpen(getPackageCodePath(), getApplicationInfo().splitSourceDirs, width, height, densityDpi);
-                // The desktop endpoint supplies keyboard and text events through SDL.
+                // Desktop sessions supply a hardware keyboard via SDL; mobile shells
+                // (SpectreOS/Wisp with Stevia OSK) report no hardware keyboard so text fields
+                // open the Wayland zwp_text_input_v3 on-screen keyboard automatically.
                 android.content.res.Configuration input=new android.content.res.Configuration();
-                input.keyboard=android.content.res.Configuration.KEYBOARD_QWERTY;
-                input.keyboardHidden=android.content.res.Configuration.KEYBOARDHIDDEN_NO;
-                input.hardKeyboardHidden=android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO;
+                boolean mobileFormFactor = "mobile".equalsIgnoreCase(System.getenv("SHIRAZ_FORM_FACTOR"));
+                if (mobileFormFactor) {
+                    input.keyboard=android.content.res.Configuration.KEYBOARD_NOKEYS;
+                    input.keyboardHidden=android.content.res.Configuration.KEYBOARDHIDDEN_YES;
+                    input.hardKeyboardHidden=android.content.res.Configuration.HARDKEYBOARDHIDDEN_YES;
+                    input.touchscreen=android.content.res.Configuration.TOUCHSCREEN_FINGER;
+                } else {
+                    input.keyboard=android.content.res.Configuration.KEYBOARD_QWERTY;
+                    input.keyboardHidden=android.content.res.Configuration.KEYBOARDHIDDEN_NO;
+                    input.hardKeyboardHidden=android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO;
+                }
                 resources.updateConfiguration(input,null);
             }
             return resources;

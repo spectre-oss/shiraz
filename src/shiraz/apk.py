@@ -2,6 +2,8 @@
 """Bounded APK/DEX inventory; deliberately not a reachability/tree-shaking proof."""
 
 import hashlib
+import marshal
+import os
 import re
 import struct
 import zipfile
@@ -105,8 +107,43 @@ def framework(descriptor):
     return descriptor.lstrip('[').startswith(FRAMEWORK)
 
 
+_MEM_INSPECT_CACHE: dict[tuple[str, bool, int, int], dict] = {}
+
+
+def _fast_inspect_cache_path(path: Path, require_dex: bool) -> Path | None:
+    if os.environ.get('SHIRAZ_FAST_INSPECT') != '1':
+        return None
+    base = os.environ.get('XDG_CACHE_HOME', '')
+    cache_root = Path(base) if base and Path(base).is_absolute() else Path.home() / '.cache'
+    cache_dir = cache_root / 'shiraz' / 'inspect'
+    key = f'{path.resolve()}:{int(require_dex)}'.encode('utf-8')
+    return cache_dir / (hashlib.sha256(key).hexdigest() + '.marshal')
+
+
 def inspect_apk(path, *, require_dex=True):
     path = Path(path)
+    cache_path = _fast_inspect_cache_path(path, require_dex)
+    st = None
+    mem_key = None
+    if cache_path is not None:
+        try:
+            st = path.stat()
+            mem_key = (str(path.resolve()), bool(require_dex), st.st_size, st.st_mtime_ns)
+            hit = _MEM_INSPECT_CACHE.get(mem_key)
+            if hit is not None:
+                return hit
+            if cache_path.is_file():
+                cached = marshal.loads(cache_path.read_bytes())
+                if (
+                    isinstance(cached, dict)
+                    and cached.get('_size') == st.st_size
+                    and cached.get('_mtime_ns') == st.st_mtime_ns
+                    and isinstance(cached.get('report'), dict)
+                ):
+                    _MEM_INSPECT_CACHE[mem_key] = cached['report']
+                    return cached['report']
+        except (OSError, ValueError, EOFError, TypeError):
+            pass
     sha = hashlib.sha256()
     with path.open('rb') as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b''):
@@ -185,7 +222,7 @@ def inspect_apk(path, *, require_dex=True):
     if require_dex and not dex_files:
         raise FormatError('APK has no supported classes.dex files')
     abis = sorted({item['abi'] for item in native})
-    return {
+    report = {
         'schema': 1,
         'apk_sha256': sha.hexdigest(),
         'manifest': manifest,
@@ -209,3 +246,16 @@ def inspect_apk(path, *, require_dex=True):
         'runnable': None,
         'compatibility_verified': False,
     }
+    if cache_path is not None and st is not None:
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            tmp = cache_path.with_name(f'.{cache_path.name}.tmp.{os.getpid()}')
+            tmp.write_bytes(
+                marshal.dumps({'_size': st.st_size, '_mtime_ns': st.st_mtime_ns, 'report': report})
+            )
+            os.replace(tmp, cache_path)
+            if mem_key is not None:
+                _MEM_INSPECT_CACHE[mem_key] = report
+        except (OSError, ValueError, TypeError):
+            pass
+    return report

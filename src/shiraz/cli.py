@@ -180,8 +180,134 @@ def main(argv=None):
         type=Path,
         help='Override the target OS applications/launcher directory',
     )
+    daemon_p = sub.add_parser(
+        'daemon',
+        help='Run the persistent SpectreOS Shiraz warm runtime daemon',
+    )
+    daemon_p.add_argument('--registry', type=Path, help='Override PackageRegistry directory')
+    daemon_p.add_argument('--no-prewarm', action='store_true', help='Disable memory pre-warming')
+    daemon_p.add_argument('--no-aot', action='store_true', help='Disable AOT compilation')
+    daemon_p.add_argument('--sandbox', action='store_true', help='Sandbox launched Android apps')
+    daemon_p.add_argument('--width', type=int, default=400)
+    daemon_p.add_argument('--height', type=int, default=765)
+    daemon_p.add_argument('--scale', type=float, default=1.0)
+
+    ctl_p = sub.add_parser('ctl', help='Control a running Shiraz warm daemon')
+    ctl_p.add_argument(
+        'action',
+        choices=[
+            'status',
+            'stop',
+            'stop-all',
+            'refresh',
+            'shutdown',
+            'autostart-on',
+            'autostart-off',
+        ],
+    )
+    ctl_p.add_argument('package', nargs='?')
+
+    inst_p = sub.add_parser(
+        'install-app',
+        help='Enroll an APK, extract its Freedesktop icon, write .desktop entry, and AOT compile',
+    )
+    inst_p.add_argument('apk', type=Path)
+    inst_p.add_argument('--registry', type=Path)
+    inst_p.add_argument('--no-aot', action='store_true', help='Skip AOT compilation during install')
+
+    uninst_p = sub.add_parser(
+        'uninstall-app',
+        help='Remove an installed Android app launcher, icon, and registry enrollment',
+    )
+    uninst_p.add_argument('package')
+    uninst_p.add_argument('--registry', type=Path)
+
+    launch_p = sub.add_parser(
+        'launch-app',
+        help='Launch an installed Android app through the warm Shiraz daemon',
+    )
+    launch_p.add_argument('package')
+    launch_p.add_argument('--width', type=int)
+    launch_p.add_argument('--height', type=int)
+    launch_p.add_argument('--frames', type=int)
+    launch_p.add_argument('--snapshot', type=Path)
+    launch_p.add_argument('--timeout', type=int)
+
+    list_p = sub.add_parser('list-apps', help='List installed Shiraz Android apps')
+    list_p.add_argument('--registry', type=Path)
+
     args = parser.parse_args(argv)
     try:
+        if args.command == 'daemon':
+            from .spectre_daemon import ShirazDaemon
+
+            daemon = ShirazDaemon(
+                registry_dir=args.registry,
+                prewarm_memory=not args.no_prewarm,
+                aot_enabled=not args.no_aot,
+                sandbox=args.sandbox,
+                width=args.width,
+                height=args.height,
+                scale=args.scale,
+            )
+            return daemon.serve_forever()
+        if args.command == 'ctl':
+            from .spectre_daemon import ctl_request, sync_autostart_entry
+
+            if args.action == 'autostart-on':
+                p = sync_autostart_entry(True)
+                print(json.dumps({'ok': True, 'autostart': str(p)}))
+                return 0
+            if args.action == 'autostart-off':
+                p = sync_autostart_entry(False)
+                print(json.dumps({'ok': True, 'removed': str(p)}))
+                return 0
+            payload = {'cmd': args.action}
+            if args.action == 'stop':
+                if not args.package:
+                    raise FormatError('ctl stop requires a package name')
+                payload['package'] = args.package
+            resp = ctl_request(payload)
+            print(json.dumps(resp, indent=2, sort_keys=True))
+            return 0 if resp.get('ok') else 1
+        if args.command == 'install-app':
+            from .spectre_daemon import install_app
+
+            result = install_app(
+                args.apk,
+                registry_dir=args.registry,
+                compile_aot=not args.no_aot,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        if args.command == 'uninstall-app':
+            from .spectre_daemon import uninstall_app
+
+            result = uninstall_app(args.package, registry_dir=args.registry)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        if args.command == 'launch-app':
+            from .spectre_daemon import launch_app_via_daemon
+
+            result = launch_app_via_daemon(
+                args.package,
+                width=args.width,
+                height=args.height,
+                frames=args.frames,
+                snapshot=str(args.snapshot.resolve()) if args.snapshot else None,
+                timeout=args.timeout,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        if args.command == 'list-apps':
+            from .spectre_daemon import list_installed_apps
+
+            print(
+                json.dumps(
+                    list_installed_apps(registry_dir=args.registry), indent=2, sort_keys=True
+                )
+            )
+            return 0
         if args.command == 'job-service-unit':
             from .job_service_unit import render
 

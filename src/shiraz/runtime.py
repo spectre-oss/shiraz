@@ -1126,6 +1126,7 @@ def launch_command(
             }
         )
     else:
+        local_lib_dir = environ.get('SHIRAZ_LOCAL_LIB_DIR', '').strip() or str(root / '.local/lib')
         env = {
             **environ,
             'ANDROID_ROOT': str(host),
@@ -1134,7 +1135,7 @@ def launch_command(
             'BOOTCLASSPATH': boot,
             'LD_LIBRARY_PATH': str(host / 'lib64')
             + ':'
-            + str(root / '.local/lib')
+            + local_lib_dir
             + ':'
             + str(root / 'build')
             + ':'
@@ -1243,15 +1244,50 @@ def launch_command(
     )
     # Match the AppImage launcher's process-scoped native Android font mapping.
     env.setdefault('SHIRAZ_ANDROID_FONT_DIR', str(root / '.local/share/shiraz/fonts'))
+    # Auto-select PipeWire ALSA output when running in a modern PipeWire session
+    if not env.get('SHIRAZ_AUDIO_DEVICE'):
+        xdg_rt = env.get('XDG_RUNTIME_DIR', '')
+        if xdg_rt and (Path(xdg_rt) / 'pipewire-0').is_socket():
+            for plugin_dir in (
+                Path('/usr/lib/x86_64-linux-gnu/alsa-lib'),
+                Path('/usr/lib64/alsa-lib'),
+                Path('/usr/lib/alsa-lib'),
+                root / '.local/lib/alsa-lib',
+            ):
+                if (plugin_dir / 'libasound_module_pcm_pipewire.so').is_file():
+                    env['SHIRAZ_AUDIO_DEVICE'] = 'pipewire'
+                    break
     env['LD_PRELOAD'] = ':'.join(map(str, platform_libraries)) + (
         ':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else ''
     )
+    aot_args = []
+    aot_dir_raw = environ.get('SHIRAZ_AOT_DIR', '').strip()
+    if aot_dir_raw and '-Xint' not in execution_options:
+        isa = {'x86_64': 'x86_64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(platform.machine())
+        boot_art_dir = Path(aot_dir_raw) / 'boot'
+        if isa and (boot_art_dir / isa / 'boot.art').is_file():
+            logical_boot = ':'.join('/shiraz/boot/' + name for name in JARS)
+            aot_args = [
+                '-Xbootclasspath-locations:' + logical_boot,
+                '-Ximage:' + str(boot_art_dir / 'boot.art'),
+            ]
+    gc_args = []
+    if environ.get('SHIRAZ_FAST_GC') == '1':
+        heap_mb = environ.get('SHIRAZ_ART_HEAP_MB', '512')
+        if heap_mb.isdigit() and 128 <= int(heap_mb) <= 1024:
+            gc_args.append('-Xmx' + heap_mb + 'm')
+        gc_args.extend(['-Xgc:CMS', '-XX:BackgroundGC=CMS', '-XX:DisableHSpaceCompactForOOM'])
+    check_jni_args = [] if environ.get('SHIRAZ_CHECK_JNI') == '0' else ['-Xcheck:jni']
+    trace_aot_args = ['-verbose:oat'] if environ.get('SHIRAZ_TRACE_AOT') == '1' else []
     command = [
         str(vm),
+        *gc_args,
         '-Xbootclasspath:' + boot,
         '-Xnoimage-dex2oat',
+        *aot_args,
         *execution_options,
-        '-Xcheck:jni',
+        *check_jni_args,
+        *trace_aot_args,
         *(
             [
                 '-XX:NativeBridge=' + str(digitalis.resolve()),
@@ -1271,6 +1307,8 @@ def launch_command(
         # The private loader must also find its matching C++ runtime. Debian
         # 12's system libstdc++ lacks symbols required by the bundled ART.
         library_path = env.pop('LD_LIBRARY_PATH') + ':' + str(Path(loader).parent)
+        if prepend := environ.get('SHIRAZ_PREPEND_LIBRARY_PATH', '').strip():
+            library_path = prepend + ':' + library_path
         preload = env.pop('LD_PRELOAD', '')
         # Scope private glibc and compatibility libraries to ART. Child host
         # executables must use their own loader and libraries.
@@ -1707,7 +1745,28 @@ def run_activity(
     # ART runs with cwd set to the app data directory, so a relative APK path
     # on the class path would not resolve there.
     apk = Path(apk).resolve()
-    classpath = str(framework) + ':' + str(apk)
+    cp_framework = framework
+    cp_apk = apk
+    aot_dir_raw = os.environ.get('SHIRAZ_AOT_DIR', '').strip()
+    if not darwin and aot_dir_raw and execution_mode != 'interpreter':
+        isa = {'x86_64': 'x86_64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(platform.machine())
+        stage = Path(aot_dir_raw) / 'stage'
+        if isa:
+            staged_fw = stage / 'shiraz-framework.jar'
+            if (
+                staged_fw.exists()
+                and (stage / 'oat' / isa / 'shiraz-framework.odex').is_file()
+                and staged_fw.resolve() == framework.resolve()
+            ):
+                cp_framework = staged_fw
+            staged_apk = stage / f"{report['apk_sha256']}.apk"
+            if (
+                staged_apk.exists()
+                and (stage / 'oat' / isa / f"{report['apk_sha256']}.odex").is_file()
+                and staged_apk.resolve() == apk
+            ):
+                cp_apk = staged_apk
+    classpath = str(cp_framework) + ':' + str(cp_apk)
     has_legacy_http = legacy_http.is_file()
     if has_legacy_http:
         classpath += ':' + str(legacy_http)
@@ -1774,18 +1833,36 @@ def run_activity(
         for child in ('cache', 'tmp', 'home', 'android-data/dalvik-cache'):
             (work / child).mkdir(parents=True, exist_ok=True)
         app_lib = work / 'app_lib'
-        if app_lib.exists():
-            shutil.rmtree(app_lib)
-        if report['native_abis']:
-            try:
-                libraries = extract_native(
-                    native_source,
-                    app_lib,
-                    'x86_64' if native_abi() == 'x86_64' and digitalis is None else 'aarch64',
-                )
-            except (ValueError, OSError, zipfile.BadZipFile) as exc:
-                raise FormatError('Cannot prepare APK native libraries: ' + str(exc)) from exc
-            print(f'SHIRAZ_NATIVE_LIBRARIES installed={len(libraries)}', flush=True)
+        target_arch = 'x86_64' if native_abi() == 'x86_64' and digitalis is None else 'aarch64'
+        cache_marker = work / '.app_lib.stamp'
+        expected_stamp = f"{report['apk_sha256']}:{target_arch}"
+        reuse_native = (
+            os.environ.get('SHIRAZ_CACHE_NATIVE_LIBS') == '1'
+            and report['native_abis']
+            and app_lib.is_dir()
+            and cache_marker.is_file()
+            and cache_marker.read_text(encoding='ascii', errors='ignore').strip() == expected_stamp
+            and any(app_lib.iterdir())
+        )
+        if reuse_native:
+            cached_count = sum(1 for item in app_lib.iterdir() if item.is_file())
+            print(f'SHIRAZ_NATIVE_LIBRARIES cached={cached_count}', flush=True)
+        else:
+            if app_lib.exists():
+                shutil.rmtree(app_lib)
+            cache_marker.unlink(missing_ok=True)
+            if report['native_abis']:
+                try:
+                    libraries = extract_native(
+                        native_source,
+                        app_lib,
+                        target_arch,
+                    )
+                except (ValueError, OSError, zipfile.BadZipFile) as exc:
+                    raise FormatError('Cannot prepare APK native libraries: ' + str(exc)) from exc
+                if os.environ.get('SHIRAZ_CACHE_NATIVE_LIBS') == '1':
+                    cache_marker.write_text(expected_stamp + '\n', encoding='ascii')
+                print(f'SHIRAZ_NATIVE_LIBRARIES installed={len(libraries)}', flush=True)
         app_lib.mkdir(parents=True, exist_ok=True)
         metadata = work / 'application.properties'
         facts = application_metadata(manifest, apk, data)

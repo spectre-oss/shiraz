@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# SPDX-License-Identifier: GPL-3.0-only
+set -eu
+ROOT="${SHIRAZ_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+export SHIRAZ_HOME="$ROOT"
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m shiraz launch-app "$@"
