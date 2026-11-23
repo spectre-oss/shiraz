@@ -17,6 +17,11 @@ bool darwin_metal_device_info(char* deviceName, std::size_t deviceCap, char* ven
 void* darwin_begin_presentation_activity(const char* reason);
 void darwin_end_presentation_activity(void* token);
 
+// Queries the active macOS display refresh rate via CoreGraphics and
+// NSScreen.maximumFramesPerSecond (reporting 120 Hz on ProMotion panels where
+// CoreGraphics reports 0). Returns a bounded rate in [24.0f, 480.0f].
+float darwin_presentation_refresh_hz();
+
 // Returns true if an SDL_TouchDeviceType (cast to int to avoid requiring SDL
 // headers here) should be forwarded to Android touchscreen input on macOS.
 // Indirect trackpad devices (SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE = 1 and

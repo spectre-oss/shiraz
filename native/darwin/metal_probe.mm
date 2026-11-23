@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "shiraz/darwin/metal_probe.hpp"
 
+#import <AppKit/AppKit.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
@@ -76,6 +78,30 @@ void darwin_end_presentation_activity(void* token) {
     @autoreleasepool {
         id<NSObject> activity = (__bridge_transfer id<NSObject>)token;
         [[NSProcessInfo processInfo] endActivity:activity];
+    }
+}
+
+float darwin_presentation_refresh_hz() {
+    @autoreleasepool {
+        double best = 0.0;
+        if ([NSThread isMainThread]) {
+            NSScreen* screen = [NSScreen mainScreen];
+            if (screen && [screen respondsToSelector:@selector(maximumFramesPerSecond)]) {
+                const NSInteger fps = [screen maximumFramesPerSecond];
+                if (fps >= 24 && fps <= 480) {
+                    best = static_cast<double>(fps);
+                }
+            }
+        }
+        CGDisplayModeRef mode = CGDisplayCopyDisplayMode(CGMainDisplayID());
+        if (mode) {
+            const double rate = CGDisplayModeGetRefreshRate(mode);
+            CGDisplayModeRelease(mode);
+            if (rate >= 24.0 && rate <= 480.0 && rate > best) {
+                best = rate;
+            }
+        }
+        return best >= 24.0 ? static_cast<float>(best) : 60.0f;
     }
 }
 

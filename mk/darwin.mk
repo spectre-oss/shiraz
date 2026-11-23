@@ -3335,7 +3335,7 @@ macos-notifications-check: $(MACOS_OUT)/libshiraz-notifications.so $(MACOS_OUT)/
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-notifications.so
 
 $(MACOS_OUT)/test-metal-probe: tests/darwin/metal_probe.cpp $(MACOS_OUT)/metal_probe.o include/shiraz/darwin/metal_probe.hpp $(MACOS_OUT)/.dir
-	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/darwin/metal_probe.cpp $(MACOS_OUT)/metal_probe.o -o $@ -framework Metal -framework Foundation
+	$(MACOS_CXX) $(MACOS_SDL_CFLAGS) tests/darwin/metal_probe.cpp $(MACOS_OUT)/metal_probe.o -o $@ -framework Metal -framework AppKit -framework CoreGraphics -framework Foundation
 
 .PHONY: macos-metal-probe-check
 macos-metal-probe-check: $(MACOS_OUT)/test-metal-probe

@@ -148,6 +148,38 @@ def main(argv=None):
     fetch.add_argument('package')
     fetch.add_argument('--cache', type=Path, required=True)
     fetch.add_argument('--output', type=Path, required=True)
+    desktop_in = sub.add_parser(
+        'install-desktop',
+        help='Install a native OS desktop launcher for an APK (Linux .desktop, macOS .app, Windows Start Menu)',
+    )
+    desktop_in.add_argument('apk', type=Path)
+    desktop_in.add_argument('--name', help='Override launcher display name')
+    desktop_in.add_argument('--icon', type=Path, help='Optional PNG or ICNS icon file')
+    desktop_in.add_argument(
+        '--sandbox',
+        action='store_true',
+        help='Launch the installed app inside the native OS sandbox',
+    )
+    desktop_in.add_argument(
+        '--no-network',
+        action='store_true',
+        help='Deny network access inside the installed app sandbox (implies --sandbox)',
+    )
+    desktop_in.add_argument(
+        '--applications-dir',
+        type=Path,
+        help='Override the target OS applications/launcher directory',
+    )
+    desktop_out = sub.add_parser(
+        'uninstall-desktop',
+        help='Remove a Shiraz-managed native desktop launcher by package name',
+    )
+    desktop_out.add_argument('package')
+    desktop_out.add_argument(
+        '--applications-dir',
+        type=Path,
+        help='Override the target OS applications/launcher directory',
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == 'job-service-unit':
@@ -225,10 +257,42 @@ def main(argv=None):
         if args.command == 'signer':
             print(json.dumps({'certificates': certificate_digests(args.apk)}))
             return 0
+        if args.command == 'uninstall-desktop':
+            from .desktop_install import uninstall_desktop_app
+
+            removed = uninstall_desktop_app(
+                args.package,
+                applications_dir=args.applications_dir,
+            )
+            print(
+                json.dumps(
+                    {'package': args.package, 'removed': [str(p) for p in removed]},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
         if args.command == 'icon':
             print(json.dumps(extract_icon(args.apk, args.output_dir), indent=2, sort_keys=True))
             return 0
         report = inspect_apk(args.apk)
+        if args.command == 'install-desktop':
+            from .desktop_install import install_desktop_app
+
+            label = args.name or resolve_label(args.apk) or report['package']
+            use_sandbox = bool(args.sandbox or args.no_network)
+            allow_network = not bool(args.no_network)
+            installed = install_desktop_app(
+                args.apk,
+                report['package'],
+                label,
+                icon_path=args.icon,
+                sandbox=use_sandbox,
+                allow_network=allow_network,
+                applications_dir=args.applications_dir,
+            )
+            print(json.dumps(installed.to_dict(), indent=2, sort_keys=True))
+            return 0
         if args.command == 'metadata':
             if args.installer is not None and not fdroid.PACKAGE.fullmatch(args.installer):
                 raise FormatError('Invalid installer package name')

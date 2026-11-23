@@ -507,6 +507,11 @@ public final class ActivityRunner {
                                 // KeyEvents may be retained for asynchronous dispatch by applications.
                                 if(event.getKeyCode()==android.view.KeyEvent.KEYCODE_P&&event.isCtrlPressed()&&event.isShiftPressed()){if(event.getAction()==0&&event.getRepeatCount()==0)context.capture.showPrivacy(activity);return;}modalInput(time); if(!android.widget.PopupWindow.shirazKey(event)&&!DialogOverlay.key(event))activity.getWindow().shirazDispatchKeyEvent(event);
                             }
+                            @Override public void onComposingText(String text, int start, int length, long time) {
+                                if (activity.isFinishing()) return;
+                                modalInput(time);
+                                if(context.inputMethod!=null)context.inputMethod.shirazSetComposingText(text,start,length);
+                            }
                             @Override public void onScroll(float x,float y,float horizontal,float vertical,long time){
                                 if(activity.isFinishing())return;finishNavigation();
                                 View root=activity.getWindow().getDecorView();if(root==null)return;

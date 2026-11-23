@@ -26,6 +26,9 @@ platforms without virtual machines, containers, or emulators:
      enforcement applying Linux Landlock LSM + seccomp-BPF network deny, macOS
      `/usr/bin/sandbox-exec` Seatbelt profiles / App Sandbox entitlements, and
      Windows Win32 Job Object limits (`CreateJobObjectW` / `AssignProcessToJobObject`).
+   - `desktop_install.py`: per-APK native launcher installation via
+     `shiraz install-desktop` / `shiraz uninstall-desktop` (Linux `.desktop` +
+     icon, macOS `~/Applications/<Label>.app`, Windows Start Menu launcher).
 2. **Java runtime & embedded WebView (`java/shiraz/runtime/`, `java/android/webkit/`)**
    - `HostOs.java`: reliable runtime detection for `linux()`, `darwin()`, and
      `windows()` under both ART (where `os.name` reports `Linux`) and standard

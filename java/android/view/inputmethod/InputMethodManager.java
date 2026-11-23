@@ -32,6 +32,7 @@ public final class InputMethodManager {
     public void updateCursorAnchorInfo(View view,CursorAnchorInfo info){}
     public void updateExtractedText(View view,int token,ExtractedText text){}
     public boolean shirazCommitText(String text){return served!=null&&served.isAttachedToWindow()&&served.hasFocus()&&connection!=null&&connection.commitText(text,1);}
+    public boolean shirazSetComposingText(String text,int start,int length){if(served==null||!served.isAttachedToWindow()||!served.hasFocus()||connection==null)return false;if(text==null||text.isEmpty())return connection.finishComposingText();return connection.setComposingText(text,1);}
     public static InputMethodManager shirazHardwareOnly() { return new InputMethodManager(); }
     public boolean showSoftInput(View view,int flags) { return showSoftInput(view,flags,null); }
     public boolean showSoftInput(View view,int flags,ResultReceiver receiver) {

@@ -327,9 +327,25 @@ float presentation_refresh_rate() {
     // Dummy/headless backends and pre-window callers use a nominal scheduling rate.
     SDL_DisplayMode mode{};
     int index = active_window ? SDL_GetWindowDisplayIndex(active_window) : -1;
+#if defined(__APPLE__)
+    const char* driver = active_window ? SDL_GetCurrentVideoDriver() : nullptr;
+    const bool isCocoa = driver && std::string(driver) == "cocoa";
+#endif
     if (index >= 0 && SDL_GetCurrentDisplayMode(index, &mode) == 0 && mode.refresh_rate > 0 &&
-        mode.refresh_rate <= 1000)
+        mode.refresh_rate <= 1000) {
+#if defined(__APPLE__)
+        if (isCocoa) {
+            const float darwinHz = darwin_presentation_refresh_hz();
+            if (darwinHz > static_cast<float>(mode.refresh_rate))
+                return darwinHz;
+        }
+#endif
         return static_cast<float>(mode.refresh_rate);
+    }
+#if defined(__APPLE__)
+    if (isCocoa)
+        return darwin_presentation_refresh_hz();
+#endif
     return 60.0f;
 }
 namespace {
@@ -489,7 +505,8 @@ void present(const Surface& initial, const std::string& title, int frames,
              const std::function<void(bool)>& focus, const std::function<void(bool)>& visibility,
              const std::function<void(double, double, float)>& testLocation,
              const std::function<uint64_t()>& contentRevision,
-             const std::function<void(Surface&, const DisplayGeometry&)>& displayChanged) {
+             const std::function<void(Surface&, const DisplayGeometry&)>& displayChanged,
+             const std::function<void(const std::string&, int, int, int64_t)>& preedit) {
     LiveInput live(std::getenv("SHIRAZ_LIVE_INPUT"));
 #if defined(__APPLE__)
     DarwinAppNapGuard appNapGuard;
@@ -1211,8 +1228,25 @@ void present(const Surface& initial, const std::string& title, int frames,
                 else
                     keys.up(event.key.keysym.scancode, meta, eventTime(event.key.timestamp));
             }
-            if (event.type == SDL_TEXTEDITING_EXT)
-                SDL_free(event.editExt.text); // Preedit is not committed text.
+            if (event.type == SDL_TEXTEDITING && preedit && ownWindow(event.edit.windowID)) {
+                const auto length = strnlen(event.edit.text, sizeof(event.edit.text));
+                if (length == sizeof(event.edit.text))
+                    throw std::runtime_error("Unterminated SDL text-editing event");
+                preedit(std::string(event.edit.text, length), event.edit.start, event.edit.length,
+                        eventTime(event.edit.timestamp));
+            }
+            if (event.type == SDL_TEXTEDITING_EXT) {
+                std::string composing;
+                if (event.editExt.text) {
+                    const auto length = strnlen(event.editExt.text, 65536);
+                    composing.assign(event.editExt.text, length);
+                    SDL_free(event.editExt.text);
+                }
+                if (preedit && ownWindow(event.editExt.windowID)) {
+                    preedit(composing, event.editExt.start, event.editExt.length,
+                            eventTime(event.editExt.timestamp));
+                }
+            }
             if (text && event.type == SDL_TEXTINPUT && ownWindow(event.text.windowID)) {
                 const auto length = strnlen(event.text.text, sizeof(event.text.text));
                 if (length == sizeof(event.text.text))

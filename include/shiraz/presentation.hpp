@@ -36,5 +36,6 @@ void present(const Surface& image, const std::string& title, int frames,
              const std::function<void(bool)>& visibility = {},
              const std::function<void(double, double, float)>& testLocation = {},
              const std::function<uint64_t()>& contentRevision = {},
-             const std::function<void(Surface&, const DisplayGeometry&)>& displayChanged = {});
+             const std::function<void(Surface&, const DisplayGeometry&)>& displayChanged = {},
+             const std::function<void(const std::string&, int, int, int64_t)>& preedit = {});
 } // namespace shiraz

@@ -69,6 +69,7 @@ public final class NativeSurface implements AutoCloseable {
         boolean onFrame();
         void onKey(int action, int key, int scan, int repeat, int meta, int flags, long down, long time);
         void onText(String text, long time);
+        default void onComposingText(String text, int start, int length, long time){}
         default void onScroll(float x,float y,float horizontal,float vertical,long time){}
         default void onTouch(int action,int[] ids,float[] xs,float[] ys,float[] pressures,long time){
             if(ids.length==1)onPointer(action,xs[0],ys[0],0x1002,time);

@@ -67,7 +67,12 @@ int main() {
     }
     shiraz::darwin_end_presentation_activity(nullptr);
 
-    std::cout << "MACOS_METAL_PROBE device=" << device << " vendor=" << vendor << "\n";
+    // 5. Verify display refresh rate query (CoreGraphics + ProMotion NSScreen).
+    const float refreshHz = shiraz::darwin_presentation_refresh_hz();
+    assert(refreshHz >= 24.0f && refreshHz <= 480.0f);
+
+    std::cout << "MACOS_METAL_PROBE device=" << device << " vendor=" << vendor
+              << " refresh_hz=" << refreshHz << "\n";
     std::cout << "MACOS_METAL_PROBE_PASS\n";
     return 0;
 }
