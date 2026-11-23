@@ -1480,6 +1480,8 @@ def run_activity(
     device_profile=None,
     native_split=None,
     registry=None,
+    sandbox=False,
+    allow_network=True,
     _service=None,
     _broker_channel=None,
     _receiver=None,
@@ -1489,6 +1491,12 @@ def run_activity(
     _job_lifetime_fd=None,
     _process_observer=None,
 ):
+    if type(sandbox) is not bool:
+        raise FormatError('Invalid sandbox setting')
+    if type(allow_network) is not bool:
+        raise FormatError('Invalid allow_network setting')
+    if not allow_network and not sandbox:
+        raise FormatError('Disabling network requires sandbox=True')
     if _job is not None:
         if (
             _service is not None
@@ -1855,6 +1863,43 @@ def run_activity(
         from .darwin_maps import CATALOG_ENV, cache_catalog_fd
 
         env.pop(CATALOG_ENV, None)
+        sandbox_launch = None
+        effective_observer = _process_observer
+        if sandbox:
+            from .sandbox import SandboxPolicy, prepare_sandbox_launch
+
+            extra_rw = [str(work.resolve())]
+            if snapshot is not None:
+                extra_rw.append(str(snapshot.resolve().parent))
+            policy = SandboxPolicy(
+                package_name=package,
+                data_dir=str(data.resolve()),
+                cache_dir=str((work / 'cache').resolve()),
+                read_only_paths=(str(ROOT.resolve()), str(apk.resolve().parent)),
+                extra_read_write_paths=tuple(dict.fromkeys(extra_rw)),
+                allow_network=allow_network,
+                allow_jit=execution_mode != 'interpreter',
+            )
+            sandbox_launch = prepare_sandbox_launch(policy, command, work, system=system)
+            command = sandbox_launch.command
+            env.update(sandbox_launch.env_updates)
+            print(
+                f'SHIRAZ_SANDBOX backend={sandbox_launch.backend} network={int(allow_network)}',
+                flush=True,
+            )
+            if sandbox_launch.process_observer is not None:
+                if _process_observer is None:
+                    effective_observer = sandbox_launch.process_observer
+                else:
+                    outer_obs = _process_observer
+                    inner_obs = sandbox_launch.process_observer
+
+                    def effective_observer(process):
+                        stack = ExitStack()
+                        stack.enter_context(outer_obs(process))
+                        stack.enter_context(inner_obs(process))
+                        return stack
+
         try:
             capability = (
                 cache_catalog_fd(ROOT, work / 'tmp')
@@ -1865,11 +1910,24 @@ def run_activity(
                 if catalog_fd is not None:
                     env[CATALOG_ENV] = str(catalog_fd)
                 if package_registry is None:
+                    observer_kw = (
+                        {'process_observer': effective_observer}
+                        if effective_observer is not None
+                        else {}
+                    )
                     if catalog_fd is None:
-                        result = run_with_live_logs(command, data, env, work, timeout)
+                        result = run_with_live_logs(
+                            command, data, env, work, timeout, **observer_kw
+                        )
                     else:
                         result = run_with_live_logs(
-                            command, data, env, work, timeout, pass_fds=(catalog_fd,)
+                            command,
+                            data,
+                            env,
+                            work,
+                            timeout,
+                            pass_fds=(catalog_fd,),
+                            **observer_kw,
                         )
                 else:
                     from .service_broker import ServiceBroker
@@ -1905,8 +1963,8 @@ def run_activity(
                                 *((catalog_fd,) if catalog_fd is not None else ()),
                             ),
                             **(
-                                {"process_observer": _process_observer}
-                                if _process_observer is not None
+                                {'process_observer': effective_observer}
+                                if effective_observer is not None
                                 else {}
                             ),
                         )
@@ -1937,6 +1995,11 @@ def run_activity(
             'execution_mode': execution_mode,
             'scope': 'experimental programmatic activity with queued callbacks and software redraw',
         }
+        if sandbox_launch is not None:
+            evidence['sandbox'] = {
+                'backend': sandbox_launch.backend,
+                'allow_network': allow_network,
+            }
         if _service is not None:
             kind = 'job' if _job is not None else 'receiver' if receiver else 'service'
             evidence[kind] = evidence.pop('activity')

@@ -100,4 +100,29 @@ class CliRunTests(unittest.TestCase):
         ):
             self.assertEqual(cli.main(['run', 'fixture.apk', '--frames', '2']), 7)
             self.assertEqual(direct.call_args.kwargs['frames'], 2)
+            self.assertFalse(direct.call_args.kwargs['sandbox'])
+            self.assertTrue(direct.call_args.kwargs['allow_network'])
             host.assert_not_called()
+
+    def test_cli_sandbox_and_no_network_flags_forward_to_direct_and_supervised(self):
+        report = dict(apk_sha256='a' * 64, manifest=dict(package='test.app'))
+        with (
+            patch.object(cli, 'inspect_apk', return_value=report),
+            patch.object(cli, 'run_activity', return_value=0) as direct,
+        ):
+            self.assertEqual(cli.main(['run', 'fixture.apk', '--no-network']), 0)
+            self.assertTrue(direct.call_args.kwargs['sandbox'])
+            self.assertFalse(direct.call_args.kwargs['allow_network'])
+        with (
+            patch.object(cli, 'inspect_apk', return_value=report),
+            patch('shiraz.host_session.HostSession') as factory,
+            redirect_stdout(io.StringIO()),
+        ):
+            host = factory.return_value.__enter__.return_value
+            host.wait.return_value = dict(apps=[dict(exit_status=0)])
+            self.assertEqual(
+                cli.main(['run', 'fixture.apk', '--registry', 'build/registry', '--sandbox']), 0
+            )
+            settings = host.start.call_args.kwargs['settings']
+            self.assertTrue(settings['sandbox'])
+            self.assertTrue(settings['allow_network'])

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Cross-platform per-app isolation and sandboxing policy builder.
+"""Cross-platform per-app isolation and sandboxing policy builder & launcher.
 
 Translates a single declarative SandboxPolicy into native host isolation
 mechanisms across all three supported desktop platforms:
@@ -11,9 +11,15 @@ mechanisms across all three supported desktop platforms:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+import ctypes
 from dataclasses import dataclass, field
+import json
+import os
+from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+import sys
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from shiraz.platform_paths import host_os
 
@@ -29,6 +35,7 @@ class SandboxPolicy:
     data_dir: str
     cache_dir: str
     read_only_paths: Tuple[str, ...] = field(default_factory=tuple)
+    extra_read_write_paths: Tuple[str, ...] = field(default_factory=tuple)
     allow_network: bool = True
     allow_jit: bool = True
     memory_limit_mb: int = 2048
@@ -41,6 +48,7 @@ class SandboxPolicy:
             ('data_dir', self.data_dir),
             ('cache_dir', self.cache_dir),
             *(('read_only_path', p) for p in self.read_only_paths),
+            *(('extra_read_write_path', p) for p in self.extra_read_write_paths),
         ):
             if not value or _CONTROL_RE.search(value):
                 raise ValueError(f'Invalid {label}: {value!r}')
@@ -48,6 +56,18 @@ class SandboxPolicy:
             raise ValueError(f'memory_limit_mb must be positive: {self.memory_limit_mb}')
         if self.max_processes <= 0:
             raise ValueError(f'max_processes must be positive: {self.max_processes}')
+
+
+@dataclass(frozen=True)
+class SandboxLaunch:
+    """Prepared per-host sandbox execution plan for a child process."""
+
+    backend: str
+    command: List[str]
+    env_updates: Dict[str, str]
+    plan_path: Path
+    profile_path: Optional[Path] = None
+    process_observer: Optional[Callable[[Any], Any]] = None
 
 
 def resolve_sandbox_backend(system: Optional[str] = None) -> str:
@@ -74,9 +94,11 @@ def build_linux_landlock_policy(policy: SandboxPolicy) -> Dict[str, Any]:
         '/lib64',
         '/etc/ssl',
         '/etc/fonts',
+        '/proc',
+        '/dev',
         *policy.read_only_paths,
     ]
-    read_write = [policy.data_dir, policy.cache_dir, '/tmp']
+    read_write = [policy.data_dir, policy.cache_dir, *policy.extra_read_write_paths, '/tmp']
     return {
         'backend': 'landlock-seccomp',
         'no_new_privs': True,
@@ -111,11 +133,14 @@ def build_macos_seatbelt_profile(policy: SandboxPolicy) -> str:
         lines.append(f'  (subpath "{_escape_sbpl(path)}")')
     lines.append(')')
 
+    rw_paths = list(
+        dict.fromkeys([policy.data_dir, policy.cache_dir, *policy.extra_read_write_paths])
+    )
+    lines.append('(allow file-read* file-write*')
+    for path in rw_paths:
+        lines.append(f'  (subpath "{_escape_sbpl(path)}")')
     lines.extend(
         [
-            '(allow file-read* file-write*',
-            f'  (subpath "{_escape_sbpl(policy.data_dir)}")',
-            f'  (subpath "{_escape_sbpl(policy.cache_dir)}")',
             '  (subpath "/private/tmp")',
             '  (subpath "/tmp")',
             ')',
@@ -161,6 +186,9 @@ def wrap_macos_seatbelt_command(command: Sequence[str], profile_path: str) -> Li
 
 def build_windows_sandbox_config(policy: SandboxPolicy) -> Dict[str, Any]:
     """Build Win32 Job Object + Restricted Token isolation parameters."""
+    rw_paths = list(
+        dict.fromkeys([policy.data_dir, policy.cache_dir, *policy.extra_read_write_paths])
+    )
     return {
         'backend': 'job-object-restricted-token',
         'job_object': {
@@ -178,7 +206,7 @@ def build_windows_sandbox_config(policy: SandboxPolicy) -> Dict[str, Any]:
         'restricted_token': {
             'disable_max_privilege': True,
         },
-        'writable_directories': [policy.data_dir, policy.cache_dir],
+        'writable_directories': rw_paths,
         'allow_network': policy.allow_network,
     }
 
@@ -195,3 +223,225 @@ def sandbox_plan(policy: SandboxPolicy, system: Optional[str] = None) -> Dict[st
             'seatbelt_profile': build_macos_seatbelt_profile(policy),
         }
     return build_windows_sandbox_config(policy)
+
+
+# ---------------------------------------------------------------------------
+# Live Windows Win32 Job Object enforcement (ctypes, zero external deps)
+# ---------------------------------------------------------------------------
+
+_JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
+_JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
+_JOB_OBJECT_INFO_BASIC_UI_RESTRICTIONS = 4
+_JOB_OBJECT_INFO_EXTENDED_LIMIT = 9
+
+_UI_LIMIT_FLAGS = {
+    'JOB_OBJECT_UILIMIT_HANDLES': 0x00000001,
+    'JOB_OBJECT_UILIMIT_READCLIPBOARD': 0x00000002,
+    'JOB_OBJECT_UILIMIT_WRITECLIPBOARD': 0x00000004,
+    'JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS': 0x00000008,
+    'JOB_OBJECT_UILIMIT_DISPLAYSETTINGS': 0x00000010,
+    'JOB_OBJECT_UILIMIT_GLOBALATOMS': 0x00000020,
+    'JOB_OBJECT_UILIMIT_DESKTOP': 0x00000040,
+    'JOB_OBJECT_UILIMIT_EXITWINDOWS': 0x00000080,
+}
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ('ReadOperationCount', ctypes.c_uint64),
+        ('WriteOperationCount', ctypes.c_uint64),
+        ('OtherOperationCount', ctypes.c_uint64),
+        ('ReadTransferCount', ctypes.c_uint64),
+        ('WriteTransferCount', ctypes.c_uint64),
+        ('OtherTransferCount', ctypes.c_uint64),
+    ]
+
+
+class _JobObjectBasicLimitInfo(ctypes.Structure):
+    _fields_ = [
+        ('PerProcessUserTimeLimit', ctypes.c_int64),
+        ('PerJobUserTimeLimit', ctypes.c_int64),
+        ('LimitFlags', ctypes.c_uint32),
+        ('MinimumWorkingSetSize', ctypes.c_size_t),
+        ('MaximumWorkingSetSize', ctypes.c_size_t),
+        ('ActiveProcessLimit', ctypes.c_uint32),
+        ('Affinity', ctypes.c_size_t),
+        ('PriorityClass', ctypes.c_uint32),
+        ('SchedulingClass', ctypes.c_uint32),
+    ]
+
+
+class _JobObjectExtendedLimitInfo(ctypes.Structure):
+    _fields_ = [
+        ('BasicLimitInformation', _JobObjectBasicLimitInfo),
+        ('IoInfo', _IoCounters),
+        ('ProcessMemoryLimit', ctypes.c_size_t),
+        ('JobMemoryLimit', ctypes.c_size_t),
+        ('PeakProcessMemoryUsed', ctypes.c_size_t),
+        ('PeakJobMemoryUsed', ctypes.c_size_t),
+    ]
+
+
+class _JobObjectBasicUiRestrictions(ctypes.Structure):
+    _fields_ = [('UIRestrictionsClass', ctypes.c_uint32)]
+
+
+def is_process_in_windows_job(process: Any, job_handle: int) -> bool:
+    """Return True if *process* is currently assigned to *job_handle* on Windows."""
+    if sys.platform != 'win32':
+        return False
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.IsProcessInJob.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int),
+    ]
+    kernel32.IsProcessInJob.restype = ctypes.c_int
+    proc_handle = getattr(process, '_handle', None)
+    if not proc_handle:
+        return False
+    result = ctypes.c_int(0)
+    if not kernel32.IsProcessInJob(
+        ctypes.c_void_p(int(proc_handle)), ctypes.c_void_p(job_handle), ctypes.byref(result)
+    ):
+        return False
+    return bool(result.value)
+
+
+def windows_sandbox_observer(config: Dict[str, Any]) -> Callable[[Any], Any]:
+    """Return a process_observer context manager enforcing Win32 Job Object limits."""
+    job_cfg = config.get('job_object', {})
+
+    @contextmanager
+    def _observe(process: Any) -> Iterator[int]:
+        if sys.platform != 'win32':
+            yield 0
+            return
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+        kernel32.SetInformationJobObject.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        ]
+        kernel32.SetInformationJobObject.restype = ctypes.c_int
+        kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            raise OSError(ctypes.get_last_error(), 'CreateJobObjectW failed')
+        try:
+            ext = _JobObjectExtendedLimitInfo()
+            flags = 0
+            if job_cfg.get('kill_on_job_close', True):
+                flags |= _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            max_procs = int(job_cfg.get('active_process_limit', 0))
+            if max_procs > 0:
+                flags |= _JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+                ext.BasicLimitInformation.ActiveProcessLimit = max_procs
+            mem_limit = int(job_cfg.get('process_memory_limit_bytes', 0))
+            if mem_limit > 0:
+                flags |= _JOB_OBJECT_LIMIT_PROCESS_MEMORY
+                ext.ProcessMemoryLimit = mem_limit
+            ext.BasicLimitInformation.LimitFlags = flags
+            if not kernel32.SetInformationJobObject(
+                job,
+                _JOB_OBJECT_INFO_EXTENDED_LIMIT,
+                ctypes.byref(ext),
+                ctypes.sizeof(ext),
+            ):
+                raise OSError(
+                    ctypes.get_last_error(), 'SetInformationJobObject(ExtendedLimit) failed'
+                )
+
+            ui_mask = 0
+            for flag_name in job_cfg.get('ui_restrictions', ()):
+                ui_mask |= _UI_LIMIT_FLAGS.get(flag_name, 0)
+            if ui_mask:
+                ui = _JobObjectBasicUiRestrictions(UIRestrictionsClass=ui_mask)
+                if not kernel32.SetInformationJobObject(
+                    job,
+                    _JOB_OBJECT_INFO_BASIC_UI_RESTRICTIONS,
+                    ctypes.byref(ui),
+                    ctypes.sizeof(ui),
+                ):
+                    raise OSError(
+                        ctypes.get_last_error(), 'SetInformationJobObject(UIRestrictions) failed'
+                    )
+
+            proc_handle = getattr(process, '_handle', None)
+            if not proc_handle:
+                raise RuntimeError(
+                    'Child process handle unavailable for Win32 Job Object assignment'
+                )
+            if not kernel32.AssignProcessToJobObject(job, ctypes.c_void_p(int(proc_handle))):
+                raise OSError(ctypes.get_last_error(), 'AssignProcessToJobObject failed')
+            yield int(job)
+        finally:
+            kernel32.CloseHandle(job)
+
+    return _observe
+
+
+def prepare_sandbox_launch(
+    policy: SandboxPolicy,
+    command: Sequence[str],
+    work_dir: Path,
+    *,
+    system: Optional[str] = None,
+    sandbox_exec_path: str = '/usr/bin/sandbox-exec',
+    python_executable: Optional[str] = None,
+) -> SandboxLaunch:
+    """Materialize host sandbox artifacts under *work_dir* and wrap *command*."""
+    if not command:
+        raise ValueError('Command must not be empty')
+    work = Path(work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    os_name = host_os(system)
+    plan = sandbox_plan(policy, system=system)
+    plan_path = work / 'sandbox-plan.json'
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    env_updates = {
+        'SHIRAZ_SANDBOX_BACKEND': plan['backend'],
+        'SHIRAZ_SANDBOX_NETWORK': '1' if policy.allow_network else '0',
+    }
+
+    if os_name == 'darwin':
+        if system is None and not os.path.isfile(sandbox_exec_path):
+            raise RuntimeError(f'macOS Seatbelt binary not found: {sandbox_exec_path}')
+        profile_path = work / 'sandbox.sb'
+        profile_path.write_text(plan['seatbelt_profile'], encoding='utf-8')
+        wrapped = [sandbox_exec_path, '-f', str(profile_path), *command]
+        return SandboxLaunch(
+            backend=plan['backend'],
+            command=wrapped,
+            env_updates=env_updates,
+            plan_path=plan_path,
+            profile_path=profile_path,
+        )
+
+    if os_name == 'linux':
+        py = python_executable or sys.executable
+        helper = str(Path(__file__).with_name('sandbox_exec.py'))
+        wrapped = [py, helper, str(plan_path), '--', *command]
+        return SandboxLaunch(
+            backend=plan['backend'],
+            command=wrapped,
+            env_updates=env_updates,
+            plan_path=plan_path,
+        )
+
+    return SandboxLaunch(
+        backend=plan['backend'],
+        command=list(command),
+        env_updates=env_updates,
+        plan_path=plan_path,
+        process_observer=windows_sandbox_observer(plan),
+    )

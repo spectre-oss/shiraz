@@ -190,6 +190,25 @@ class LaunchCommandTests(unittest.TestCase):
             ['sample.app', 'android.app.Application', 'sample.app.Main'],
         )
 
+    def test_sandbox_launch_wraps_command_for_linux_and_darwin(self):
+        linux_host = self.tree('Linux')
+        command, env, out = self.launch('Linux', linux_host, {}, sandbox=True, allow_network=False)
+        self.assertIn('sandbox_exec.py', command[1])
+        self.assertEqual(env['SHIRAZ_SANDBOX_BACKEND'], 'landlock-seccomp')
+        self.assertEqual(env['SHIRAZ_SANDBOX_NETWORK'], '0')
+        self.assertIn('SHIRAZ_SANDBOX backend=landlock-seccomp network=0', out)
+
+        darwin_host = self.tree('Darwin')
+        d_command, d_env, d_out = self.launch(
+            'Darwin', darwin_host, {}, sandbox=True, allow_network=True
+        )
+        self.assertEqual(d_command[0], '/usr/bin/sandbox-exec')
+        self.assertEqual(d_command[1], '-f')
+        self.assertTrue(Path(d_command[2]).is_file())
+        self.assertEqual(d_env['SHIRAZ_SANDBOX_BACKEND'], 'seatbelt-app-sandbox')
+        self.assertEqual(d_env['SHIRAZ_SANDBOX_NETWORK'], '1')
+        self.assertIn('SHIRAZ_SANDBOX backend=seatbelt-app-sandbox network=1', d_out)
+
     def test_guest_cache_capability_replaces_inherited_env_and_closes_after_launch(self):
         host = self.tree('Darwin')
         bridge = self.root / 'build/macos/libshiraz-guest.so'

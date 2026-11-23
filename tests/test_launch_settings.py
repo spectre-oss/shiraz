@@ -13,7 +13,11 @@ from shiraz.launch_settings import normalize_settings
 
 class LaunchSettingsTests(unittest.TestCase):
     def test_defaults_and_invalid_settings(self):
-        self.assertFalse(normalize_settings()['native_code'])
+        defaults = normalize_settings()
+        self.assertFalse(defaults['native_code'])
+        self.assertFalse(defaults['sandbox'])
+        self.assertTrue(defaults['allow_network'])
+        self.assertTrue(normalize_settings({'sandbox': True, 'allow_network': False})['sandbox'])
         for settings in (
             [],
             {'width': True},
@@ -28,6 +32,9 @@ class LaunchSettingsTests(unittest.TestCase):
             {'snapshot': 'relative.ppm'},
             {'device_profile': '/tmp/../profile.json'},
             {'native_code': 1},
+            {'sandbox': 1},
+            {'allow_network': 0},
+            {'sandbox': False, 'allow_network': False},
             {'log_level': 'unknown'},
             {'classpath': '/tmp'},
         ):

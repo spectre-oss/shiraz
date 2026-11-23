@@ -75,6 +75,16 @@ def main(argv=None):
                 choices=['VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'ASSERT', 'SILENT'],
                 default='INFO',
             )
+            p.add_argument(
+                '--sandbox',
+                action='store_true',
+                help='Isolate the app process using the native OS sandbox (Linux Landlock, macOS Seatbelt, Windows Job Object)',
+            )
+            p.add_argument(
+                '--no-network',
+                action='store_true',
+                help='Deny network access inside the app sandbox (implies --sandbox)',
+            )
         if command == 'plan':
             p.add_argument('--output', type=Path, required=True)
         if command == 'metadata':
@@ -225,6 +235,8 @@ def main(argv=None):
             sys.stdout.write(properties_text(registry_metadata(args.apk, report, args.installer)))
             return 0
         if args.command == 'run':
+            use_sandbox = bool(args.sandbox or args.no_network)
+            allow_network = not bool(args.no_network)
             if args.registry is not None:
                 if args.native_split is not None:
                     raise FormatError('Registered native split launch is not implemented')
@@ -244,6 +256,8 @@ def main(argv=None):
                     timeout=args.timeout,
                     log_level=args.log_level,
                     native_code=native_mode == '1',
+                    sandbox=use_sandbox,
+                    allow_network=allow_network,
                 )
                 with HostSession(args.registry) as host:
                     host.start(
@@ -267,6 +281,8 @@ def main(argv=None):
                 device_profile=args.device_profile,
                 native_split=args.native_split,
                 registry=args.registry,
+                sandbox=use_sandbox,
+                allow_network=allow_network,
             )
         if args.command == 'plan':
             output = args.output.resolve()

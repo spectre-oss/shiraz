@@ -21,9 +21,11 @@ platforms without virtual machines, containers, or emulators:
      `host_page_size()` and `elf_needs_copy_load()`.
    - `host_layout.py`: maps build host tags (`linux-x86`, `darwin-x86`,
      `windows-x86`).
-   - `sandbox.py`: unified cross-platform `SandboxPolicy` and backend resolver
-     generating Linux Landlock rules, macOS Seatbelt SBPL profiles / App Sandbox
-     entitlements, and Windows Job Object + Restricted Token configurations.
+   - `sandbox.py` & `sandbox_exec.py`: unified cross-platform `SandboxPolicy`,
+     `prepare_sandbox_launch(...)`, and `shiraz run --sandbox [--no-network]`
+     enforcement applying Linux Landlock LSM + seccomp-BPF network deny, macOS
+     `/usr/bin/sandbox-exec` Seatbelt profiles / App Sandbox entitlements, and
+     Windows Win32 Job Object limits (`CreateJobObjectW` / `AssignProcessToJobObject`).
 2. **Java runtime & embedded WebView (`java/shiraz/runtime/`, `java/android/webkit/`)**
    - `HostOs.java`: reliable runtime detection for `linux()`, `darwin()`, and
      `windows()` under both ART (where `os.name` reports `Linux`) and standard

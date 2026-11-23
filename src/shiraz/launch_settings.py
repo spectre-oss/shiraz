@@ -56,6 +56,8 @@ def normalize_settings(settings=None):
         log_level='INFO',
         timeout=None,
         native_code=False,
+        sandbox=False,
+        allow_network=True,
         embed=None,
         frames=None,
         snapshot=None,
@@ -81,6 +83,12 @@ def normalize_settings(settings=None):
         raise FormatError('Invalid launch log level')
     if type(result['native_code']) is not bool:
         raise FormatError('Invalid native code setting')
+    if type(result['sandbox']) is not bool:
+        raise FormatError('Invalid sandbox setting')
+    if type(result['allow_network']) is not bool:
+        raise FormatError('Invalid allow_network setting')
+    if not result['allow_network'] and not result['sandbox']:
+        raise FormatError('Disabling network requires sandbox=True')
     frames = result['frames']
     if frames is not None and (type(frames) is not int or not 1 <= frames <= 600):
         raise FormatError('Invalid launch frame limit')
