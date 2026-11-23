@@ -504,11 +504,6 @@ def collect_warm_files(
         candidates.extend(
             sorted(p for p in build_dir.glob('*.so*') if p.is_file() and not p.is_symlink())
         )
-    local_lib = root / '.local/lib'
-    if local_lib.is_dir():
-        candidates.extend(
-            sorted(p for p in local_lib.glob('*.so*') if p.is_file() and not p.is_symlink())
-        )
 
     # 3. Boot jars, framework jar & resources
     candidates.extend(host / 'framework' / name for name in JARS)
@@ -530,7 +525,13 @@ def collect_warm_files(
     except RuntimeError:
         pass
 
-    # 4b. Pre-extracted native app libraries (e.g. libosmand.so, libnative-utils.so)
+    # 5. Bundled fonts (needed on first frame)
+    font_dir = root / '.local/share/shiraz/fonts'
+    for name in BUNDLED_FONTS:
+        if name.endswith('.ttf'):
+            candidates.append(font_dir / name)
+
+    # 6. Pre-extracted native app libraries (e.g. libnative-utils.so, libosmand.so)
     runs_dir = root / 'build/runs'
     if runs_dir.is_dir():
         for app_lib in sorted(runs_dir.glob('*/processes/*/app_lib')):
@@ -539,11 +540,20 @@ def collect_warm_files(
                     sorted(p for p in app_lib.glob('*.so*') if p.is_file() and not p.is_symlink())
                 )
 
-    # 5. Bundled fonts (needed on first frame)
-    font_dir = root / '.local/share/shiraz/fonts'
-    for name in BUNDLED_FONTS:
-        if name.endswith('.ttf'):
-            candidates.append(font_dir / name)
+    # 7. Remaining bundled host runtime shared libraries (skip unused software-GL giants
+    #    like libLLVM / swrast_dri / libz3 unless software rendering is explicitly forced,
+    #    so they never crowd out app odex, fonts, or native app_lib/*.so from the RAM budget).
+    local_lib = root / '.local/lib'
+    software_gl = os.environ.get('LIBGL_ALWAYS_SOFTWARE') == '1'
+    if local_lib.is_dir():
+        for p in sorted(local_lib.glob('*.so*')):
+            if not p.is_file() or p.is_symlink():
+                continue
+            if not software_gl and p.name.startswith(
+                ('libLLVM', 'swrast_dri', 'llvmpipe', 'libz3')
+            ):
+                continue
+            candidates.append(p)
 
     # Deduplicate by resolved path and cap total memory budget
     seen = set()

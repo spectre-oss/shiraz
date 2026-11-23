@@ -56,11 +56,30 @@ def resolve_value(table, ident):
     raise FormatError('Manifest flag reference depth exceeded')
 
 
+_MEM_FLAGS_CACHE: dict[tuple[str, int, int, int, int, int], dict[tuple[int, bool], str]] = {}
+
+
+def _fast_flags_cache_path(apk_resolved):
+    import hashlib
+    import os
+    from pathlib import Path
+
+    if os.environ.get('SHIRAZ_FAST_INSPECT') != '1':
+        return None
+    base = os.environ.get('XDG_CACHE_HOME', '')
+    cache_root = Path(base) if base and Path(base).is_absolute() else Path.home() / '.cache'
+    key = str(apk_resolved).encode('utf-8')
+    return cache_root / 'shiraz' / 'manifest_flags' / (hashlib.sha256(key).hexdigest() + '.marshal')
+
+
 def normalize(apk, manifest):
     """Resolve component visibility flags in a copy; never rewrite the signed APK."""
     import copy
+    import marshal
+    import os
     import re
     import zipfile
+    from pathlib import Path
 
     from .app_icon import MAX_TABLE, ResourceTable
 
@@ -81,6 +100,48 @@ def normalize(apk, manifest):
         return result
     if len(pending) > 4096:
         raise FormatError('Manifest resource flag count limit')
+    for _, _, ident in pending:
+        if type(ident) is not int or not 0 < ident <= 0xFFFFFFFF:
+            raise FormatError('Invalid manifest flag resource ID')
+
+    apk_path = Path(apk)
+    apk_resolved = apk_path.resolve()
+    cache_path = _fast_flags_cache_path(apk_resolved)
+    st = None
+    mem_key = None
+    cached_values = None
+    if cache_path is not None:
+        try:
+            st = os.lstat(apk_resolved)
+            mem_key = (
+                str(apk_resolved),
+                st.st_dev,
+                st.st_ino,
+                st.st_size,
+                st.st_mtime_ns,
+                st.st_ctime_ns,
+            )
+            hit = _MEM_FLAGS_CACHE.get(mem_key)
+            if hit is not None:
+                cached_values = hit
+            elif cache_path.is_file() and not cache_path.is_symlink():
+                loaded = marshal.loads(cache_path.read_bytes())
+                if (
+                    isinstance(loaded, dict)
+                    and loaded.get('_stamp') == list(mem_key[1:])
+                    and isinstance(loaded.get('values'), dict)
+                ):
+                    cached_values = loaded['values']
+                    _MEM_FLAGS_CACHE[mem_key] = cached_values
+        except (OSError, ValueError, EOFError, TypeError):
+            cached_values = None
+
+    needed_keys = {(ident, field == 'process') for _, field, ident in pending}
+    if cached_values is not None and needed_keys.issubset(cached_values.keys()):
+        for item, field, ident in pending:
+            item[field] = cached_values[(ident, field == 'process')]
+        return result
+
     with zipfile.ZipFile(apk) as archive:
         if archive.namelist().count('resources.arsc') != 1:
             raise FormatError('Missing or duplicate manifest resource table')
@@ -88,10 +149,8 @@ def normalize(apk, manifest):
         if info.file_size > MAX_TABLE:
             raise FormatError('Manifest resource table exceeds limit')
         table = ResourceTable(archive.read(info))
-    cache = {}
+    cache = dict(cached_values) if cached_values is not None else {}
     for item, field, ident in pending:
-        if type(ident) is not int or not 0 < ident <= 0xFFFFFFFF:
-            raise FormatError('Invalid manifest flag resource ID')
         key = (ident, field == 'process')
         if key not in cache:
             if field == 'process':
@@ -107,4 +166,13 @@ def normalize(apk, manifest):
             else:
                 cache[key] = resolve_boolean(table, ident)
         item[field] = cache[key]
+    if cache_path is not None and mem_key is not None:
+        _MEM_FLAGS_CACHE[mem_key] = cache
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            tmp = cache_path.with_name(f'.{cache_path.name}.tmp.{os.getpid()}')
+            tmp.write_bytes(marshal.dumps({'_stamp': list(mem_key[1:]), 'values': cache}))
+            os.replace(tmp, cache_path)
+        except (OSError, ValueError, TypeError):
+            pass
     return result

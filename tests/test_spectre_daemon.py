@@ -129,6 +129,94 @@ class SpectreDaemonUnitTest(unittest.TestCase):
         files = aot_cache.collect_warm_files()
         self.assertTrue(all(p.is_file() for p in files))
 
+    def test_collect_warm_files_skips_software_gl_and_prioritizes_app_libs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            host = root / 'host'
+            cache = root / 'cache'
+            (root / '.local/lib').mkdir(parents=True)
+            (root / '.local/lib/libLLVM-15.so.1').write_bytes(b'L' * 4096)
+            (root / '.local/lib/swrast_dri.so').write_bytes(b'S' * 4096)
+            (root / '.local/lib/libz3.so.4').write_bytes(b'Z' * 4096)
+            (root / '.local/lib/libSDL2-2.0.so.0').write_bytes(b'D' * 1024)
+            app_lib = root / 'build/runs/deadbeef/processes/abcd/app_lib'
+            app_lib.mkdir(parents=True)
+            native_so = app_lib / 'libnative-utils.so'
+            native_so.write_bytes(b'N' * 2048)
+
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop('LIBGL_ALWAYS_SOFTWARE', None)
+                files = aot_cache.collect_warm_files(cache, root=root, host=host, max_bytes=3500)
+            names = [p.name for p in files]
+            self.assertIn('libnative-utils.so', names)
+            self.assertIn('libSDL2-2.0.so.0', names)
+            self.assertNotIn('libLLVM-15.so.1', names)
+            self.assertNotIn('swrast_dri.so', names)
+            self.assertNotIn('libz3.so.4', names)
+            self.assertLess(names.index('libnative-utils.so'), names.index('libSDL2-2.0.so.0'))
+
+    def test_resolve_wayland_display_detects_live_socket(self):
+        import socket
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rt = Path(tmp)
+            sock_path = rt / 'wayland-1'
+            srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                srv.bind(str(sock_path))
+                env = dict(os.environ, XDG_RUNTIME_DIR=str(rt))
+                env.pop('WAYLAND_DISPLAY', None)
+                with mock.patch.dict(os.environ, env, clear=True):
+                    daemon = spectre_daemon.ShirazDaemon(prewarm_memory=False, aot_enabled=False)
+                    self.assertEqual(daemon._resolve_wayland_display(), 'wayland-1')
+            finally:
+                srv.close()
+
+    def test_warm_pool_payload_encoding_and_direct_control(self):
+        import struct
+        from shiraz.warm_pool import DirectProcessControl, encode_handoff_payload
+
+        payload = encode_handoff_payload(
+            data_dir='/tmp/data',
+            app_lib_dir='/tmp/lib',
+            cp_apk='/tmp/app.apk',
+            env_pairs=[('WAYLAND_DISPLAY', 'wayland-1')],
+            prop_pairs=[('log.tag', 'INFO')],
+            activity_args=['pkg', 'App', 'Act'],
+        )
+        pos = 0
+
+        def take_u32():
+            nonlocal pos
+            (val,) = struct.unpack_from('>I', payload, pos)
+            pos += 4
+            return val
+
+        def take_str():
+            nonlocal pos
+            n = take_u32()
+            s = payload[pos : pos + n].decode('utf-8')
+            pos += n
+            return s
+
+        self.assertEqual(take_str(), '/tmp/data')
+        self.assertEqual(take_str(), '/tmp/lib')
+        self.assertEqual(take_str(), '/tmp/app.apk')
+        self.assertEqual(take_u32(), 1)
+        self.assertEqual((take_str(), take_str()), ('WAYLAND_DISPLAY', 'wayland-1'))
+        self.assertEqual(take_u32(), 1)
+        self.assertEqual((take_str(), take_str()), ('log.tag', 'INFO'))
+        self.assertEqual(take_u32(), 3)
+        self.assertEqual([take_str(), take_str(), take_str()], ['pkg', 'App', 'Act'])
+        self.assertEqual(pos, len(payload))
+
+        ctrl = DirectProcessControl(4242)
+        self.assertEqual(ctrl.reported_pid(), 4242)
+        with self.assertRaises(PermissionError):
+            ctrl.terminate(9999)
+        ctrl.close()
+        self.assertIsNone(ctrl.reported_pid())
+
 
 if __name__ == '__main__':
     unittest.main()

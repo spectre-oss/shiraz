@@ -471,6 +471,28 @@ class PackageRegistryTests(unittest.TestCase):
                 first['uid'],
             )
 
+    def test_launch_apk_fast_inspect_cache_reuses_and_detects_tampering(self):
+        import os
+        from unittest.mock import patch
+
+        enrolled = self.enroll('test.fast')
+        env = dict(os.environ, SHIRAZ_FAST_INSPECT='1', XDG_CACHE_HOME=str(self.root / 'cache'))
+        with patch.dict(os.environ, env, clear=True):
+            PackageRegistry._VERIFIED_APK_CACHE.clear()
+            apk = self.registry.launch_apk('test.fast', enrolled['apk_sha256'])
+            self.assertTrue(apk.is_file())
+            # Memory hit + disk hit (after clearing in-process cache) should avoid re-hashing.
+            with patch(
+                'shiraz.package_registry.hashlib.sha256', side_effect=AssertionError('rehashed')
+            ):
+                self.assertEqual(self.registry.launch_apk('test.fast', enrolled['apk_sha256']), apk)
+                PackageRegistry._VERIFIED_APK_CACHE.clear()
+                self.assertEqual(self.registry.launch_apk('test.fast', enrolled['apk_sha256']), apk)
+            # Tampering with the stored APK changes stat metadata and must be rejected.
+            apk.write_bytes(apk.read_bytes() + b'tampered')
+            with self.assertRaisesRegex(FormatError, 'content mismatch'):
+                self.registry.launch_apk('test.fast', enrolled['apk_sha256'])
+
     def test_generation_lease_blocks_replacement_but_allows_identical_enrollment(self):
         first = self.enroll('test.one')
         objects = set(self.registry.objects.iterdir())

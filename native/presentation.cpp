@@ -242,9 +242,38 @@ struct PresentationWindow {
                                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                                           (embed_requested() ? SDL_WINDOW_HIDDEN : 0)));
 #else
-        window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED,
-                                      SDL_WINDOWPOS_UNDEFINED, width, height,
-                                      SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI));
+        const Uint32 baseFlags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+        const char* requested = std::getenv("SHIRAZ_RENDERER");
+        const bool softwareRequested = requested && std::string(requested) == "software";
+        const char* videoDriver = SDL_GetCurrentVideoDriver();
+        const bool isDummy = videoDriver && std::string(videoDriver) == "dummy";
+        if (!softwareRequested && !isDummy) {
+            const char* renderDriver = std::getenv("SHIRAZ_HOST_SDL_RENDER_DRIVER");
+            if (!renderDriver || !*renderDriver)
+                renderDriver = std::getenv("SDL_RENDER_DRIVER");
+            const bool explicitDriver = renderDriver && *renderDriver;
+#if defined(__aarch64__) || defined(__arm__)
+            const bool preferGles2 = !explicitDriver || std::string(renderDriver) == "opengles2";
+#else
+            const bool preferGles2 = explicitDriver && std::string(renderDriver) == "opengles2";
+#endif
+            if (preferGles2) {
+                SDL_SetHintWithPriority("SDL_RENDER_DRIVER", "opengles2", SDL_HINT_OVERRIDE);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+            }
+            // Create the Wayland/X11 window with OpenGL upfront so SDL_CreateRenderer
+            // does not destroy and recreate the toplevel surface (saving ~100-150ms
+            // and avoiding an orphaned bufferless placeholder toplevel on Wayland).
+            window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED,
+                                          SDL_WINDOWPOS_UNDEFINED, width, height,
+                                          baseFlags | SDL_WINDOW_OPENGL));
+        }
+        if (!window) {
+            window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED,
+                                          SDL_WINDOWPOS_UNDEFINED, width, height, baseFlags));
+        }
 #endif
         if (!window)
             throw std::runtime_error(SDL_GetError());

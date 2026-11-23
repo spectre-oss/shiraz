@@ -1510,6 +1510,225 @@ def explicit_activity(manifest, component):
     return component
 
 
+def prepare_direct_activity(
+    apk,
+    report,
+    *,
+    registry,
+    broker_channel,
+    width=360,
+    height=640,
+    frames=None,
+    snapshot=None,
+    log_level='INFO',
+    device_profile=None,
+    environ=None,
+):
+    """Prepare a direct or warm-pool ART activity launch without spawning app_worker.
+
+    Returns (session_ctx, command, env, data, work, cp_apk, app_lib, prop_pairs, activity_args).
+    Caller must hold session_ctx open for the lifetime of the ART process.
+    """
+    from .manifest_flags import normalize
+    from .package_registry import PackageRegistry
+
+    env_in = os.environ if environ is None else environ
+    if log_level not in ('VERBOSE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'ASSERT', 'SILENT'):
+        raise FormatError('Invalid Android log level')
+    if (
+        width < 1
+        or height < 1
+        or width > 8192
+        or height > 8192
+        or width * height > 16 * 1024 * 1024
+    ):
+        raise FormatError('Activity dimensions exceed supported limits')
+    if frames is not None and not 1 <= frames <= 600:
+        raise FormatError('frames must be between 1 and 600')
+
+    system = host_system()
+    execution_mode = env_in.get('SHIRAZ_ART_MODE', 'interpreter')
+    execution_options = art_execution_options(execution_mode)
+    manifest = normalize(apk, report['manifest'])
+    minimum = manifest.get('min_sdk')
+    if minimum and (not re.fullmatch(r'[0-9]+', str(minimum)) or int(minimum) > 27):
+        raise FormatError(
+            'APK requires a newer Android API profile than the current experimental API-27 subset'
+        )
+    if manifest.get('application_enabled') == 'false':
+        raise FormatError('The application is disabled in its manifest')
+    package = manifest['package']
+    app = manifest['application_class'] or 'android.app.Application'
+    launcher = manifest['launcher_activities']
+    if not launcher or not launcher[0]['target']:
+        raise FormatError('APK has no supported MAIN/LAUNCHER activity')
+    activity = launcher[0]['target']
+    activity_process = activity_process_name(manifest, activity)
+    if not all(NAME.fullmatch(name) for name in (package, app, activity)):
+        raise FormatError('Invalid package or component class name')
+
+    package_registry = PackageRegistry(registry)
+    apk = package_registry.launch_apk(package, report['apk_sha256'])
+    if not supports_native_abis(report['native_abis']):
+        raise FormatError(
+            'APK has no native ABI candidate for this host (' + str(native_abi()) + ')'
+        )
+
+    vm, framework, framework_resources, required, _ = runtime_inputs(
+        system, ROOT, HOST, execution_mode
+    )
+    legacy_http = ROOT / 'build/shiraz-legacy-http.jar'
+    apk = Path(apk).resolve()
+    cp_framework = framework
+    cp_apk = apk
+    aot_dir_raw = env_in.get('SHIRAZ_AOT_DIR', '').strip()
+    if aot_dir_raw and execution_mode != 'interpreter':
+        isa = {'x86_64': 'x86_64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(platform.machine())
+        stage = Path(aot_dir_raw) / 'stage'
+        if isa:
+            staged_fw = stage / 'shiraz-framework.jar'
+            if (
+                staged_fw.exists()
+                and (stage / 'oat' / isa / 'shiraz-framework.odex').is_file()
+                and staged_fw.resolve() == framework.resolve()
+            ):
+                cp_framework = staged_fw
+            staged_apk = stage / f"{report['apk_sha256']}.apk"
+            if (
+                staged_apk.exists()
+                and (stage / 'oat' / isa / f"{report['apk_sha256']}.odex").is_file()
+                and staged_apk.resolve() == apk
+            ):
+                cp_apk = staged_apk
+    classpath = str(cp_framework) + ':' + str(cp_apk)
+    has_legacy_http = legacy_http.is_file()
+    if has_legacy_http:
+        classpath += ':' + str(legacy_http)
+
+    device_profile = selected_device_profile(
+        package, device_profile or env_in.get('SHIRAZ_DEVICE_PROFILE_TEMPLATE')
+    )
+    if snapshot:
+        snapshot = local_path(snapshot, 'build')
+        if snapshot.suffix.lower() != '.ppm':
+            raise FormatError('Startup screenshots must use the .ppm format')
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+
+    work = local_path(ROOT / 'build/runs' / report['apk_sha256'], 'build')
+    data = local_path(ROOT / 'data/apps' / package, 'data')
+    process_identity = activity_process or package
+    if process_identity.startswith(':'):
+        process_identity = package + process_identity
+    work = work / 'processes' / hashlib.sha256(process_identity.encode('utf-8')).hexdigest()
+    work.mkdir(parents=True, exist_ok=True)
+    data.mkdir(parents=True, exist_ok=True)
+
+    session_stack = ExitStack()
+    try:
+        timestamps = session_stack.enter_context(
+            package_session(data, report['apk_sha256'], process_identity)
+        )
+        (work / 'result.json').unlink(missing_ok=True)
+        for child in ('cache', 'tmp', 'home', 'android-data/dalvik-cache'):
+            (work / child).mkdir(parents=True, exist_ok=True)
+        app_lib = work / 'app_lib'
+        target_arch = 'x86_64' if native_abi() == 'x86_64' else 'aarch64'
+        cache_marker = work / '.app_lib.stamp'
+        expected_stamp = f"{report['apk_sha256']}:{target_arch}"
+        reuse_native = (
+            env_in.get('SHIRAZ_CACHE_NATIVE_LIBS') == '1'
+            and report['native_abis']
+            and app_lib.is_dir()
+            and cache_marker.is_file()
+            and cache_marker.read_text(encoding='ascii', errors='ignore').strip() == expected_stamp
+            and any(app_lib.iterdir())
+        )
+        if not reuse_native:
+            if app_lib.exists():
+                shutil.rmtree(app_lib)
+            cache_marker.unlink(missing_ok=True)
+            if report['native_abis']:
+                try:
+                    extract_native(apk, app_lib, target_arch)
+                except (ValueError, OSError, zipfile.BadZipFile) as exc:
+                    raise FormatError('Cannot prepare APK native libraries: ' + str(exc)) from exc
+                if env_in.get('SHIRAZ_CACHE_NATIVE_LIBS') == '1':
+                    cache_marker.write_text(expected_stamp + '\n', encoding='ascii')
+        app_lib.mkdir(parents=True, exist_ok=True)
+        metadata = work / 'application.properties'
+        facts = application_metadata(manifest, apk, data)
+        facts['nativeLibraryDir'] = str(app_lib)
+        facts['runtime.library.apacheHttpLegacy'] = 'true' if has_legacy_http else 'false'
+        facts.update(timestamps)
+        metadata.write_text(properties_text(facts), encoding='utf-8')
+        profile_values = validate_device_profile(device_profile) if device_profile else {}
+        command, env = launch_command(
+            system,
+            root=ROOT,
+            host=HOST,
+            environ=env_in,
+            vm=vm,
+            classpath=classpath,
+            framework_resources=framework_resources,
+            work=work,
+            data=data,
+            app_lib=app_lib,
+            metadata=metadata,
+            package=package,
+            app=app,
+            activity=activity,
+            width=width,
+            height=height,
+            frames=frames,
+            snapshot=snapshot,
+            log_level=log_level,
+            execution_options=execution_options,
+            device_profile=device_profile,
+            profile_values=profile_values,
+            digitalis=None,
+            version=(ROOT / 'VERSION').read_text(encoding='ascii').strip(),
+            gles=False,
+            guest_bridge=None,
+            activity_process=activity_process,
+        )
+        env['SHIRAZ_BROKER_FD'] = str(broker_channel.fileno())
+        env['SHIRAZ_PACKAGE_UID'] = str(package_registry.identity(package)['uid'])
+        prop_pairs = [
+            ('java.io.tmpdir', str(work / 'tmp')),
+            ('user.home', str(work / 'home')),
+            ('log.tag', log_level),
+        ]
+        if activity_process is not None and activity_process != package:
+            prop_pairs.append(('shiraz.activityProcess', activity_process))
+        if device_profile:
+            prop_pairs.append(('shiraz.deviceProfile', str(device_profile)))
+        activity_args = [
+            package,
+            app,
+            activity,
+            str(width),
+            str(height),
+            str(frames if frames is not None else -1),
+            str(data),
+            str(snapshot) if snapshot else '-',
+            str(metadata),
+        ]
+        return (
+            session_stack,
+            command,
+            env,
+            data,
+            work,
+            cp_apk,
+            app_lib,
+            prop_pairs,
+            activity_args,
+        )
+    except BaseException:
+        session_stack.close()
+        raise
+
+
 def run_activity(
     apk,
     report,
@@ -1982,6 +2201,35 @@ def run_activity(
                         stack.enter_context(inner_obs(process))
                         return stack
 
+        apk_stamp_before = None
+        split_stamp_before = None
+        if os.environ.get('SHIRAZ_FAST_INSPECT') == '1':
+            import stat as _stat
+
+            try:
+                st = os.lstat(apk)
+                if _stat.S_ISREG(st.st_mode):
+                    apk_stamp_before = (
+                        st.st_dev,
+                        st.st_ino,
+                        st.st_size,
+                        st.st_mtime_ns,
+                        st.st_ctime_ns,
+                    )
+                if split_report:
+                    sst = os.lstat(native_split)
+                    if _stat.S_ISREG(sst.st_mode):
+                        split_stamp_before = (
+                            sst.st_dev,
+                            sst.st_ino,
+                            sst.st_size,
+                            sst.st_mtime_ns,
+                            sst.st_ctime_ns,
+                        )
+            except OSError:
+                apk_stamp_before = None
+                split_stamp_before = None
+
         try:
             capability = (
                 cache_catalog_fd(ROOT, work / 'tmp')
@@ -2054,19 +2302,55 @@ def run_activity(
             raise FormatError(
                 f'Activity timed out; inspect {work.relative_to(ROOT)}/stderr.log'
             ) from None
-        current = hashlib.sha256()
-        with apk.open('rb') as stream:
-            for block in iter(lambda: stream.read(1024 * 1024), b''):
-                current.update(block)
-        if split_report:
-            split_digest = hashlib.sha256()
-            with native_split.open('rb') as stream:
+        apk_stat_unchanged = False
+        if apk_stamp_before is not None:
+            try:
+                st_after = os.lstat(apk)
+                apk_stat_unchanged = (
+                    _stat.S_ISREG(st_after.st_mode)
+                    and (
+                        st_after.st_dev,
+                        st_after.st_ino,
+                        st_after.st_size,
+                        st_after.st_mtime_ns,
+                        st_after.st_ctime_ns,
+                    )
+                    == apk_stamp_before
+                )
+            except OSError:
+                apk_stat_unchanged = False
+        if not apk_stat_unchanged:
+            current = hashlib.sha256()
+            with apk.open('rb') as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b''):
-                    split_digest.update(block)
-            if split_digest.hexdigest() != split_report['apk_sha256']:
-                raise FormatError('Input native split changed during the run')
-        if current.hexdigest() != report['apk_sha256']:
-            raise FormatError('Input APK changed during the run')
+                    current.update(block)
+            if current.hexdigest() != report['apk_sha256']:
+                raise FormatError('Input APK changed during the run')
+        if split_report:
+            split_stat_unchanged = False
+            if split_stamp_before is not None:
+                try:
+                    sst_after = os.lstat(native_split)
+                    split_stat_unchanged = (
+                        _stat.S_ISREG(sst_after.st_mode)
+                        and (
+                            sst_after.st_dev,
+                            sst_after.st_ino,
+                            sst_after.st_size,
+                            sst_after.st_mtime_ns,
+                            sst_after.st_ctime_ns,
+                        )
+                        == split_stamp_before
+                    )
+                except OSError:
+                    split_stat_unchanged = False
+            if not split_stat_unchanged:
+                split_digest = hashlib.sha256()
+                with native_split.open('rb') as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b''):
+                        split_digest.update(block)
+                if split_digest.hexdigest() != split_report['apk_sha256']:
+                    raise FormatError('Input native split changed during the run')
         evidence = {
             'package': package,
             'activity': activity,

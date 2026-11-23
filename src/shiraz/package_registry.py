@@ -368,20 +368,74 @@ class PackageRegistry:
                 raise PermissionError('Unknown package')
             return dict(row)
 
+    _VERIFIED_APK_CACHE: dict[tuple[str, str], tuple[int, int, int, int, int]] = {}
+
+    @staticmethod
+    def _verified_apk_cache_path(expected_sha256):
+        if os.environ.get('SHIRAZ_FAST_INSPECT') != '1':
+            return None
+        base = os.environ.get('XDG_CACHE_HOME', '')
+        cache_root = Path(base) if base and Path(base).is_absolute() else Path.home() / '.cache'
+        return cache_root / 'shiraz' / 'verified' / (expected_sha256 + '.json')
+
+    @staticmethod
+    def _stat_stamp(st):
+        return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
     def launch_apk(self, package, expected_sha256):
         identity = self.identity(package)
         if identity['sha256'] != expected_sha256:
             raise FormatError('Launch APK does not match enrolled package')
         path = self.objects / (identity['sha256'] + '.apk')
-        if path.is_symlink() or not path.is_file():
+        try:
+            st = os.lstat(path)
+        except OSError:
+            raise FormatError('Registered APK missing or not a regular file') from None
+        if not stat.S_ISREG(st.st_mode):
             raise FormatError('Registered APK missing or not a regular file')
+        resolved = path.resolve()
+        stamp = self._stat_stamp(st)
+        cache_path = self._verified_apk_cache_path(expected_sha256)
+        mem_key = (str(resolved), expected_sha256)
+        if cache_path is not None:
+            if self._VERIFIED_APK_CACHE.get(mem_key) == stamp:
+                return resolved
+            try:
+                if cache_path.is_file() and not cache_path.is_symlink():
+                    cached = json.loads(cache_path.read_text(encoding='utf-8'))
+                    if (
+                        isinstance(cached, dict)
+                        and cached.get('path') == str(resolved)
+                        and cached.get('sha256') == expected_sha256
+                        and cached.get('stamp') == list(stamp)
+                    ):
+                        self._VERIFIED_APK_CACHE[mem_key] = stamp
+                        return resolved
+            except (OSError, ValueError, TypeError):
+                pass
         digest = hashlib.sha256()
         with path.open('rb') as source:
             for chunk in iter(lambda: source.read(1024 * 1024), b''):
                 digest.update(chunk)
         if digest.hexdigest() != expected_sha256:
             raise FormatError('Registered APK content mismatch')
-        return path.resolve()
+        if cache_path is not None:
+            self._VERIFIED_APK_CACHE[mem_key] = stamp
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                tmp = cache_path.with_name(f'.{cache_path.name}.tmp.{os.getpid()}')
+                fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+                try:
+                    payload = json.dumps(
+                        {'path': str(resolved), 'sha256': expected_sha256, 'stamp': list(stamp)}
+                    ).encode('utf-8')
+                    os.write(fd, payload)
+                finally:
+                    os.close(fd)
+                os.replace(tmp, cache_path)
+            except OSError:
+                pass
+        return resolved
 
     def lookup_package(
         self, caller_uid, caller_sha256, *, uid=None, package=None, all_packages=False

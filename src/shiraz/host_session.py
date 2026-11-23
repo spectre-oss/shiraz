@@ -62,6 +62,7 @@ class HostSession:
         self.launch_ids = {}
         self.launch_identities = {}
         self.inboxes = {}
+        self.warm_pool = None
         self.lock = threading.RLock()
         self.closed = False
 
@@ -341,42 +342,144 @@ class HostSession:
                 with self.broker.open_session(
                     package, identity['sha256'], process_name=process_name
                 ) as channel:
-                    command = [
-                        sys.executable,
-                        '-m',
-                        'shiraz.app_worker',
-                        str(self.registry.root),
-                        package,
-                        identity['sha256'],
-                        str(channel.fileno()),
-                        json.dumps(settings),
-                    ]
-                    if component is not None:
-                        command.append(component)
-                    if launch_channel is not None:
-                        command.extend((str(launch_channel.fileno()), str(caller['uid'])))
-                    control_host, control_worker = socket.socketpair()
-                    env['SHIRAZ_PROCESS_CONTROL_FD'] = str(control_worker.fileno())
-                    lease.callback(control_host.close)
-                    with (
-                        control_worker,
-                        (work / 'stdout.log').open('wb') as out,
-                        (work / 'stderr.log').open('wb') as err,
-                    ):
-                        process = subprocess.Popen(
-                            command,
-                            cwd=ROOT,
-                            env=env,
-                            stdin=subprocess.DEVNULL,
-                            stdout=out,
-                            stderr=err,
-                            pass_fds=(
-                                channel.fileno(),
-                                control_worker.fileno(),
-                                *((launch_channel.fileno(),) if launch_channel is not None else ()),
-                            ),
-                            start_new_session=True,
+                    direct_launch = (
+                        sys.platform == 'linux'
+                        and os.environ.get('SHIRAZ_DIRECT_LAUNCH') == '1'
+                        and component is None
+                        and launch_channel is None
+                        and not settings.get('sandbox')
+                        and settings.get('embed') is None
+                        and settings.get('timeout') is None
+                    )
+                    control_host = None
+                    direct_control = None
+                    if direct_launch:
+                        from .runtime import prepare_direct_activity
+                        from .warm_pool import DirectProcessControl
+
+                        env['SHIRAZ_GUEST_LOADER'] = '1' if settings.get('native_code') else '0'
+                        (
+                            session_ctx,
+                            art_cmd,
+                            art_env,
+                            data_dir,
+                            run_work,
+                            cp_apk,
+                            app_lib,
+                            prop_pairs,
+                            activity_args,
+                        ) = prepare_direct_activity(
+                            apk,
+                            report,
+                            registry=self.registry.root,
+                            broker_channel=channel,
+                            width=settings['width'],
+                            height=settings['height'],
+                            frames=settings.get('frames'),
+                            snapshot=settings.get('snapshot'),
+                            log_level=settings.get('log_level', 'INFO'),
+                            device_profile=settings.get('device_profile'),
+                            environ=env,
                         )
+                        lease.enter_context(session_ctx)
+                        run_stdout = run_work / 'stdout.log'
+                        run_stderr = run_work / 'stderr.log'
+                        with run_stdout.open('wb') as out, run_stderr.open('wb') as err:
+                            for link_name, target in (
+                                ('stdout.log', run_stdout),
+                                ('stderr.log', run_stderr),
+                            ):
+                                link_path = work / link_name
+                                link_path.unlink(missing_ok=True)
+                                os.symlink(target, link_path)
+                            process = None
+                            if (
+                                self.warm_pool is not None
+                                and os.environ.get('SHIRAZ_WARM_POOL', '1') == '1'
+                            ):
+                                env_pairs = [
+                                    (k, v)
+                                    for k, v in art_env.items()
+                                    if k != 'SHIRAZ_BROKER_FD'
+                                    and (
+                                        k.startswith(
+                                            (
+                                                'SHIRAZ_',
+                                                'SDL_',
+                                                'WAYLAND_',
+                                                'DBUS_',
+                                                'ANDROID_',
+                                                'XDG_',
+                                                'BIONIC_',
+                                            )
+                                        )
+                                        or k in ('HOME', 'TMPDIR')
+                                    )
+                                ]
+                                process = self.warm_pool.claim_and_dispatch(
+                                    data_dir=data_dir,
+                                    app_lib_dir=app_lib,
+                                    cp_apk=cp_apk,
+                                    env_pairs=env_pairs,
+                                    prop_pairs=prop_pairs,
+                                    activity_args=activity_args,
+                                    broker_fd=channel.fileno(),
+                                    stdout_fd=out.fileno(),
+                                    stderr_fd=err.fileno(),
+                                )
+                            if process is None:
+                                process = subprocess.Popen(
+                                    art_cmd,
+                                    cwd=data_dir,
+                                    env=art_env,
+                                    stdin=subprocess.DEVNULL,
+                                    stdout=out,
+                                    stderr=err,
+                                    pass_fds=(channel.fileno(),),
+                                    start_new_session=True,
+                                )
+                        direct_control = DirectProcessControl(process.pid)
+                    else:
+                        command = [
+                            sys.executable,
+                            '-m',
+                            'shiraz.app_worker',
+                            str(self.registry.root),
+                            package,
+                            identity['sha256'],
+                            str(channel.fileno()),
+                            json.dumps(settings),
+                        ]
+                        if component is not None:
+                            command.append(component)
+                        if launch_channel is not None:
+                            command.extend((str(launch_channel.fileno()), str(caller['uid'])))
+                        control_host, control_worker = socket.socketpair()
+                        env['SHIRAZ_PROCESS_CONTROL_FD'] = str(control_worker.fileno())
+                        lease.callback(control_host.close)
+                        with (
+                            control_worker,
+                            (work / 'stdout.log').open('wb') as out,
+                            (work / 'stderr.log').open('wb') as err,
+                        ):
+                            process = subprocess.Popen(
+                                command,
+                                cwd=ROOT,
+                                env=env,
+                                stdin=subprocess.DEVNULL,
+                                stdout=out,
+                                stderr=err,
+                                pass_fds=(
+                                    channel.fileno(),
+                                    control_worker.fileno(),
+                                    *(
+                                        (launch_channel.fileno(),)
+                                        if launch_channel is not None
+                                        else ()
+                                    ),
+                                ),
+                                start_new_session=True,
+                            )
             except BaseException:
                 lease.close()
                 if inbox is not None:
@@ -388,7 +491,9 @@ class HostSession:
                 self.activity_processes[(package, process_name)] = (process, work)
             self.process_names[process] = process_name
             self.launch_settings[process] = settings
-            self.process_controls[process] = ProcessControl(control_host)
+            self.process_controls[process] = (
+                direct_control if direct_control is not None else ProcessControl(control_host)
+            )
             self.changed.set()
             self.launch_ids[process] = launch_id
             self.launch_identities[process] = dict(identity)
@@ -632,6 +737,11 @@ class HostSession:
                     process.wait(timeout=3)
                 self._join_reaper(process)
         finally:
+            if self.warm_pool is not None:
+                try:
+                    self.warm_pool.close()
+                except Exception:
+                    pass
             self.broker.close()
             for process in processes:
                 if process.poll() is not None:

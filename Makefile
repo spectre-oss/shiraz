@@ -19,7 +19,7 @@ commit:
 	python3 scripts/commit.py
 
 all: build
-build: build/libshiraz-host.so build/shiraz-preview build/libandroid.so build/libandroid.so.0 build/libnativewindow.so build/libEGL.so.1 build/libshiraz-jni.so build/shiraz-framework.jar
+build: build/libshiraz-host.so build/libshiraz-warm-pool.so build/shiraz-preview build/libandroid.so build/libandroid.so.0 build/libnativewindow.so build/libEGL.so.1 build/libshiraz-jni.so build/shiraz-framework.jar
 build/libandroid.so.0: build/libandroid.so
 	ln -sfn libandroid.so $@
 build/libnativewindow.so: build/libandroid.so
@@ -167,6 +167,10 @@ presentation-smoke: build/test-presentation
 build/libshiraz-host.so: native/host_process.cpp native/fds.cpp native/file_observer.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp include/shiraz/ipc_channel.hpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/host_process.cpp native/fds.cpp native/file_observer.cpp native/gles_version.cpp native/ipc_channel.cpp native/ipc_jni.cpp native/ipc_spawn.cpp -o $@ -lEGL -ldl
+
+build/libshiraz-warm-pool.so: native/warm_pool.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/warm_pool.cpp -o $@ -ldl
 
 build/test-gles-probe: tests/native/gles_probe.cpp native/gles_version.cpp
 	@mkdir -p build

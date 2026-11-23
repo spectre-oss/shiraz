@@ -83,3 +83,31 @@ class ManifestFlagTests(unittest.TestCase):
         ):
             with self.assertRaises(FormatError):
                 resolve_boolean(Table(entries), 1)
+
+    def test_fast_inspect_cache_reuses_and_invalidates_on_change(self):
+        import os
+        from unittest.mock import patch
+
+        manifest = {'services': [{'enabled': '@0x7f010000'}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            apk = root / 'flags.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                archive.writestr(
+                    'resources.arsc',
+                    table([], [type_chunk(1, {0: (18, 1, False)})]),
+                )
+            env = dict(os.environ, SHIRAZ_FAST_INSPECT='1', XDG_CACHE_HOME=str(root / 'cache'))
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(normalize(apk, manifest)['services'], [{'enabled': 'true'}])
+                # Second call should serve from cache without re-opening the ZIP.
+                with patch('zipfile.ZipFile', side_effect=AssertionError('should hit cache')):
+                    self.assertEqual(normalize(apk, manifest)['services'], [{'enabled': 'true'}])
+                # Rewriting the APK with a different flag must invalidate the cache.
+                with zipfile.ZipFile(apk, 'w') as archive:
+                    archive.writestr(
+                        'resources.arsc',
+                        table([], [type_chunk(1, {0: (18, 0, False)})]),
+                    )
+                    archive.writestr('extra.txt', b'invalidate')
+                self.assertEqual(normalize(apk, manifest)['services'], [{'enabled': 'false'}])

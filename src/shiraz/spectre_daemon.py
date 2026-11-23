@@ -18,6 +18,7 @@ import os
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -42,6 +43,7 @@ from .app_icon import extract_icon, resolve_label
 from .host_session import HostSession
 from .package_registry import PackageRegistry
 from .runtime import ROOT
+from .warm_pool import WarmArtPool
 
 _DESKTOP_CONTROL_TRANSLATE = str.maketrans({'\n': ' ', '\r': ' ', '\t': ' ', '\0': ''})
 
@@ -696,6 +698,7 @@ class ShirazDaemon:
         self.error_message = ''
         self.last_launch_ms: Optional[int] = None
         self.warmer = MemoryWarmer()
+        self.warm_pool = WarmArtPool(aot_dir=self.aot_root)
         self.session: Optional[HostSession] = None
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
@@ -725,6 +728,7 @@ class ShirazDaemon:
                 'pid': os.getpid(),
                 'warm_ram_mb': self.warmer.warm_ram_mb,
                 'warm_files': self.warmer.warm_files,
+                'warm_pool_ready': self.warm_pool.ready,
                 'aot_boot_ready': boot_image_ready(self.aot_root),
                 'aot_framework_ready': framework_aot_ready(self.aot_root),
                 'prewarm_memory': self.prewarm_memory,
@@ -768,6 +772,7 @@ class ShirazDaemon:
                 try:
                     import hashlib
                     from .architecture import native_abi
+                    from .manifest_flags import normalize as normalize_manifest_flags
                     from .native_payload import extract_native
                     from .runtime import activity_process_name
 
@@ -780,9 +785,10 @@ class ShirazDaemon:
                         try:
                             apk = reg.launch_apk(pkg, sha)
                             report = inspect_apk(apk)
+                            # Pre-warm normalized manifest flags cache so first launch skips resources.arsc parsing.
+                            manifest = normalize_manifest_flags(apk, report.get('manifest') or {})
                             # Pre-extract native libs into the exact work/processes/<hash>/app_lib
                             # directory that runtime.py reuses when SHIRAZ_CACHE_NATIVE_LIBS=1.
-                            manifest = report.get('manifest') or {}
                             launchers = manifest.get('launcher_activities') or []
                             if report.get('native_abis') and launchers:
                                 proc_name = activity_process_name(manifest, launchers[0]['target'])
@@ -824,6 +830,11 @@ class ShirazDaemon:
             if self.prewarm_memory and not self._stop_event.is_set():
                 self.warmer.warm(collect_warm_files(self.aot_root))
 
+            # 4. Boot one pre-warmed standby ART VM (Zygote-style) so cold app launches
+            #    skip dalvikvm boot, boot.art/framework loading, and native library dlopen.
+            if (self.prewarm_memory or self.aot_enabled) and not self._stop_event.is_set():
+                self.warm_pool.ensure_standby_async()
+
             with self._lock:
                 if not self._stop_event.is_set():
                     self.state = 'ready'
@@ -860,6 +871,41 @@ class ShirazDaemon:
             else:
                 self._stop_event.wait(timeout=0.5)
 
+    def _resolve_wayland_display(self, requested: Optional[str] = None) -> str:
+        runtime_dir = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}')
+        for candidate in (
+            (requested or '').strip(),
+            self.wayland_display.strip(),
+            os.environ.get('WAYLAND_DISPLAY', '').strip(),
+        ):
+            if not candidate:
+                continue
+            sock = Path(candidate) if os.path.isabs(candidate) else runtime_dir / candidate
+            try:
+                if sock.exists() and stat.S_ISSOCK(sock.stat().st_mode):
+                    return candidate
+            except OSError:
+                continue
+        # Fallback: pick the most recently created live Wayland compositor socket in XDG_RUNTIME_DIR
+        # (handles daemon startup racing ahead of Wisp's initial configure IPC).
+        try:
+            sockets = []
+            for entry in runtime_dir.glob('wayland-*'):
+                if entry.name.endswith('.lock'):
+                    continue
+                try:
+                    st = entry.stat()
+                    if stat.S_ISSOCK(st.st_mode):
+                        sockets.append((st.st_mtime_ns, entry.name))
+                except OSError:
+                    continue
+            if sockets:
+                sockets.sort(reverse=True)
+                return sockets[0][1]
+        except OSError:
+            pass
+        return (requested or self.wayland_display or os.environ.get('WAYLAND_DISPLAY', '')).strip()
+
     def _launch_package(self, req: Dict[str, object]) -> Dict[str, object]:
         package = str(req.get('package') or '').strip()
         if not package:
@@ -892,6 +938,9 @@ class ShirazDaemon:
 
         # Apply SpectreOS Wayland + Freedesktop + AOT fast-launch environment before spawn.
         saved_env: Dict[str, Optional[str]] = {}
+        wayland_display = self._resolve_wayland_display(
+            str(req.get('wayland_display') or '') or None
+        )
         launch_env = {
             'SHIRAZ_ART_MODE': 'jit',
             'SHIRAZ_AOT_DIR': str(self.aot_root) if self.aot_enabled else '',
@@ -899,12 +948,14 @@ class ShirazDaemon:
             'SHIRAZ_FAST_GC': '1',
             'SHIRAZ_FAST_INSPECT': '1',
             'SHIRAZ_CACHE_NATIVE_LIBS': '1',
+            'SHIRAZ_DIRECT_LAUNCH': '1',
+            'SHIRAZ_WARM_POOL': '1',
             'SHIRAZ_FORM_FACTOR': os.environ.get('SHIRAZ_FORM_FACTOR', 'mobile'),
             'SHIRAZ_DESKTOP_ENTRY': f'{package}.Shiraz',
             'SDL_VIDEO_WAYLAND_WMCLASS': f'{package}.Shiraz',
         }
-        if self.wayland_display:
-            launch_env['WAYLAND_DISPLAY'] = self.wayland_display
+        if wayland_display:
+            launch_env['WAYLAND_DISPLAY'] = wayland_display
             if (
                 'SDL_VIDEODRIVER' not in os.environ
                 and 'SHIRAZ_HOST_SDL_VIDEODRIVER' not in os.environ
@@ -1080,6 +1131,7 @@ class ShirazDaemon:
         ensure_mime_apk_handler()
         self.registry_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.session = HostSession(self.registry_dir)
+        self.session.warm_pool = self.warm_pool
 
         if self.sock_path.exists():
             self.sock_path.unlink(missing_ok=True)
@@ -1138,6 +1190,7 @@ class ShirazDaemon:
                 except Exception:
                     pass
                 self.session = None
+            self.warm_pool.close()
             self.warmer.release()
             with self._lock:
                 self.state = 'disabled'
