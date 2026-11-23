@@ -238,6 +238,7 @@ bool has_extension(const std::vector<VkExtensionProperties>& list, const char* n
     return false;
 }
 
+#if defined(__APPLE__)
 bool has_extension_name(const std::vector<const char*>& list, const char* name) {
     for (const char* ext : list) {
         if (ext && std::strcmp(ext, name) == 0) {
@@ -246,6 +247,7 @@ bool has_extension_name(const std::vector<const char*>& list, const char* name) 
     }
     return false;
 }
+#endif
 
 void append_extension(std::vector<VkExtensionProperties>& list, const char* name,
                       uint32_t specVersion) {
@@ -259,6 +261,7 @@ void append_extension(std::vector<VkExtensionProperties>& list, const char* name
     list.push_back(prop);
 }
 
+#if defined(__APPLE__)
 bool host_supports_instance_extension(const char* extName) {
     const auto& loader = host_loader();
     auto fn = loader.instanceProc<PFN_vkEnumerateInstanceExtensionProperties>(
@@ -277,6 +280,7 @@ bool host_supports_instance_extension(const char* extName) {
     props.resize(count);
     return has_extension(props, extName);
 }
+#endif
 
 // Map Android AHardwareBuffer format constants (hardware_buffer.h / AHardwareBuffer_Format)
 // to Vulkan VkFormat and bytes per pixel.

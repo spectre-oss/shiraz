@@ -48,6 +48,9 @@ Uint32 close_window(Uint32, void*) {
 }
 } // namespace
 int main() {
+#if defined(_WIN32)
+    SDL_SetMainReady();
+#endif
     const bool hostOnly = std::getenv("SHIRAZ_HOST_SDL_VIDEODRIVER") != nullptr;
     if (hostOnly)
         assert(!std::getenv("SDL_VIDEODRIVER") && !std::getenv("SDL_RENDER_DRIVER"));

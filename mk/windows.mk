@@ -63,7 +63,7 @@ $(WINDOWS_OUT)/libvulkan.dll: native/ndk_vulkan.cpp include/shiraz/ndk/vulkan.h 
 $(WINDOWS_OUT)/test-ndk-vulkan.exe: tests/ndk_vulkan.cpp $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/shiraz-win32-host.dll
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/ndk_vulkan.cpp -o $@ -L$(WINDOWS_OUT) -lvulkan -lshiraz-win32-host -pthread
 
-WINDOWS_SDL_CFLAGS = $(shell sdl2-config --cflags 2>/dev/null)
+WINDOWS_SDL_CFLAGS = $(shell sdl2-config --cflags 2>/dev/null | sed 's/-Dmain=SDL_main//g')
 WINDOWS_SDL_LIBS = $(shell sdl2-config --libs 2>/dev/null | sed 's/-lmingw32//g; s/-lSDL2main//g; s/-mwindows//g')
 
 $(WINDOWS_OUT)/test-presentation.exe: tests/presentation.cpp native/presentation.cpp native/win32/d3d11_probe.cpp native/win32/gpu_stub.cpp include/shiraz/presentation.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/win32/d3d11_probe.hpp $(WINDOWS_OUT)/.dir
