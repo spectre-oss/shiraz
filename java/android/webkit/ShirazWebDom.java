@@ -58,6 +58,133 @@ final class ShirazWebDom {
             return false;
         }
 
+        DomNode insertBefore(DomNode newNode, DomNode refNode) {
+            if (newNode == null) return null;
+            if (refNode == null) {
+                appendChild(newNode);
+                return newNode;
+            }
+            int idx = children.indexOf(refNode);
+            if (idx < 0) return null;
+            if (newNode.parent != null) {
+                int oldIdx = newNode.parent.children.indexOf(newNode);
+                newNode.parent.children.remove(newNode);
+                if (newNode.parent == this && oldIdx >= 0 && oldIdx < idx) {
+                    idx--;
+                }
+            }
+            newNode.parent = this;
+            children.add(idx, newNode);
+            return newNode;
+        }
+
+        DomNode replaceChild(DomNode newNode, DomNode oldNode) {
+            if (newNode == null || oldNode == null) return null;
+            int idx = children.indexOf(oldNode);
+            if (idx < 0) return null;
+            if (newNode == oldNode) return oldNode;
+            if (newNode.parent != null) {
+                int oldIdx = newNode.parent.children.indexOf(newNode);
+                newNode.parent.children.remove(newNode);
+                if (newNode.parent == this && oldIdx >= 0 && oldIdx < idx) {
+                    idx--;
+                }
+            }
+            oldNode.parent = null;
+            newNode.parent = this;
+            children.set(idx, newNode);
+            return oldNode;
+        }
+
+        DomNode cloneNode(boolean deep) {
+            DomNode copy = new DomNode(nodeType, tagName, textData);
+            copy.attributes.putAll(attributes);
+            if (deep) {
+                for (DomNode c : children) {
+                    copy.appendChild(c.cloneNode(true));
+                }
+            }
+            return copy;
+        }
+
+        DomNode nextSibling() {
+            if (parent == null) return null;
+            int idx = parent.children.indexOf(this);
+            return (idx >= 0 && idx + 1 < parent.children.size()) ? parent.children.get(idx + 1) : null;
+        }
+
+        DomNode previousSibling() {
+            if (parent == null) return null;
+            int idx = parent.children.indexOf(this);
+            return idx > 0 ? parent.children.get(idx - 1) : null;
+        }
+
+        boolean contains(DomNode other) {
+            DomNode cur = other;
+            while (cur != null) {
+                if (cur == this) return true;
+                cur = cur.parent;
+            }
+            return false;
+        }
+
+        boolean isContentEditable() {
+            DomNode cur = this;
+            while (cur != null) {
+                if (cur.nodeType == NODE_ELEMENT && cur.hasAttribute("contenteditable")) {
+                    String val = cur.getAttribute("contenteditable");
+                    if ("false".equalsIgnoreCase(val)) return false;
+                    return true;
+                }
+                cur = cur.parent;
+            }
+            return false;
+        }
+
+        boolean isEditableControl() {
+            if (nodeType != NODE_ELEMENT) return false;
+            if ("textarea".equals(tagName)) return true;
+            if ("input".equals(tagName)) {
+                String type = getAttribute("type");
+                if (type == null || type.isEmpty()) return true;
+                String t = type.toLowerCase(Locale.ROOT);
+                return "text".equals(t) || "search".equals(t) || "email".equals(t)
+                        || "url".equals(t) || "tel".equals(t) || "password".equals(t)
+                        || "number".equals(t);
+            }
+            return hasAttribute("contenteditable") && !"false".equalsIgnoreCase(getAttribute("contenteditable"));
+        }
+
+        String getEditableValue() {
+            if ("input".equals(tagName)) {
+                String v = getAttribute("value");
+                return v == null ? "" : v;
+            }
+            if ("textarea".equals(tagName)) {
+                String v = getAttribute("value");
+                return v != null ? v : getTextContent();
+            }
+            return getTextContent();
+        }
+
+        void setEditableValue(String value) {
+            String safe = value == null ? "" : value;
+            if ("input".equals(tagName)) {
+                setAttribute("value", safe);
+            } else if ("textarea".equals(tagName)) {
+                setAttribute("value", safe);
+                setTextContent(safe);
+            } else {
+                setTextContent(safe);
+            }
+        }
+
+        String getOuterHtml() {
+            StringBuilder sb = new StringBuilder();
+            serializeNode(this, sb);
+            return sb.toString();
+        }
+
         String getAttribute(String name) {
             if (name == null) return null;
             return attributes.get(name.toLowerCase(Locale.ROOT));
@@ -261,6 +388,22 @@ final class ShirazWebDom {
     DomNode getElementById(String id) {
         if (id == null || id.isEmpty()) return null;
         return findById(document, id);
+    }
+
+    DomNode findPrimaryEditableNode() {
+        return findFirstEditable(getBody());
+    }
+
+    private static DomNode findFirstEditable(DomNode node) {
+        if (node == null) return null;
+        if (node.isEditableControl()) return node;
+        for (DomNode c : node.children) {
+            if (c.nodeType == NODE_ELEMENT) {
+                DomNode found = findFirstEditable(c);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static DomNode findById(DomNode node, String id) {
@@ -522,6 +665,13 @@ final class ShirazWebDom {
                 String val = node.getAttribute("value");
                 if (val == null) val = node.getAttribute("placeholder");
                 if (val != null && !val.isEmpty()) out.append('[').append(val).append(']');
+                return;
+            }
+            if ("textarea".equals(tag)) {
+                ensureNewline(out);
+                String val = node.getEditableValue();
+                if (!val.isEmpty()) out.append(val);
+                ensureNewline(out);
                 return;
             }
             boolean isBlock = BLOCK_TAGS.contains(tag);

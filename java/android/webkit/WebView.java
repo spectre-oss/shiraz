@@ -2,17 +2,23 @@
 package android.webkit;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
 import android.text.Html;
+import android.text.TextWatcher;
 import android.util.AttributeSet;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ScrollView;
-import android.widget.TextView;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Embedded WebView backed by Shiraz's pure-Java HTML5 DOM tree ({@link ShirazWebDom})
@@ -60,10 +66,15 @@ public class WebView extends FrameLayout {
 
     private final WebSettings settings = new WebSettings();
     private final PrivateAccess privateAccess = new PrivateAccess();
-    private final TextView body;
+    private final EditText body;
     private final List<HistoryEntry> history = new ArrayList<HistoryEntry>();
+    private final Map<Integer, Runnable> pendingTimers = new LinkedHashMap<Integer, Runnable>();
+    private int nextTimerId = 1;
+    private Handler timerHandler;
     private int historyIndex = -1;
     private ShirazWebDom dom = ShirazWebDom.parse("");
+    private ShirazWebDom.DomNode activeEditableNode;
+    private boolean syncingDomToView;
     private final ShirazJsEngine jsEngine;
     private String url = "";
     private int progress;
@@ -81,8 +92,32 @@ public class WebView extends FrameLayout {
 
     public WebView(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
-        body = new TextView(context);
+        body = new EditText(context);
         body.setPadding(24, 24, 24, 24);
+        body.setFocusable(false);
+        body.setFocusableInTouchMode(false);
+        body.setCursorVisible(false);
+        body.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override public void afterTextChanged(Editable s) {
+                if (syncingDomToView || destroyed || activeEditableNode == null) return;
+                String updated = s == null ? "" : s.toString();
+                int selStart = Math.max(0, body.getSelectionStart());
+                int selEnd = Math.max(selStart, body.getSelectionEnd());
+                try {
+                    jsEngine.applyInteractiveEdit(activeEditableNode, updated, selStart, selEnd);
+                } catch (RuntimeException err) {
+                    if (chrome != null) {
+                        chrome.onConsoleMessage(new ConsoleMessage(
+                                String.valueOf(err.getMessage()), WebView.this.url, 1,
+                                ConsoleMessage.MessageLevel.ERROR));
+                    }
+                }
+            }
+        });
         ScrollView scroll = new ScrollView(context);
         scroll.addView(body, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         addView(scroll, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -137,7 +172,64 @@ public class WebView extends FrameLayout {
             @Override public void onWindowPostMessage(String data, String targetOrigin) {
                 jsEngine.dispatchWindowMessage(data, targetOrigin);
             }
+
+            @Override public int scheduleTimer(final Runnable action, long delayMs) {
+                if (destroyed || action == null || pendingTimers.size() >= 256) return 0;
+                final int id = nextTimerId++;
+                Runnable wrapped = new Runnable() {
+                    @Override public void run() {
+                        pendingTimers.remove(Integer.valueOf(id));
+                        if (!destroyed) action.run();
+                    }
+                };
+                pendingTimers.put(Integer.valueOf(id), wrapped);
+                Handler h = ensureTimerHandler();
+                if (h != null) {
+                    h.postDelayed(wrapped, Math.max(0L, delayMs));
+                } else {
+                    postDelayed(wrapped, Math.max(0L, delayMs));
+                }
+                return id;
+            }
+
+            @Override public void cancelTimer(int timerId) {
+                Runnable r = pendingTimers.remove(Integer.valueOf(timerId));
+                if (r != null) {
+                    if (timerHandler != null) timerHandler.removeCallbacks(r);
+                    removeCallbacks(r);
+                }
+            }
+
+            @Override public int getViewportWidth() {
+                int w = getWidth();
+                return w > 0 ? w : 360;
+            }
+
+            @Override public int getViewportHeight() {
+                int h = getHeight();
+                return h > 0 ? h : 640;
+            }
+
+            @Override public boolean isDomStorageEnabled() {
+                return settings.getDomStorageEnabled();
+            }
         }, dom);
+    }
+
+    private Handler ensureTimerHandler() {
+        if (timerHandler != null) return timerHandler;
+        Looper looper = Looper.myLooper();
+        if (looper == null) looper = Looper.getMainLooper();
+        if (looper != null) timerHandler = new Handler(looper);
+        return timerHandler;
+    }
+
+    private void cancelAllPendingTimers() {
+        for (Runnable r : new ArrayList<Runnable>(pendingTimers.values())) {
+            if (timerHandler != null) timerHandler.removeCallbacks(r);
+            removeCallbacks(r);
+        }
+        pendingTimers.clear();
     }
 
     /** Disabling debugging is valid without a DevTools server; enabling it is unsupported. */
@@ -195,9 +287,11 @@ public class WebView extends FrameLayout {
 
     private void loadDocumentInternal(
             String targetUrl, String rawPayload, boolean isHtml, boolean recordHistory) {
+        cancelAllPendingTimers();
         this.url = targetUrl == null ? "" : targetUrl;
         this.progress = 0;
         this.title = null;
+        this.activeEditableNode = null;
         inPageCallback = true;
         try {
             if (client != null) client.onPageStarted(this, this.url, null);
@@ -215,6 +309,15 @@ public class WebView extends FrameLayout {
                                         String.valueOf(err.getMessage()), this.url, 1,
                                         ConsoleMessage.MessageLevel.ERROR));
                             }
+                        }
+                    }
+                    try {
+                        jsEngine.dispatchDocumentLifecycleEvents();
+                    } catch (RuntimeException err) {
+                        if (chrome != null) {
+                            chrome.onConsoleMessage(new ConsoleMessage(
+                                    String.valueOf(err.getMessage()), this.url, 1,
+                                    ConsoleMessage.MessageLevel.ERROR));
                         }
                     }
                     String updatedTitle = dom.getTitle();
@@ -254,7 +357,13 @@ public class WebView extends FrameLayout {
     }
 
     private void renderCurrentDom() {
-        String rendered = dom.toRenderedText();
+        ShirazWebDom.DomNode editable = dom.findPrimaryEditableNode();
+        activeEditableNode = editable;
+        boolean hasEditor = editable != null;
+        body.setFocusable(hasEditor);
+        body.setFocusableInTouchMode(hasEditor);
+        body.setCursorVisible(hasEditor);
+        String rendered = hasEditor ? editable.getEditableValue() : dom.toRenderedText();
         if (rendered.length() > 32000) {
             rendered = rendered.substring(0, 32000) + "\n\u2026";
         }
@@ -262,7 +371,18 @@ public class WebView extends FrameLayout {
     }
 
     private void show(CharSequence text) {
-        body.setText(text == null ? "" : text);
+        String desired = text == null ? "" : text.toString();
+        CharSequence current = body.getText();
+        if (current != null && desired.equals(current.toString())) return;
+        syncingDomToView = true;
+        try {
+            body.setText(desired);
+            if (activeEditableNode != null) {
+                body.setSelection(desired.length());
+            }
+        } finally {
+            syncingDomToView = false;
+        }
     }
 
     private static final class FetchedPayload {
@@ -499,6 +619,8 @@ public class WebView extends FrameLayout {
 
     public void destroy() {
         destroyed = true;
+        cancelAllPendingTimers();
+        activeEditableNode = null;
         history.clear();
         historyIndex = -1;
         removeAllViews();

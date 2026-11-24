@@ -32,6 +32,11 @@ final class ShirazJsEngine {
         boolean onConfirm(String message);
         String onPrompt(String message, String defaultValue);
         void onWindowPostMessage(String data, String targetOrigin);
+        int scheduleTimer(Runnable action, long delayMs);
+        void cancelTimer(int timerId);
+        int getViewportWidth();
+        int getViewportHeight();
+        boolean isDomStorageEnabled();
     }
 
     static final class Undefined {
@@ -190,10 +195,52 @@ final class ShirazJsEngine {
     private final IdentityHashMap<ShirazWebDom.DomNode, Map<String, List<JsCallable>>> domListeners =
             new IdentityHashMap<ShirazWebDom.DomNode, Map<String, List<JsCallable>>>();
     private final Map<String, List<JsCallable>> windowListeners = new HashMap<String, List<JsCallable>>();
+    private final Map<String, List<JsCallable>> documentListeners = new HashMap<String, List<JsCallable>>();
+    private final Map<String, String> localStorageData = new LinkedHashMap<String, String>();
+    private final Map<String, String> sessionStorageData = new LinkedHashMap<String, String>();
+    private final List<MutationObserverEntry> mutationObservers = new ArrayList<MutationObserverEntry>();
+    private ShirazWebDom.DomNode activeElementNode;
+    private SelectionRange currentSelection = new SelectionRange();
+    private final long engineStartNanos = System.nanoTime();
     private JsObject windowObj;
     private JsObject documentObj;
     private Env globalEnv;
     private int steps;
+
+    private static final class SelectionRange {
+        ShirazWebDom.DomNode startContainer;
+        int startOffset;
+        ShirazWebDom.DomNode endContainer;
+        int endOffset;
+
+        boolean isCollapsed() {
+            return startContainer == endContainer && startOffset == endOffset;
+        }
+    }
+
+    private static final class MutationObserverEntry {
+        final JsCallable callback;
+        ShirazWebDom.DomNode target;
+        boolean childList;
+        boolean attributes;
+        boolean characterData;
+        boolean subtree;
+        final List<JsObject> pendingRecords = new ArrayList<JsObject>();
+
+        MutationObserverEntry(JsCallable callback) {
+            this.callback = callback;
+        }
+
+        boolean matches(ShirazWebDom.DomNode node, String type) {
+            if (target == null || node == null) return false;
+            boolean typeOk = ("childList".equals(type) && childList)
+                    || ("attributes".equals(type) && attributes)
+                    || ("characterData".equals(type) && characterData);
+            if (!typeOk) return false;
+            if (node == target) return true;
+            return subtree && target.contains(node);
+        }
+    }
 
     ShirazJsEngine(HostCallbacks host, ShirazWebDom initialDom) {
         this.host = host;
@@ -222,6 +269,10 @@ final class ShirazJsEngine {
         this.nodeProxies.clear();
         this.domListeners.clear();
         this.windowListeners.clear();
+        this.documentListeners.clear();
+        this.mutationObservers.clear();
+        this.activeElementNode = this.dom.getBody();
+        this.currentSelection = new SelectionRange();
         this.globalEnv = new Env(null);
         this.windowObj = new JsObject();
         this.documentObj = buildDocumentObject();
@@ -234,6 +285,151 @@ final class ShirazJsEngine {
         }
     }
 
+    void dispatchDocumentLifecycleEvents() {
+        JsObject domReady = makeEventObject("DOMContentLoaded", documentObj, true, false, null);
+        dispatchDocumentListeners("DOMContentLoaded", domReady);
+        dispatchWindowListeners("DOMContentLoaded", domReady);
+        JsObject loadEvt = makeEventObject("load", windowObj, false, false, null);
+        dispatchWindowListeners("load", loadEvt);
+    }
+
+    void applyInteractiveEdit(ShirazWebDom.DomNode target, String newText, int selStart, int selEnd) {
+        if (target == null) return;
+        String safe = newText == null ? "" : newText;
+        String prev = target.getEditableValue();
+        activeElementNode = target;
+        int len = safe.length();
+        int clampedStart = Math.max(0, Math.min(selStart, len));
+        int clampedEnd = Math.max(clampedStart, Math.min(selEnd, len));
+        currentSelection.startContainer = target;
+        currentSelection.startOffset = clampedStart;
+        currentSelection.endContainer = target;
+        currentSelection.endOffset = clampedEnd;
+        if (!safe.equals(prev)) {
+            target.setEditableValue(safe);
+            recordMutation(target, "characterData", null, null, null);
+            recordMutation(target, "childList", null, null, null);
+            DomElementProxy proxy = wrapNode(target);
+            JsObject inputEvt = makeEventObject("input", proxy, true, false, null);
+            inputEvt.setProp("data", safe);
+            inputEvt.setProp("inputType", "insertText");
+            proxy.fireEvent("input", inputEvt);
+            flushMutationObservers();
+        }
+        JsObject selEvt = makeEventObject("selectionchange", documentObj, false, false, null);
+        dispatchDocumentListeners("selectionchange", selEvt);
+    }
+
+    void notifyInteractiveFocus(ShirazWebDom.DomNode target) {
+        if (target == null || target == activeElementNode) return;
+        ShirazWebDom.DomNode prev = activeElementNode;
+        activeElementNode = target;
+        if (prev != null && prev != dom.getBody()) {
+            DomElementProxy prevProxy = wrapNode(prev);
+            prevProxy.fireEvent("blur", makeEventObject("blur", prevProxy, false, false, null));
+        }
+        DomElementProxy nextProxy = wrapNode(target);
+        nextProxy.fireEvent("focus", makeEventObject("focus", nextProxy, false, false, null));
+    }
+
+    private JsObject makeEventObject(
+            String type, Object target, boolean bubbles, boolean cancelable, Object detail) {
+        final JsObject evt = new JsObject();
+        evt.setProp("type", type == null ? "" : type);
+        evt.setProp("target", target);
+        evt.setProp("currentTarget", target);
+        evt.setProp("bubbles", Boolean.valueOf(bubbles));
+        evt.setProp("cancelable", Boolean.valueOf(cancelable));
+        evt.setProp("defaultPrevented", Boolean.FALSE);
+        evt.setProp("_stopped", Boolean.FALSE);
+        if (detail != null) evt.setProp("detail", detail);
+        evt.setProp("preventDefault", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (toJsBoolean(evt.getProp("cancelable"))) {
+                    evt.setProp("defaultPrevented", Boolean.TRUE);
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        evt.setProp("stopPropagation", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                evt.setProp("_stopped", Boolean.TRUE);
+                return Undefined.INSTANCE;
+            }
+        });
+        return evt;
+    }
+
+    private void dispatchDocumentListeners(String type, JsObject event) {
+        Object inline = documentObj.getProp("on" + type);
+        List<Object> args = Collections.<Object>singletonList(event);
+        if (inline instanceof JsCallable) {
+            steps = 0;
+            ((JsCallable) inline).call(documentObj, args);
+        }
+        List<JsCallable> list = documentListeners.get(type);
+        if (list != null) {
+            for (JsCallable fn : new ArrayList<JsCallable>(list)) {
+                steps = 0;
+                fn.call(documentObj, args);
+            }
+        }
+    }
+
+    private void dispatchWindowListeners(String type, JsObject event) {
+        Object inline = windowObj.getProp("on" + type);
+        List<Object> args = Collections.<Object>singletonList(event);
+        if (inline instanceof JsCallable) {
+            steps = 0;
+            ((JsCallable) inline).call(windowObj, args);
+        }
+        List<JsCallable> list = windowListeners.get(type);
+        if (list != null) {
+            for (JsCallable fn : new ArrayList<JsCallable>(list)) {
+                steps = 0;
+                fn.call(windowObj, args);
+            }
+        }
+    }
+
+    private void recordMutation(
+            ShirazWebDom.DomNode target,
+            String type,
+            String attributeName,
+            ShirazWebDom.DomNode added,
+            ShirazWebDom.DomNode removed) {
+        if (mutationObservers.isEmpty() || target == null) return;
+        for (MutationObserverEntry entry : mutationObservers) {
+            if (!entry.matches(target, type)) continue;
+            JsObject rec = new JsObject();
+            rec.setProp("type", type);
+            rec.setProp("target", wrapNode(target));
+            rec.setProp("attributeName", attributeName);
+            JsArray addedList = new JsArray();
+            if (added != null) addedList.items.add(wrapNode(added));
+            JsArray removedList = new JsArray();
+            if (removed != null) removedList.items.add(wrapNode(removed));
+            rec.setProp("addedNodes", addedList);
+            rec.setProp("removedNodes", removedList);
+            entry.pendingRecords.add(rec);
+        }
+    }
+
+    void flushMutationObservers() {
+        if (mutationObservers.isEmpty()) return;
+        for (MutationObserverEntry entry : new ArrayList<MutationObserverEntry>(mutationObservers)) {
+            if (entry.pendingRecords.isEmpty()) continue;
+            JsArray batch = new JsArray();
+            batch.items.addAll(entry.pendingRecords);
+            entry.pendingRecords.clear();
+            steps = 0;
+            List<Object> args = new ArrayList<Object>(2);
+            args.add(batch);
+            args.add(windowObj);
+            entry.callback.call(windowObj, args);
+        }
+    }
+
     Object evaluate(String source) {
         if (source == null || source.trim().isEmpty()) return Undefined.INSTANCE;
         steps = 0;
@@ -243,6 +439,7 @@ final class ShirazJsEngine {
         for (Stmt stmt : program) {
             last = execStmt(stmt, globalEnv, windowObj);
         }
+        flushMutationObservers();
         return last;
     }
 
@@ -338,6 +535,209 @@ final class ShirazJsEngine {
         defineGlobal("addEventListener", windowObj.getProp("addEventListener"));
         defineGlobal("removeEventListener", windowObj.getProp("removeEventListener"));
         defineGlobal("postMessage", windowObj.getProp("postMessage"));
+
+        windowObj.setProp("innerWidth", Double.valueOf(Math.max(1, host.getViewportWidth())));
+        windowObj.setProp("innerHeight", Double.valueOf(Math.max(1, host.getViewportHeight())));
+        windowObj.setProp("devicePixelRatio", Double.valueOf(1.0));
+        windowObj.setProp("getSelection", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                return buildSelectionObject();
+            }
+        });
+        defineGlobal("getSelection", windowObj.getProp("getSelection"));
+
+        // Timers & microtasks
+        JsCallable setTimeoutFn = new JsCallable() {
+            @Override public Object call(Object t, final List<Object> a) {
+                if (a.isEmpty()) return Double.valueOf(0);
+                final Object cb = a.get(0);
+                long delay = a.size() >= 2 ? Math.max(0L, (long) toJsNumber(a.get(1))) : 0L;
+                if (delay > 60000L) delay = 60000L;
+                final List<Object> extra = a.size() > 2
+                        ? new ArrayList<Object>(a.subList(2, a.size()))
+                        : Collections.<Object>emptyList();
+                int id = host.scheduleTimer(new Runnable() {
+                    @Override public void run() {
+                        try {
+                            steps = 0;
+                            if (cb instanceof JsCallable) {
+                                ((JsCallable) cb).call(windowObj, extra);
+                                flushMutationObservers();
+                            } else if (cb instanceof String) {
+                                evaluate((String) cb);
+                            }
+                        } catch (RuntimeException err) {
+                            host.onConsole(ConsoleMessage.MessageLevel.ERROR, String.valueOf(err.getMessage()));
+                        }
+                    }
+                }, delay);
+                return Double.valueOf(id);
+            }
+        };
+        JsCallable clearTimeoutFn = new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty()) host.cancelTimer((int) toJsNumber(a.get(0)));
+                return Undefined.INSTANCE;
+            }
+        };
+        defineGlobal("setTimeout", setTimeoutFn);
+        defineGlobal("clearTimeout", clearTimeoutFn);
+        defineGlobal("clearInterval", clearTimeoutFn);
+        defineGlobal("requestAnimationFrame", new JsCallable() {
+            @Override public Object call(Object t, final List<Object> a) {
+                if (a.isEmpty() || !(a.get(0) instanceof JsCallable)) return Double.valueOf(0);
+                final JsCallable fn = (JsCallable) a.get(0);
+                int id = host.scheduleTimer(new Runnable() {
+                    @Override public void run() {
+                        try {
+                            steps = 0;
+                            double ms = (System.nanoTime() - engineStartNanos) / 1_000_000.0;
+                            fn.call(windowObj, Collections.<Object>singletonList(Double.valueOf(ms)));
+                            flushMutationObservers();
+                        } catch (RuntimeException err) {
+                            host.onConsole(ConsoleMessage.MessageLevel.ERROR, String.valueOf(err.getMessage()));
+                        }
+                    }
+                }, 16L);
+                return Double.valueOf(id);
+            }
+        });
+        defineGlobal("cancelAnimationFrame", clearTimeoutFn);
+        defineGlobal("queueMicrotask", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty() && a.get(0) instanceof JsCallable) {
+                    final JsCallable fn = (JsCallable) a.get(0);
+                    host.scheduleTimer(new Runnable() {
+                        @Override public void run() {
+                            try {
+                                steps = 0;
+                                fn.call(windowObj, Collections.<Object>emptyList());
+                                flushMutationObservers();
+                            } catch (RuntimeException err) {
+                                host.onConsole(ConsoleMessage.MessageLevel.ERROR, String.valueOf(err.getMessage()));
+                            }
+                        }
+                    }, 0L);
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+
+        // Storage (localStorage & sessionStorage)
+        defineGlobal("localStorage", buildStorageObject(localStorageData));
+        defineGlobal("sessionStorage", buildStorageObject(sessionStorageData));
+
+        // Event & CustomEvent constructors
+        defineGlobal("Event", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                String type = a.isEmpty() ? "" : toJsString(a.get(0));
+                boolean bubbles = false;
+                boolean cancelable = false;
+                if (a.size() >= 2 && a.get(1) instanceof JsObject) {
+                    JsObject init = (JsObject) a.get(1);
+                    bubbles = toJsBoolean(init.getProp("bubbles"));
+                    cancelable = toJsBoolean(init.getProp("cancelable"));
+                }
+                return makeEventObject(type, null, bubbles, cancelable, null);
+            }
+        });
+        defineGlobal("CustomEvent", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                String type = a.isEmpty() ? "" : toJsString(a.get(0));
+                boolean bubbles = false;
+                boolean cancelable = false;
+                Object detail = null;
+                if (a.size() >= 2 && a.get(1) instanceof JsObject) {
+                    JsObject init = (JsObject) a.get(1);
+                    bubbles = toJsBoolean(init.getProp("bubbles"));
+                    cancelable = toJsBoolean(init.getProp("cancelable"));
+                    Object d = init.getProp("detail");
+                    detail = d == Undefined.INSTANCE ? null : d;
+                }
+                return makeEventObject(type, null, bubbles, cancelable, detail);
+            }
+        });
+
+        // MutationObserver constructor
+        defineGlobal("MutationObserver", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (a.isEmpty() || !(a.get(0) instanceof JsCallable)) {
+                    throw new JsRuntimeError("MutationObserver requires a callback function");
+                }
+                final MutationObserverEntry entry = new MutationObserverEntry((JsCallable) a.get(0));
+                JsObject observer = new JsObject();
+                observer.setProp("observe", new JsCallable() {
+                    @Override public Object call(Object obs, List<Object> oa) {
+                        if (oa.isEmpty() || !(oa.get(0) instanceof DomElementProxy)) return Undefined.INSTANCE;
+                        entry.target = ((DomElementProxy) oa.get(0)).node;
+                        entry.childList = false;
+                        entry.attributes = false;
+                        entry.characterData = false;
+                        entry.subtree = false;
+                        if (oa.size() >= 2 && oa.get(1) instanceof JsObject) {
+                            JsObject opts = (JsObject) oa.get(1);
+                            entry.childList = toJsBoolean(opts.getProp("childList"));
+                            entry.attributes = toJsBoolean(opts.getProp("attributes"));
+                            entry.characterData = toJsBoolean(opts.getProp("characterData"));
+                            entry.subtree = toJsBoolean(opts.getProp("subtree"));
+                        } else {
+                            entry.childList = true;
+                            entry.attributes = true;
+                            entry.characterData = true;
+                            entry.subtree = true;
+                        }
+                        if (!mutationObservers.contains(entry)) {
+                            mutationObservers.add(entry);
+                        }
+                        return Undefined.INSTANCE;
+                    }
+                });
+                observer.setProp("disconnect", new JsCallable() {
+                    @Override public Object call(Object obs, List<Object> oa) {
+                        mutationObservers.remove(entry);
+                        entry.pendingRecords.clear();
+                        return Undefined.INSTANCE;
+                    }
+                });
+                observer.setProp("takeRecords", new JsCallable() {
+                    @Override public Object call(Object obs, List<Object> oa) {
+                        JsArray taken = new JsArray();
+                        taken.items.addAll(entry.pendingRecords);
+                        entry.pendingRecords.clear();
+                        return taken;
+                    }
+                });
+                return observer;
+            }
+        });
+
+        // Error, Date, performance, navigator
+        defineGlobal("Error", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                JsObject err = new JsObject();
+                err.setProp("name", "Error");
+                err.setProp("message", a.isEmpty() ? "" : toJsString(a.get(0)));
+                return err;
+            }
+        });
+        JsObject dateCtor = new JsObject();
+        dateCtor.setProp("now", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                return Double.valueOf((double) System.currentTimeMillis());
+            }
+        });
+        defineGlobal("Date", dateCtor);
+        JsObject perf = new JsObject();
+        perf.setProp("now", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                return Double.valueOf((System.nanoTime() - engineStartNanos) / 1_000_000.0);
+            }
+        });
+        defineGlobal("performance", perf);
+        JsObject nav = new JsObject();
+        nav.setProp("userAgent", "Mozilla/5.0 (Linux; Android 15) ShirazWebView/1.0");
+        nav.setProp("language", Locale.getDefault().toLanguageTag());
+        defineGlobal("navigator", nav);
 
         // console
         JsObject console = new JsObject();
@@ -587,7 +987,367 @@ final class ShirazJsEngine {
                 return out;
             }
         });
+        objectCtor.setProp("entries", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                JsArray out = new JsArray();
+                if (!a.isEmpty() && a.get(0) instanceof JsObject) {
+                    JsObject obj = (JsObject) a.get(0);
+                    for (String k : obj.ownKeys()) {
+                        JsArray pair = new JsArray();
+                        pair.items.add(k);
+                        pair.items.add(obj.getProp(k));
+                        out.items.add(pair);
+                    }
+                }
+                return out;
+            }
+        });
+        objectCtor.setProp("assign", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (a.isEmpty() || !(a.get(0) instanceof JsObject)) return new JsObject();
+                JsObject target = (JsObject) a.get(0);
+                for (int i = 1; i < a.size(); i++) {
+                    if (a.get(i) instanceof JsObject) {
+                        JsObject src = (JsObject) a.get(i);
+                        for (String k : src.ownKeys()) target.setProp(k, src.getProp(k));
+                    }
+                }
+                return target;
+            }
+        });
+        objectCtor.setProp("create", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                JsObject created = new JsObject();
+                if (!a.isEmpty() && a.get(0) instanceof JsObject) {
+                    JsObject proto = (JsObject) a.get(0);
+                    for (String k : proto.ownKeys()) created.setProp(k, proto.getProp(k));
+                }
+                return created;
+            }
+        });
         defineGlobal("Object", objectCtor);
+        arrayCtor.setProp("from", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                JsArray out = new JsArray();
+                if (a.isEmpty()) return out;
+                Object src = a.get(0);
+                if (src instanceof JsArray) {
+                    out.items.addAll(((JsArray) src).items);
+                } else if (src instanceof String) {
+                    String s = (String) src;
+                    for (int i = 0; i < s.length(); i++) out.items.add(String.valueOf(s.charAt(i)));
+                }
+                return out;
+            }
+        });
+    }
+
+    private JsObject buildStorageObject(final Map<String, String> backing) {
+        JsObject storage = new JsObject() {
+            @Override Object getProp(String name) {
+                if ("length".equals(name)) return Double.valueOf(backing.size());
+                Object superVal = super.getProp(name);
+                if (superVal != Undefined.INSTANCE) return superVal;
+                return backing.containsKey(name) ? backing.get(name) : Undefined.INSTANCE;
+            }
+        };
+        storage.setProp("getItem", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (a.isEmpty()) return null;
+                String k = toJsString(a.get(0));
+                return backing.containsKey(k) ? backing.get(k) : null;
+            }
+        });
+        storage.setProp("setItem", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (a.size() >= 2 && backing.size() < 2048) {
+                    backing.put(toJsString(a.get(0)), toJsString(a.get(1)));
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        storage.setProp("removeItem", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty()) backing.remove(toJsString(a.get(0)));
+                return Undefined.INSTANCE;
+            }
+        });
+        storage.setProp("clear", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                backing.clear();
+                return Undefined.INSTANCE;
+            }
+        });
+        storage.setProp("key", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                int idx = a.isEmpty() ? 0 : (int) toJsNumber(a.get(0));
+                if (idx < 0 || idx >= backing.size()) return null;
+                int i = 0;
+                for (String k : backing.keySet()) {
+                    if (i++ == idx) return k;
+                }
+                return null;
+            }
+        });
+        return storage;
+    }
+
+    private JsObject buildRangeObject(final SelectionRange range) {
+        JsObject obj = new JsObject() {
+            @Override Object getProp(String name) {
+                if ("startContainer".equals(name)) return wrapNode(range.startContainer);
+                if ("endContainer".equals(name)) return wrapNode(range.endContainer);
+                if ("startOffset".equals(name)) return Double.valueOf(range.startOffset);
+                if ("endOffset".equals(name)) return Double.valueOf(range.endOffset);
+                if ("collapsed".equals(name)) return Boolean.valueOf(range.isCollapsed());
+                return super.getProp(name);
+            }
+        };
+        obj.setProp("setStart", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (a.size() >= 2 && a.get(0) instanceof DomElementProxy) {
+                    range.startContainer = ((DomElementProxy) a.get(0)).node;
+                    range.startOffset = Math.max(0, (int) toJsNumber(a.get(1)));
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        obj.setProp("setEnd", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (a.size() >= 2 && a.get(0) instanceof DomElementProxy) {
+                    range.endContainer = ((DomElementProxy) a.get(0)).node;
+                    range.endOffset = Math.max(0, (int) toJsNumber(a.get(1)));
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        obj.setProp("selectNodeContents", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty() && a.get(0) instanceof DomElementProxy) {
+                    ShirazWebDom.DomNode n = ((DomElementProxy) a.get(0)).node;
+                    range.startContainer = n;
+                    range.startOffset = 0;
+                    range.endContainer = n;
+                    range.endOffset = n.getEditableValue().length();
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        obj.setProp("collapse", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                boolean toStart = !a.isEmpty() && toJsBoolean(a.get(0));
+                if (toStart) {
+                    range.endContainer = range.startContainer;
+                    range.endOffset = range.startOffset;
+                } else {
+                    range.startContainer = range.endContainer;
+                    range.startOffset = range.endOffset;
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        obj.setProp("deleteContents", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (range.startContainer != null && range.startContainer == range.endContainer) {
+                    String text = range.startContainer.getEditableValue();
+                    int s = Math.max(0, Math.min(range.startOffset, text.length()));
+                    int e = Math.max(s, Math.min(range.endOffset, text.length()));
+                    if (e > s) {
+                        range.startContainer.setEditableValue(text.substring(0, s) + text.substring(e));
+                        range.endOffset = s;
+                        recordMutation(range.startContainer, "characterData", null, null, null);
+                        host.onDomMutated();
+                    }
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        obj.setProp("insertNode", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty() && a.get(0) instanceof DomElementProxy && range.startContainer != null) {
+                    ShirazWebDom.DomNode inserted = ((DomElementProxy) a.get(0)).node;
+                    range.startContainer.appendChild(inserted);
+                    recordMutation(range.startContainer, "childList", null, inserted, null);
+                    host.onDomMutated();
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        obj.setProp("cloneRange", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                SelectionRange copy = new SelectionRange();
+                copy.startContainer = range.startContainer;
+                copy.startOffset = range.startOffset;
+                copy.endContainer = range.endContainer;
+                copy.endOffset = range.endOffset;
+                return buildRangeObject(copy);
+            }
+        });
+        obj.setProp("toString", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (range.startContainer == null) return "";
+                String text = range.startContainer.getEditableValue();
+                int s = Math.max(0, Math.min(range.startOffset, text.length()));
+                int e = Math.max(s, Math.min(range.endOffset, text.length()));
+                return text.substring(s, e);
+            }
+        });
+        return obj;
+    }
+
+    private JsObject buildSelectionObject() {
+        JsObject sel = new JsObject() {
+            @Override Object getProp(String name) {
+                if ("anchorNode".equals(name)) return wrapNode(currentSelection.startContainer);
+                if ("anchorOffset".equals(name)) return Double.valueOf(currentSelection.startOffset);
+                if ("focusNode".equals(name)) return wrapNode(currentSelection.endContainer);
+                if ("focusOffset".equals(name)) return Double.valueOf(currentSelection.endOffset);
+                if ("isCollapsed".equals(name)) return Boolean.valueOf(currentSelection.isCollapsed());
+                if ("rangeCount".equals(name)) return Double.valueOf(currentSelection.startContainer == null ? 0 : 1);
+                return super.getProp(name);
+            }
+        };
+        sel.setProp("getRangeAt", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                return buildRangeObject(currentSelection);
+            }
+        });
+        sel.setProp("removeAllRanges", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                currentSelection.startContainer = null;
+                currentSelection.endContainer = null;
+                currentSelection.startOffset = 0;
+                currentSelection.endOffset = 0;
+                return Undefined.INSTANCE;
+            }
+        });
+        sel.setProp("addRange", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty() && a.get(0) instanceof JsObject) {
+                    JsObject r = (JsObject) a.get(0);
+                    Object sc = r.getProp("startContainer");
+                    Object ec = r.getProp("endContainer");
+                    currentSelection.startContainer = sc instanceof DomElementProxy ? ((DomElementProxy) sc).node : null;
+                    currentSelection.endContainer = ec instanceof DomElementProxy ? ((DomElementProxy) ec).node : currentSelection.startContainer;
+                    currentSelection.startOffset = Math.max(0, (int) toJsNumber(r.getProp("startOffset")));
+                    currentSelection.endOffset = Math.max(0, (int) toJsNumber(r.getProp("endOffset")));
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        sel.setProp("collapse", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty() && a.get(0) instanceof DomElementProxy) {
+                    ShirazWebDom.DomNode n = ((DomElementProxy) a.get(0)).node;
+                    int offset = a.size() >= 2 ? Math.max(0, (int) toJsNumber(a.get(1))) : 0;
+                    currentSelection.startContainer = n;
+                    currentSelection.endContainer = n;
+                    currentSelection.startOffset = offset;
+                    currentSelection.endOffset = offset;
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        sel.setProp("selectAllChildren", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (!a.isEmpty() && a.get(0) instanceof DomElementProxy) {
+                    ShirazWebDom.DomNode n = ((DomElementProxy) a.get(0)).node;
+                    currentSelection.startContainer = n;
+                    currentSelection.endContainer = n;
+                    currentSelection.startOffset = 0;
+                    currentSelection.endOffset = n.getEditableValue().length();
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        sel.setProp("toString", new JsCallable() {
+            @Override public Object call(Object t, List<Object> a) {
+                if (currentSelection.startContainer == null) return "";
+                String text = currentSelection.startContainer.getEditableValue();
+                int s = Math.max(0, Math.min(currentSelection.startOffset, text.length()));
+                int e = Math.max(s, Math.min(currentSelection.endOffset, text.length()));
+                return text.substring(s, e);
+            }
+        });
+        return sel;
+    }
+
+    private boolean executeCommand(String command, String value) {
+        if (command == null) return false;
+        String cmd = command.toLowerCase(Locale.ROOT);
+        ShirazWebDom.DomNode target = activeElementNode;
+        if (target == null || !target.isEditableControl()) {
+            target = dom.findPrimaryEditableNode();
+        }
+        if (target == null) return false;
+        String cur = target.getEditableValue();
+        int len = cur.length();
+        int start = currentSelection.startContainer == target
+                ? Math.max(0, Math.min(currentSelection.startOffset, len))
+                : len;
+        int end = currentSelection.endContainer == target
+                ? Math.max(start, Math.min(currentSelection.endOffset, len))
+                : len;
+        if ("selectall".equals(cmd)) {
+            currentSelection.startContainer = target;
+            currentSelection.endContainer = target;
+            currentSelection.startOffset = 0;
+            currentSelection.endOffset = len;
+            dispatchDocumentListeners("selectionchange", makeEventObject("selectionchange", documentObj, false, false, null));
+            return true;
+        }
+        if ("inserttext".equals(cmd)) {
+            String ins = value == null ? "" : value;
+            String updated = cur.substring(0, start) + ins + cur.substring(end);
+            int caret = start + ins.length();
+            applyInteractiveEdit(target, updated, caret, caret);
+            host.onDomMutated();
+            return true;
+        }
+        if ("inserthtml".equals(cmd)) {
+            String html = value == null ? "" : value;
+            ShirazWebDom.DomNode frag = ShirazWebDom.parseFragment(html);
+            for (ShirazWebDom.DomNode child : new ArrayList<ShirazWebDom.DomNode>(frag.children)) {
+                target.appendChild(child);
+                recordMutation(target, "childList", null, child, null);
+            }
+            DomElementProxy proxy = wrapNode(target);
+            proxy.fireEvent("input", makeEventObject("input", proxy, true, false, null));
+            flushMutationObservers();
+            host.onDomMutated();
+            return true;
+        }
+        if ("delete".equals(cmd)) {
+            int delStart = start == end ? Math.max(0, start - 1) : start;
+            String updated = cur.substring(0, delStart) + cur.substring(end);
+            applyInteractiveEdit(target, updated, delStart, delStart);
+            host.onDomMutated();
+            return true;
+        }
+        if ("forwarddelete".equals(cmd)) {
+            int delEnd = start == end ? Math.min(len, end + 1) : end;
+            String updated = cur.substring(0, start) + cur.substring(delEnd);
+            applyInteractiveEdit(target, updated, start, start);
+            host.onDomMutated();
+            return true;
+        }
+        if ("bold".equals(cmd) || "italic".equals(cmd) || "underline".equals(cmd)) {
+            String tag = "bold".equals(cmd) ? "strong" : ("italic".equals(cmd) ? "em" : "u");
+            String selected = cur.substring(start, end);
+            String before = cur.substring(0, start);
+            String after = cur.substring(end);
+            target.setInnerHtml(
+                    ShirazWebDom.decodeEntities(before).replace("<", "&lt;")
+                    + "<" + tag + ">" + selected.replace("<", "&lt;") + "</" + tag + ">"
+                    + ShirazWebDom.decodeEntities(after).replace("<", "&lt;"));
+            recordMutation(target, "childList", null, null, null);
+            DomElementProxy proxy = wrapNode(target);
+            proxy.fireEvent("input", makeEventObject("input", proxy, true, false, null));
+            flushMutationObservers();
+            host.onDomMutated();
+            return true;
+        }
+        return false;
     }
 
     private JsCallable makeConsoleFn(final ConsoleMessage.MessageLevel level) {
@@ -635,6 +1395,7 @@ final class ShirazJsEngine {
                 if ("body".equals(name)) return wrapNode(dom.getBody());
                 if ("head".equals(name)) return wrapNode(dom.getHead());
                 if ("documentElement".equals(name)) return wrapNode(dom.getDocumentElement());
+                if ("activeElement".equals(name)) return wrapNode(activeElementNode != null ? activeElementNode : dom.getBody());
                 if ("readyState".equals(name)) return "complete";
                 return super.getProp(name);
             }
@@ -692,6 +1453,63 @@ final class ShirazJsEngine {
                 return wrapNode(dom.createTextNode(txt));
             }
         });
+        doc.setProp("createDocumentFragment", new JsCallable() {
+            @Override public Object call(Object thisArg, List<Object> args) {
+                return wrapNode(new ShirazWebDom.DomNode(ShirazWebDom.NODE_DOCUMENT, "#document-fragment", null));
+            }
+        });
+        doc.setProp("createRange", new JsCallable() {
+            @Override public Object call(Object thisArg, List<Object> args) {
+                return buildRangeObject(new SelectionRange());
+            }
+        });
+        doc.setProp("getSelection", new JsCallable() {
+            @Override public Object call(Object thisArg, List<Object> args) {
+                return buildSelectionObject();
+            }
+        });
+        doc.setProp("execCommand", new JsCallable() {
+            @Override public Object call(Object thisArg, List<Object> args) {
+                if (args.isEmpty()) return Boolean.FALSE;
+                String cmd = toJsString(args.get(0));
+                String val = args.size() >= 3 && args.get(2) != null && args.get(2) != Undefined.INSTANCE
+                        ? toJsString(args.get(2))
+                        : "";
+                return Boolean.valueOf(executeCommand(cmd, val));
+            }
+        });
+        doc.setProp("addEventListener", new JsCallable() {
+            @Override public Object call(Object thisArg, List<Object> args) {
+                if (args.size() >= 2 && args.get(1) instanceof JsCallable) {
+                    String type = toJsString(args.get(0));
+                    List<JsCallable> list = documentListeners.get(type);
+                    if (list == null) {
+                        list = new ArrayList<JsCallable>();
+                        documentListeners.put(type, list);
+                    }
+                    list.add((JsCallable) args.get(1));
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        doc.setProp("removeEventListener", new JsCallable() {
+            @Override public Object call(Object thisArg, List<Object> args) {
+                if (args.size() >= 2 && args.get(1) instanceof JsCallable) {
+                    List<JsCallable> list = documentListeners.get(toJsString(args.get(0)));
+                    if (list != null) list.remove(args.get(1));
+                }
+                return Undefined.INSTANCE;
+            }
+        });
+        doc.setProp("dispatchEvent", new JsCallable() {
+            @Override public Object call(Object thisArg, List<Object> args) {
+                if (args.isEmpty()) return Boolean.FALSE;
+                Object raw = args.get(0);
+                JsObject evt = raw instanceof JsObject ? (JsObject) raw : makeEventObject(toJsString(raw), documentObj, false, false, null);
+                dispatchDocumentListeners(toJsString(evt.getProp("type")), evt);
+                return Boolean.TRUE;
+            }
+        });
         return doc;
     }
 
@@ -712,7 +1530,9 @@ final class ShirazJsEngine {
             props.put("setAttribute", new JsCallable() {
                 @Override public Object call(Object t, List<Object> a) {
                     if (a.size() >= 2) {
-                        node.setAttribute(toJsString(a.get(0)), toJsString(a.get(1)));
+                        String attr = toJsString(a.get(0));
+                        node.setAttribute(attr, toJsString(a.get(1)));
+                        recordMutation(node, "attributes", attr, null, null);
                         host.onDomMutated();
                     }
                     return Undefined.INSTANCE;
@@ -721,7 +1541,9 @@ final class ShirazJsEngine {
             props.put("removeAttribute", new JsCallable() {
                 @Override public Object call(Object t, List<Object> a) {
                     if (!a.isEmpty()) {
-                        node.removeAttribute(toJsString(a.get(0)));
+                        String attr = toJsString(a.get(0));
+                        node.removeAttribute(attr);
+                        recordMutation(node, "attributes", attr, null, null);
                         host.onDomMutated();
                     }
                     return Undefined.INSTANCE;
@@ -737,8 +1559,39 @@ final class ShirazJsEngine {
                     if (!a.isEmpty() && a.get(0) instanceof DomElementProxy) {
                         DomElementProxy child = (DomElementProxy) a.get(0);
                         node.appendChild(child.node);
+                        recordMutation(node, "childList", null, child.node, null);
                         host.onDomMutated();
                         return child;
+                    }
+                    return null;
+                }
+            });
+            props.put("insertBefore", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.size() >= 1 && a.get(0) instanceof DomElementProxy) {
+                        DomElementProxy newChild = (DomElementProxy) a.get(0);
+                        ShirazWebDom.DomNode refNode = (a.size() >= 2 && a.get(1) instanceof DomElementProxy)
+                                ? ((DomElementProxy) a.get(1)).node
+                                : null;
+                        if (node.insertBefore(newChild.node, refNode) != null) {
+                            recordMutation(node, "childList", null, newChild.node, null);
+                            host.onDomMutated();
+                            return newChild;
+                        }
+                    }
+                    return null;
+                }
+            });
+            props.put("replaceChild", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.size() >= 2 && a.get(0) instanceof DomElementProxy && a.get(1) instanceof DomElementProxy) {
+                        DomElementProxy newChild = (DomElementProxy) a.get(0);
+                        DomElementProxy oldChild = (DomElementProxy) a.get(1);
+                        if (node.replaceChild(newChild.node, oldChild.node) != null) {
+                            recordMutation(node, "childList", null, newChild.node, oldChild.node);
+                            host.onDomMutated();
+                            return oldChild;
+                        }
                     }
                     return null;
                 }
@@ -748,11 +1601,67 @@ final class ShirazJsEngine {
                     if (!a.isEmpty() && a.get(0) instanceof DomElementProxy) {
                         DomElementProxy child = (DomElementProxy) a.get(0);
                         if (node.removeChild(child.node)) {
+                            recordMutation(node, "childList", null, null, child.node);
                             host.onDomMutated();
                             return child;
                         }
                     }
                     return null;
+                }
+            });
+            props.put("remove", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (node.parent != null) {
+                        ShirazWebDom.DomNode parent = node.parent;
+                        if (parent.removeChild(node)) {
+                            recordMutation(parent, "childList", null, null, node);
+                            host.onDomMutated();
+                        }
+                    }
+                    return Undefined.INSTANCE;
+                }
+            });
+            props.put("cloneNode", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    boolean deep = !a.isEmpty() && toJsBoolean(a.get(0));
+                    return wrapNode(node.cloneNode(deep));
+                }
+            });
+            props.put("contains", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.isEmpty() || !(a.get(0) instanceof DomElementProxy)) return Boolean.FALSE;
+                    return Boolean.valueOf(node.contains(((DomElementProxy) a.get(0)).node));
+                }
+            });
+            props.put("focus", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    notifyInteractiveFocus(node);
+                    return Undefined.INSTANCE;
+                }
+            });
+            props.put("blur", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (activeElementNode == node) {
+                        activeElementNode = dom.getBody();
+                        fireEvent("blur", makeEventObject("blur", DomElementProxy.this, false, false, null));
+                    }
+                    return Undefined.INSTANCE;
+                }
+            });
+            props.put("getBoundingClientRect", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    int w = Math.max(1, host.getViewportWidth());
+                    int h = Math.max(1, host.getViewportHeight());
+                    JsObject rect = new JsObject();
+                    rect.setProp("x", Double.valueOf(0));
+                    rect.setProp("y", Double.valueOf(0));
+                    rect.setProp("left", Double.valueOf(0));
+                    rect.setProp("top", Double.valueOf(0));
+                    rect.setProp("right", Double.valueOf(w));
+                    rect.setProp("bottom", Double.valueOf(h));
+                    rect.setProp("width", Double.valueOf(w));
+                    rect.setProp("height", Double.valueOf(h));
+                    return rect;
                 }
             });
             props.put("querySelector", new JsCallable() {
@@ -829,32 +1738,216 @@ final class ShirazJsEngine {
             });
         }
 
-        private boolean fireEvent(String type, JsObject evt) {
+        boolean fireEvent(String type, JsObject evt) {
             if (evt == null) {
-                evt = new JsObject();
-                evt.setProp("type", type);
+                evt = makeEventObject(type, this, true, true, null);
+            } else if (evt.getProp("target") == null || evt.getProp("target") == Undefined.INSTANCE) {
                 evt.setProp("target", this);
             }
-            List<Object> args = Collections.<Object>singletonList(evt);
-            Object inlineHandler = props.get("on" + type);
-            if (inlineHandler instanceof JsCallable) {
-                ((JsCallable) inlineHandler).call(this, args);
-            } else {
-                String attrHandler = node.getAttribute("on" + type);
-                if (attrHandler != null && !attrHandler.trim().isEmpty()) {
-                    evaluate(attrHandler);
-                }
-            }
-            Map<String, List<JsCallable>> byType = domListeners.get(node);
-            if (byType != null) {
-                List<JsCallable> list = byType.get(type);
-                if (list != null) {
-                    for (JsCallable fn : new ArrayList<JsCallable>(list)) {
-                        fn.call(this, args);
+            boolean bubbles = toJsBoolean(evt.getProp("bubbles"));
+            ShirazWebDom.DomNode cur = node;
+            while (cur != null) {
+                DomElementProxy curProxy = wrapNode(cur);
+                evt.setProp("currentTarget", curProxy);
+                List<Object> args = Collections.<Object>singletonList(evt);
+                Object inlineHandler = curProxy.props.get("on" + type);
+                if (inlineHandler instanceof JsCallable) {
+                    ((JsCallable) inlineHandler).call(curProxy, args);
+                } else {
+                    String attrHandler = cur.getAttribute("on" + type);
+                    if (attrHandler != null && !attrHandler.trim().isEmpty()) {
+                        evaluate(attrHandler);
                     }
                 }
+                Map<String, List<JsCallable>> byType = domListeners.get(cur);
+                if (byType != null) {
+                    List<JsCallable> list = byType.get(type);
+                    if (list != null) {
+                        for (JsCallable fn : new ArrayList<JsCallable>(list)) {
+                            fn.call(curProxy, args);
+                        }
+                    }
+                }
+                if (!bubbles || toJsBoolean(evt.getProp("_stopped"))) break;
+                cur = cur.parent;
             }
-            return true;
+            if (bubbles && !toJsBoolean(evt.getProp("_stopped"))) {
+                evt.setProp("currentTarget", documentObj);
+                dispatchDocumentListeners(type, evt);
+            }
+            if (bubbles && !toJsBoolean(evt.getProp("_stopped"))) {
+                evt.setProp("currentTarget", windowObj);
+                dispatchWindowListeners(type, evt);
+            }
+            return !toJsBoolean(evt.getProp("defaultPrevented"));
+        }
+
+        private JsObject buildClassList() {
+            JsObject list = new JsObject() {
+                @Override Object getProp(String prop) {
+                    if ("length".equals(prop)) {
+                        String cls = node.getClassName().trim();
+                        return Double.valueOf(cls.isEmpty() ? 0 : cls.split("\\s+").length);
+                    }
+                    return super.getProp(prop);
+                }
+            };
+            list.setProp("contains", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.isEmpty()) return Boolean.FALSE;
+                    String target = toJsString(a.get(0));
+                    String cls = node.getClassName().trim();
+                    if (cls.isEmpty()) return Boolean.FALSE;
+                    for (String c : cls.split("\\s+")) {
+                        if (c.equals(target)) return Boolean.TRUE;
+                    }
+                    return Boolean.FALSE;
+                }
+            });
+            list.setProp("add", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    List<String> tokens = new ArrayList<String>();
+                    String cur = node.getClassName().trim();
+                    if (!cur.isEmpty()) {
+                        for (String c : cur.split("\\s+")) tokens.add(c);
+                    }
+                    for (Object arg : a) {
+                        String tok = toJsString(arg).trim();
+                        if (!tok.isEmpty() && !tokens.contains(tok)) tokens.add(tok);
+                    }
+                    node.setAttribute("class", joinStrings(tokens, " "));
+                    recordMutation(node, "attributes", "class", null, null);
+                    host.onDomMutated();
+                    return Undefined.INSTANCE;
+                }
+            });
+            list.setProp("remove", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    List<String> tokens = new ArrayList<String>();
+                    String cur = node.getClassName().trim();
+                    if (!cur.isEmpty()) {
+                        for (String c : cur.split("\\s+")) tokens.add(c);
+                    }
+                    for (Object arg : a) tokens.remove(toJsString(arg).trim());
+                    node.setAttribute("class", joinStrings(tokens, " "));
+                    recordMutation(node, "attributes", "class", null, null);
+                    host.onDomMutated();
+                    return Undefined.INSTANCE;
+                }
+            });
+            list.setProp("toggle", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.isEmpty()) return Boolean.FALSE;
+                    String tok = toJsString(a.get(0)).trim();
+                    List<String> tokens = new ArrayList<String>();
+                    String cur = node.getClassName().trim();
+                    if (!cur.isEmpty()) {
+                        for (String c : cur.split("\\s+")) tokens.add(c);
+                    }
+                    boolean present = tokens.contains(tok);
+                    boolean want = a.size() >= 2 ? toJsBoolean(a.get(1)) : !present;
+                    if (want && !present) tokens.add(tok);
+                    else if (!want && present) tokens.remove(tok);
+                    node.setAttribute("class", joinStrings(tokens, " "));
+                    recordMutation(node, "attributes", "class", null, null);
+                    host.onDomMutated();
+                    return Boolean.valueOf(want);
+                }
+            });
+            return list;
+        }
+
+        private JsObject buildStyleObject() {
+            JsObject style = new JsObject() {
+                private LinkedHashMap<String, String> parseCss() {
+                    LinkedHashMap<String, String> map = new LinkedHashMap<String, String>();
+                    String raw = node.getAttribute("style");
+                    if (raw == null || raw.trim().isEmpty()) return map;
+                    for (String decl : raw.split(";")) {
+                        int colon = decl.indexOf(':');
+                        if (colon > 0) {
+                            String k = decl.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+                            String v = decl.substring(colon + 1).trim();
+                            if (!k.isEmpty()) map.put(k, v);
+                        }
+                    }
+                    return map;
+                }
+
+                private void writeCss(LinkedHashMap<String, String> map) {
+                    StringBuilder sb = new StringBuilder();
+                    for (Map.Entry<String, String> e : map.entrySet()) {
+                        if (sb.length() > 0) sb.append("; ");
+                        sb.append(e.getKey()).append(": ").append(e.getValue());
+                    }
+                    node.setAttribute("style", sb.toString());
+                    recordMutation(node, "attributes", "style", null, null);
+                    host.onDomMutated();
+                }
+
+                @Override Object getProp(String prop) {
+                    if ("cssText".equals(prop)) {
+                        String raw = node.getAttribute("style");
+                        return raw == null ? "" : raw;
+                    }
+                    Object superVal = super.getProp(prop);
+                    if (superVal != Undefined.INSTANCE) return superVal;
+                    String v = parseCss().get(camelToKebab(prop));
+                    return v == null ? "" : v;
+                }
+
+                @Override void setProp(String prop, Object value) {
+                    if ("cssText".equals(prop)) {
+                        node.setAttribute("style", toJsString(value));
+                        recordMutation(node, "attributes", "style", null, null);
+                        host.onDomMutated();
+                        return;
+                    }
+                    LinkedHashMap<String, String> map = parseCss();
+                    String k = camelToKebab(prop);
+                    String v = toJsString(value).trim();
+                    if (v.isEmpty()) map.remove(k);
+                    else map.put(k, v);
+                    writeCss(map);
+                }
+            };
+            style.setProp("getPropertyValue", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    return a.isEmpty() ? "" : style.getProp(toJsString(a.get(0)));
+                }
+            });
+            style.setProp("setProperty", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.size() >= 2) style.setProp(toJsString(a.get(0)), a.get(1));
+                    return Undefined.INSTANCE;
+                }
+            });
+            style.setProp("removeProperty", new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.isEmpty()) return "";
+                    Object prev = style.getProp(toJsString(a.get(0)));
+                    style.setProp(toJsString(a.get(0)), "");
+                    return prev;
+                }
+            });
+            return style;
+        }
+
+        private JsObject buildDatasetObject() {
+            return new JsObject() {
+                @Override Object getProp(String prop) {
+                    String attr = "data-" + camelToKebab(prop);
+                    String v = node.getAttribute(attr);
+                    return v == null ? Undefined.INSTANCE : v;
+                }
+
+                @Override void setProp(String prop, Object value) {
+                    String attr = "data-" + camelToKebab(prop);
+                    node.setAttribute(attr, toJsString(value));
+                    recordMutation(node, "attributes", attr, null, null);
+                    host.onDomMutated();
+                }
+            };
         }
 
         @Override Object getProp(String name) {
@@ -866,11 +1959,20 @@ final class ShirazJsEngine {
             if ("nodeType".equals(name)) return Double.valueOf(node.nodeType);
             if ("id".equals(name)) return node.getId();
             if ("className".equals(name)) return node.getClassName();
+            if ("classList".equals(name)) return buildClassList();
+            if ("style".equals(name)) return buildStyleObject();
+            if ("dataset".equals(name)) return buildDatasetObject();
             if ("textContent".equals(name) || "innerText".equals(name)) return node.getTextContent();
             if ("innerHTML".equals(name)) return node.getInnerHtml();
+            if ("outerHTML".equals(name)) return node.getOuterHtml();
+            if ("isContentEditable".equals(name)) return Boolean.valueOf(node.isContentEditable());
+            if ("contentEditable".equals(name)) {
+                String ce = node.getAttribute("contenteditable");
+                if (ce == null) return "inherit";
+                return ce.isEmpty() ? "true" : ce;
+            }
             if ("value".equals(name)) {
-                String v = node.getAttribute("value");
-                return v == null ? "" : v;
+                return node.getEditableValue();
             }
             if ("href".equals(name)) {
                 String v = node.getAttribute("href");
@@ -882,7 +1984,9 @@ final class ShirazJsEngine {
             }
             if ("children".equals(name)) return wrapNodeList(node.getChildElements());
             if ("childNodes".equals(name)) return wrapNodeList(node.children);
-            if ("parentNode".equals(name)) return wrapNode(node.parent);
+            if ("parentNode".equals(name) || "parentElement".equals(name)) return wrapNode(node.parent);
+            if ("nextSibling".equals(name)) return wrapNode(node.nextSibling());
+            if ("previousSibling".equals(name)) return wrapNode(node.previousSibling());
             if ("firstChild".equals(name)) {
                 return node.children.isEmpty() ? null : wrapNode(node.children.get(0));
             }
@@ -895,26 +1999,38 @@ final class ShirazJsEngine {
         @Override void setProp(String name, Object value) {
             if ("id".equals(name)) {
                 node.setAttribute("id", toJsString(value));
+                recordMutation(node, "attributes", "id", null, null);
                 host.onDomMutated();
                 return;
             }
             if ("className".equals(name)) {
                 node.setAttribute("class", toJsString(value));
+                recordMutation(node, "attributes", "class", null, null);
+                host.onDomMutated();
+                return;
+            }
+            if ("contentEditable".equals(name)) {
+                node.setAttribute("contenteditable", toJsString(value));
+                recordMutation(node, "attributes", "contenteditable", null, null);
                 host.onDomMutated();
                 return;
             }
             if ("textContent".equals(name) || "innerText".equals(name)) {
                 node.setTextContent(toJsString(value));
+                recordMutation(node, "characterData", null, null, null);
+                recordMutation(node, "childList", null, null, null);
                 host.onDomMutated();
                 return;
             }
             if ("innerHTML".equals(name)) {
                 node.setInnerHtml(toJsString(value));
+                recordMutation(node, "childList", null, null, null);
                 host.onDomMutated();
                 return;
             }
             if ("value".equals(name)) {
-                node.setAttribute("value", toJsString(value));
+                node.setEditableValue(toJsString(value));
+                recordMutation(node, "attributes", "value", null, null);
                 host.onDomMutated();
                 return;
             }
@@ -930,6 +2046,29 @@ final class ShirazJsEngine {
             }
             super.setProp(name, value);
         }
+    }
+
+    private static String joinStrings(List<String> items, String sep) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) sb.append(sep);
+            sb.append(items.get(i));
+        }
+        return sb.toString();
+    }
+
+    private static String camelToKebab(String input) {
+        if (input == null || input.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(input.length() + 4);
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c >= 'A' && c <= 'Z') {
+                sb.append('-').append((char) (c + ('a' - 'A')));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -2673,6 +3812,45 @@ final class ShirazJsEngine {
                 }
             };
         }
+        if ("replaceAll".equals(prop)) {
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.size() < 2) return s;
+                    String target = toJsString(a.get(0));
+                    String repl = toJsString(a.get(1));
+                    if (target.isEmpty()) return s;
+                    return s.replace(target, repl);
+                }
+            };
+        }
+        if ("trimStart".equals(prop) || "trimLeft".equals(prop)) {
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    int i = 0;
+                    while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+                    return s.substring(i);
+                }
+            };
+        }
+        if ("trimEnd".equals(prop) || "trimRight".equals(prop)) {
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    int end = s.length();
+                    while (end > 0 && Character.isWhitespace(s.charAt(end - 1))) end--;
+                    return s.substring(0, end);
+                }
+            };
+        }
+        if ("repeat".equals(prop)) {
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    int count = a.isEmpty() ? 0 : Math.max(0, Math.min(1024, (int) toJsNumber(a.get(0))));
+                    StringBuilder sb = new StringBuilder(s.length() * count);
+                    for (int i = 0; i < count; i++) sb.append(s);
+                    return sb.toString();
+                }
+            };
+        }
         if ("charAt".equals(prop)) {
             return new JsCallable() {
                 @Override public Object call(Object t, List<Object> a) {
@@ -2841,6 +4019,77 @@ final class ShirazJsEngine {
                         acc = fn.call(windowObj, cbArgs);
                     }
                     return acc;
+                }
+            };
+        }
+        if ("find".equals(prop) || "findIndex".equals(prop)) {
+            final boolean returnIndex = "findIndex".equals(prop);
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (!a.isEmpty() && a.get(0) instanceof JsCallable) {
+                        JsCallable fn = (JsCallable) a.get(0);
+                        for (int i = 0; i < arr.items.size(); i++) {
+                            List<Object> cbArgs = new ArrayList<Object>(3);
+                            cbArgs.add(arr.items.get(i));
+                            cbArgs.add(Double.valueOf(i));
+                            cbArgs.add(arr);
+                            if (toJsBoolean(fn.call(windowObj, cbArgs))) {
+                                return returnIndex ? Double.valueOf(i) : arr.items.get(i);
+                            }
+                        }
+                    }
+                    return returnIndex ? Double.valueOf(-1) : Undefined.INSTANCE;
+                }
+            };
+        }
+        if ("some".equals(prop) || "every".equals(prop)) {
+            final boolean isEvery = "every".equals(prop);
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    if (a.isEmpty() || !(a.get(0) instanceof JsCallable)) {
+                        return Boolean.valueOf(isEvery);
+                    }
+                    JsCallable fn = (JsCallable) a.get(0);
+                    for (int i = 0; i < arr.items.size(); i++) {
+                        List<Object> cbArgs = new ArrayList<Object>(3);
+                        cbArgs.add(arr.items.get(i));
+                        cbArgs.add(Double.valueOf(i));
+                        cbArgs.add(arr);
+                        boolean matched = toJsBoolean(fn.call(windowObj, cbArgs));
+                        if (isEvery && !matched) return Boolean.FALSE;
+                        if (!isEvery && matched) return Boolean.TRUE;
+                    }
+                    return Boolean.valueOf(isEvery);
+                }
+            };
+        }
+        if ("concat".equals(prop)) {
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    JsArray out = new JsArray(arr.items);
+                    for (Object arg : a) {
+                        if (arg instanceof JsArray) out.items.addAll(((JsArray) arg).items);
+                        else out.items.add(arg);
+                    }
+                    return out;
+                }
+            };
+        }
+        if ("splice".equals(prop)) {
+            return new JsCallable() {
+                @Override public Object call(Object t, List<Object> a) {
+                    JsArray removed = new JsArray();
+                    if (a.isEmpty()) return removed;
+                    int len = arr.items.size();
+                    int start = (int) toJsNumber(a.get(0));
+                    if (start < 0) start = Math.max(0, len + start);
+                    else start = Math.min(len, start);
+                    int delCount = a.size() >= 2
+                            ? Math.max(0, Math.min(len - start, (int) toJsNumber(a.get(1))))
+                            : (len - start);
+                    for (int i = 0; i < delCount; i++) removed.items.add(arr.items.remove(start));
+                    for (int i = 2; i < a.size(); i++) arr.items.add(start + (i - 2), a.get(i));
+                    return removed;
                 }
             };
         }

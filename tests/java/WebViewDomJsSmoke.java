@@ -13,6 +13,7 @@ import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
 import android.webkit.WebMessage;
 import android.webkit.WebView;
+import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import java.io.File;
@@ -224,6 +225,94 @@ public final class WebViewDomJsSmoke {
         view.loadData("<title>Static</title><script>document.title='Mutated';</script><p>Safe</p>",
                 "text/html", "UTF-8");
         assertEquals("Static", view.getTitle(), "inline script skipped when JS disabled");
+
+        // 13. Rich DOM/JS contentEditable editor (Joplin/CodeMirror-style round-trip)
+        view.getSettings().setJavaScriptEnabled(true);
+        view.getSettings().setDomStorageEnabled(true);
+        final List<String> rnMessages = new ArrayList<String>();
+        view.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void postMessage(String msg) {
+                rnMessages.add(msg);
+            }
+        }, "ReactNativeWebView");
+
+        String editorHtml = "<!doctype html><html><head><title>Note Editor</title></head><body>"
+                + "<div id='ed' class='cm-content' contenteditable='true' data-note-id='n42'>Initial body</div>"
+                + "<script>"
+                + "var ed = document.getElementById('ed');"
+                + "var observed = 0;"
+                + "var docInputBubbled = 0;"
+                + "var selChanges = 0;"
+                + "var readyFired = false;"
+                + "document.addEventListener('DOMContentLoaded', () => { readyFired = true; });"
+                + "document.addEventListener('selectionchange', () => { selChanges++; });"
+                + "document.addEventListener('input', () => { docInputBubbled++; });"
+                + "var mo = new MutationObserver((records) => { observed += records.length; });"
+                + "mo.observe(ed, { childList: true, characterData: true, attributes: true, subtree: true });"
+                + "ed.addEventListener('input', (e) => {"
+                + "  ReactNativeWebView.postMessage(JSON.stringify({ kind: 'change', body: ed.textContent, id: ed.dataset.noteId }));"
+                + "});"
+                + "ed.classList.add('focused'); ed.style.backgroundColor = '#fff';"
+                + "localStorage.setItem('draft', 'saved-draft');"
+                + "</script></body></html>";
+
+        view.loadDataWithBaseURL("file:///app/MarkdownEditor.html", editorHtml, "text/html", "UTF-8", null);
+        assertEquals("true", evalSync(view, "readyFired"), "DOMContentLoaded fired");
+        assertEquals("true", evalSync(view, "ed.isContentEditable"), "contentEditable detected");
+        assertEquals("true", evalSync(view, "ed.classList.contains('focused')"), "classList.add");
+        assertEquals("\"#fff\"", evalSync(view, "ed.style.backgroundColor"), "style camelCase");
+        assertEquals("\"n42\"", evalSync(view, "ed.dataset.noteId"), "dataset camelCase");
+        assertEquals("\"saved-draft\"", evalSync(view, "localStorage.getItem('draft')"), "localStorage");
+
+        // User edits directly through WebView's interactive EditText
+        ScrollView editorScroll = (ScrollView) view.getChildAt(0);
+        EditText editorInput = (EditText) editorScroll.getChildAt(0);
+        assertTrue(editorInput.isFocusableInTouchMode(), "contentEditable enables interactive EditText");
+        assertEquals("Initial body", editorInput.getText().toString(), "editor seeded with DOM content");
+        editorInput.setText("Updated Joplin note body");
+        assertEquals("\"Updated Joplin note body\"", evalSync(view, "ed.textContent"),
+                "interactive EditText synced back into DOM");
+        assertTrue(rnMessages.size() >= 1 && rnMessages.get(rnMessages.size() - 1).contains("Updated Joplin note body"),
+                "ReactNativeWebView.postMessage fired from contentEditable input");
+        assertTrue(Double.parseDouble(evalSync(view, "docInputBubbled")) >= 1.0, "input event bubbled to document");
+        assertTrue(Double.parseDouble(evalSync(view, "selChanges")) >= 1.0, "selectionchange fired");
+        assertTrue(Double.parseDouble(evalSync(view, "observed")) >= 1.0, "MutationObserver notified");
+
+        // Selection, Range, execCommand, DOM tree mutations & CustomEvent
+        assertEquals("true", evalSync(view, "document.execCommand('selectAll')"), "execCommand selectAll");
+        assertEquals("\"Updated Joplin note body\"", evalSync(view, "window.getSelection().toString()"),
+                "getSelection returns selected text");
+        assertEquals("true", evalSync(view, "document.execCommand('insertText', false, 'Hello Markdown')"),
+                "execCommand insertText");
+        assertEquals("Hello Markdown", editorInput.getText().toString(), "execCommand synced to EditText");
+        assertEquals("true", evalSync(view, "document.execCommand('selectAll') && document.execCommand('bold')"),
+                "execCommand bold");
+        assertEquals("\"<strong>Hello Markdown</strong>\"", evalSync(view, "ed.innerHTML"),
+                "bold wrapped selection");
+        assertEquals("\"<span>A</span><span>B</span>\"",
+                evalSync(view, "var box = document.createElement('div');"
+                        + "var b = document.createElement('span'); b.textContent = 'B';"
+                        + "var a = document.createElement('span'); a.textContent = 'A';"
+                        + "box.appendChild(b); box.insertBefore(a, b); box.innerHTML"),
+                "insertBefore order");
+        assertEquals("\"custom-ok\"",
+                evalSync(view, "var got = '';"
+                        + "ed.addEventListener('ping', (e) => { got = e.detail; e.preventDefault(); });"
+                        + "var ce = new CustomEvent('ping', { detail: 'custom-ok', cancelable: true, bubbles: true });"
+                        + "ed.dispatchEvent(ce); got"),
+                "CustomEvent dispatch");
+
+        // setTimeout & clearTimeout scheduling
+        evalSync(view, "var timerFired = 0; var t1 = setTimeout(() => { timerFired += 1; }, 0);"
+                + "var t2 = setTimeout(() => { timerFired += 100; }, 0); clearTimeout(t2);");
+        new android.os.Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override public void run() {
+                Looper.shirazRequestMainExit();
+            }
+        }, 5);
+        Looper.loop();
+        assertEquals("1", evalSync(view, "timerFired"), "setTimeout fired and clearTimeout cancelled");
 
         view.destroy();
         java.nio.file.Files.deleteIfExists(appDir);
