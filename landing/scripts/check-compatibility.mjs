@@ -190,8 +190,22 @@ for (const loc of ['https://spectre-oss.github.io/shiraz/', 'https://spectre-oss
   if (!sitemap.includes(`<loc>${loc}</loc>`)) throw Error(`sitemap.xml missing ${loc}`);
 }
 if (!/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/.test(sitemap)) throw Error('sitemap.xml missing ISO lastmod dates');
-const manifest = JSON.parse(readFileSync(`${root}landing/static/manifest.webmanifest`, 'utf8'));
-if (!manifest.name || !manifest.short_name || !Array.isArray(manifest.icons) || manifest.icons.length < 2) throw Error('Invalid web app manifest');
+for (const manifestFile of ['manifest.webmanifest', 'run-manifest.webmanifest']) {
+  const manifest = JSON.parse(readFileSync(`${root}landing/static/${manifestFile}`, 'utf8'));
+  if (
+    !manifest.name ||
+    !manifest.short_name ||
+    manifest.display !== 'standalone' ||
+    !manifest.start_url ||
+    !Array.isArray(manifest.icons) ||
+    manifest.icons.length < 2 ||
+    !Array.isArray(manifest.file_handlers) ||
+    !manifest.file_handlers.length
+  ) {
+    throw Error(`Invalid web app manifest: ${manifestFile}`);
+  }
+}
+if (!existsSync(`${root}landing/static/sw.js`)) throw Error('Missing PWA service worker sw.js');
 for (const file of ['llms.txt', 'llms-full.txt']) {
   const text = readFileSync(`${root}landing/static/${file}`, 'utf8');
   if (!text.startsWith('# Shiraz\n') || !text.includes('4,445') || !text.includes('887')) throw Error(`Invalid or stale ${file}`);

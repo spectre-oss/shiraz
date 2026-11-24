@@ -83,6 +83,26 @@ def main():
 
         bases[architecture] = {**appimage_entry, 'formats': formats}
 
+    browser_runtime = None
+    for ext, fmt in (('.erofs', 'erofs'), ('.img', 'ext4')):
+        rt_name = f'Shiraz-Browser-Runtime-{version}-aarch64{ext}'
+        rt_path = ROOT / 'dist' / rt_name
+        if rt_path.is_file():
+            rt_sha_file = Path(str(rt_path) + '.sha256')
+            rt_digest, rt_named = rt_sha_file.read_text().strip().split(None, 1)
+            if rt_named != rt_name or hashlib.sha256(rt_path.read_bytes()).hexdigest() != rt_digest:
+                raise RuntimeError('browser runtime checksum mismatch: ' + rt_name)
+            rt_location = 'base/' + rt_name
+            shutil.copy2(rt_path, site / rt_location)
+            browser_runtime = dict(
+                file=rt_location,
+                sha256=rt_digest,
+                size=rt_path.stat().st_size,
+                format=fmt,
+                architecture='aarch64',
+            )
+            break
+
     manifest = {
         'version': version,
         'architectures': bases,
@@ -91,6 +111,8 @@ def main():
         'base_size': bases['x86_64']['base_size'],
         'release_url': f'https://github.com/spectre-oss/shiraz/releases/tag/v{version}',
     }
+    if browser_runtime is not None:
+        manifest['browser_runtime'] = browser_runtime
     (site / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
     total_site_bytes = sum(p.stat().st_size for p in site.rglob('*') if p.is_file())

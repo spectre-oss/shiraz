@@ -2,7 +2,7 @@
 
 > Shiraz is an open-source (GPL-3.0-only), GTK-free Android compatibility layer that runs supported Android APKs directly on Linux, Apple Silicon macOS (experimental), and Windows (experimental foundation) using standalone ART, SDL2, and native graphics/audio/OS bridges — without booting an Android system image, virtual machine, container, or kernel binder module.
 
-Snapshot version: v0.363.1 (data updated 2026-11-24).
+Snapshot version: v0.364.0 (data updated 2026-11-24).
 
 ## Core Facts
 
@@ -27,6 +27,7 @@ Snapshot version: v0.363.1 (data updated 2026-11-24).
 ## Website Pages
 
 - [Home & Browser Builder](https://spectre-oss.github.io/shiraz/): Architecture overview, Shiraz Web (WebRTC), macOS Launcher, and in-browser AppImage/Flatpak APK packager.
+- [Run APK in Browser](https://spectre-oss.github.io/shiraz/run/): 100% client-side in-browser Android APK runner powered by Shiraz (aarch64 Linux runtime) inside [pithings/unkernel](https://github.com/pithings/unkernel) (Linux 7.3 + kwemu on WebAssembly). Zero backend compute.
 - [Compatibility & Coverage Tracker](https://spectre-oss.github.io/shiraz/compatibility/): Filterable app compatibility catalog, 3-OS host matrix, 30 subsystem notes, 49-package API 35 breakdown, 15-library NDK audit, and behavioral probe tracker.
 - [Compare Shiraz and Its Peers](https://spectre-oss.github.io/shiraz/compare/): Side-by-side comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper, Waydroid, and Android Emulator.
 - [Full AI Context (llms-full.txt)](https://spectre-oss.github.io/shiraz/llms-full.txt): Complete single-file reference with app records, host layers, subsystem limits, and FAQs.

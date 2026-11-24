@@ -89,6 +89,7 @@ __pycache__/
 /landing/build/
 /landing/static/shiraz-assemble.wasm
 /landing/static/wasm_exec.js
+/landing/static/unkernel/
 /landing/test-results/
 /landing/playwright-report/
 /landing/static/social-card.png

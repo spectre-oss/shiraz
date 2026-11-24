@@ -322,6 +322,110 @@ func jsBuildFromApk(this js.Value, args []js.Value) any {
 	hash := sha256.Sum256(result)
 	return map[string]any{"bytes": array, "sha256": hex.EncodeToString(hash[:]), "package": meta.Package, "architecture": meta.Architecture}
 }
+
+type browserLaunch struct {
+	Architecture          string   `json:"architecture"`
+	Package               string   `json:"package"`
+	Label                 string   `json:"label,omitempty"`
+	Application           string   `json:"application"`
+	Activity              string   `json:"activity"`
+	Version               string   `json:"version"`
+	SHA256                string   `json:"sha256"`
+	Native                bool     `json:"native"`
+	NativeLibs            []string `json:"native_libs"`
+	LaunchProperties      string   `json:"launch_properties"`
+	ApplicationProperties string   `json:"application_properties"`
+}
+
+func prepareBrowserApk(apk []byte, version string) (*browserLaunch, error) {
+	if !versionName.MatchString(version) {
+		return nil, errors.New("invalid Shiraz runtime version")
+	}
+	if len(apk) < 4 || string(apk[:2]) != "PK" {
+		return nil, errors.New("input is not an APK/ZIP")
+	}
+	meta, err := inspectAPK(apk, version, "aarch64")
+	if err != nil {
+		return nil, err
+	}
+	apkZip, err := zip.NewReader(bytes.NewReader(apk), int64(len(apk)))
+	if err != nil {
+		return nil, err
+	}
+	abi, machine, err := targetABI("aarch64")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var nativeLibs []string
+	var nativeBytes uint64
+	hasNative := false
+	for _, file := range apkZip.File {
+		if strings.HasPrefix(file.Name, "lib/") && strings.HasSuffix(file.Name, ".so") {
+			hasNative = true
+		}
+		if strings.HasPrefix(file.Name, "lib/"+abi+"/") && !file.FileInfo().IsDir() {
+			name := strings.TrimPrefix(file.Name, "lib/"+abi+"/")
+			if !nativeName.MatchString(name) || reserved[name] || seen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 256<<20 {
+				return nil, errors.New("unsupported native library")
+			}
+			stream, err := file.Open()
+			if err != nil {
+				return nil, err
+			}
+			var header [20]byte
+			n, readErr := io.ReadFull(stream, header[:])
+			stream.Close()
+			if readErr != nil || n < 20 || string(header[:6]) != "\x7fELF\x02\x01" || header[16] != 3 || header[17] != 0 || header[18] != machine || header[19] != 0 {
+				return nil, errors.New("native library architecture does not match aarch64")
+			}
+			seen[name] = true
+			nativeBytes += file.UncompressedSize64
+			if len(seen) > 64 || nativeBytes > 512<<20 {
+				return nil, errors.New("native payload exceeds limit")
+			}
+			nativeLibs = append(nativeLibs, name)
+		}
+	}
+	if hasNative && len(nativeLibs) == 0 {
+		return nil, errors.New("APK has native libraries without arm64-v8a support; the browser runner requires arm64-v8a or pure Java/Kotlin APKs")
+	}
+	if nativeLibs == nil {
+		nativeLibs = []string{}
+	}
+	sum := sha256.Sum256(apk)
+	digest := hex.EncodeToString(sum[:])
+	launch := fmt.Sprintf("activity=%s\naot=false\napplication=%s\ndigitalis=false\nnative=%t\npackage=%s\nsha256=%s\nversion=%s\n", property(meta.Activity), property(meta.Application), len(nativeLibs) > 0, property(meta.Package), digest, property(version))
+	return &browserLaunch{
+		Architecture:          "aarch64",
+		Package:               meta.Package,
+		Label:                 meta.Label,
+		Application:           meta.Application,
+		Activity:              meta.Activity,
+		Version:               version,
+		SHA256:                digest,
+		Native:                len(nativeLibs) > 0,
+		NativeLibs:            nativeLibs,
+		LaunchProperties:      launch,
+		ApplicationProperties: meta.ApplicationProperties,
+	}, nil
+}
+
+func jsPrepareBrowserApk(this js.Value, args []js.Value) any {
+	if len(args) != 2 {
+		return map[string]any{"error": "expected APK bytes and Shiraz runtime version"}
+	}
+	result, err := prepareBrowserApk(bytesFromJS(args[0]), args[1].String())
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	return string(raw)
+}
+
 func jsInspectApk(this js.Value, args []js.Value) any {
 	if len(args) != 2 && len(args) != 3 {
 		return map[string]any{"error": "expected APK, Shiraz version, and optional architecture"}
@@ -371,5 +475,6 @@ func main() {
 	js.Global().Set("shirazBuildFromApk", js.FuncOf(jsBuildFromApk))
 	js.Global().Set("shirazBuildFlatpakFromApk", js.FuncOf(jsBuildFlatpakFromApk))
 	js.Global().Set("shirazInspectApk", js.FuncOf(jsInspectApk))
+	js.Global().Set("shirazPrepareBrowserApk", js.FuncOf(jsPrepareBrowserApk))
 	select {}
 }

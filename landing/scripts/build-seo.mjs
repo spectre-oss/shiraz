@@ -53,6 +53,7 @@ Snapshot version: v${version} (data updated ${inventory.updated}).
 ## Website Pages
 
 - [Home & Browser Builder](${SITE}/): Architecture overview, Shiraz Web (WebRTC), macOS Launcher, and in-browser AppImage/Flatpak APK packager.
+- [Run APK in Browser](${SITE}/run/): 100% client-side in-browser Android APK runner powered by Shiraz (aarch64 Linux runtime) inside [pithings/unkernel](https://github.com/pithings/unkernel) (Linux 7.3 + kwemu on WebAssembly). Zero backend compute.
 - [Compatibility & Coverage Tracker](${SITE}/compatibility/): Filterable app compatibility catalog, 3-OS host matrix, 30 subsystem notes, 49-package API 35 breakdown, 15-library NDK audit, and behavioral probe tracker.
 - [Compare Shiraz and Its Peers](${SITE}/compare/): Side-by-side comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper, Waydroid, and Android Emulator.
 - [Full AI Context (llms-full.txt)](${SITE}/llms-full.txt): Complete single-file reference with app records, host layers, subsystem limits, and FAQs.

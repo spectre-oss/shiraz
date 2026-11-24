@@ -396,13 +396,108 @@ test('comparison shows six approaches and reveals the rest on request', async ({
 });
 
 test('every route shares one navigation and marks the current page', async ({page}) => {
-  for (const [path, current] of [['/', null], ['/compatibility/', 'Compatibility'], ['/compare/', 'Compare']]) {
+  for (const [path, current] of [['/', null], ['/run/', 'Run'], ['/compatibility/', 'Compatibility'], ['/compare/', 'Compare']]) {
     await page.goto(path);
     const nav = page.getByRole('navigation', {name: 'Main navigation'});
-    for (const name of ['Builder', 'Compatibility', 'Compare']) await expect(nav.getByRole('link', {name, exact: true})).toHaveCount(1);
+    for (const name of ['Run', 'Builder', 'Compatibility', 'Compare']) await expect(nav.getByRole('link', {name, exact: true})).toHaveCount(1);
     if (current) await expect(nav.locator('[aria-current=page]')).toHaveText(current);
     else await expect(nav.locator('[aria-current=page]')).toHaveCount(0);
   }
+});
+
+test('home page links to the client-side browser APK runner with unkernel credit, zero telemetry, pop-out and installable PWA', async ({page, request}) => {
+  await page.goto('/');
+  await expect(page.locator('link[rel="manifest"]')).toHaveCount(1);
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', /\/manifest\.webmanifest$/);
+
+  const runBtn = page.locator('.hero .actions').getByRole('link', {name: 'Run APK in browser'});
+  await expect(runBtn).toBeVisible();
+
+  const runExternalRequests = [];
+  page.on('request', req => {
+    const url = new URL(req.url());
+    if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') {
+      runExternalRequests.push(req.url());
+    }
+  });
+
+  await runBtn.click();
+  await expect(page).toHaveURL(/\/run\/$/);
+  await expect(page.getByRole('heading', {level: 1})).toContainText('Run an APK.');
+
+  // Dedicated installable PWA manifest for /run/ (single <link rel="manifest">).
+  await expect(page.locator('link[rel="manifest"]')).toHaveCount(1);
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', /\/run-manifest\.webmanifest$/);
+
+  const runManifestRes = await request.get('/run-manifest.webmanifest');
+  expect(runManifestRes.ok()).toBe(true);
+  const runManifest = await runManifestRes.json();
+  expect(runManifest.display).toBe('standalone');
+  expect(runManifest.start_url).toBe('./run/?standalone=1');
+  expect(runManifest.file_handlers?.[0]?.accept?.['application/vnd.android.package-archive']).toContain('.apk');
+  expect(runManifest.icons.some(icon => icon.sizes === '192x192' && icon.purpose === 'maskable')).toBe(true);
+  expect(runManifest.icons.some(icon => icon.sizes === '512x512' && icon.purpose === 'maskable')).toBe(true);
+
+  const swRes = await request.get('/sw.js');
+  expect(swRes.ok()).toBe(true);
+  expect(await swRes.text()).toContain('self.location.origin');
+
+  // Credit for pithings/unkernel must be clearly visible and linked, with zero-telemetry guarantee.
+  const credit = page.locator('.unkernel-credit');
+  await expect(credit).toBeVisible();
+  await expect(credit).toContainText('Pooya Parsa');
+  await expect(credit).toContainText('zero telemetry');
+  await expect(credit.getByRole('link', {name: /pithings\/unkernel/i})).toHaveAttribute('href', 'https://github.com/pithings/unkernel');
+  await expect(credit.getByRole('link', {name: /unkernel\.dev/i})).toHaveAttribute('href', 'https://unkernel.dev/');
+
+  // Pop-out controls exist on the application frame and install prompt reveals the Install app button.
+  await expect(page.getByRole('button', {name: 'Pop out', exact: true})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Pop out app into floating window'})).toBeVisible();
+  await page.evaluate(() => {
+    const evt = new Event('beforeinstallprompt', {cancelable: true});
+    evt.prompt = async () => {};
+    evt.userChoice = Promise.resolve({outcome: 'dismissed'});
+    window.dispatchEvent(evt);
+  });
+  await expect(page.getByRole('button', {name: 'Install app'})).toBeVisible();
+
+  // Missing APK fails before loading WASM.
+  let wasmRequests = 0;
+  page.on('request', req => { if (req.url().endsWith('.wasm')) wasmRequests++; });
+  await page.locator('#runner-launch').click();
+  await expect(page.locator('#runner-status')).toContainText('Select or drop an Android .apk file first.');
+  expect(wasmRequests).toBe(0);
+
+  // Zero unkernel.dev, Wisp relay, or analytics/telemetry network traffic on /run/.
+  const nonGitHubExternal = runExternalRequests.filter(u => !u.startsWith('https://api.github.com/repos/spectre-oss/shiraz'));
+  expect(nonGitHubExternal).toEqual([]);
+
+  // Responsive & WCAG 2.1 AA checks across desktop and narrow mobile viewports.
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({width, height: 844});
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.addScriptTag({path: require.resolve('axe-core/axe.min.js')});
+    const violations = await page.evaluate(async () => (await window.axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa']}})).violations);
+    expect(violations).toEqual([]);
+  }
+
+  // Standalone / popped-out PWA view makes strictly zero external requests and stays accessible.
+  const standaloneExternal = [];
+  page.on('request', req => {
+    const url = new URL(req.url());
+    if (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost') {
+      standaloneExternal.push(req.url());
+    }
+  });
+  await page.setViewportSize({width: 440, height: 780});
+  await page.goto('/run/?standalone=1');
+  await expect(page.locator('.standalone-header')).toBeVisible();
+  await expect(page.locator('.runner-hero')).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Pop out', exact: true})).toBeVisible();
+  expect(standaloneExternal).toEqual([]);
+  await page.addScriptTag({path: require.resolve('axe-core/axe.min.js')});
+  const standaloneViolations = await page.evaluate(async () => (await window.axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa']}})).violations);
+  expect(standaloneViolations).toEqual([]);
 });
 
 test('SEO, GEO and AEO discovery files, JSON-LD graphs and matching FAQs are published on every route', async ({page, request}) => {
@@ -413,7 +508,7 @@ test('SEO, GEO and AEO discovery files, JSON-LD graphs and matching FAQs are pub
   const sitemap = await request.get('/sitemap.xml');
   expect(sitemap.ok()).toBe(true);
   const sitemapXml = await sitemap.text();
-  for (const url of ['https://spectre-oss.github.io/shiraz/', 'https://spectre-oss.github.io/shiraz/compatibility/', 'https://spectre-oss.github.io/shiraz/compare/']) {
+  for (const url of ['https://spectre-oss.github.io/shiraz/', 'https://spectre-oss.github.io/shiraz/run/', 'https://spectre-oss.github.io/shiraz/compatibility/', 'https://spectre-oss.github.io/shiraz/compare/']) {
     expect(sitemapXml).toContain(`<loc>${url}</loc>`);
   }
 
@@ -440,6 +535,7 @@ test('SEO, GEO and AEO discovery files, JSON-LD graphs and matching FAQs are pub
 
   const expectations = [
     ['/', ['Organization', 'WebSite', 'SoftwareApplication', 'HowTo', 'FAQPage']],
+    ['/run/', ['Organization', 'WebSite', 'WebPage', 'BreadcrumbList', 'SoftwareApplication', 'FAQPage']],
     ['/compatibility/', ['Organization', 'WebSite', 'WebPage', 'BreadcrumbList', 'Dataset', 'FAQPage']],
     ['/compare/', ['Organization', 'WebSite', 'WebPage', 'BreadcrumbList', 'ItemList', 'FAQPage']]
   ];

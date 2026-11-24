@@ -30,5 +30,8 @@
   },
   "imports": {
     "#lib/*": "./src/lib/*"
+  },
+  "dependencies": {
+    "unkernel": "0.2.0-261124-c08e977"
   }
 }

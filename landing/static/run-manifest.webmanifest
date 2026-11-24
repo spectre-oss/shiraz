@@ -1,0 +1,57 @@
+{
+  "id": "./run/",
+  "name": "Shiraz Browser Runner — Run Android™ APKs locally",
+  "short_name": "Shiraz",
+  "description": "100% client-side Android™ APK runner powered by Shiraz and pithings/unkernel. Zero backend compute, zero telemetry.",
+  "start_url": "./run/?standalone=1",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#2b0f1c",
+  "theme_color": "#2b0f1c",
+  "categories": ["utilities", "developer"],
+  "icons": [
+    {
+      "src": "spectre.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "./run/?standalone=1",
+      "accept": {
+        "application/vnd.android.package-archive": [".apk"]
+      }
+    }
+  ],
+  "launch_handler": {
+    "client_mode": ["focus-existing", "auto"]
+  }
+}

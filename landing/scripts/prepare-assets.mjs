@@ -14,6 +14,13 @@ if (process.env.SHIRAZ_PREBUILT_WASM !== '1') {
 }
 for (const name of ['shiraz-assemble.wasm', 'wasm_exec.js']) copyFileSync(`${root}go-wasm/${name}`, `${root}landing/static/${name}`);
 
+// Copy unkernel's prebuilt Linux-in-Wasm bundle from node_modules into ignored static/.
+const unkernelWasm = `${root}landing/node_modules/unkernel/dist/unkernel.wasm`;
+if (existsSync(unkernelWasm)) {
+  mkdirSync(`${root}landing/static/unkernel`, { recursive: true });
+  copyFileSync(unkernelWasm, `${root}landing/static/unkernel/unkernel.wasm`);
+}
+
 // Raster preview for Open Graph clients and PNG touch/manifest icons from SVG sources.
 const { default: sharp } = await import('sharp');
 await sharp(`${root}landing/src/lib/social-card.svg`).png().toFile(`${root}landing/static/social-card.png`);

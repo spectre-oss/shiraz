@@ -7,6 +7,7 @@
   import GitHubLink from '#lib/GitHubLink.svelte';
   const home = resolve('/');
   const links = [
+    { href: resolve('/run/'), label: 'Run', path: resolve('/run/'), narrow: 'nav-run' },
     { href: home + '#builder', label: 'Builder', path: null, narrow: 'nav-builder' },
     { href: resolve('/compatibility/'), label: 'Compatibility', path: resolve('/compatibility/') },
     { href: resolve('/compare/'), label: 'Compare', path: resolve('/compare/'), narrow: 'nav-compare' }

@@ -1,0 +1,16 @@
+unkernel — Linux on WebAssembly
+Repository: https://github.com/pithings/unkernel
+Website:    https://unkernel.dev/
+Author:     Pooya Parsa <pooya@pi0.io>
+Package:    unkernel (MIT AND GPL-2.0-only)
+
+Shiraz's client-side in-browser runner uses unkernel to boot a real Linux 7.3
+kernel compiled to WebAssembly with the kwemu aarch64 CPU emulator and JIT,
+running Shiraz's unmodified aarch64 Linux runtime locally inside the visitor's
+browser tab with zero backend compute.
+
+Licenses:
+- unkernel JavaScript/TypeScript SDK: MIT License, Copyright (c) 2026 Pooya Parsa
+- unkernel.wasm kernel bundle (Linux 7.3 + arch/wasm + kwemu + BusyBox): GPL-2.0
+- Complete upstream third-party list and source code:
+  https://github.com/pithings/unkernel/blob/main/THIRD-PARTY.md

@@ -33,6 +33,7 @@
 | --- | --- | --- |
 | **Shiraz Runtime** | The core CLI, standalone ART host (with warm standby daemon on Linux), framework layer, 15 NDK libraries, and native OS adapters ([development guide](docs/DEVELOPMENT.md)). | Running APKs directly on Linux/macOS desktops, installing desktop entries (`shiraz install-desktop`), and developing Android compatibility. |
 | **[Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder)** | Packages an APK and the runtime into a standalone Linux **AppImage** or sandboxed **Flatpak** (`.flatpak`) directly in your browser using Go WebAssembly — your APK stays local ([guide](docs/BUILDER.md)). | Turning a supported APK into a single-file or sandboxed Linux desktop application with no upload. |
+| **[Shiraz Browser Runner](https://spectre-oss.github.io/shiraz/run/)** *(exp.)* | Runs supported pure-DEX and `arm64-v8a` APKs 100% client-side in your browser tab by executing Shiraz’s `aarch64` Linux runtime inside [pithings/unkernel](https://github.com/pithings/unkernel) (Linux 7.3 + `kwemu` on WebAssembly) with zero backend compute. | Dropping an APK into a modern browser (Chrome/Edge 137+, Firefox 153+, Safari 27+) with no server or install. |
 | **[Shiraz Web](docs/WEB.md)** | Runs an APK on a Linux host and streams its screen, touch, and keyboard to any browser over WebRTC. | Trying apps through a browser locally or on Linux phones from a host. |
 | **[Shiraz Launcher](macos/Launcher/README.md)** *(macOS, exp.)* | Native SwiftUI shelf for Apple Silicon Macs with per-app screen presets, F-Droid catalog browsing, Dock icons, and live console ([watch demo](https://spectre-oss.github.io/shiraz/#mac)). | Managing, configuring, and launching local APKs on Apple Silicon. |
 
@@ -196,6 +197,7 @@ Shiraz's original code is licensed under [GPL-3.0-only](LICENSE). Third-party co
 | Skia & libsndfile | BSD-3-Clause / LGPL-2.1-or-later · [Skia notice](LICENSES/SKIA-NOTICE.txt) · [sndfile notice](LICENSES/SNDFILE-NOTICE.txt) |
 | Noto fonts | SIL Open Font License 1.1 · [Noto fonts notice](LICENSES/NOTO-FONTS.txt) |
 | macOS text, path, and image libraries | FreeType (FTL), HarfBuzz / fontconfig / pixman (MIT-style), cairo (LGPL-2.1), libwebp (BSD-3-Clause + patent grant), libjpeg-turbo (IJG, BSD-3-Clause, zlib) · [macOS graphics notice](LICENSES/MACOS-GRAPHICS-NOTICE.txt). *This software is based in part on the work of the Independent JPEG Group.* |
+| [unkernel](https://github.com/pithings/unkernel) (`Linux 7.3` + `kwemu` on WebAssembly, by Pooya Parsa) | MIT (JS SDK) & GPL-2.0 (kernel bundle) · [unkernel notice](LICENSES/UNKERNEL-NOTICE.txt) |
 | macOS OpenGL ES & GPU canvas libraries | ANGLE (BSD-3-Clause), Abseil (Apache-2.0), Chromium zlib (Zlib), Chromium zlib/google & anglebase (BSD-3-Clause), xxHash (BSD-2-Clause), Skia with skcms (BSD-3-Clause) · [macOS GPU notice](LICENSES/MACOS-GPU-NOTICE.txt) |
 
 These are acknowledgments, not a complete license inventory for every build. Redistributed components must retain their applicable license texts and notices.

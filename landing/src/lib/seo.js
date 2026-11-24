@@ -69,6 +69,25 @@ export const compareFaqs = [
   }
 ];
 
+export const runFaqs = [
+  {
+    q: 'Does the in-browser APK runner upload my APK or use a backend server?',
+    a: 'No. Everything runs 100% locally in your browser tab with zero backend compute. Shiraz’s Go WebAssembly inspector parses the APK in memory, and unkernel boots a Linux 7.3 kernel compiled to WebAssembly to run Shiraz’s unmodified aarch64 Linux runtime directly on your machine.'
+  },
+  {
+    q: 'How does pithings/unkernel power Shiraz in the browser?',
+    a: 'unkernel (created by Pooya Parsa) compiles a real Linux 7.3 kernel with a real MMU straight to WebAssembly and runs unmodified aarch64 Linux binaries on kwemu, an embedded ARM64 CPU emulator and WebAssembly JIT. Shiraz runs inside it as normal aarch64 Linux user space, supporting both pure Java/Kotlin APKs and arm64-v8a native libraries.'
+  },
+  {
+    q: 'Which browsers and Android APKs work in the browser runner?',
+    a: 'It requires a modern browser with WebAssembly JSPI support (Chrome or Edge 137+, Firefox 153+, Safari 27+). Supported APKs must be pure Java/Kotlin or include arm64-v8a native libraries; 32-bit-only APKs, Google Play Services, and raw UDP/inbound sockets are not supported, and CPU-heavy or GPU-intensive apps run slower than native Linux.'
+  },
+  {
+    q: 'Is my app data saved between reloads?',
+    a: 'When persistent storage is enabled, app data under the guest data directory is stored locally in your browser’s IndexedDB via unkernel’s persistent data disk and can be cleared at any time from the runner controls.'
+  }
+];
+
 const orgNode = {
   '@type': 'Organization',
   '@id': `${SITE_URL}/#organization`,
@@ -265,6 +284,47 @@ export function compareJsonLd({ version, updated, projects }) {
         }))
       },
       faqNode(`${SITE_URL}/compare/#faq`, compareFaqs)
+    ]
+  };
+}
+
+export function runJsonLd(version) {
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      orgNode,
+      websiteNode,
+      {
+        '@type': 'WebPage',
+        '@id': `${SITE_URL}/run/#webpage`,
+        url: `${SITE_URL}/run/`,
+        name: 'Run Android™ APKs in your browser — Shiraz + unkernel',
+        description:
+          'Drop a supported Android APK and run it 100% client-side inside your browser tab with Shiraz aarch64 and pithings/unkernel Linux on WebAssembly. Zero backend compute.',
+        inLanguage: 'en',
+        isPartOf: { '@id': `${SITE_URL}/#website` },
+        breadcrumb: { '@id': `${SITE_URL}/run/#breadcrumb` }
+      },
+      breadcrumbNode(`${SITE_URL}/run/#breadcrumb`, [
+        ['Home', `${SITE_URL}/`],
+        ['Run in browser', `${SITE_URL}/run/`]
+      ]),
+      {
+        '@type': 'SoftwareApplication',
+        '@id': `${SITE_URL}/run/#runner`,
+        name: 'Shiraz Browser Runner',
+        softwareVersion: version,
+        applicationCategory: 'UtilitiesApplication',
+        operatingSystem: 'WebAssembly (Chrome 137+, Edge 137+, Firefox 153+, Safari 27+)',
+        license: 'https://www.gnu.org/licenses/gpl-3.0.html',
+        isAccessibleForFree: true,
+        url: `${SITE_URL}/run/`,
+        codeRepository: REPO_URL,
+        description:
+          'Client-side Android APK runner in the browser combining Shiraz standalone ARM64 ART with pithings/unkernel Linux 7.3 on WebAssembly.',
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }
+      },
+      faqNode(`${SITE_URL}/run/#faq`, runFaqs)
     ]
   };
 }

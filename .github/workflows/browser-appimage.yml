@@ -75,7 +75,7 @@ jobs:
             pkg-config python3 python3-venv ripgrep weston xz-utils zlib1g-dev
           mkdir -p "$TMPDIR"
           if [ "$SHIRAZ_ARCH" = aarch64 ]; then
-            sudo apt-get install -y --no-install-recommends aapt
+            sudo apt-get install -y --no-install-recommends aapt erofs-utils
           fi
       - uses: actions/cache@v4
         with:
@@ -144,6 +144,11 @@ jobs:
             python3 scripts/make_flatpak_base.py \
               build/flatpak/io.github.spectre_oss.shiraz.org_shiraz_fixture.stage \
               "dist/Shiraz-Flatpak-Base-${version}-${SHIRAZ_ARCH}.flatpak-base"
+            if [ "$SHIRAZ_ARCH" = aarch64 ]; then
+              python3 scripts/make_browser_runtime.py \
+                build/appimage/org.shiraz.fixture.AppDir \
+                "dist/Shiraz-Browser-Runtime-${version}-aarch64.erofs"
+            fi
             export SHIRAZ_WASM_GOROOT="$(go env GOROOT)"
             (cd go-wasm && GOOS=js GOARCH=wasm go test -exec="python3 ../scripts/run_wasm_test.py" ./... && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
             python3 go-wasm/bootstrap_font.py
@@ -219,6 +224,8 @@ jobs:
             dist/Shiraz-Browser-Base-*-${{ matrix.arch }}.AppImage.sha256
             dist/Shiraz-Flatpak-Base-*-${{ matrix.arch }}.flatpak-base
             dist/Shiraz-Flatpak-Base-*-${{ matrix.arch }}.flatpak-base.sha256
+            dist/Shiraz-Browser-Runtime-*-${{ matrix.arch }}.erofs
+            dist/Shiraz-Browser-Runtime-*-${{ matrix.arch }}.erofs.sha256
             dist/shiraz-web_*_amd64.deb
             dist/shiraz-web_*_amd64.deb.sha256
             go-wasm/shiraz-assemble.wasm
@@ -264,6 +271,7 @@ jobs:
           tag="v${version}"
           assets=(dist/Shiraz-Browser-Base-${version}-*.AppImage dist/Shiraz-Browser-Base-${version}-*.AppImage.sha256
                   dist/Shiraz-Flatpak-Base-${version}-*.flatpak-base dist/Shiraz-Flatpak-Base-${version}-*.flatpak-base.sha256
+                  dist/Shiraz-Browser-Runtime-${version}-aarch64.erofs dist/Shiraz-Browser-Runtime-${version}-aarch64.erofs.sha256
                   "dist/Shiraz-Browser-Builder-${version}.zip" dist/shiraz-web_*_amd64.deb dist/shiraz-web_*_amd64.deb.sha256)
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${assets[@]}" --clobber
