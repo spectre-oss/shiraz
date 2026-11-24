@@ -195,6 +195,53 @@ public class ContentResolver {
  public void notifyChange(Uri uri,android.database.ContentObserver observer){notifyChange(uri,observer,true);}
  public void notifyChange(Uri uri,android.database.ContentObserver observer,boolean syncToNetwork){notifyChange(uri,observer,syncToNetwork?NOTIFY_SYNC_TO_NETWORK:0);}
  public void notifyChange(Uri uri,android.database.ContentObserver observer,int flags){context.shirazContentObservers().notifyChange(uri,observer,flags);}
- /** No Android settings provider is installed. Absence is distinct from a value of zero. */
- public String shirazReadSetting(String table,String name){if(name==null)throw new NullPointerException("name");if(!"global".equals(table)&&!"system".equals(table)&&!"secure".equals(table))throw new IllegalArgumentException("Settings table");if(shiraz.runtime.DeviceProfile.selected()){if("secure".equals(table)&&"android_id".equals(name)){shiraz.runtime.HostAppInstaller.recordAccess("settings:secure:android_id");return shiraz.runtime.DeviceProfile.get("settings.androidId",null);}if("system".equals(table)&&"screen_brightness".equals(name)){shiraz.runtime.HostAppInstaller.recordAccess("settings:system:screen_brightness");return shiraz.runtime.DeviceProfile.get("settings.screenBrightness",null);}}return null;}
+ /** No Android settings provider is installed. Absence is distinct from a value of zero,
+  *  except secure android_id which Android guarantees non-null per app installation. */
+ private static final java.util.concurrent.ConcurrentHashMap<String,String> SHIRAZ_ANDROID_IDS=new java.util.concurrent.ConcurrentHashMap<String,String>();
+ private String shirazDefaultAndroidId(){
+  String pkg=null;
+  try{pkg=context.getPackageName();}catch(RuntimeException ignored){}
+  String key=(pkg!=null&&!pkg.isEmpty())?pkg:"default";
+  String cached=SHIRAZ_ANDROID_IDS.get(key);
+  if(cached!=null)return cached;
+  File dir=null;
+  try{dir=context.getFilesDir();}catch(RuntimeException ignored){}
+  if(dir!=null){
+   File store=new File(dir,".shiraz_android_id");
+   try{
+    if(store.isFile()){
+     try(BufferedReader reader=new BufferedReader(new InputStreamReader(new FileInputStream(store),"UTF-8"))){
+      String line=reader.readLine();
+      if(line!=null&&line.length()==16&&line.matches("[0-9a-f]{16}")){
+       String prev=SHIRAZ_ANDROID_IDS.putIfAbsent(key,line);
+       return prev!=null?prev:line;
+      }
+     }
+    }
+   }catch(IOException ignored){}
+  }
+  String generated;
+  try{
+   java.security.MessageDigest md=java.security.MessageDigest.getInstance("SHA-256");
+   String seed="shiraz:android_id:"+key+":"+(dir!=null?dir.getAbsolutePath():"");
+   byte[] digest=md.digest(seed.getBytes("UTF-8"));
+   StringBuilder sb=new StringBuilder(16);
+   for(int i=0;i<8;i++)sb.append(String.format(java.util.Locale.US,"%02x",digest[i]&0xff));
+   generated=sb.toString();
+  }catch(Exception error){
+   generated=String.format(java.util.Locale.US,"%016x",(long)key.hashCode()&0xffffffffL);
+  }
+  if(dir!=null){
+   try{
+    dir.mkdirs();
+    File store=new File(dir,".shiraz_android_id");
+    if(!store.exists()){
+     try(FileOutputStream out=new FileOutputStream(store)){out.write((generated+"\n").getBytes("UTF-8"));}
+    }
+   }catch(IOException ignored){}
+  }
+  String prev=SHIRAZ_ANDROID_IDS.putIfAbsent(key,generated);
+  return prev!=null?prev:generated;
+ }
+ public String shirazReadSetting(String table,String name){if(name==null)throw new NullPointerException("name");if(!"global".equals(table)&&!"system".equals(table)&&!"secure".equals(table))throw new IllegalArgumentException("Settings table");if(shiraz.runtime.DeviceProfile.selected()){if("secure".equals(table)&&"android_id".equals(name)){shiraz.runtime.HostAppInstaller.recordAccess("settings:secure:android_id");return shiraz.runtime.DeviceProfile.get("settings.androidId",null);}if("system".equals(table)&&"screen_brightness".equals(name)){shiraz.runtime.HostAppInstaller.recordAccess("settings:system:screen_brightness");return shiraz.runtime.DeviceProfile.get("settings.screenBrightness",null);}}if("secure".equals(table)&&"android_id".equals(name))return shirazDefaultAndroidId();return null;}
 }

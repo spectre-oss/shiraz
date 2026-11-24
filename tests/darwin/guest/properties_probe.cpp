@@ -77,6 +77,45 @@ int main() {
         require(int32_t(invoke(foreach, {number(1), number(0)}).result_integers[0]) == -1 &&
                     *guest_errno_location() == 22 && visited == api27_properties().size(),
                 "foreign callback rejected");
+        void* read_cb = nullptr;
+        std::string read_cb_name;
+        std::string read_cb_value;
+        uint32_t read_cb_serial = 99;
+        unsigned read_cb_calls = 0;
+        void* read_cb_cookie = &read_cb_calls;
+        read_cb = closure([&](Capture& capture) {
+            CallCursor cursor(capture, Convention::Aapcs64);
+            auto* supplied = cursor.read<void*>();
+            auto* prop_name = cursor.read<const char*>();
+            auto* prop_val = cursor.read<const char*>();
+            auto serial = cursor.read<uint32_t>();
+            if (supplied == read_cb_cookie && prop_name && prop_val) {
+                read_cb_name = prop_name;
+                read_cb_value = prop_val;
+                read_cb_serial = serial;
+                ++read_cb_calls;
+            }
+        });
+        auto readable =
+            property_exports(api27_properties(), [&](const void* p) { return p == read_cb; });
+        void* readable_nth = reinterpret_cast<void*>(readable.at(1).address);
+        void* read_callback_fn = reinterpret_cast<void*>(readable.at(4).address);
+        auto readable_handle = invoke(readable_nth, {Argument::integer(0)}).result_integers[0];
+        errno = EBUSY;
+        *guest_errno_location() = 73;
+        invoke(read_callback_fn,
+               {number(readable_handle), number(reinterpret_cast<uintptr_t>(read_cb)),
+                number(reinterpret_cast<uintptr_t>(read_cb_cookie))});
+        require(read_cb_calls == 1 && read_cb_name == expected->first &&
+                    read_cb_value == expected->second && read_cb_serial == 0 && errno == EBUSY &&
+                    *guest_errno_location() == 73,
+                "__system_property_read_callback delivers name/value/serial");
+        invoke(read_callback_fn, {number(1), number(reinterpret_cast<uintptr_t>(read_cb)),
+                                  number(reinterpret_cast<uintptr_t>(read_cb_cookie))});
+        invoke(read_callback_fn, {number(readable_handle), number(1),
+                                  number(reinterpret_cast<uintptr_t>(read_cb_cookie))});
+        require(read_cb_calls == 1,
+                "__system_property_read_callback ignores invalid handle or unvalidated callback");
         auto long_name = property_exports({{std::string(50, 'n'), "value"}});
         auto long_handle =
             invoke(reinterpret_cast<void*>(long_name.at(1).address), {Argument::integer(0)})

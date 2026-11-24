@@ -26,8 +26,10 @@ static int result(long double value, uint64_t low, uint64_t high) {
         if (!(X))                                                                                  \
             return __LINE__;                                                                       \
     } while (0)
-// A volatile function pointer prevents compile-time folding of log2l literals.
+// Volatile function pointers prevent compile-time folding of literals.
 static long double (*volatile logarithm)(long double) = log2l;
+static long double (*volatile sqroot)(long double) = sqrtl;
+static long double (*volatile power)(long double, long double) = powl;
 int run_quad_math(int mode, int group) {
     errno = 73;
     if (group == 0) {
@@ -88,6 +90,54 @@ int run_quad_math(int mode, int group) {
         CHECK(result(logarithm(input(0, UINT64_C(0x7fff000000000000))), 0,
                      UINT64_C(0x7fff000000000000)) &&
               errno == 73);
+    } else if (group == 7) {
+        // Exact binary128 sqrtl: 1, 4, subnormal 2^-16494 -> 2^-8247, -0, +Inf.
+        CHECK(result(sqroot(input(0, UINT64_C(0x3fff000000000000))), 0,
+                     UINT64_C(0x3fff000000000000)));
+        CHECK(result(sqroot(input(0, UINT64_C(0x4001000000000000))), 0,
+                     UINT64_C(0x4000000000000000)));
+        CHECK(result(sqroot(input(1, 0)), 0, UINT64_C(0x1fc8000000000000)));
+        CHECK(result(sqroot(input(0, UINT64_C(0x8000000000000000))), 0,
+                     UINT64_C(0x8000000000000000)));
+        CHECK(result(sqroot(input(0, UINT64_C(0x7fff000000000000))), 0,
+                     UINT64_C(0x7fff000000000000)));
+        // Exact binary128 powl: 2^10=1024, 2^-16494 (subnormal), (-2)^3=-8, (-1)^Inf=1, x^0=1.
+        CHECK(result(
+            power(input(0, UINT64_C(0x4000000000000000)), input(0, UINT64_C(0x4002400000000000))),
+            0, UINT64_C(0x4009000000000000)));
+        CHECK(result(
+            power(input(0, UINT64_C(0x4000000000000000)), input(0, UINT64_C(0xc00d01b800000000))),
+            1, 0));
+        CHECK(result(
+            power(input(0, UINT64_C(0xc000000000000000)), input(0, UINT64_C(0x4000800000000000))),
+            0, UINT64_C(0xc002000000000000)));
+        CHECK(result(
+            power(input(0, UINT64_C(0xbfff000000000000)), input(0, UINT64_C(0x7fff000000000000))),
+            0, UINT64_C(0x3fff000000000000)));
+        CHECK(result(power(input(0x123, UINT64_C(0x7fff800000000000)), input(0, 0)), 0,
+                     UINT64_C(0x3fff000000000000)));
+        CHECK(errno == 73);
+    } else if (group == 8) {
+        // Exact 113-bit rounding of sqrtl(2) across all 4 IEEE-754 modes.
+        uint64_t expected_lo =
+            mode == 2 ? UINT64_C(0xc908b2fb1366ea96) : UINT64_C(0xc908b2fb1366ea95);
+        CHECK(result(sqroot(input(0, UINT64_C(0x4000000000000000))), expected_lo,
+                     UINT64_C(0x3fff6a09e667f3bc)));
+        // General binary128 powl: 3^2 ~= 9.0 (0x4002200000000000, low=0).
+        volatile union Quad nine_bits;
+        nine_bits.value =
+            power(input(0, UINT64_C(0x4000800000000000)), input(0, UINT64_C(0x4000000000000000)));
+        CHECK(nine_bits.bits.high >= UINT64_C(0x40021fffffffffff) &&
+              nine_bits.bits.high <= UINT64_C(0x4002200000000001));
+        CHECK(errno == 73);
+    } else if (group == 9) {
+        // Domain errors: sqrtl(-1) and powl(-2, 0.5) raise FE_INVALID, preserve guest errno.
+        CHECK(result(sqroot(input(0, UINT64_C(0xbfff000000000000))), 0,
+                     UINT64_C(0x7fff800000000000)));
+        CHECK(result(
+            power(input(0, UINT64_C(0xc000000000000000)), input(0, UINT64_C(0x3ffe000000000000))),
+            0, UINT64_C(0x7fff800000000000)));
+        CHECK(errno == 73);
     } else
         return -1;
     return 0;

@@ -10,6 +10,8 @@
 #include "shiraz/darwin/guest/jni.hpp"
 #include "shiraz/darwin/guest/path.hpp"
 #include "shiraz/darwin/guest/opensles.hpp"
+#include "shiraz/darwin/guest/admission_domain.hpp"
+#include "shiraz/darwin/guest/closure.hpp"
 #include "shiraz/darwin/guest/loader.hpp"
 #include "shiraz/darwin/guest/binding_evidence.hpp"
 #include <cstdio>
@@ -25,7 +27,6 @@
 #include <mutex>
 #include <signal.h>
 #ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-#include "shiraz/darwin/guest/admission_domain.hpp"
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -33,8 +34,7 @@
 #endif
 
 namespace {
-#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-uintptr_t isolated_transfer(uintptr_t target, uintptr_t site, uintptr_t stack) noexcept {
+uintptr_t guest_admission_transfer(uintptr_t target, uintptr_t site, uintptr_t stack) noexcept {
     try {
         auto domain = shiraz::guest::AdmissionDomain::current_invocation();
         if (!domain)
@@ -46,16 +46,22 @@ uintptr_t isolated_transfer(uintptr_t target, uintptr_t site, uintptr_t stack) n
         const char* image_name = named && image.dli_fname ? image.dli_fname : "none";
         if (const char* slash = std::strrchr(image_name, '/'))
             image_name = slash + 1;
+#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
+        const char* tag = "SHIRAZ_ISOLATED_ADMISSION_REJECTED";
+#else
+        const char* tag = "SHIRAZ_GUEST_ADMISSION_REJECTED";
+#endif
         std::fprintf(stderr,
-                     "SHIRAZ_ISOLATED_ADMISSION_REJECTED reason=%s site=0x%llx target=0x%llx "
+                     "%s reason=%s site=0x%llx target=0x%llx "
                      "known_closure=%d image=%s symbol=%s\n",
-                     error.what(), static_cast<unsigned long long>(site),
+                     tag, error.what(), static_cast<unsigned long long>(site),
                      static_cast<unsigned long long>(target),
                      shiraz::guest::known_guest_closure(reinterpret_cast<void*>(target)) ? 1 : 0,
                      image_name, named && image.dli_sname ? image.dli_sname : "none");
         std::abort();
     }
 }
+#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
 void restrict_probe_process() {
 #ifndef SHIRAZ_OUTER_SANDBOX_PROBE
     void* library = ::dlopen("/usr/lib/system/libsystem_sandbox.dylib", RTLD_NOW | RTLD_LOCAL);
@@ -164,6 +170,108 @@ void* load(const char* path, int flags) {
             throw shiraz::guest::ElfError("unsupported Darwin NativeBridge load flags");
         std::lock_guard<std::recursive_mutex> lock(*mutex);
         auto canonical = std::filesystem::canonical(path);
+        auto init_loader = [&](bool use_admission) {
+            std::function<void()> close_audio, close_looper;
+            lifecycle = std::make_shared<shiraz::guest::Lifecycle>(shiraz::guest::is_guest_code);
+            if (use_admission) {
+                // Signal delivery can enter guest code without an AdmissionDomain
+                // invocation. Refuse callback installation for this entire runtime,
+                // including registrations from threads outside an active invocation.
+                signals = std::make_shared<shiraz::guest::SignalRuntime>(
+                    shiraz::guest::is_guest_code,
+                    shiraz::guest::SignalRuntime::CallbackPolicy::RejectCallbacks);
+            } else {
+                signals =
+                    std::make_shared<shiraz::guest::SignalRuntime>(shiraz::guest::is_guest_code);
+            }
+            cleanup = std::make_shared<shiraz::guest::CleanupRuntime>(shiraz::guest::is_guest_code);
+            auto providers = shiraz::guest::dynamic_personality(
+                [&] {
+                    auto memory_snapshot = std::make_shared<shiraz::guest::MemorySnapshot>();
+                    shiraz::guest::MapsStream::Factory maps;
+                    if (const char* catalog = std::getenv("SHIRAZ_GUEST_CACHE_CATALOG_FD")) {
+                        char* end = nullptr;
+                        errno = 0;
+                        long descriptor = std::strtol(catalog, &end, 10);
+                        std::vector<uint8_t> bytes;
+                        if (errno || !end || *end || end == catalog || descriptor < 3 ||
+                            descriptor > INT_MAX ||
+                            !shiraz::guest::read_proc_maps_catalog(int(descriptor), bytes))
+                            throw shiraz::guest::ElfError("invalid guest maps cache capability");
+                        int fd_flags = ::fcntl(int(descriptor), F_GETFD);
+                        if (fd_flags < 0 ||
+                            ::fcntl(int(descriptor), F_SETFD, fd_flags | FD_CLOEXEC))
+                            throw shiraz::guest::ElfError(
+                                "cannot scope guest maps cache capability");
+                        maps = shiraz::guest::proc_maps_factory(bytes, [memory_snapshot] {
+                            if (!*memory_snapshot)
+                                throw shiraz::guest::ElfError("guest memory snapshot unavailable");
+                            return (*memory_snapshot)();
+                        });
+                        if (!maps)
+                            throw shiraz::guest::ElfError("guest maps cache metadata mismatch");
+                    }
+                    const bool maps_configured = bool(maps);
+                    auto providers = shiraz::guest::native_personality(
+                        shiraz::guest::is_guest_code, lifecycle, signals, cleanup,
+                        memory_snapshot.get(), std::move(maps));
+                    if (maps_configured)
+                        std::fprintf(stderr, "SHIRAZ_PROC_MAPS configured=1 snapshot=per-open\n");
+                    const char* shim = std::getenv("SHIRAZ_GUEST_EGL_SHIM");
+                    if (shim) {
+                        for (auto& provider : shiraz::guest::guest_graphics_providers(shim))
+                            providers.add(std::move(provider));
+                    }
+                    const char* android_directory = std::getenv("SHIRAZ_GUEST_ANDROID_LIB_DIR");
+                    if (android_directory || shim) {
+                        auto directory = android_directory
+                                             ? std::filesystem::path(android_directory)
+                                             : std::filesystem::path(shim).parent_path();
+                        providers.add(shiraz::guest::android_provider(
+                            directory,
+                            [](void* env) -> void* {
+                                return shiraz::guest::host_env(static_cast<JNIEnv*>(env));
+                            },
+                            shiraz::guest::is_guest_code, lifecycle, &close_looper));
+                    }
+                    providers.add(shiraz::guest::bitmap_provider([](void* env) -> void* {
+                        return shiraz::guest::host_env(static_cast<JNIEnv*>(env));
+                    }));
+                    providers.add(shiraz::guest::opensles_provider(shiraz::guest::is_guest_code,
+                                                                   close_audio, lifecycle));
+                    return providers;
+                }(),
+                {[] { return loader.get(); }, mutex,
+                 [] {
+                     std::atomic_store(&code_validation,
+                                       std::make_shared<const shiraz::guest::CodeValidator>(
+                                           loader->code_validator()));
+                     shiraz::guest::set_path_reader_validator(
+                         loader->code_validator("libandroidx.graphics.path.so"));
+                 }});
+            if (use_admission) {
+                loader = std::make_unique<shiraz::guest::Loader>(
+                    std::vector<std::filesystem::path>{canonical.parent_path()},
+                    std::move(providers), shiraz::guest::Loader::Mode::AdmissionFixture,
+                    uintptr_t(&guest_admission_transfer));
+            } else {
+                loader = std::make_unique<shiraz::guest::Loader>(
+                    std::vector<std::filesystem::path>{canonical.parent_path()},
+                    std::move(providers));
+            }
+            loader->add_preunmap_hook(std::move(close_audio));
+            if (close_looper)
+                loader->add_preunmap_hook(std::move(close_looper));
+            lifecycle->attach(*loader);
+            signals->attach(*loader);
+            cleanup->attach(*loader);
+        };
+        const char* admission_env = std::getenv("SHIRAZ_GUEST_ADMISSION");
+#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
+        const bool initial_admission = true;
+#else
+        const bool initial_admission = admission_env && !std::strcmp(admission_env, "1");
+#endif
         if (!loader) {
             if (!process_namespace.bridge_reference) {
                 Dl_info image{};
@@ -177,102 +285,26 @@ void* load(const char* path, int flags) {
                 std::fprintf(stderr, "SHIRAZ_GUEST_NAMESPACE_LIFETIME process=1 explicit_unmap=0 "
                                      "bridge_reference=1\n");
             }
-            std::function<void()> close_audio, close_looper;
-            lifecycle = std::make_shared<shiraz::guest::Lifecycle>(shiraz::guest::is_guest_code);
-#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-            // Signal delivery can enter guest code without an AdmissionDomain
-            // invocation. Refuse callback installation for this entire runtime,
-            // including registrations from threads outside an active invocation.
-            signals = std::make_shared<shiraz::guest::SignalRuntime>(
-                shiraz::guest::is_guest_code,
-                shiraz::guest::SignalRuntime::CallbackPolicy::RejectCallbacks);
-#else
-            signals = std::make_shared<shiraz::guest::SignalRuntime>(shiraz::guest::is_guest_code);
-#endif
-            cleanup = std::make_shared<shiraz::guest::CleanupRuntime>(shiraz::guest::is_guest_code);
-            loader = std::make_unique<shiraz::guest::Loader>(
-                std::vector<std::filesystem::path>{canonical.parent_path()},
-                shiraz::guest::dynamic_personality(
-                    [&] {
-                        auto memory_snapshot = std::make_shared<shiraz::guest::MemorySnapshot>();
-                        shiraz::guest::MapsStream::Factory maps;
-                        if (const char* catalog = std::getenv("SHIRAZ_GUEST_CACHE_CATALOG_FD")) {
-                            char* end = nullptr;
-                            errno = 0;
-                            long descriptor = std::strtol(catalog, &end, 10);
-                            std::vector<uint8_t> bytes;
-                            if (errno || !end || *end || end == catalog || descriptor < 3 ||
-                                descriptor > INT_MAX ||
-                                !shiraz::guest::read_proc_maps_catalog(int(descriptor), bytes))
-                                throw shiraz::guest::ElfError(
-                                    "invalid guest maps cache capability");
-                            int fd_flags = ::fcntl(int(descriptor), F_GETFD);
-                            if (fd_flags < 0 ||
-                                ::fcntl(int(descriptor), F_SETFD, fd_flags | FD_CLOEXEC))
-                                throw shiraz::guest::ElfError(
-                                    "cannot scope guest maps cache capability");
-                            maps = shiraz::guest::proc_maps_factory(bytes, [memory_snapshot] {
-                                if (!*memory_snapshot)
-                                    throw shiraz::guest::ElfError(
-                                        "guest memory snapshot unavailable");
-                                return (*memory_snapshot)();
-                            });
-                            if (!maps)
-                                throw shiraz::guest::ElfError("guest maps cache metadata mismatch");
-                        }
-                        const bool maps_configured = bool(maps);
-                        auto providers = shiraz::guest::native_personality(
-                            shiraz::guest::is_guest_code, lifecycle, signals, cleanup,
-                            memory_snapshot.get(), std::move(maps));
-                        if (maps_configured)
-                            std::fprintf(stderr,
-                                         "SHIRAZ_PROC_MAPS configured=1 snapshot=per-open\n");
-                        const char* shim = std::getenv("SHIRAZ_GUEST_EGL_SHIM");
-                        if (shim) {
-                            for (auto& provider : shiraz::guest::guest_graphics_providers(shim))
-                                providers.add(std::move(provider));
-                        }
-                        const char* android_directory = std::getenv("SHIRAZ_GUEST_ANDROID_LIB_DIR");
-                        if (android_directory || shim) {
-                            auto directory = android_directory
-                                                 ? std::filesystem::path(android_directory)
-                                                 : std::filesystem::path(shim).parent_path();
-                            providers.add(shiraz::guest::android_provider(
-                                directory,
-                                [](void* env) -> void* {
-                                    return shiraz::guest::host_env(static_cast<JNIEnv*>(env));
-                                },
-                                shiraz::guest::is_guest_code, lifecycle, &close_looper));
-                        }
-                        providers.add(shiraz::guest::bitmap_provider([](void* env) -> void* {
-                            return shiraz::guest::host_env(static_cast<JNIEnv*>(env));
-                        }));
-                        providers.add(shiraz::guest::opensles_provider(shiraz::guest::is_guest_code,
-                                                                       close_audio, lifecycle));
-                        return providers;
-                    }(),
-                    {[] { return loader.get(); }, mutex,
-                     [] {
-                         std::atomic_store(&code_validation,
-                                           std::make_shared<const shiraz::guest::CodeValidator>(
-                                               loader->code_validator()));
-                         shiraz::guest::set_path_reader_validator(
-                             loader->code_validator("libandroidx.graphics.path.so"));
-                     }})
-#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-                    ,
-                shiraz::guest::Loader::Mode::AdmissionFixture, uintptr_t(&isolated_transfer)
-#endif
-            );
-            loader->add_preunmap_hook(std::move(close_audio));
-            if (close_looper)
-                loader->add_preunmap_hook(std::move(close_looper));
-            lifecycle->attach(*loader);
-            signals->attach(*loader);
-            cleanup->attach(*loader);
+            init_loader(initial_admission);
         }
         size_t before = loader->constructor_count(), records = loader->bindings().size();
-        loader->link(canonical, flags & RTLD_GLOBAL);
+        try {
+            loader->link(canonical, flags & RTLD_GLOBAL);
+        } catch (const shiraz::guest::ElfError& err) {
+            const bool allow_auto = !admission_env || std::strcmp(admission_env, "0") != 0;
+            if (!loader->uses_admission() && loader->image_count() == 0 && allow_auto &&
+                std::strstr(err.what(), "ambiguous unreachable TPIDR/SVC/system-control word")) {
+                std::fprintf(stderr,
+                             "SHIRAZ_GUEST_ADMISSION auto-enabled reason=indirect-cfg module=%s\n",
+                             canonical.filename().c_str());
+                init_loader(true);
+                before = loader->constructor_count();
+                records = loader->bindings().size();
+                loader->link(canonical, flags & RTLD_GLOBAL);
+            } else {
+                throw;
+            }
+        }
         std::atomic_store(&code_validation, std::make_shared<const shiraz::guest::CodeValidator>(
                                                 loader->code_validator()));
         shiraz::guest::set_path_reader_validator(
@@ -324,12 +356,12 @@ void* load(const char* path, int flags) {
         }
         std::fprintf(stderr, "SHIRAZ_GUEST_ELF_LOADED constructors=%zu images=%zu\n",
                      loader->constructor_count() - before, loader->image_count());
-#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-        std::fprintf(stderr, "SHIRAZ_GUEST_TPIDR_REWRITTEN dynamic_count=unavailable\n");
-#else
-        std::fprintf(stderr, "SHIRAZ_GUEST_TPIDR_REWRITTEN sites=%zu\n",
-                     loader->rewritten_thread_pointers());
-#endif
+        if (loader->uses_admission()) {
+            std::fprintf(stderr, "SHIRAZ_GUEST_TPIDR_REWRITTEN dynamic_count=unavailable\n");
+        } else {
+            std::fprintf(stderr, "SHIRAZ_GUEST_TPIDR_REWRITTEN sites=%zu\n",
+                         loader->rewritten_thread_pointers());
+        }
         return handle;
     } catch (const std::exception& error) {
         last_error = error.what();
@@ -348,32 +380,19 @@ void* trampoline(void* handle, const char* name, const char* shorty, uint32_t le
         void* function = reinterpret_cast<void*>(binding.address);
         if (!loader->contains_code(function))
             throw shiraz::guest::ElfError("guest JNI symbol is not executable");
+        auto domain = loader->uses_admission() ? loader->admission_domain()
+                                               : std::shared_ptr<shiraz::guest::AdmissionDomain>{};
         if (shorty) {
             // This standalone ART passes length=0 even with a valid shorty.
             size_t actual = strnlen(shorty, 258);
             if (!actual || actual > 257 || (length && length != actual))
                 throw shiraz::guest::ElfError("invalid guest native shorty length");
-            return shiraz::guest::native_trampoline(function, std::string(shorty, actual)
-#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-                                                                  ,
-                                                    loader->admission_domain()
-#endif
-            );
+            return shiraz::guest::native_trampoline(function, std::string(shorty, actual), domain);
         }
         if (!std::strcmp(name, "JNI_OnLoad"))
-            return shiraz::guest::onload_trampoline(function, false, binding.provider
-#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-                                                    ,
-                                                    loader->admission_domain()
-#endif
-            );
+            return shiraz::guest::onload_trampoline(function, false, binding.provider, domain);
         if (!std::strcmp(name, "JNI_OnUnload"))
-            return shiraz::guest::onload_trampoline(function, true, {}
-#ifdef SHIRAZ_ISOLATED_ADMISSION_PROBE
-                                                    ,
-                                                    loader->admission_domain()
-#endif
-            );
+            return shiraz::guest::onload_trampoline(function, true, {}, domain);
         throw shiraz::guest::ElfError("guest symbol requires an explicit ABI signature");
     } catch (const std::exception& error) {
         last_error = error.what();

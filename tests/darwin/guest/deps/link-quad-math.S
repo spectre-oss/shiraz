@@ -5,3 +5,11 @@
 .type log2l, %function
 log2l:
  brk #0
+.global sqrtl
+.type sqrtl, %function
+sqrtl:
+ brk #0
+.global powl
+.type powl, %function
+powl:
+ brk #0

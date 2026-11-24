@@ -19,8 +19,12 @@ public final class ContentResolverSmoke {
  private static byte[] read(InputStream input)throws Exception{try(InputStream in=input;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] buffer=new byte[4096];for(int n;(n=in.read(buffer))!=-1;)out.write(buffer,0,n);return out.toByteArray();}}
  public static void main(String[] args)throws Exception{
   final Resources resources=Resources.shirazOpen(args[0],100,100);
-  Context context=new ContextWrapper(null){private ContentResolver resolver;public String getPackageName(){return "org.shiraz.fixture";}public Resources getResources(){return resources;}public synchronized ContentResolver getContentResolver(){if(resolver==null)resolver=new ContentResolver(this);return resolver;}};
+  Context context=new ContextWrapper(null){private ContentResolver resolver;public String getPackageName(){return "org.shiraz.fixture";}public File getFilesDir(){return new File(args[1]);}public Resources getResources(){return resources;}public synchronized ContentResolver getContentResolver(){if(resolver==null)resolver=new ContentResolver(this);return resolver;}};
   try{ContentResolver resolver=context.getContentResolver();check(new ContextWrapper(context).getContentResolver()==resolver,"wrapper resolver identity");
+   String androidId=Settings.Secure.getString(resolver,Settings.Secure.ANDROID_ID);
+   check(androidId!=null&&androidId.length()==16&&androidId.matches("[0-9a-f]{16}"),"persistent default android_id");
+   File idStore=new File(args[1],".shiraz_android_id");
+   check(idStore.isFile()&&androidId.equals(Settings.Secure.getString(new ContentResolver(context),Settings.Secure.ANDROID_ID)),"android_id persisted across resolver instances");
    check(Settings.Global.getString(resolver,Settings.Global.AIRPLANE_MODE_ON)==null,"airplane absent, not false");check(Settings.Global.getInt(resolver,Settings.Global.AIRPLANE_MODE_ON,1)==1&&Settings.Global.getInt(resolver,"missing",-7)==-7,"caller defaults retained");check(Settings.System.getInt(resolver,Settings.System.AIRPLANE_MODE_ON,9)==9,"legacy airplane alias absent");try{Settings.Global.getInt(resolver,"missing");throw new AssertionError("missing value invented");}catch(Settings.SettingNotFoundException expected){}
    ContentResolver values=new ContentResolver(context){public String shirazReadSetting(String table,String name){return name;}};check(Settings.Global.getInt(values,"42",0)==42&&Settings.Global.getInt(values,"2147483648",8)==8&&Settings.Global.getInt(values," 1",7)==7,"integer parse/default semantics");try{Settings.Global.getInt(values,"invalid");throw new AssertionError("malformed accepted");}catch(Settings.SettingNotFoundException expected){}
    try{Settings.Global.putInt(resolver,Settings.Global.AIRPLANE_MODE_ON,1);throw new AssertionError("write claimed");}catch(UnsupportedOperationException expected){}
@@ -32,7 +36,7 @@ public final class ContentResolverSmoke {
    android.content.pm.ProviderInfo providerInfo=new android.content.pm.ProviderInfo();providerInfo.authority="fixture.duplicate";
    new ProbeProvider("first").attachInfo(context,providerInfo);new ProbeProvider("second").attachInfo(context,providerInfo);
    check("first".equals(resolver.getType(Uri.parse("content://fixture.duplicate/item"))),"Duplicate authority retains first publication");
-   check(file.delete(),"fixture cleanup");System.out.println("CONTENT_RESOLVER_SETTINGS_STREAMS_OK");
+   check(file.delete(),"fixture cleanup");idStore.delete();System.out.println("CONTENT_RESOLVER_SETTINGS_STREAMS_OK");
   }finally{resources.shirazClose();}
  }
 }

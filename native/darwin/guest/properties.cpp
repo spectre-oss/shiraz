@@ -79,7 +79,7 @@ std::vector<ProviderExport> property_exports(PropertyMap properties,
         std::memcpy(value, it->second.c_str(), it->second.size() + 1);
         return_value(capture, int(it->second.size()));
     });
-    auto foreach = closure([values, validate = std::move(validate)](Capture& capture) {
+    auto foreach = closure([values, validate](Capture& capture) {
         CallCursor cursor(capture, Convention::Aapcs64);
         void* callback = cursor.read<void*>();
         void* cookie = cursor.read<void*>();
@@ -106,6 +106,32 @@ std::vector<ProviderExport> property_exports(PropertyMap properties,
             return_value(capture, -1);
         }
     });
+    auto read_callback = closure([values, validate = std::move(validate)](Capture& capture) {
+        CallCursor cursor(capture, Convention::Aapcs64);
+        const void* handle = cursor.read<const void*>();
+        void* callback = cursor.read<void*>();
+        void* cookie = cursor.read<void*>();
+        HostErrno preserve;
+        auto it = std::find_if(values->begin(), values->end(),
+                               [&](const auto& item) { return &item == handle; });
+        if (it == values->end() || !callback || !validate || !validate(callback))
+            return;
+        try {
+            auto domain = AdmissionDomain::current_invocation();
+            std::vector<Argument> args{
+                Argument::integer(reinterpret_cast<uintptr_t>(cookie), ArgumentType::Int64),
+                Argument::integer(reinterpret_cast<uintptr_t>(it->first.c_str()),
+                                  ArgumentType::Int64),
+                Argument::integer(reinterpret_cast<uintptr_t>(it->second.c_str()),
+                                  ArgumentType::Int64),
+                Argument::integer(0, ArgumentType::Int32)};
+            if (domain)
+                (void)invoke_admitted(domain, callback, args);
+            else
+                (void)invoke(callback, args);
+        } catch (...) {
+        }
+    });
     return {{"__system_property_get", "LIBC", reinterpret_cast<uintptr_t>(entry),
              SymbolKind::Function, "properties/explicit-api-profile", false},
             {"__system_property_find_nth", "LIBC", reinterpret_cast<uintptr_t>(nth),
@@ -113,6 +139,8 @@ std::vector<ProviderExport> property_exports(PropertyMap properties,
             {"__system_property_read", "LIBC", reinterpret_cast<uintptr_t>(read),
              SymbolKind::Function, "properties/opaque-read", false},
             {"__system_property_foreach", "LIBC", reinterpret_cast<uintptr_t>(foreach),
+             SymbolKind::Function, "properties/validated-callback", false},
+            {"__system_property_read_callback", "LIBC", reinterpret_cast<uintptr_t>(read_callback),
              SymbolKind::Function, "properties/validated-callback", false}};
 }
 } // namespace shiraz::guest

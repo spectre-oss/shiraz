@@ -25,14 +25,18 @@ int main(int argc, char** argv) {
         require(argc == 2, "usage: quad-math-probe fixture-directory");
         Environment restore;
         auto providers = core_personality();
-        providers.add({"libm.so", {"LIBC"}, {quad_log2_export()}, false});
+        providers.add({"libm.so",
+                       {"LIBC"},
+                       {quad_log2_export(), quad_powl_export(), quad_sqrtl_export()},
+                       false});
         Loader loader({std::filesystem::canonical(argv[1])}, std::move(providers));
         auto* module = loader.open("libquad-math.so");
         auto entry = reinterpret_cast<void*>(loader.symbol(module, "run_quad_math").address);
         const int modes[] = {FE_TONEAREST, FE_TOWARDZERO, FE_UPWARD, FE_DOWNWARD};
-        const int raised[] = {0, FE_INEXACT, FE_DIVBYZERO, FE_INVALID, 0, FE_INVALID, 0};
+        const int raised[] = {0, FE_INEXACT, FE_DIVBYZERO, FE_INVALID, 0, FE_INVALID,
+                              0, 0,          FE_INEXACT,   FE_INVALID};
         for (int mode = 0; mode < 4; ++mode)
-            for (int group = 0; group < 7; ++group) {
+            for (int group = 0; group < 10; ++group) {
                 require(!std::fesetround(modes[mode]), "select actual math rounding mode");
                 std::feclearexcept(FE_ALL_EXCEPT);
                 std::feraiseexcept(group == 2 ? FE_INVALID : FE_DIVBYZERO);

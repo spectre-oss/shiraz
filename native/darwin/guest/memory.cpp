@@ -645,6 +645,8 @@ Providers native_personality(CodeValidator validate, std::shared_ptr<Lifecycle> 
     result.add(cxx_provider());
     auto math = math_provider();
     math.exports.push_back(quad_log2_export());
+    math.exports.push_back(quad_powl_export());
+    math.exports.push_back(quad_sqrtl_export());
     result.add(std::move(math));
     result.add(log_provider());
     if (validate)
