@@ -23,7 +23,8 @@ public final class AnimatorInflater {
    limit(depth);if(!p.getNamespace().isEmpty())throw new IllegalArgumentException("Animator namespace");String tag=p.getName();XmlAttributes a=new XmlAttributes(context,p);int start=p.getDepth();
    if(tag.equals("set")){attributes(p,"ordering");int order=a.integer("ordering",0);if(order<0||order>1)throw new IllegalArgumentException("Animator ordering");AnimatorSet set=new AnimatorSet();ArrayList<Animator> children=new ArrayList<Animator>();while(p.next()!=XmlPullParser.END_DOCUMENT){if(p.getEventType()==XmlPullParser.END_TAG&&p.getDepth()==start)break;if(p.getEventType()==XmlPullParser.START_TAG)children.add(animation(p,depth+1));}if(order==0)set.playTogether(children);else set.playSequentially(children);return set;}
    if(!tag.equals("animator")&&!tag.equals("objectAnimator"))throw new UnsupportedOperationException("Animator XML element "+tag);
-   attributes(p,tag.equals("objectAnimator")?"propertyName pathData propertyXName propertyYName duration startOffset startDelay valueFrom valueTo valueType repeatCount repeatMode interpolator":"duration startOffset startDelay valueFrom valueTo valueType repeatCount repeatMode interpolator");
+   // AOSP ignores legacy Animation attributes like fillAfter on property animators (used by Material 3 animators).
+   attributes(p,tag.equals("objectAnimator")?"propertyName pathData propertyXName propertyYName duration startOffset startDelay valueFrom valueTo valueType repeatCount repeatMode interpolator fillAfter":"duration startOffset startDelay valueFrom valueTo valueType repeatCount repeatMode interpolator");
    int type=a.integer("valueType",4);if(type!=0&&type!=1&&type!=2&&type!=4)throw new UnsupportedOperationException("Animator XML value type "+type);
    ValueAnimator result;
    if(type==2){
@@ -48,13 +49,32 @@ public final class AnimatorInflater {
    while(p.next()!=XmlPullParser.END_DOCUMENT){if(p.getEventType()==XmlPullParser.END_TAG&&p.getDepth()==start)break;if(p.getEventType()==XmlPullParser.START_TAG)throw new UnsupportedOperationException("Animator keyframes/propertyValuesHolder are not implemented");}return result;
   }
   StateListAnimator stateList(int id)throws Exception{
-   try(CompiledXmlParser p=open(id)){if(!p.getNamespace().isEmpty()||!p.getName().equals("selector"))throw new IllegalArgumentException("State animator selector required");attributes(p,"");StateListAnimator result=new StateListAnimator();
-    while(p.next()!=XmlPullParser.END_DOCUMENT){if(p.getEventType()!=XmlPullParser.START_TAG)continue;limit(1);if(!p.getNamespace().isEmpty()||!p.getName().equals("item")||p.getDepth()!=2)throw new IllegalArgumentException("State animator item required");XmlAttributes a=new XmlAttributes(context,p);ArrayList<Integer> states=new ArrayList<Integer>();
+   try(CompiledXmlParser p=open(id)){
+    // Material 3 state-list animators wrap <selector> in a root <set>; AOSP skips outer non-item tags.
+    int selectorDepth=p.getDepth();
+    if(p.getNamespace().isEmpty()&&p.getName().equals("set")){
+     attributes(p,"");
+     while(p.next()!=XmlPullParser.END_DOCUMENT){
+      if(p.getEventType()==XmlPullParser.START_TAG)break;
+      if(p.getEventType()==XmlPullParser.END_TAG&&p.getDepth()==selectorDepth)throw new IllegalArgumentException("State animator selector required");
+     }
+    }
+    if(p.getEventType()!=XmlPullParser.START_TAG||!p.getNamespace().isEmpty()||!p.getName().equals("selector"))throw new IllegalArgumentException("State animator selector required");
+    attributes(p,"");selectorDepth=p.getDepth();int itemDepth=selectorDepth+1;StateListAnimator result=new StateListAnimator();
+    while(p.next()!=XmlPullParser.END_DOCUMENT){
+     if(p.getEventType()==XmlPullParser.END_TAG&&p.getDepth()==selectorDepth)break;
+     if(p.getEventType()!=XmlPullParser.START_TAG)continue;
+     limit(1);if(!p.getNamespace().isEmpty()||!p.getName().equals("item")||p.getDepth()!=itemDepth)throw new IllegalArgumentException("State animator item required");
+     XmlAttributes a=new XmlAttributes(context,p);ArrayList<Integer> states=new ArrayList<Integer>();
      for(BinaryXml.Attribute attr:p.shirazNode().attributes){if(BinaryXml.ANDROID.equals(attr.namespace)&&attr.name.equals("animation"))continue;if(attr.resourceId==0||attr.value.type!=18)throw new IllegalArgumentException("State animator requires boolean states");states.add(attr.value.data==0?-attr.resourceId:attr.resourceId);}
      Animator animation=a.has("animation")?load(a.reference("animation",0),2):null;
-     while(p.next()!=XmlPullParser.END_DOCUMENT){if(p.getEventType()==XmlPullParser.END_TAG&&p.getDepth()==2)break;if(p.getEventType()==XmlPullParser.START_TAG){if(animation!=null)throw new IllegalArgumentException("Duplicate state animation");animation=animation(p,2);}}
+     while(p.next()!=XmlPullParser.END_DOCUMENT){if(p.getEventType()==XmlPullParser.END_TAG&&p.getDepth()==itemDepth)break;if(p.getEventType()==XmlPullParser.START_TAG){if(animation!=null)throw new IllegalArgumentException("Duplicate state animation");animation=animation(p,2);}}
      if(animation==null)throw new IllegalArgumentException("Missing state animation");int[] spec=new int[states.size()];for(int i=0;i<spec.length;i++)spec[i]=states.get(i);result.addState(spec,animation);
-    }return result;
+    }
+    if(selectorDepth>1){
+     while(p.next()!=XmlPullParser.END_DOCUMENT){if(p.getEventType()==XmlPullParser.START_TAG)throw new IllegalArgumentException("Unexpected element after state animator selector");}
+    }
+    return result;
    }
   }
  }
