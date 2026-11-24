@@ -424,3 +424,34 @@ int main(void) {
         self.assertIn('Sandbox policy: disabled (--no-sandbox)', opt_out_diag.stdout)
         conflict = self.run_launcher('--sandbox', '--no-sandbox', '--diagnose')
         self.assertNotEqual(conflict.returncode, 0)
+
+    def test_digitalis_bundle_diagnostics_and_native_bridge_flags(self):
+        self.launch.write_text(self.launch.read_text() + 'native=true\ndigitalis=true\n')
+        missing = self.run_launcher('--diagnose')
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn('Missing Android ARM64 native libraries', missing.stderr)
+
+        (self.app / 'usr/android-lib').mkdir(parents=True)
+        (self.app / 'usr/android-lib/libguest.so').touch()
+        missing_bridge = self.run_launcher('--diagnose')
+        self.assertNotEqual(missing_bridge.returncode, 0)
+        self.assertIn('libberberis_arm64.so', missing_bridge.stderr)
+
+        dig_dir = self.app / 'usr/lib/digitalis'
+        dig_dir.mkdir(parents=True)
+        for name in (
+            'libberberis_arm64.so',
+            'libberberis_proxy_libc.so',
+            'libberberis_proxy_libm.so',
+        ):
+            (dig_dir / name).touch()
+        diag = self.run_launcher('--diagnose')
+        self.assertEqual(diag.returncode, 0, diag.stderr)
+        self.assertIn('ARM64 bridge: digitalis (bundled)', diag.stdout)
+
+        shutil.copy2('/usr/bin/echo', self.app / 'usr/art/bin/dalvikvm')
+        before = set(self.cache.rglob('stdout.log'))
+        launched = self.run_launcher('--frames', '1')
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        log = (set(self.cache.rglob('stdout.log')) - before).pop().read_text()
+        self.assertIn(f'-XX:NativeBridge={dig_dir / "libberberis_arm64.so"}', log)

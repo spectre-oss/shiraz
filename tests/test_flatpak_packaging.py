@@ -231,6 +231,47 @@ class FlatpakPackagingTests(unittest.TestCase):
                 )
                 self.assertEqual(glib.g_variant_is_normal_form(pv), 1)
 
+    def test_flatpak_bundle_with_digitalis_arm64_payload_validates(self):
+        import build_appimage as ba  # noqa: E402
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stage = tmp_path / 'stage'
+            files_dir = stage / 'files'
+            _stage_minimal_files(files_dir, machine=62)
+            dig_src = tmp_path / 'digitalis'
+            dig_src.mkdir()
+            for name in (
+                'libberberis_arm64.so',
+                'libberberis_proxy_libc.so',
+                'libberberis_proxy_libm.so',
+            ):
+                (dig_src / name).write_bytes(_make_elf(62))
+            from types import SimpleNamespace
+
+            libraries = SimpleNamespace(extra_sources={})
+            meta = ba.bundle_digitalis(
+                files_dir, libraries, dig_src, scan_dependencies=False, root=tmp_path
+            )
+            self.assertEqual(meta['guest_abi'], 'arm64-v8a')
+            (files_dir / 'usr/android-lib').mkdir(parents=True)
+            (files_dir / 'usr/android-lib/libguest_arm64.so').write_bytes(_make_elf(183))
+            ba.validate_bundle_architectures(files_dir, 'x86_64', digitalis_enabled=True)
+
+            app_id = ob.flatpak_app_id('org.shiraz.arm64demo')
+            (stage / 'export/share/applications').mkdir(parents=True)
+            (stage / 'export/share/applications' / f'{app_id}.desktop').write_text(
+                ob.flatpak_desktop_entry(app_id, 'Arm64Demo'), encoding='utf-8'
+            )
+            (stage / 'metadata').write_text(
+                ob.flatpak_metadata_ini(app_id, 'x86_64'), encoding='utf-8'
+            )
+            bundle = tmp_path / 'arm64demo.flatpak'
+            bundle.write_bytes(
+                ob.build_flatpak_bundle_from_tree(stage, app_id, 'x86_64', timestamp=1700000000)
+            )
+            fs.verify_gvariant_superblock(bundle)
+
 
 if __name__ == '__main__':
     unittest.main()

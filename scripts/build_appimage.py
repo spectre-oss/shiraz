@@ -78,6 +78,11 @@ RUNTIME_LIBS = (
     'shiraz-speech',
     'shiraz-notifications',
 )
+DIGITALIS_REQUIRED_LIBS = (
+    'libberberis_arm64.so',
+    'libberberis_proxy_libc.so',
+    'libberberis_proxy_libm.so',
+)
 DISPLAY_LIBS = (
     'libwayland-client.so.0',
     'libwayland-egl.so.1',
@@ -163,7 +168,48 @@ def fetch(name, cache, architecture="x86_64"):
     return dest
 
 
-def validate_report(report, architecture="x86_64"):
+def needs_digitalis(report, architecture='x86_64'):
+    abis = report.get('native_abis') or []
+    return architecture == 'x86_64' and bool(abis) and 'x86_64' not in abis and 'arm64-v8a' in abis
+
+
+def resolve_digitalis_dir(explicit_dir=None, *, root=ROOT, required=False):
+    candidates = []
+    if explicit_dir is not None:
+        candidates.append(Path(explicit_dir).resolve())
+    else:
+        env_dir = os.environ.get('SHIRAZ_DIGITALIS_DIR')
+        env_lib = os.environ.get('SHIRAZ_DIGITALIS_LIBRARY')
+        if env_dir:
+            candidates.append(Path(env_dir).resolve())
+        if env_lib:
+            candidates.append(Path(env_lib).resolve().parent)
+        candidates.append((root / 'build/digitalis-host/deploy').resolve())
+        candidates.append((root / 'build/digitalis-host').resolve())
+
+    missing_detail = None
+    for candidate in candidates:
+        if not candidate.is_dir():
+            if explicit_dir is not None:
+                missing_detail = f'Digitalis directory does not exist: {candidate}'
+            continue
+        missing = [name for name in DIGITALIS_REQUIRED_LIBS if not (candidate / name).is_file()]
+        if not missing:
+            return candidate
+        missing_detail = f'Incomplete Digitalis directory {candidate}: missing ' + ', '.join(
+            missing
+        )
+        if explicit_dir is not None:
+            break
+    if required:
+        raise RuntimeError(
+            missing_detail
+            or 'Digitalis ARM64 bridge not found; build it with `make runtime-digitalis` or pass --digitalis-dir'
+        )
+    return None
+
+
+def validate_report(report, architecture='x86_64', *, allow_digitalis=False):
     m = report['manifest']
     minimum = str(m.get('min_sdk') or '1')
     if not minimum.isdecimal() or int(minimum) > 27:
@@ -182,8 +228,67 @@ def validate_report(report, architecture="x86_64"):
         raise FormatError('Unsupported package architecture')
     abi = 'arm64-v8a' if architecture == 'aarch64' else 'x86_64'
     if report['native_abis'] and abi not in report['native_abis']:
+        if allow_digitalis and needs_digitalis(report, architecture):
+            return values
         raise FormatError('APK has no ' + abi + '/managed runtime candidate')
     return values
+
+
+def bundle_digitalis(root_dir, libraries, digitalis_dir, *, scan_dependencies=True, root=ROOT):
+    """Bundle built Digitalis (Berberis ARM64-on-x86_64) libs and notices into usr/lib/digitalis."""
+    source_dir = resolve_digitalis_dir(digitalis_dir, root=root, required=True)
+    dest_dir = Path(root_dir) / 'usr/lib/digitalis'
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    bundled = []
+    seen = set()
+    to_copy = list(DIGITALIS_REQUIRED_LIBS)
+    for path in sorted(source_dir.glob('libberberis_proxy_*.so')):
+        if path.name not in to_copy:
+            to_copy.append(path.name)
+    for name in to_copy:
+        src = source_dir / name
+        if not src.is_file() or name in seen:
+            continue
+        require_architecture(src, 'x86_64')
+        dst = dest_dir / name
+        copy_file(src, dst)
+        seen.add(name)
+        digest = sha256(dst)
+        rel = f'usr/lib/digitalis/{name}'
+        label = str(src.relative_to(root)) if src.is_relative_to(root) else src.name
+        libraries.extra_sources[rel] = {'source': label, 'sha256': digest}
+        bundled.append({'name': name, 'path': rel, 'sha256': digest})
+        if scan_dependencies:
+            libraries.scan(src)
+
+    notice_dir = Path(root_dir) / 'usr/share/shiraz/licenses/digitalis'
+    for rel_notice in (
+        'context/digitalis/NOTICE',
+        'context/digitalis/LICENSE',
+        'context/digitalis-native-bridge-support/NOTICE',
+        'context/digitalis-bionic/NOTICE',
+    ):
+        src_notice = root / rel_notice
+        if src_notice.is_file():
+            copy_file(src_notice, notice_dir / rel_notice.replace('/', '_'))
+    return {
+        'enabled': True,
+        'guest_abi': 'arm64-v8a',
+        'bridge': 'usr/lib/digitalis/libberberis_arm64.so',
+        'libraries': bundled,
+    }
+
+
+def validate_bundle_architectures(root_dir, architecture, *, digitalis_enabled=False):
+    root_path = Path(root_dir)
+    android_lib_dir = root_path / 'usr/android-lib'
+    for binary in root_path.rglob('*'):
+        if not (binary.is_file() and not binary.is_symlink() and elf(binary)):
+            continue
+        if digitalis_enabled and binary.is_relative_to(android_lib_dir):
+            require_architecture(binary, 'aarch64')
+        else:
+            require_architecture(binary, architecture)
 
 
 def elf(path):
@@ -447,7 +552,25 @@ def build(args):
     loader = 'ld-linux-aarch64.so.1' if architecture == 'aarch64' else 'ld-linux-x86-64.so.2'
     apk = args.apk.resolve()
     report = inspect_apk(apk)
-    package, application, activity = validate_report(report, architecture)
+    digitalis_requested = bool(
+        getattr(args, 'digitalis', False) or getattr(args, 'digitalis_dir', None)
+    )
+    use_digitalis = needs_digitalis(report, architecture)
+    digitalis_dir = None
+    if use_digitalis:
+        digitalis_dir = resolve_digitalis_dir(
+            getattr(args, 'digitalis_dir', None), required=digitalis_requested
+        )
+        if digitalis_dir is None:
+            raise FormatError(
+                'APK has only arm64-v8a native libraries on x86_64; build Digitalis with '
+                '`make runtime-digitalis` and pass --digitalis'
+            )
+    elif digitalis_requested:
+        digitalis_dir = resolve_digitalis_dir(getattr(args, 'digitalis_dir', None), required=True)
+    package, application, activity = validate_report(
+        report, architecture, allow_digitalis=use_digitalis
+    )
     version = (ROOT / 'VERSION').read_text().strip()
     title = args.name or (
         'OsmAnd'
@@ -564,9 +687,9 @@ def build(args):
     ]:
         shutil.copytree(source, share / name, symlinks=False)
     copy_file(ROOT / 'packaging/android-fonts.xml', share / 'fonts/android-fonts.xml')
-    native_payload = extract_native(
-        share / 'original.apk', appdir / 'usr/android-lib', architecture
-    )
+    native_arch = 'aarch64' if use_digitalis else architecture
+    native_payload = extract_native(share / 'original.apk', appdir / 'usr/android-lib', native_arch)
+    digitalis_meta = bundle_digitalis(appdir, libraries, digitalis_dir) if use_digitalis else None
     copy_file(
         ROOT / '.local/share/bionic_translation/cfg.d/bionic_translation.cfg',
         share / 'bionic_translation/cfg.d/bionic_translation.cfg',
@@ -659,6 +782,7 @@ def build(args):
                 version=version,
                 aot='true' if aot else 'false',
                 native='true' if native_payload else 'false',
+                digitalis='true' if use_digitalis else 'false',
             )
         )
     )
@@ -728,6 +852,7 @@ def build(args):
             for k, v in (DOWNLOADS | (ARM64_DOWNLOADS if architecture == 'aarch64' else {})).items()
         },
         'native_payload': native_payload,
+        'digitalis': digitalis_meta,
         'libraries': libraries.sources,
         'public_assets': libraries.extra_sources,
         'aot': aot,
@@ -744,11 +869,10 @@ def build(args):
         'compatibility': 'Packaging does not resolve outstanding Android API compatibility failures.',
     }
     (share / 'bundle.json').write_text(json.dumps(provenance, indent=2) + '\n')
+    validate_bundle_architectures(appdir, architecture, digitalis_enabled=use_digitalis)
     # Strip generated native-library copies only. ART owns the generated OAT ELF
     # layout/checksums, so preserve its compiler output byte-for-byte.
     for binary in appdir.rglob('*'):
-        if binary.is_file() and elf(binary):
-            require_architecture(binary, architecture)
         if (
             binary.is_file()
             and not binary.is_symlink()
@@ -799,6 +923,16 @@ def main():
         '--no-aot',
         action='store_true',
         help='Build a smaller JIT-only package without precompiled ART artifacts',
+    )
+    parser.add_argument(
+        '--digitalis',
+        action='store_true',
+        help='Bundle the Digitalis ARM64-on-x86_64 native bridge for arm64-v8a APKs on x86_64',
+    )
+    parser.add_argument(
+        '--digitalis-dir',
+        type=Path,
+        help='Directory containing built Digitalis libraries (libberberis_arm64.so + proxies)',
     )
     args = parser.parse_args()
     try:

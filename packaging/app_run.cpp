@@ -429,7 +429,23 @@ int main(int argc, char** argv) {
         if (nativeProperty != "true" && nativeProperty != "false")
             fail("Invalid packaged native mode");
         const bool packagedNative = nativeProperty == "true";
-        if (packagedNative) {
+        const std::string digitalisProperty =
+            facts.count("digitalis") ? facts.at("digitalis") : "false";
+        if (digitalisProperty != "true" && digitalisProperty != "false")
+            fail("Invalid packaged digitalis mode");
+        const bool packagedDigitalis = digitalisProperty == "true";
+        const fs::path digitalisDir = lib / "digitalis";
+        const fs::path digitalisBridge = digitalisDir / "libberberis_arm64.so";
+        if (packagedDigitalis) {
+#if !defined(__x86_64__)
+            fail("Packaged Digitalis ARM64 translation requires an x86_64 host");
+#endif
+            if (!fs::is_directory(usr / "android-lib") || fs::is_empty(usr / "android-lib"))
+                fail("Missing Android ARM64 native libraries for Digitalis");
+            for (const auto& file : {digitalisBridge, digitalisDir / "libberberis_proxy_libc.so",
+                                     digitalisDir / "libberberis_proxy_libm.so"})
+                requireFile(file);
+        } else if (packagedNative) {
             if (!fs::is_directory(usr / "android-lib") || fs::is_empty(usr / "android-lib"))
                 fail("Missing Android native libraries");
             for (const auto& file :
@@ -439,6 +455,8 @@ int main(int argc, char** argv) {
                   share / "bionic_translation/cfg.d/shiraz-host.cfg"})
                 requireFile(file);
         }
+        const std::string effectiveLibraryPath =
+            packagedDigitalis ? (digitalisDir.string() + ":" + libraryPath) : libraryPath;
         int heapMiB = 512;
         if (const char* configured = std::getenv("SHIRAZ_ART_HEAP_MB"))
             heapMiB = number(configured, 128, 512, "SHIRAZ_ART_HEAP_MB");
@@ -464,7 +482,9 @@ int main(int argc, char** argv) {
                       << (inFlatpak ? "Container: flatpak\n" : "")
                       << "Package: " << facts["package"] << "\nRuntime: " << facts["version"]
                       << "\nART mode: " << mode
-                      << "\nPackaged AOT: " << (packagedAot ? "yes" : "no") << "\nSandbox policy: "
+                      << "\nPackaged AOT: " << (packagedAot ? "yes" : "no")
+                      << "\nARM64 bridge: " << (packagedDigitalis ? "digitalis (bundled)" : "none")
+                      << "\nSandbox policy: "
                       << (inFlatpak   ? "flatpak"
                           : noSandbox ? "disabled (--no-sandbox)"
                                       : "landlock (enforced at launch)")
@@ -558,28 +578,36 @@ int main(int argc, char** argv) {
         env("ANDROID_ROOT", art.string());
         env("ANDROID_DATA", (work / "android-data").string());
         env("BOOTCLASSPATH", boot);
-        env("LD_LIBRARY_PATH", libraryPath);
+        env("LD_LIBRARY_PATH", effectiveLibraryPath);
         env("XDG_CACHE_HOME", (work / "cache").string());
         env("XDG_DATA_DIRS", share.string() + ":/usr/share");
         env("SHIRAZ_FONT_DIR", (share / "fonts").string());
         env("FONTCONFIG_FILE", (share / "fonts.conf").string());
-        if (packagedNative) {
+        if (packagedDigitalis) {
+            env("BERBERIS_GUEST_LD_LIBRARY_PATH", (usr / "android-lib").string());
+            env("SHIRAZ_ANDROID_FONT_DIR", (share / "fonts").string());
+            env("SHIRAZ_ANDROID_DISPLAY_ID", "Shiraz " + facts["version"]);
+            env("SHIRAZ_ANDROID_RELEASE", "8.1");
+            unsetenv("BIONIC_LD_LIBRARY_PATH");
+        } else if (packagedNative) {
             env("BIONIC_LD_LIBRARY_PATH", (usr / "android-lib").string());
             env("SHIRAZ_ANDROID_FONT_DIR", (share / "fonts").string());
             env("SHIRAZ_ANDROID_DISPLAY_ID", "Shiraz " + facts["version"]);
             env("SHIRAZ_ANDROID_RELEASE", "8.1");
+            unsetenv("BERBERIS_GUEST_LD_LIBRARY_PATH");
             if (fs::is_regular_file(lib / "libEGL_shiraz.so.1"))
                 env("LD_PRELOAD",
                     "libandroid.so:libshiraz-resources.so:libEGL_shiraz.so.1:libjnigraphics.so");
         } else {
             unsetenv("BIONIC_LD_LIBRARY_PATH");
+            unsetenv("BERBERIS_GUEST_LD_LIBRARY_PATH");
             unsetenv("SHIRAZ_ANDROID_FONT_DIR");
         }
         // Keep one non-moving allocation space: a spare compaction heap consumes scarce
         // low-address virtual memory needed by large Java pixel arrays on host ART.
         std::vector<std::string> arguments = {activeLoader.string(),
                                               "--library-path",
-                                              libraryPath,
+                                              effectiveLibraryPath,
                                               (art / "bin/dalvikvm").string(),
                                               "-Xmx" + std::to_string(heapMiB) + "m",
                                               "-Xgc:CMS",
@@ -590,7 +618,9 @@ int main(int argc, char** argv) {
                                               mode == "jit" ? "-Xusejit:true" : "-Xusejit:false"};
         if (mode == "interpreter")
             arguments.push_back("-Xint");
-        if (packagedNative) {
+        if (packagedDigitalis) {
+            arguments.push_back("-XX:NativeBridge=" + digitalisBridge.string());
+        } else if (packagedNative) {
             arguments.insert(
                 arguments.begin() + 1,
                 {"--preload", "libshiraz-android-fonts.so:libshiraz-android-process.so"});

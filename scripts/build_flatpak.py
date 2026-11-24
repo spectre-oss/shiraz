@@ -22,14 +22,17 @@ from build_appimage import (  # noqa: E402
     DOWNLOADS,
     RUNTIME_LIBS,
     Libraries,
+    bundle_digitalis,
     copy_file,
     elf,
     fetch,
+    needs_digitalis,
     notices,
     package_bionic_libc,
     remove_staging_tree,
-    require_architecture,
+    resolve_digitalis_dir,
     sha256,
+    validate_bundle_architectures,
     validate_report,
     validate_unwind_abi,
 )
@@ -132,7 +135,25 @@ def build(args):
     multiarch = 'aarch64-linux-gnu' if architecture == 'aarch64' else 'x86_64-linux-gnu'
     apk = args.apk.resolve()
     report = inspect_apk(apk)
-    package, application, activity = validate_report(report, architecture)
+    digitalis_requested = bool(
+        getattr(args, 'digitalis', False) or getattr(args, 'digitalis_dir', None)
+    )
+    use_digitalis = needs_digitalis(report, architecture)
+    digitalis_dir = None
+    if use_digitalis:
+        digitalis_dir = resolve_digitalis_dir(
+            getattr(args, 'digitalis_dir', None), required=digitalis_requested
+        )
+        if digitalis_dir is None:
+            raise FormatError(
+                'APK has only arm64-v8a native libraries on x86_64; build Digitalis with '
+                '`make runtime-digitalis` and pass --digitalis'
+            )
+    elif digitalis_requested:
+        digitalis_dir = resolve_digitalis_dir(getattr(args, 'digitalis_dir', None), required=True)
+    package, application, activity = validate_report(
+        report, architecture, allow_digitalis=use_digitalis
+    )
     version = (ROOT / 'VERSION').read_text().strip()
     title = args.name or (
         'OsmAnd'
@@ -222,8 +243,12 @@ def build(args):
     ]:
         shutil.copytree(source, share / name, symlinks=False)
     copy_file(ROOT / 'packaging/android-fonts.xml', share / 'fonts/android-fonts.xml')
+    native_arch = 'aarch64' if use_digitalis else architecture
     native_payload = extract_native(
-        share / 'original.apk', files_dir / 'usr/android-lib', architecture
+        share / 'original.apk', files_dir / 'usr/android-lib', native_arch
+    )
+    digitalis_meta = (
+        bundle_digitalis(files_dir, libraries, digitalis_dir) if use_digitalis else None
     )
     copy_file(
         ROOT / '.local/share/bionic_translation/cfg.d/bionic_translation.cfg',
@@ -285,6 +310,7 @@ def build(args):
                 version=version,
                 aot='true' if aot else 'false',
                 native='true' if native_payload else 'false',
+                digitalis='true' if use_digitalis else 'false',
             )
         )
     )
@@ -349,6 +375,7 @@ def build(args):
         'apk_version': report['manifest'].get('version_name'),
         'architecture': architecture,
         'native_payload': native_payload,
+        'digitalis': digitalis_meta,
         'libraries': libraries.sources,
         'public_assets': libraries.extra_sources,
         'aot': aot,
@@ -367,9 +394,9 @@ def build(args):
     }
     (share / 'bundle.json').write_text(json.dumps(provenance, indent=2) + '\n')
 
+    validate_bundle_architectures(files_dir, architecture, digitalis_enabled=use_digitalis)
     for binary in files_dir.rglob('*'):
         if binary.is_file() and not binary.is_symlink() and elf(binary):
-            require_architecture(binary, architecture)
             if binary.suffix not in ('.oat', '.odex') and not binary.is_relative_to(
                 files_dir / 'usr/android-lib'
             ):
@@ -468,6 +495,16 @@ def main():
         '--pure-python',
         action='store_true',
         help='Emit the OSTree static-delta .flatpak bundle with scripts/ostree_bundle.py directly',
+    )
+    parser.add_argument(
+        '--digitalis',
+        action='store_true',
+        help='Bundle the Digitalis ARM64-on-x86_64 native bridge for arm64-v8a APKs on x86_64',
+    )
+    parser.add_argument(
+        '--digitalis-dir',
+        type=Path,
+        help='Directory containing built Digitalis libraries (libberberis_arm64.so + proxies)',
     )
     args = parser.parse_args()
     try:

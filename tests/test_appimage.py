@@ -242,3 +242,65 @@ assert str(Path(sys.argv[1]).resolve()) in Path('/proc/self/maps').read_text()
             stage.symlink_to(outside, target_is_directory=True)
             with self.assertRaisesRegex(RuntimeError, 'symlink'):
                 packaging.remove_staging_tree(stage)
+
+    def test_digitalis_validation_bundling_and_mixed_guest_arch_verification(self):
+        report = self.report()
+        report['native_abis'] = ['arm64-v8a']
+        self.assertTrue(packaging.needs_digitalis(report, 'x86_64'))
+        self.assertFalse(packaging.needs_digitalis(report, 'aarch64'))
+        self.assertEqual(
+            packaging.validate_report(report, 'x86_64', allow_digitalis=True)[0],
+            'org.example.app',
+        )
+        # 32-bit ARM stays rejected even with Digitalis enabled.
+        report['native_abis'] = ['armeabi-v7a']
+        self.assertFalse(packaging.needs_digitalis(report, 'x86_64'))
+        with self.assertRaises(packaging.FormatError):
+            packaging.validate_report(report, 'x86_64', allow_digitalis=True)
+
+        def make_elf(machine):
+            header = bytearray(64)
+            header[:6] = b'\x7fELF\x02\x01'
+            struct.pack_into('<HH', header, 16, 3, machine)
+            return bytes(header)
+
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            dig_src = root / 'digitalis-src'
+            dig_src.mkdir()
+            (dig_src / 'libberberis_arm64.so').write_bytes(make_elf(62))
+            with self.assertRaisesRegex(RuntimeError, 'Incomplete Digitalis'):
+                packaging.resolve_digitalis_dir(dig_src, required=True)
+            for name in (
+                'libberberis_proxy_libc.so',
+                'libberberis_proxy_libm.so',
+                'libberberis_proxy_libandroid.so',
+            ):
+                (dig_src / name).write_bytes(make_elf(62))
+            (root / 'context/digitalis').mkdir(parents=True)
+            (root / 'context/digitalis/NOTICE').write_text('Berberis Apache-2.0 notice\n')
+
+            appdir = root / 'AppDir'
+            libraries = packaging.Libraries(appdir)
+            meta = packaging.bundle_digitalis(
+                appdir, libraries, dig_src, scan_dependencies=False, root=root
+            )
+            self.assertTrue(meta['enabled'])
+            self.assertEqual(meta['bridge'], 'usr/lib/digitalis/libberberis_arm64.so')
+            self.assertEqual(len(meta['libraries']), 4)
+            self.assertTrue(
+                (appdir / 'usr/share/shiraz/licenses/digitalis/context_digitalis_NOTICE').is_file()
+            )
+            # Add a guest ARM64 library under usr/android-lib and a host x86_64 binary under usr/bin.
+            (appdir / 'usr/android-lib').mkdir(parents=True)
+            (appdir / 'usr/android-lib/libapp.so').write_bytes(make_elf(183))
+            (appdir / 'usr/bin').mkdir(parents=True)
+            (appdir / 'usr/bin/shiraz-app').write_bytes(make_elf(62))
+            packaging.validate_bundle_architectures(appdir, 'x86_64', digitalis_enabled=True)
+            # Without digitalis_enabled, ARM64 guest ELF under x86_64 bundle must fail.
+            with self.assertRaisesRegex(RuntimeError, 'architecture mismatch'):
+                packaging.validate_bundle_architectures(appdir, 'x86_64', digitalis_enabled=False)
+            # Even with digitalis_enabled, x86_64 guest lib in usr/android-lib must fail.
+            (appdir / 'usr/android-lib/libwrong.so').write_bytes(make_elf(62))
+            with self.assertRaisesRegex(RuntimeError, 'architecture mismatch'):
+                packaging.validate_bundle_architectures(appdir, 'x86_64', digitalis_enabled=True)
