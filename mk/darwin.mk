@@ -3406,5 +3406,34 @@ $(MACOS_OUT)/libshiraz-warm-pool.so: native/warm_pool.cpp mk/darwin.mk $(MACOS_O
 
 macos-runtime-libs: $(MACOS_OUT)/libshiraz-warm-pool.so
 
+# Live Apple Silicon check for Darwin ART mach_vm_remap (MemMap::ReplaceWith),
+# MAP_JIT + pthread_jit_write_protect_np + sys_icache_invalidate, and ARM64
+# FaultManager ucontext_t register/signal decoding (normal + hardened runtime).
+MACOS_ART_JIT_REMAP_CFLAGS := -std=c++17 -O2 -g -Wall -Wextra -Werror \
+	-isystem $(MACOS_ANDROIDFW_TREE)/art/libartbase \
+	-isystem $(MACOS_ANDROIDFW_TREE)/art/runtime \
+	-isystem $(MACOS_ANDROIDFW_TREE)/art/libdexfile \
+	-isystem $(MACOS_ANDROIDFW_TREE)/art/sigchainlib \
+	-isystem $(MACOS_ANDROIDFW_TREE)/libbase/include \
+	-isystem $(MACOS_ANDROIDFW_TREE)/system/core/libutils/include \
+	-isystem $(MACOS_ANDROIDFW_TREE)/system/core/libcutils/include \
+	-isystem $(MACOS_ANDROIDFW_TREE)/system/core/liblog/include \
+	-isystem $(MACOS_ANDROIDFW_TREE)/libnativehelper/include_jni
+
+$(MACOS_OUT)/art-jit-remap-fault-test: tests/darwin/art_jit_remap_fault_test.cpp $(MACOS_ANDROIDFW_LIB_DIR)/libart.so $(MACOS_ANDROIDFW_LIB_DIR)/libartbase.so $(MACOS_ANDROIDFW_LIB_DIR)/libsigchain.so $(MACOS_OUT)/.dir
+	$(CXX) $(MACOS_ART_JIT_REMAP_CFLAGS) tests/darwin/art_jit_remap_fault_test.cpp -o $@ $(MACOS_ANDROIDFW_LIB_DIR)/libartbase.so $(MACOS_ANDROIDFW_LIB_DIR)/libart.so $(MACOS_ANDROIDFW_LIB_DIR)/libsigchain.so -Wl,-rpath,$(MACOS_ANDROIDFW_LIB_DIR)
+
+$(MACOS_OUT)/art-jit-remap-fault-hardened: $(MACOS_OUT)/art-jit-remap-fault-test tests/darwin/art_jit_hardened.entitlements
+	cp -f $< $@.tmp
+	codesign --force --sign - --options runtime --entitlements tests/darwin/art_jit_hardened.entitlements $@.tmp
+	codesign --verify --strict $@.tmp
+	mv -f $@.tmp $@
+
+.PHONY: macos-art-jit-remap-fault-check
+macos-art-jit-remap-fault-check: $(MACOS_OUT)/art-jit-remap-fault-test $(MACOS_OUT)/art-jit-remap-fault-hardened
+	$(MACOS_OUT)/art-jit-remap-fault-test
+	$(MACOS_OUT)/art-jit-remap-fault-hardened
+
+
 
 

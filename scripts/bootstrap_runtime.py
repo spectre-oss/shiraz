@@ -497,6 +497,17 @@ PATCHES_DARWIN = {
                 'art/runtime/native_bridge_art_interface.cc': '976f3fe572f3a85e2d7aad9d3194da3aa14d3c9e62a61686ae7f3f7577c88583',
             },
         ),
+        (
+            'art-darwin-jit-remap-fault.patch',
+            {
+                'art/libartbase/base/mem_map.h': 'da7bda1784b1f5a460bc2b3779321d0474bee390aff139954b23117d4093d440',
+                'art/libartbase/base/mem_map.cc': 'c18131a6e79b8f15f1367103d9c27c1e43edda5a7364c3f3b18fc6a81b658720',
+                'art/libartbase/base/utils.cc': '13f8e49a139765a0421ea3b045b1cd3a74722f4ca9c9c00208b8cacba683988f',
+                'art/runtime/jit/jit_code_cache.cc': 'f683a6b6e5e37816c54650921ebc25a142620cc611ebeed011655102c127257b',
+                'art/runtime/fault_handler.cc': '8a8b5b42d2850c559d0680f53680b1ccd9c6e2eb1c6de9427fa616163b73ad50',
+                'art/runtime/arch/arm64/fault_handler_arm64.cc': 'b6eecc26ec242b5731555e822c39c4cbc685835c64e33949947b1ea5ad162349',
+            },
+        ),
     ],
 }
 BSD_VERSION = '0.12.2'

@@ -1,0 +1,538 @@
+diff --git a/art/libartbase/base/mem_map.h b/art/libartbase/base/mem_map.h
+index d020314..9bbabbb 100644
+--- a/art/libartbase/base/mem_map.h
++++ b/art/libartbase/base/mem_map.h
+@@ -88,7 +88,11 @@ inline bool OverlapsHeapReferenceWindow(const void* begin, size_t length) {
+ // Otherwise, calls might see uninitialized values.
+ class MemMap {
+  public:
+-  static constexpr bool kCanReplaceMapping = HAVE_MREMAP_SYSCALL;
++#if HAVE_MREMAP_SYSCALL || (defined(__APPLE__) && defined(__aarch64__))
++  static constexpr bool kCanReplaceMapping = true;
++#else
++  static constexpr bool kCanReplaceMapping = false;
++#endif
+ 
+   // Creates an invalid mapping.
+   MemMap() {}
+@@ -198,6 +202,15 @@ class MemMap {
+                         error_msg);
+   }
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Map an anonymous MAP_JIT RWX region for Apple Silicon JIT code caches.
++  // XNU forbids MAP_FIXED with MAP_JIT, so `hint` is passed as an advisory address.
++  static MemMap MapAnonymousJit(const char* name,
++                                uint8_t* hint,
++                                size_t byte_count,
++                                /*out*/std::string* error_msg);
++#endif
++
+   // Create placeholder for a region allocated by direct call to mmap.
+   // This is useful when we do not have control over the code calling mmap,
+   // but when we still want to keep track of it in the list.
+diff --git a/art/libartbase/base/mem_map.cc b/art/libartbase/base/mem_map.cc
+index d58c2c4..59488fd 100644
+--- a/art/libartbase/base/mem_map.cc
++++ b/art/libartbase/base/mem_map.cc
+@@ -31,6 +31,9 @@
+ #include <sstream>
+ #if defined(__APPLE__) && defined(__aarch64__)
+ #include <algorithm>
++#include <mach/mach.h>
++#include <mach/mach_error.h>
++#include <mach/mach_vm.h>
+ #include <vector>
+ #endif
+ 
+@@ -494,12 +497,47 @@ static ptrdiff_t PointerDiff(A* a, B* b) {
+   return static_cast<ptrdiff_t>(reinterpret_cast<intptr_t>(a) - reinterpret_cast<intptr_t>(b));
+ }
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++MemMap MemMap::MapAnonymousJit(const char* name,
++                               uint8_t* hint,
++                               size_t byte_count,
++                               std::string* error_msg) {
++  if (byte_count == 0) {
++    if (error_msg != nullptr) {
++      *error_msg = "Empty MAP_JIT MemMap requested";
++    }
++    return Invalid();
++  }
++  const size_t page_aligned_byte_count = RoundUp(byte_count, kPageSize);
++  const int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
++  const int flags = MAP_PRIVATE | MAP_ANON | MAP_JIT;
++  void* actual = TargetMMap(hint, page_aligned_byte_count, prot, flags, -1, 0);
++  if (actual == MAP_FAILED) {
++    if (error_msg != nullptr) {
++      *error_msg = StringPrintf("MAP_JIT mmap(%p, %zu) for '%s' failed: %s",
++                                hint,
++                                page_aligned_byte_count,
++                                name,
++                                strerror(errno));
++    }
++    return Invalid();
++  }
++  return MemMap(name,
++                reinterpret_cast<uint8_t*>(actual),
++                byte_count,
++                actual,
++                page_aligned_byte_count,
++                prot,
++                /* reuse= */ false);
++}
++#endif
++
+ bool MemMap::ReplaceWith(MemMap* source, /*out*/std::string* error) {
+-#if !HAVE_MREMAP_SYSCALL
++#if !HAVE_MREMAP_SYSCALL && !(defined(__APPLE__) && defined(__aarch64__))
+   UNUSED(source);
+   *error = "Cannot perform atomic replace because we are missing the required mremap syscall";
+   return false;
+-#else  // !HAVE_MREMAP_SYSCALL
++#else  // HAVE_MREMAP_SYSCALL || (__APPLE__ && __aarch64__)
+   CHECK(source != nullptr);
+   CHECK(source->IsValid());
+   if (!MemMap::kCanReplaceMapping) {
+@@ -522,8 +560,7 @@ bool MemMap::ReplaceWith(MemMap* source, /*out*/std::string* error) {
+         "source starts at a different offset from the mmap. Cannot atomically replace mappings";
+     return false;
+   }
+-  // mremap doesn't allow the final [start, end] to overlap with the initial [start, end] (it's like
+-  // memcpy but the check is explicit and actually done).
++  // mremap/mach_vm_remap must not overlap the final [start, end] with the initial [start, end].
+   if (source->BaseBegin() > BaseBegin() &&
+       reinterpret_cast<uint8_t*>(BaseBegin()) + source->BaseSize() >
+       reinterpret_cast<uint8_t*>(source->BaseBegin())) {
+@@ -537,6 +574,32 @@ bool MemMap::ReplaceWith(MemMap* source, /*out*/std::string* error) {
+     return false;
+   }
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++  mach_vm_address_t target_addr = reinterpret_cast<mach_vm_address_t>(BaseBegin());
++  vm_prot_t cur_prot = VM_PROT_NONE;
++  vm_prot_t max_prot = VM_PROT_NONE;
++  kern_return_t kr = mach_vm_remap(mach_task_self(),
++                                   &target_addr,
++                                   source->BaseSize(),
++                                   /* mask= */ 0,
++                                   VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
++                                   mach_task_self(),
++                                   reinterpret_cast<mach_vm_address_t>(source->BaseBegin()),
++                                   /* copy= */ FALSE,
++                                   &cur_prot,
++                                   &max_prot,
++                                   VM_INHERIT_DEFAULT);
++  if (kr != KERN_SUCCESS || target_addr != reinterpret_cast<mach_vm_address_t>(BaseBegin())) {
++    source->Protect(old_prot);
++    *error = std::string("Failed to mach_vm_remap source to dest. Error was ") +
++             mach_error_string(kr);
++    return false;
++  }
++  // Drop the old virtual alias (restoring PROT_NONE if inside the heap reference window).
++  if (TargetMUnmap(source->BaseBegin(), source->BaseSize()) != 0) {
++    PLOG(WARNING) << "Failed to release source range after mach_vm_remap";
++  }
++#else
+   // Do the mremap.
+   void* res = mremap(/*old_address*/source->BaseBegin(),
+                      /*old_size*/source->BaseSize(),
+@@ -552,6 +615,7 @@ bool MemMap::ReplaceWith(MemMap* source, /*out*/std::string* error) {
+     return false;
+   }
+   CHECK(res == BaseBegin());
++#endif
+ 
+   // The new base_size is all the pages of the 'source' plus any remaining dest pages. We will unmap
+   // them later.
+@@ -567,7 +631,7 @@ bool MemMap::ReplaceWith(MemMap* source, /*out*/std::string* error) {
+   SetSize(source_size);
+ 
+   return true;
+-#endif  // !HAVE_MREMAP_SYSCALL
++#endif  // HAVE_MREMAP_SYSCALL || (__APPLE__ && __aarch64__)
+ }
+ 
+ MemMap MemMap::MapFileAtAddress(uint8_t* expected_ptr,
+diff --git a/art/libartbase/base/utils.cc b/art/libartbase/base/utils.cc
+index b9531a9..8c3308b 100644
+--- a/art/libartbase/base/utils.cc
++++ b/art/libartbase/base/utils.cc
+@@ -34,6 +34,7 @@
+ 
+ #if defined(__APPLE__)
+ #include <crt_externs.h>
++#include <libkern/OSCacheControl.h>
+ #include <sys/syscall.h>
+ #include "AvailabilityMacros.h"  // For MAC_OS_X_VERSION_MAX_ALLOWED
+ #endif
+@@ -159,7 +160,15 @@ bool FlushCpuCaches(void* begin, void* end) {
+ #else
+ 
+ bool FlushCpuCaches(void* begin, void* end) {
++#if defined(__APPLE__) && defined(__aarch64__)
++  const uintptr_t start = reinterpret_cast<uintptr_t>(begin);
++  const uintptr_t limit = reinterpret_cast<uintptr_t>(end);
++  if (limit > start) {
++    sys_icache_invalidate(begin, static_cast<size_t>(limit - start));
++  }
++#else
+   __builtin___clear_cache(reinterpret_cast<char*>(begin), reinterpret_cast<char*>(end));
++#endif
+   return true;
+ }
+ 
+diff --git a/art/runtime/jit/jit_code_cache.cc b/art/runtime/jit/jit_code_cache.cc
+index a6aefc4..9c0a0f4 100644
+--- a/art/runtime/jit/jit_code_cache.cc
++++ b/art/runtime/jit/jit_code_cache.cc
+@@ -16,6 +16,9 @@
+ 
+ #include "jit_code_cache.h"
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++#include <pthread.h>
++#endif
+ #include <sstream>
+ 
+ #include <android-base/logging.h>
+@@ -198,6 +201,57 @@ bool JitCodeCache::InitializeMappings(bool rwx_memory_allowed,
+   const size_t data_capacity = capacity / kCodeAndDataCapacityDivider;
+   const size_t exec_capacity = capacity - data_capacity;
+ 
++  std::string data_cache_name = is_zygote ? "zygote-data-code-cache" : "data-code-cache";
++  std::string exec_cache_name = is_zygote ? "zygote-jit-code-cache" : "jit-code-cache";
++  std::string error_str;
++
++#if defined(__APPLE__) && defined(__aarch64__)
++  // Apple Silicon forbids RWX mprotect and MAP_FIXED|MAP_JIT. Reserve data+exec
++  // contiguously outside the low-4GiB heap window, trim the upper exec hole, and
++  // map a single MAP_JIT region into that hole so `code_ptr - stack_map` stays
++  // a positive 32-bit offset without dual memfd views.
++  UNUSED(rwx_memory_allowed);
++  MemMap data_pages = MemMap::MapAnonymous(
++      data_cache_name.c_str(),
++      data_capacity + exec_capacity,
++      kProtRW,
++      /* low_4gb= */ false,
++      &error_str);
++  if (!data_pages.IsValid()) {
++    std::ostringstream oss;
++    oss << "Failed to create Darwin JIT data cache: " << error_str << " size=" << capacity;
++    *error_msg = oss.str();
++    return false;
++  }
++  MemMap exec_pages;
++  MemMap non_exec_pages;
++  if (exec_capacity > 0) {
++    uint8_t* const divider = data_pages.Begin() + data_capacity;
++    data_pages.SetSize(data_capacity);
++    exec_pages = MemMap::MapAnonymousJit(exec_cache_name.c_str(), divider, exec_capacity, &error_str);
++    if (!exec_pages.IsValid()) {
++      std::ostringstream oss;
++      oss << "Failed to create Darwin MAP_JIT code cache: " << error_str << " size=" << capacity;
++      *error_msg = oss.str();
++      return false;
++    }
++    const intptr_t span = reinterpret_cast<intptr_t>(exec_pages.End()) -
++                          reinterpret_cast<intptr_t>(data_pages.Begin());
++    if (exec_pages.Begin() < data_pages.End() || span <= 0 ||
++        static_cast<uint64_t>(span) > (UINT64_C(1) << 31)) {
++      std::ostringstream oss;
++      oss << "Darwin MAP_JIT region (" << static_cast<void*>(exec_pages.Begin())
++          << ") is not within a positive 2 GiB offset above data cache ("
++          << static_cast<void*>(data_pages.Begin()) << ")";
++      *error_msg = oss.str();
++      return false;
++    }
++  }
++  data_pages_ = std::move(data_pages);
++  exec_pages_ = std::move(exec_pages);
++  non_exec_pages_ = std::move(non_exec_pages);
++  return true;
++#else
+   // File descriptor enabling dual-view mapping of code section.
+   unique_fd mem_fd;
+ 
+@@ -226,10 +280,6 @@ bool JitCodeCache::InitializeMappings(bool rwx_memory_allowed,
+     return false;
+   }
+ 
+-  std::string data_cache_name = is_zygote ? "zygote-data-code-cache" : "data-code-cache";
+-  std::string exec_cache_name = is_zygote ? "zygote-jit-code-cache" : "jit-code-cache";
+-
+-  std::string error_str;
+   // Map name specific for android_os_Debug.cpp accounting.
+   // Map in low 4gb to simplify accessing root tables for x86_64.
+   // We could do PC-relative addressing to avoid this problem, but that
+@@ -352,6 +402,7 @@ bool JitCodeCache::InitializeMappings(bool rwx_memory_allowed,
+   exec_pages_ = std::move(exec_pages);
+   non_exec_pages_ = std::move(non_exec_pages);
+   return true;
++#endif  // __APPLE__ && __aarch64__
+ }
+ 
+ JitCodeCache* JitCodeCache::Create(bool used_only_for_profile_data,
+@@ -465,6 +516,14 @@ void JitCodeCache::InitializeSpaces() {
+     code_heap = &exec_pages_;
+   }
+   if (code_heap != nullptr) {
++#if defined(__APPLE__) && defined(__aarch64__)
++    // MAP_JIT regions use per-thread pthread_jit_write_protect_np rather than mprotect.
++    pthread_jit_write_protect_np(0);
++    exec_mspace_ = create_mspace_with_base(code_heap->Begin(), exec_end_, false /*locked*/);
++    CHECK(exec_mspace_ != nullptr) << "create_mspace_with_base (exec) failed";
++    SetFootprintLimit(initial_capacity_);
++    pthread_jit_write_protect_np(1);
++#else
+     // Make all pages reserved for the code heap writable. The mspace allocator, that manages the
+     // heap, will take and initialize pages in create_mspace_with_base().
+     CheckedCall(mprotect, "create code heap", code_heap->Begin(), code_heap->Size(), kProtRW);
+@@ -474,6 +533,7 @@ void JitCodeCache::InitializeSpaces() {
+     // Protect pages containing heap metadata. Updates to the code heap toggle write permission to
+     // perform the update and there are no other times write access is required.
+     CheckedCall(mprotect, "protect code heap", code_heap->Begin(), code_heap->Size(), kProtR);
++#endif
+   } else {
+     exec_mspace_ = nullptr;
+     SetFootprintLimit(initial_capacity_);
+@@ -568,26 +628,48 @@ const void* JitCodeCache::GetZygoteSavedEntryPoint(ArtMethod* method) {
+   return nullptr;
+ }
+ 
++#if defined(__APPLE__) && defined(__aarch64__)
++static thread_local int gDarwinJitWriteDepth = 0;
++#endif
++
+ class ScopedCodeCacheWrite : ScopedTrace {
+  public:
+   explicit ScopedCodeCacheWrite(const JitCodeCache* const code_cache)
+       : ScopedTrace("ScopedCodeCacheWrite"),
+         code_cache_(code_cache) {
++#if defined(__APPLE__) && defined(__aarch64__)
++    const MemMap* const updatable_pages = code_cache_->GetUpdatableCodeMapping();
++    if (updatable_pages != nullptr) {
++      if (gDarwinJitWriteDepth++ == 0) {
++        pthread_jit_write_protect_np(0);
++      }
++    }
++#else
+     ScopedTrace trace("mprotect all");
+     const MemMap* const updatable_pages = code_cache_->GetUpdatableCodeMapping();
+     if (updatable_pages != nullptr) {
+       int prot = code_cache_->HasDualCodeMapping() ? kProtRW : kProtRWX;
+       CheckedCall(mprotect, "Cache +W", updatable_pages->Begin(), updatable_pages->Size(), prot);
+     }
++#endif
+   }
+ 
+   ~ScopedCodeCacheWrite() {
++#if defined(__APPLE__) && defined(__aarch64__)
++    const MemMap* const updatable_pages = code_cache_->GetUpdatableCodeMapping();
++    if (updatable_pages != nullptr) {
++      if (--gDarwinJitWriteDepth == 0) {
++        pthread_jit_write_protect_np(1);
++      }
++    }
++#else
+     ScopedTrace trace("mprotect code");
+     const MemMap* const updatable_pages = code_cache_->GetUpdatableCodeMapping();
+     if (updatable_pages != nullptr) {
+       int prot = code_cache_->HasDualCodeMapping() ? kProtR : kProtRX;
+       CheckedCall(mprotect, "Cache -W", updatable_pages->Begin(), updatable_pages->Size(), prot);
+     }
++#endif
+   }
+ 
+  private:
+diff --git a/art/runtime/fault_handler.cc b/art/runtime/fault_handler.cc
+index 6a9f794..76d5df5 100644
+--- a/art/runtime/fault_handler.cc
++++ b/art/runtime/fault_handler.cc
+@@ -147,12 +147,19 @@ void FaultManager::Init() {
+   };
+ 
+   AddSpecialSignalHandlerFn(SIGSEGV, &sa);
++#if defined(__APPLE__)
++  // Darwin may deliver SIGBUS for unmapped/guard page faults on arm64.
++  AddSpecialSignalHandlerFn(SIGBUS, &sa);
++#endif
+   initialized_ = true;
+ }
+ 
+ void FaultManager::Release() {
+   if (initialized_) {
+     RemoveSpecialSignalHandlerFn(SIGSEGV, art_fault_handler);
++#if defined(__APPLE__)
++    RemoveSpecialSignalHandlerFn(SIGBUS, art_fault_handler);
++#endif
+     initialized_ = false;
+   }
+ }
+@@ -186,21 +193,34 @@ bool FaultManager::HandleFaultByOtherHandlers(int sig, siginfo_t* info, void* co
+ }
+ 
+ static const char* SignalCodeName(int sig, int code) {
+-  if (sig != SIGSEGV) {
+-    return "UNKNOWN";
+-  } else {
++  if (sig == SIGSEGV) {
+     switch (code) {
+       case SEGV_MAPERR: return "SEGV_MAPERR";
+       case SEGV_ACCERR: return "SEGV_ACCERR";
+       default:          return "UNKNOWN";
+     }
++#if defined(__APPLE__)
++  } else if (sig == SIGBUS) {
++    switch (code) {
++      case BUS_ADRALN: return "BUS_ADRALN";
++      case BUS_ADRERR: return "BUS_ADRERR";
++      case BUS_OBJERR: return "BUS_OBJERR";
++      default:         return "UNKNOWN";
++    }
++#endif
++  } else {
++    return "UNKNOWN";
+   }
+ }
+ static std::ostream& PrintSignalInfo(std::ostream& os, siginfo_t* info) {
+   os << "  si_signo: " << info->si_signo << " (" << strsignal(info->si_signo) << ")\n"
+      << "  si_code: " << info->si_code
+      << " (" << SignalCodeName(info->si_signo, info->si_code) << ")";
+-  if (info->si_signo == SIGSEGV) {
++  if (info->si_signo == SIGSEGV
++#if defined(__APPLE__)
++      || info->si_signo == SIGBUS
++#endif
++      ) {
+     os << "\n" << "  si_addr: " << info->si_addr;
+   }
+   return os;
+diff --git a/art/runtime/arch/arm64/fault_handler_arm64.cc b/art/runtime/arch/arm64/fault_handler_arm64.cc
+index 7abef12..4eb80ee 100644
+--- a/art/runtime/arch/arm64/fault_handler_arm64.cc
++++ b/art/runtime/arch/arm64/fault_handler_arm64.cc
+@@ -42,11 +42,117 @@ extern "C" void art_quick_implicit_suspend();
+ 
+ namespace art {
+ 
+-#if defined(__APPLE__)
+-// Darwin: implicit null, suspend and stack-overflow checks are disabled (see
+-// Runtime::Init), so FaultManager::Init never installs these handlers. The Linux
+-// bodies below read struct sigcontext, which does not exist on Darwin; keep explicit
+-// "not handled" stubs so a stray signal falls through to the default handling.
++#if defined(__APPLE__) && defined(__aarch64__)
++// Darwin ARM64 fault handling via ucontext_t (uc_mcontext->__ss / __es).
++void FaultManager::GetMethodAndReturnPcAndSp(siginfo_t* siginfo,
++                                             void* context,
++                                             ArtMethod** out_method,
++                                             uintptr_t* out_return_pc,
++                                             uintptr_t* out_sp) {
++  ucontext_t* uc = reinterpret_cast<ucontext_t*>(context);
++  if (uc == nullptr || uc->uc_mcontext == nullptr) {
++    *out_sp = 0;
++    return;
++  }
++  const auto& ss = uc->uc_mcontext->__ss;
++  const auto& es = uc->uc_mcontext->__es;
++  *out_sp = static_cast<uintptr_t>(ss.__sp);
++  VLOG(signals) << "sp: " << *out_sp;
++  if (*out_sp == 0) {
++    return;
++  }
++
++  uintptr_t fault_addr = static_cast<uintptr_t>(es.__far);
++  if (fault_addr == 0 && siginfo != nullptr) {
++    fault_addr = reinterpret_cast<uintptr_t>(siginfo->si_addr);
++  }
++  uintptr_t overflow_addr =
++      *out_sp - GetStackOverflowReservedBytes(InstructionSet::kArm64);
++  if (overflow_addr == fault_addr) {
++    *out_method = reinterpret_cast<ArtMethod*>(static_cast<uintptr_t>(ss.__x[0]));
++  } else {
++    *out_method = *reinterpret_cast<ArtMethod**>(*out_sp);
++  }
++  VLOG(signals) << "pc: " << std::hex << static_cast<uintptr_t>(ss.__pc);
++  *out_return_pc = static_cast<uintptr_t>(ss.__pc) + 4;
++}
++
++bool NullPointerHandler::Action(int sig ATTRIBUTE_UNUSED, siginfo_t* info, void* context) {
++  if (info == nullptr || !IsValidImplicitCheck(info)) {
++    return false;
++  }
++  ucontext_t* uc = reinterpret_cast<ucontext_t*>(context);
++  if (uc == nullptr || uc->uc_mcontext == nullptr) {
++    return false;
++  }
++  auto& ss = uc->uc_mcontext->__ss;
++  ss.__sp -= sizeof(uintptr_t);
++  *reinterpret_cast<uintptr_t*>(static_cast<uintptr_t>(ss.__sp)) =
++      static_cast<uintptr_t>(ss.__pc) + 4;
++  ss.__lr = reinterpret_cast<uintptr_t>(info->si_addr);
++  ss.__pc = reinterpret_cast<uintptr_t>(art_quick_throw_null_pointer_exception_from_signal);
++  VLOG(signals) << "Generating null pointer exception (Darwin arm64)";
++  return true;
++}
++
++bool SuspensionHandler::Action(int sig ATTRIBUTE_UNUSED,
++                               siginfo_t* info ATTRIBUTE_UNUSED,
++                               void* context) {
++  ucontext_t* uc = reinterpret_cast<ucontext_t*>(context);
++  if (uc == nullptr || uc->uc_mcontext == nullptr) {
++    return false;
++  }
++  auto& ss = uc->uc_mcontext->__ss;
++  uint32_t checkinst1 = 0xf9400240 |
++      (Thread::ThreadSuspendTriggerOffset<PointerSize::k64>().Int32Value() << 7);
++  uint32_t checkinst2 = 0xf9400000;
++
++  uint8_t* ptr2 = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(ss.__pc));
++  uint8_t* ptr1 = ptr2 - 4;
++  uint32_t inst2 = *reinterpret_cast<uint32_t*>(ptr2);
++  if (inst2 != checkinst2) {
++    return false;
++  }
++  uint8_t* limit = ptr1 - 80;
++  bool found = false;
++  while (ptr1 > limit) {
++    if (*reinterpret_cast<uint32_t*>(ptr1) == checkinst1) {
++      found = true;
++      break;
++    }
++    ptr1 -= 4;
++  }
++  if (found) {
++    ss.__lr = static_cast<uintptr_t>(ss.__pc) + 4;
++    ss.__pc = reinterpret_cast<uintptr_t>(art_quick_implicit_suspend);
++    Thread::Current()->RemoveSuspendTrigger();
++    return true;
++  }
++  return false;
++}
++
++bool StackOverflowHandler::Action(int sig ATTRIBUTE_UNUSED,
++                                  siginfo_t* info,
++                                  void* context) {
++  ucontext_t* uc = reinterpret_cast<ucontext_t*>(context);
++  if (uc == nullptr || uc->uc_mcontext == nullptr) {
++    return false;
++  }
++  auto& ss = uc->uc_mcontext->__ss;
++  const auto& es = uc->uc_mcontext->__es;
++  uintptr_t sp = static_cast<uintptr_t>(ss.__sp);
++  uintptr_t fault_addr = static_cast<uintptr_t>(es.__far);
++  if (fault_addr == 0 && info != nullptr) {
++    fault_addr = reinterpret_cast<uintptr_t>(info->si_addr);
++  }
++  uintptr_t overflow_addr = sp - GetStackOverflowReservedBytes(InstructionSet::kArm64);
++  if (fault_addr != overflow_addr) {
++    return false;
++  }
++  ss.__pc = reinterpret_cast<uintptr_t>(art_quick_throw_stack_overflow);
++  return true;
++}
++#elif defined(__APPLE__)
+ void FaultManager::GetMethodAndReturnPcAndSp(siginfo_t* siginfo ATTRIBUTE_UNUSED,
+                                              void* context ATTRIBUTE_UNUSED,
+                                              ArtMethod** out_method ATTRIBUTE_UNUSED,
