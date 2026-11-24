@@ -33,15 +33,16 @@ public final class AlarmListenerSmoke {
             final AlarmManager.OnAlarmListener[] repeat={null};
             repeat[0]=new AlarmManager.OnAlarmListener(){public void onAlarm(){count[0]++;if(count[0]==3)alarms.set(AlarmManager.RTC,0,"self",repeat[0],null);}};
             alarms.set(AlarmManager.RTC,0,"self",repeat[0],null);pump(20);check(count[0]==4,"callback re-registration");
-            try{alarms.set(AlarmManager.RTC_WAKEUP,0,"unsupported",listener,null);throw new AssertionError("wakeup accepted");}catch(UnsupportedOperationException expected){}
+            alarms.set(AlarmManager.RTC_WAKEUP,System.currentTimeMillis()-10,"wakeup-in-session",listener,null);pump(20);check(count[0]==5,"wakeup listener alarm missing");
+            try{alarms.set(99,0,"invalid",listener,null);throw new AssertionError("invalid alarm type accepted");}catch(IllegalArgumentException expected){}
             try{alarms.setWindow(AlarmManager.RTC,0,-1,"invalid",listener,null);throw new AssertionError("negative window accepted");}catch(IllegalArgumentException expected){}
             AlarmManager.OnAlarmListener[] bounded=new AlarmManager.OnAlarmListener[256];
             for(int i=0;i<bounded.length;i++){bounded[i]=new AlarmManager.OnAlarmListener(){public void onAlarm(){throw new AssertionError("future bounded alarm delivered");}};alarms.set(AlarmManager.ELAPSED_REALTIME,Long.MAX_VALUE,"bounded",bounded[i],null);}
             try{alarms.set(AlarmManager.RTC,0,"overflow",listener,null);throw new AssertionError("listener limit bypassed");}catch(IllegalStateException expected){}
             alarms.set(AlarmManager.ELAPSED_REALTIME,Long.MAX_VALUE,"replace at capacity",bounded[0],null);
             for(AlarmManager.OnAlarmListener entry:bounded)alarms.cancel(entry);
-            alarms.setExact(AlarmManager.ELAPSED_REALTIME,Long.MAX_VALUE,"distant",listener,null);pump(10);check(count[0]==4,"overflow delivered alarm");
-            alarms.set(AlarmManager.RTC,0,"close",listener,null);alarms.shirazClose();pump(20);check(count[0]==4,"closed callback delivered");
+            alarms.setExact(AlarmManager.ELAPSED_REALTIME,Long.MAX_VALUE,"distant",listener,null);pump(10);check(count[0]==5,"overflow delivered alarm");
+            alarms.set(AlarmManager.RTC,0,"close",listener,null);alarms.shirazClose();pump(20);check(count[0]==5,"closed callback delivered");
             try{alarms.set(AlarmManager.RTC,0,"closed",listener,null);throw new AssertionError("closed manager accepted");}catch(IllegalStateException expected){}
             System.out.println("ALARM_LISTENER_OK");
         } finally {alarms.shirazClose();worker.quit();worker.join(3000);Looper.shirazShutdownMain();}

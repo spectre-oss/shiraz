@@ -4,7 +4,12 @@ package android.app;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
-/** Session-owned main-queue alarms. Host wakeup and restart persistence are not implemented. */
+/**
+ * Session-owned main-queue alarms. Wakeup alarm types ({@link #RTC_WAKEUP} and
+ * {@link #ELAPSED_REALTIME_WAKEUP}) execute on their respective active-session clock while Shiraz
+ * is running; waking a suspended host OS and persisting alarms across process restarts are not
+ * implemented.
+ */
 public class AlarmManager {
     public static final int RTC_WAKEUP = 0, RTC = 1, ELAPSED_REALTIME_WAKEUP = 2, ELAPSED_REALTIME = 3;
     public static final long INTERVAL_FIFTEEN_MINUTES = 900000L, INTERVAL_HALF_HOUR = 1800000L, INTERVAL_HOUR = 3600000L, INTERVAL_HALF_DAY = 43200000L, INTERVAL_DAY = 86400000L;
@@ -14,6 +19,18 @@ public class AlarmManager {
     private final Map<OnAlarmListener, ListenerAlarm> listeners = new IdentityHashMap<OnAlarmListener, ListenerAlarm>();
     private android.os.Handler handler;
     private boolean closed;
+    private static boolean loggedWakeupLimit;
+
+    private static boolean isRtcType(int type) { return type == RTC || type == RTC_WAKEUP; }
+
+    private static void noteWakeupBestEffort(int type) {
+        if ((type == RTC_WAKEUP || type == ELAPSED_REALTIME_WAKEUP) && !loggedWakeupLimit) {
+            loggedWakeupLimit = true;
+            System.err.println(
+                "SHIRAZ_UNSUPPORTED AlarmManager.WAKEUP: host sleep wakeup is not implemented; "
+                    + "delivering alarm on active-session clock");
+        }
+    }
 
     private final class Alarm implements Runnable {
         final int type;
@@ -23,7 +40,7 @@ public class AlarmManager {
         Alarm(int type, long trigger, long interval, PendingIntent operation) {
             this.type = type; this.trigger = trigger; this.interval = interval; this.operation = operation;
         }
-        long now() { return type == RTC ? System.currentTimeMillis() : android.os.SystemClock.elapsedRealtime(); }
+        long now() { return isRtcType(type) ? System.currentTimeMillis() : android.os.SystemClock.elapsedRealtime(); }
         boolean enqueue() {
             long now = now();
             // Recheck clock changes and resume without placing unbounded delays on the queue.
@@ -64,7 +81,7 @@ public class AlarmManager {
         ListenerAlarm(int type, long trigger, OnAlarmListener listener, android.os.Handler target) {
             this.type = type; this.trigger = Math.max(0, trigger); this.listener = listener; this.target = target;
         }
-        long now() { return type == RTC ? System.currentTimeMillis() : android.os.SystemClock.elapsedRealtime(); }
+        long now() { return isRtcType(type) ? System.currentTimeMillis() : android.os.SystemClock.elapsedRealtime(); }
         boolean enqueue() {
             long now = now(), remaining = trigger - now;
             return target.postDelayed(this, trigger <= now ? 0 : remaining < 0 ? 1000 : Math.min(1000, remaining));
@@ -87,8 +104,7 @@ public class AlarmManager {
         if (closed) throw new IllegalStateException("Alarm session closed");
         if (listener == null) throw new NullPointerException("listener");
         if (type < RTC_WAKEUP || type > ELAPSED_REALTIME) throw new IllegalArgumentException("Alarm type");
-        if (type == RTC_WAKEUP || type == ELAPSED_REALTIME_WAKEUP)
-            throw new UnsupportedOperationException("Host wakeup alarms are not implemented");
+        noteWakeupBestEffort(type);
         if (!listeners.containsKey(listener) && pending.size() + listeners.size() >= 256) throw new IllegalStateException("Alarm limit");
         if (target == null) target = new android.os.Handler(android.os.Looper.getMainLooper());
         ListenerAlarm alarm = new ListenerAlarm(type, trigger, listener, target);
@@ -113,8 +129,7 @@ public class AlarmManager {
         if (closed) throw new IllegalStateException("Alarm session closed");
         if (operation == null) throw new NullPointerException("operation");
         if (type < RTC_WAKEUP || type > ELAPSED_REALTIME) throw new IllegalArgumentException("Alarm type");
-        if (type == RTC_WAKEUP || type == ELAPSED_REALTIME_WAKEUP)
-            throw new UnsupportedOperationException("Host wakeup alarms are not implemented");
+        noteWakeupBestEffort(type);
         if (!pending.containsKey(operation) && pending.size() + listeners.size() >= 256) throw new IllegalStateException("Alarm limit");
         if (handler == null) handler = new android.os.Handler(android.os.Looper.getMainLooper());
         Alarm alarm = new Alarm(type, Math.max(0, trigger), interval, operation);

@@ -49,15 +49,23 @@ public final class AlarmDeliverySmoke {
             pump(20); check(receiver.count == before + 1, "service alarm not dispatched");
             token.cancel(); alarms.setRepeating(AlarmManager.RTC, 0, 10, token);
             pump(40); check(receiver.count == before + 1, "canceled pending intent delivered");
-            try { alarms.set(AlarmManager.RTC_WAKEUP, 0, service); throw new AssertionError("wakeup silently accepted"); }
-            catch (UnsupportedOperationException expected) {}
+            int beforeWakeup = receiver.count;
+            alarms.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() - 10, service);
+            pump(20);
+            check(receiver.count == beforeWakeup + 1, "RTC_WAKEUP in-session alarm missing");
+            alarms.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() - 10, service);
+            pump(20);
+            check(receiver.count == beforeWakeup + 2, "ELAPSED_REALTIME_WAKEUP in-session alarm missing");
+            try { alarms.set(99, 0, service); throw new AssertionError("invalid alarm type accepted"); }
+            catch (IllegalArgumentException expected) {}
             try { alarms.setRepeating(AlarmManager.RTC, 0, 0, service); throw new AssertionError("zero interval"); }
             catch (IllegalArgumentException expected) {}
+            int beforeOverflow = receiver.count;
             alarms.set(AlarmManager.ELAPSED_REALTIME, Long.MAX_VALUE, service);
-            pump(10); check(receiver.count == before + 1, "overflow delivered future alarm");
+            pump(10); check(receiver.count == beforeOverflow, "overflow delivered future alarm");
             alarms.set(AlarmManager.ELAPSED_REALTIME, 0, service);
             alarms.shirazClose(); pump(20);
-            check(receiver.count == before + 1, "delivery after session close");
+            check(receiver.count == beforeOverflow, "delivery after session close");
             try { alarms.set(AlarmManager.RTC, 0, service); throw new AssertionError("closed manager accepted alarm"); }
             catch (IllegalStateException expected) {}
             System.out.println("ALARM_DELIVERY_OK");
