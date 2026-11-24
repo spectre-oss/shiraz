@@ -15,7 +15,9 @@ public class RippleDrawable extends LayerDrawable {
  private ColorStateList color;
  private int radius=RADIUS_AUTO,alpha=255;
  private final Rect hotspotBounds=new Rect();private boolean customBounds,hotspotSet,pressed,focused,hovered,scheduled;
+ private long scheduledAt;
  private static final android.view.animation.Interpolator MOTION=new android.view.animation.PathInterpolator(.4f,0,.2f,1);
+ private static final android.view.animation.Interpolator PATTERN_ENTER=new android.view.animation.PathInterpolator(0f,0f,.2f,1f);
  private float hotspotX,hotspotY,backgroundFrom,backgroundTo;private long backgroundTime;
  private static final class Wave {long enter,exit;float x,y;boolean active,released,settled;}
  private final Wave[] waves=new Wave[11];private Wave current;
@@ -54,11 +56,21 @@ public class RippleDrawable extends LayerDrawable {
    for(Wave wave:waves)if(wave.active&&wave.released&&time>=wave.exit+exitDuration())wave.active=false;
    current=null;for(Wave wave:waves)if(!wave.active){current=wave;break;}
    if(current!=null){Rect area=customBounds?hotspotBounds:getBounds();current.x=hotspotSet?hotspotX:area.left/2f+area.right/2f;current.y=hotspotSet?hotspotY:area.top/2f+area.bottom/2f;current.enter=time;current.active=true;current.released=false;current.settled=!android.animation.ValueAnimator.areAnimatorsEnabled();}
-  }else if(!down&&pressed&&current!=null){if(hotspotSet){current.x=hotspotX;current.y=hotspotY;}current.exit=style==STYLE_PATTERNED?Math.max(time,current.enter+450):time>current.enter&&time<current.enter+225?current.enter+225:time;current.released=true;if(current.settled)current.active=false;current=null;}
+  }else if(!down&&pressed&&current!=null){if(hotspotSet){current.x=hotspotX;current.y=hotspotY;}current.exit=style==STYLE_PATTERNED?Math.max(time,current.enter+450):time>=current.enter&&time<current.enter+225?current.enter+225:time;current.released=true;if(current.settled)current.active=false;current=null;}
   pressed=down;invalidateSelf();return true;
  }
  private void stop(){if(scheduled){unscheduleSelf(frame);scheduled=false;}}
- private void requestFrame(){if(getCallback()!=null&&!scheduled){scheduled=true;scheduleSelf(frame,Math.max(android.os.SystemClock.uptimeMillis(),now()+16));}}
+ private void requestFrame(){long when=Math.max(android.os.SystemClock.uptimeMillis(),now()+16);if(getCallback()!=null&&(!scheduled||when>scheduledAt+250)){scheduled=true;scheduledAt=when;scheduleSelf(frame,when);}}
+ public final boolean shirazIsAnimating(){
+  long time=now();
+  if(backgroundFrom!=backgroundTo&&time<backgroundTime+80)return true;
+  for(Wave wave:waves){
+   if(!wave.active)continue;
+   if(wave.released&&time>=wave.exit+exitDuration())continue;
+   if(wave.released||!wave.settled&&time<wave.enter+enterDuration())return true;
+  }
+  return false;
+ }
  @Override public void jumpToCurrentState(){super.jumpToCurrentState();for(Wave wave:waves){if(wave.released)wave.active=false;else wave.settled=true;}backgroundFrom=backgroundTo;stop();invalidateSelf();}
  @Override public boolean setVisible(boolean visible,boolean restart){boolean changed=super.setVisible(visible,restart);if(!visible){pressed=false;clearWaves();focused=hovered=false;backgroundFrom=backgroundTo=0;stop();releaseBuffers();}else if(changed||restart){pressed=false;onStateChange(getState());}return changed;}
  @Override public void setAlpha(int value){if(value<0||value>255)throw new IllegalArgumentException("alpha");alpha=value;for(int i=0;i<getNumberOfLayers();i++)if(getId(i)!=MASK&&getDrawable(i)!=null)getDrawable(i).setAlpha(value);invalidateSelf();}
@@ -92,7 +104,8 @@ public class RippleDrawable extends LayerDrawable {
    }}
  }
  private void patterned(Canvas canvas,Wave wave,long time,Rect area,float cx,float cy,float r){
-  float progress=wave.settled?.5f:.5f*MOTION.getInterpolation(Math.min(1,Math.max(0,(time-wave.enter)/450f)));
+  long elapsed=Math.max(16L,time-wave.enter);
+  float progress=wave.settled?.5f:.5f*PATTERN_ENTER.getInterpolation(Math.min(1,elapsed/450f));
   if(wave.released&&time>=wave.exit)progress=.5f+.5f*Math.min(1,(time-wave.exit)/375f);
   if(progress<=0||progress>=1||r<=0)return;
   float origin=Math.min(1,progress*2),x=wave.x+(cx-wave.x)*origin,y=wave.y+(cy-wave.y)*origin;

@@ -6,13 +6,9 @@
 // counters. All slot state is guarded by ANativeWindow::mutex. Metal objects are
 // made in native/darwin/shared_event.mm (MRC, +1 references).
 #include "shiraz/darwin/window_queue.h"
+#include "shiraz/window_queue_common.hpp"
 #include <IOSurface/IOSurfaceRef.h>
-#include <algorithm>
-#include <chrono>
 #include <condition_variable>
-#include <map>
-#include <string>
-#include <thread>
 
 extern "C" {
 void* shiraz_mtl_slot_create(void* device, int32_t width, int32_t height, void** surfaceOut, uint32_t* bytesPerRow);
@@ -21,7 +17,11 @@ void* shiraz_mtl_retain(void* object);
 }
 
 namespace shiraz { namespace darwin {
-enum SlotState { SLOT_FREE, SLOT_DEQUEUED, SLOT_QUEUED, SLOT_ACQUIRED };
+using shiraz::zc_common::SlotState;
+using shiraz::zc_common::SLOT_FREE;
+using shiraz::zc_common::SLOT_DEQUEUED;
+using shiraz::zc_common::SLOT_QUEUED;
+using shiraz::zc_common::SLOT_ACQUIRED;
 struct QueueSlot {
     void* surface = nullptr;   // IOSurfaceRef +1
     void* texture = nullptr;   // id<MTLTexture> +1
@@ -58,38 +58,6 @@ using namespace shiraz::darwin;
 std::mutex deviceMutex;
 void* recordedDevice = nullptr;
 std::atomic<uint64_t> eventSerials{0}, slotGenerations{0};
-
-// ---- counters (H2) ----
-struct Counters {
-    std::mutex mutex;
-    std::map<std::string, uint64_t> reads, observer, counts;
-    std::map<std::string, std::vector<double>> samples;
-    uint64_t readTotal = 0, observerTotal = 0;
-};
-Counters& counters() { static Counters* value = new Counters; return *value; }
-bool traceZeroCopy() {
-    static const bool enabled = [] { const char* v = std::getenv("SHIRAZ_TRACE_ZERO_COPY"); return v && std::strcmp(v, "1") == 0; }();
-    return enabled;
-}
-void printCounters() {
-    char line[4096];
-    shiraz_zero_copy_counters(line, sizeof line);
-    std::fprintf(stderr, "%s\n", line);
-}
-void startReporter() {
-    if (!traceZeroCopy()) return;
-    static std::once_flag once;
-    std::call_once(once, [] {
-        std::atexit(printCounters);
-        std::thread([] { for (;;) { std::this_thread::sleep_for(std::chrono::seconds(1)); printCounters(); } }).detach();
-    });
-}
-double percentile(std::vector<double> values, double p) {
-    if (values.empty()) return 0;
-    std::sort(values.begin(), values.end());
-    size_t index = size_t(p * double(values.size() - 1) + 0.5);
-    return values[std::min(index, values.size() - 1)];
-}
 
 WindowQueue* ensureQueue(ANativeWindow* w) {
     if (!w->queue) w->queue.reset(new WindowQueue);
@@ -129,17 +97,7 @@ bool allocateSlot(ANativeWindow* w, uint32_t index) {
 // queue step will drop when DROP_QUEUED), or a new slot index; -1 when none.
 // EXCLUDE is the producer's current slot. Mutex held; does not mutate.
 int pickSlot(const WindowQueue* q, int exclude, bool dropQueued, bool* allocate) {
-    *allocate = false;
-    int best = -1;
-    for (uint32_t i = 0; i < q->count; ++i) {
-        if (int(i) == exclude) continue;
-        const QueueSlot& s = q->slots[i];
-        if (s.pins) continue;
-        if (s.state == SLOT_FREE || (dropQueued && s.state == SLOT_QUEUED)) { best = int(i); if (s.state == SLOT_FREE) break; }
-    }
-    if (best >= 0) return best;
-    if (q->count < SHIRAZ_WINDOW_MAX_SLOTS) { *allocate = true; return int(q->count); }
-    return -1;
+    return shiraz::zc_common::pickSlot(q, SHIRAZ_WINDOW_MAX_SLOTS, exclude, dropQueued, allocate);
 }
 // Takes slot INDEX for the producer. Mutex held.
 int32_t takeSlot(ANativeWindow* w, int index, bool allocate, ShirazWindowSlot* out) {
@@ -178,14 +136,10 @@ int32_t queueStep(ANativeWindow* w, uint32_t index, int32_t width, int32_t heigh
     return 0;
 }
 int32_t checkProducer(ANativeWindow* w, uint64_t producer) {
-    WindowQueue* q = w->queue.get();
-    if (!q || q->abandoned || !producer || q->producer != producer) return -EPIPE;
-    return 0;
+    return shiraz::zc_common::checkProducer(w, producer);
 }
 int32_t checkHeld(ANativeWindow* w, uint32_t index, uint64_t generation) {
-    WindowQueue* q = w->queue.get();
-    if (index >= q->count || q->slots[index].generation != generation || q->slots[index].state != SLOT_DEQUEUED) return -EINVAL;
-    return 0;
+    return shiraz::zc_common::checkHeld(w, index, generation);
 }
 
 // CPU materialise (C2, C7). LOCK holds w->mutex on entry and on return.
@@ -193,11 +147,7 @@ int32_t materialize(ANativeWindow* w, std::unique_lock<std::mutex>& lock, uint64
     for (int attempt = 0; attempt < 3; ++attempt) {
         WindowQueue* q = w->queue.get();
         if (!q || !q->latest_iosurface || q->materialized_revision == w->revision) { *outRevision = w->revision; return 0; }
-        int newest = -1;
-        for (uint32_t i = 0; i < q->count; ++i) {
-            const QueueSlot& s = q->slots[i];
-            if ((s.state == SLOT_QUEUED || s.state == SLOT_ACQUIRED) && (newest < 0 || s.revision > q->slots[newest].revision)) newest = int(i);
-        }
+        int newest = shiraz::zc_common::findNewestReadableSlot(q);
         if (newest < 0) { *outRevision = w->revision; return 0; }
         QueueSlot& s = q->slots[newest];
         const uint64_t generation = s.generation, revision = s.revision, frameValue = s.frame_value;
@@ -247,10 +197,7 @@ int32_t copyArgbLocked(ANativeWindow* w, uint32_t* output, uint64_t capacity, ui
     auto count = uint64_t(w->width) * w->height;
     if (capacity < count) return -EINVAL;
     if (w->front_argb) std::memcpy(output, w->front.data(), size_t(count) * 4);
-    else for (uint64_t i = 0; i < count; ++i) {
-        const auto* p = &w->front[i * 4];
-        output[i] = (uint32_t(p[3]) << 24) | (uint32_t(p[0]) << 16) | (uint32_t(p[1]) << 8) | p[2];
-    }
+    else shiraz::zc_common::copyRgbaToArgb(w->front.data(), output, count);
     // Never report a revision newer than the pixels returned.
     if (revision) *revision = (w->queue && w->queue->latest_iosurface) ? copiedRevision : w->revision;
     return 0;
@@ -258,75 +205,15 @@ int32_t copyArgbLocked(ANativeWindow* w, uint32_t* output, uint64_t capacity, ui
 } // namespace
 
 extern "C" {
-int32_t shiraz_zero_copy_mode(void) {
-    static const int32_t mode = [] {
-        const char* v = std::getenv("SHIRAZ_EGL_ZERO_COPY");
-        if (!v || !*v || std::strcmp(v, "1") == 0) return 1;
-        if (std::strcmp(v, "0") == 0) return 0;
-        if (std::strcmp(v, "require") == 0) return 2;
-        std::fprintf(stderr, "SHIRAZ_RUNTIME_FATAL zero-copy reason=bad-env SHIRAZ_EGL_ZERO_COPY=%s (0, 1 or require)\n", v);
-        std::abort();
-    }();
-    return mode;
-}
-void shiraz_zero_copy_fatal(const char* reason) {
-    if (shiraz_zero_copy_mode() != 2) return;
-    std::fprintf(stderr, "SHIRAZ_RUNTIME_FATAL zero-copy reason=%s\n", reason ? reason : "unknown");
-    printCounters();
-    std::fflush(stderr);
-    std::abort();
-}
-void shiraz_cpu_pixel_reads_add(const char* site, uint64_t bytes) {
-    auto& c = counters();
-    { std::lock_guard<std::mutex> guard(c.mutex); c.reads[site ? site : "unknown"] += 1; ++c.readTotal; (void)bytes; }
-    startReporter();
-}
-void shiraz_observer_reads_add(const char* site, uint64_t bytes) {
-    auto& c = counters();
-    { std::lock_guard<std::mutex> guard(c.mutex); c.observer[site ? site : "unknown"] += 1; ++c.observerTotal; (void)bytes; }
-    startReporter();
-}
-void shiraz_zero_copy_count(const char* name, uint64_t amount) {
-    auto& c = counters();
-    { std::lock_guard<std::mutex> guard(c.mutex); c.counts[name ? name : "unknown"] += amount; }
-    startReporter();
-}
-// Ordered per-window events for the gates (T2: cpu publishes and consumer fallbacks after
-// that window's first zero-copy queue).
-void shiraz_zero_copy_event(const char* name, ANativeWindow* window) {
-    if (!traceZeroCopy()) return;
-    std::fprintf(stderr, "SHIRAZ_ZC_EVENT %s window=%p t_ns=%llu\n", name ? name : "unknown", static_cast<void*>(window), static_cast<unsigned long long>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
-}
-void shiraz_zero_copy_sample(const char* name, double ms) {
-    auto& c = counters();
-    { std::lock_guard<std::mutex> guard(c.mutex); auto& v = c.samples[name ? name : "unknown"]; if (v.size() < 200000) v.push_back(ms); }
-    startReporter();
-}
-uint64_t shiraz_cpu_pixel_reads_total(void) {
-    auto& c = counters(); std::lock_guard<std::mutex> guard(c.mutex); return c.readTotal;
-}
-void shiraz_zero_copy_counters(char* out, size_t size) {
-    if (!out || !size) return;
-    auto& c = counters();
-    std::string line = "SHIRAZ_ZC_COUNTERS";
-    {
-        std::lock_guard<std::mutex> guard(c.mutex);
-        line += " cpu_pixel_reads=" + std::to_string(c.readTotal);
-        for (auto& e : c.reads) line += " read." + e.first + "=" + std::to_string(e.second);
-        line += " observer_reads=" + std::to_string(c.observerTotal);
-        for (auto& e : c.observer) line += " observer." + e.first + "=" + std::to_string(e.second);
-        for (auto& e : c.counts) line += " " + e.first + "=" + std::to_string(e.second);
-        char number[64];
-        for (auto& e : c.samples) {
-            std::snprintf(number, sizeof number, " %s_n=%zu", e.first.c_str(), e.second.size()); line += number;
-            std::snprintf(number, sizeof number, " %s_p50=%.3f", e.first.c_str(), percentile(e.second, .5)); line += number;
-            std::snprintf(number, sizeof number, " %s_p90=%.3f", e.first.c_str(), percentile(e.second, .9)); line += number;
-            std::snprintf(number, sizeof number, " %s_p99=%.3f", e.first.c_str(), percentile(e.second, .99)); line += number;
-        }
-    }
-    std::snprintf(out, size, "%s", line.c_str());
-}
+int32_t shiraz_zero_copy_mode(void) { return shiraz::zc_common::zeroCopyMode(); }
+void shiraz_zero_copy_fatal(const char* reason) { shiraz::zc_common::zeroCopyFatal(reason); }
+void shiraz_cpu_pixel_reads_add(const char* site, uint64_t bytes) { shiraz::zc_common::addCpuPixelReads(site, bytes); }
+void shiraz_observer_reads_add(const char* site, uint64_t bytes) { shiraz::zc_common::addObserverReads(site, bytes); }
+void shiraz_zero_copy_count(const char* name, uint64_t amount) { shiraz::zc_common::addZeroCopyCount(name, amount); }
+void shiraz_zero_copy_event(const char* name, ANativeWindow* window) { shiraz::zc_common::emitZeroCopyEvent(name, window); }
+void shiraz_zero_copy_sample(const char* name, double ms) { shiraz::zc_common::recordZeroCopySample(name, ms); }
+uint64_t shiraz_cpu_pixel_reads_total(void) { return shiraz::zc_common::cpuPixelReadsTotal(); }
+void shiraz_zero_copy_counters(char* out, size_t size) { shiraz::zc_common::formatCounters(out, size); }
 
 int32_t shiraz_window_set_device(void* device) {
     if (!device) return -EINVAL;
@@ -357,22 +244,10 @@ uint64_t shiraz_window_next_value(ANativeWindow* w, int kind) {
     return ++ensureQueue(w)->values[kind];
 }
 int32_t shiraz_window_connect_producer(ANativeWindow* w, uint64_t producer) {
-    if (!w || !producer) return -EINVAL;
-    std::lock_guard<std::mutex> guard(w->mutex);
-    WindowQueue* q = ensureQueue(w);
-    if (q->abandoned) return -EPIPE;
-    if (q->producer && q->producer != producer) return -EBUSY;
-    q->producer = producer;
-    return 0;
+    return shiraz::zc_common::connectProducer(w, producer, ensureQueue);
 }
 void shiraz_window_disconnect_producer(ANativeWindow* w, uint64_t producer) {
-    if (!w) return;
-    std::lock_guard<std::mutex> guard(w->mutex);
-    WindowQueue* q = w->queue.get();
-    if (!q || q->producer != producer) return;
-    for (uint32_t i = 0; i < q->count; ++i) if (q->slots[i].state == SLOT_DEQUEUED) q->slots[i].state = SLOT_FREE;
-    q->producer = 0;
-    q->cv.notify_all();
+    shiraz::zc_common::disconnectProducer(w, producer);
 }
 int32_t shiraz_window_dequeue_slot(ANativeWindow* w, uint64_t producer, ShirazWindowSlot* out) {
     if (!w || !out) return -EINVAL;
@@ -428,28 +303,13 @@ int32_t shiraz_window_queue_and_dequeue(ANativeWindow* w, uint64_t producer, uin
     return -EWOULDBLOCK;
 }
 int32_t shiraz_window_cancel_slot(ANativeWindow* w, uint64_t producer, uint32_t index) {
-    if (!w) return -EINVAL;
-    std::lock_guard<std::mutex> guard(w->mutex);
-    WindowQueue* q = w->queue.get();
-    if (!q || q->producer != producer || index >= q->count || q->slots[index].state != SLOT_DEQUEUED) return -EINVAL;
-    q->slots[index].state = SLOT_FREE;
-    q->cv.notify_all();
-    return 0;
+    return shiraz::zc_common::cancelSlot(w, producer, index);
 }
 int32_t shiraz_window_cpu_frames_required(ANativeWindow* w, const char** reason) {
-    if (!w) return 0;
-    std::lock_guard<std::mutex> guard(w->mutex);
-    const char* why = nullptr;
-    if (w->shared) why = "export";
-    else if (w->frameSink) why = "frame-sink";
-    else if (w->queue && w->queue->offscreen) why = "offscreen";
-    if (reason) *reason = why;
-    return why ? 1 : 0;
+    return shiraz::zc_common::cpuFramesRequired(w, reason);
 }
 void shiraz_window_set_offscreen(ANativeWindow* w) {
-    if (!w) return;
-    std::lock_guard<std::mutex> guard(w->mutex);
-    ensureQueue(w)->offscreen = true;
+    shiraz::zc_common::setOffscreen(w, ensureQueue);
 }
 int32_t shiraz_window_acquire_slot(ANativeWindow* w, uint64_t consumer, uint64_t frameSerial, ShirazWindowSlot* out) {
     if (!w || !out || !consumer) return -EINVAL;
@@ -492,9 +352,7 @@ int32_t shiraz_window_acquire_slot(ANativeWindow* w, uint64_t consumer, uint64_t
     return -ENODATA;
 }
 const char* shiraz_window_nodata_reason(ANativeWindow* w) {
-    if (!w) return "nodata-nothing-queued";
-    std::lock_guard<std::mutex> guard(w->mutex);
-    return w->queue && w->queue->ever_queued ? "nodata-cpu-newer" : "nodata-nothing-queued";
+    return shiraz::zc_common::nodataReason(w);
 }
 int32_t shiraz_window_mark_sampled(ANativeWindow* w, uint64_t consumer, uint32_t index, uint64_t generation, uint64_t releaseValue) {
     if (!w) return -EINVAL;
@@ -520,16 +378,10 @@ int32_t shiraz_window_consumer_detach(ANativeWindow* w, uint64_t consumer) {
     return 0;
 }
 void shiraz_window_abandon(ANativeWindow* w) {
-    if (!w) return;
-    std::lock_guard<std::mutex> guard(w->mutex);
-    WindowQueue* q = ensureQueue(w);
-    q->abandoned = true;
-    q->cv.notify_all();
+    shiraz::zc_common::abandon(w, ensureQueue);
 }
 int32_t shiraz_window_abandoned(ANativeWindow* w) {
-    if (!w) return 1;
-    std::lock_guard<std::mutex> guard(w->mutex);
-    return w->queue && w->queue->abandoned ? 1 : 0;
+    return shiraz::zc_common::abandoned(w);
 }
 int32_t shiraz_window_copy_argb_revision(ANativeWindow* w, uint32_t* pixels, size_t count, uint64_t* revision) {
     if (!w || !pixels) return -EINVAL;

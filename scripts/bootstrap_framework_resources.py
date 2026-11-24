@@ -146,7 +146,7 @@ def main():
         seeds += sorted(
             key
             for key in index.public
-            if key[0] in ('color', 'layout', 'dimen') and key not in seeds
+            if key[0] in ('color', 'layout', 'dimen', 'integer') and key not in seeds
         )
     selected, generated = index.closure(seeds)
     outputs, provenance = index.emit(selected, generated)

@@ -77,6 +77,8 @@ RUNTIME_LIBS = (
     'shiraz-playback',
     'shiraz-speech',
     'shiraz-notifications',
+    'shiraz-location',
+    'shiraz-trust',
 )
 DIGITALIS_REQUIRED_LIBS = (
     'libberberis_arm64.so',

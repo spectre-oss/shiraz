@@ -7,6 +7,7 @@
 #include <vector>
 #include <atomic>
 #include "shiraz/live_input.hpp"
+#include "shiraz/presentation_input.hpp"
 #if defined(__APPLE__)
 #include "shiraz/darwin/metal_probe.hpp"
 #include "shiraz/frame_export.hpp"
@@ -30,8 +31,10 @@
 #include <chrono>
 #include <cstdio>
 #include <dlfcn.h>
-#elif defined(__linux__)
+#endif
+#if defined(__linux__)
 #include <dlfcn.h>
+#include "linux/osk_dbus.inc"
 #endif
 
 namespace shiraz {
@@ -788,17 +791,20 @@ void present(const Surface& initial, const std::string& title, int frames,
     uint64_t uploadedRevision = contentRevision ? contentRevision() : 0, uploads = 1,
              skippedUploads = 0;
     bool repaint = true;
-#if defined(__APPLE__)
-    struct DarwinLiveResizeWatch {
+#if defined(_WIN32)
+    Win32PowerGuard win32PowerGuard;
+#endif
+    struct LiveResizeWatch {
         SDL_Window* window;
         SDL_Renderer* renderer;
         std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* texture;
         Surface* image;
         bool* embedded;
         bool* repaint;
+        bool registered = false;
         bool active = false;
         static int SDLCALL onEvent(void* userdata, SDL_Event* event) {
-            auto* self = static_cast<DarwinLiveResizeWatch*>(userdata);
+            auto* self = static_cast<LiveResizeWatch*>(userdata);
             if (!self || self->active || !event || event->type != SDL_WINDOWEVENT ||
                 event->window.windowID != SDL_GetWindowID(self->window))
                 return 0;
@@ -824,68 +830,27 @@ void present(const Surface& initial, const std::string& title, int frames,
             self->active = false;
             return 0;
         }
-        DarwinLiveResizeWatch(SDL_Window* w, SDL_Renderer* r,
-                              std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* t,
-                              Surface* img, bool* emb, bool* rep)
-            : window(w), renderer(r), texture(t), image(img), embedded(emb), repaint(rep) {
-            SDL_AddEventWatch(&DarwinLiveResizeWatch::onEvent, this);
+        LiveResizeWatch(SDL_Window* w, SDL_Renderer* r,
+                        std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* t,
+                        Surface* img, bool* emb, bool* rep, bool enable)
+            : window(w), renderer(r), texture(t), image(img), embedded(emb), repaint(rep),
+              registered(enable) {
+            if (registered)
+                SDL_AddEventWatch(&LiveResizeWatch::onEvent, this);
         }
-        ~DarwinLiveResizeWatch() {
-            SDL_DelEventWatch(&DarwinLiveResizeWatch::onEvent, this);
-        }
-    };
-    DarwinLiveResizeWatch darwinLiveResizeWatch(window.get(), renderer.get(), &texture, &image,
-                                                &embedded, &repaint);
-#endif
-#if defined(_WIN32)
-    Win32PowerGuard win32PowerGuard;
-    struct Win32LiveResizeWatch {
-        SDL_Window* window;
-        SDL_Renderer* renderer;
-        std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* texture;
-        Surface* image;
-        bool* repaint;
-        bool active = false;
-        static int SDLCALL onEvent(void* userdata, SDL_Event* event) {
-            auto* self = static_cast<Win32LiveResizeWatch*>(userdata);
-            if (!self || self->active || !event || event->type != SDL_WINDOWEVENT ||
-                event->window.windowID != SDL_GetWindowID(self->window))
-                return 0;
-            if (event->window.event != SDL_WINDOWEVENT_EXPOSED &&
-                event->window.event != SDL_WINDOWEVENT_RESIZED &&
-                event->window.event != SDL_WINDOWEVENT_SIZE_CHANGED)
-                return 0;
-            if (!self->texture || !self->texture->get())
-                return 0;
-            self->active = true;
-            int outW = 0, outH = 0;
-            if (SDL_GetRendererOutputSize(self->renderer, &outW, &outH) == 0 && outW > 0 &&
-                outH > 0) {
-                auto v = fit(self->image->width, self->image->height, outW, outH);
-                SDL_Rect rect{int(v.x), int(v.y), int(v.width), int(v.height)};
-                SDL_SetRenderDrawColor(self->renderer, 16, 18, 22, 255);
-                SDL_RenderClear(self->renderer);
-                SDL_RenderCopy(self->renderer, self->texture->get(), nullptr, &rect);
-                SDL_RenderPresent(self->renderer);
-                if (self->repaint)
-                    *self->repaint = true;
-            }
-            self->active = false;
-            return 0;
-        }
-        Win32LiveResizeWatch(SDL_Window* w, SDL_Renderer* r,
-                             std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>* t,
-                             Surface* img, bool* rep)
-            : window(w), renderer(r), texture(t), image(img), repaint(rep) {
-            SDL_AddEventWatch(&Win32LiveResizeWatch::onEvent, this);
-        }
-        ~Win32LiveResizeWatch() {
-            SDL_DelEventWatch(&Win32LiveResizeWatch::onEvent, this);
+        ~LiveResizeWatch() {
+            if (registered)
+                SDL_DelEventWatch(&LiveResizeWatch::onEvent, this);
         }
     };
-    Win32LiveResizeWatch win32LiveResizeWatch(window.get(), renderer.get(), &texture, &image,
-                                              &repaint);
+#if defined(__APPLE__)
+    bool* liveResizeEmbedded = &embedded;
+#else
+    bool* liveResizeEmbedded = nullptr;
 #endif
+    LiveResizeWatch liveResizeWatch(window.get(), renderer.get(), &texture, &image,
+                                    liveResizeEmbedded, &repaint,
+                                    should_enable_live_resize_watch(SDL_GetCurrentVideoDriver()));
     int presentedWidth = -1, presentedHeight = -1;
     uint64_t presents = 0, skippedPresents = 0;
     auto upload = [&](bool reset = false) {
@@ -939,10 +904,15 @@ void present(const Surface& initial, const std::string& title, int frames,
                       << event.point.x << ' ' << event.point.y << '\n';
     });
     struct TextInput {
-        bool enabled, wayland;
+        bool enabled, wayland, dummy;
         unsigned applied = ~0u;
+        bool oskShown = false;
+#if defined(__linux__)
+        linux_osk::Session oskDbus;
+#endif
         explicit TextInput(bool value)
-            : enabled(value), wayland(std::string(SDL_GetCurrentVideoDriver()) == "wayland") {
+            : enabled(value), wayland(std::string(SDL_GetCurrentVideoDriver()) == "wayland"),
+              dummy(std::string(SDL_GetCurrentVideoDriver()) == "dummy") {
             sync();
         }
         void sync() {
@@ -958,9 +928,30 @@ void present(const Surface& initial, const std::string& title, int frames,
                 SDL_StartTextInput();
             } else
                 SDL_StopTextInput();
+#if defined(__linux__)
+            if (enabled && !dummy) {
+                const bool wantOsk = (request & 1) != 0;
+                if (wantOsk) {
+                    oskDbus.setVisible(true);
+                    oskShown = true;
+                } else if (oskShown || applied != ~0u) {
+                    oskDbus.setVisible(false);
+                    oskShown = false;
+                }
+            }
+#endif
             applied = request;
         }
+        void hideOsk() {
+#if defined(__linux__)
+            if (oskShown && !dummy) {
+                oskDbus.setVisible(false);
+                oskShown = false;
+            }
+#endif
+        }
         ~TextInput() {
+            hideOsk();
             SDL_StopTextInput();
             text_input_request.store(0);
         }
@@ -1286,6 +1277,7 @@ void present(const Surface& initial, const std::string& title, int frames,
                 touches.cancel(eventTime(event.common.timestamp));
                 pointer.cancel(eventTime(event.common.timestamp));
                 keys.cancel(eventTime(event.common.timestamp));
+                textInput.hideOsk();
                 if (focus)
                     focus(false);
             }
@@ -1303,6 +1295,7 @@ void present(const Surface& initial, const std::string& title, int frames,
                 case SDL_WINDOWEVENT_MINIMIZED:
                     touches.cancel(eventTime(event.common.timestamp));
                     pointer.cancel(eventTime(event.common.timestamp));
+                    textInput.hideOsk();
                     visibility(false);
                     break;
                 case SDL_WINDOWEVENT_SHOWN:
@@ -1401,11 +1394,10 @@ void present(const Surface& initial, const std::string& title, int frames,
                     input({PointerAction::Scroll, *mapped, mouse_source,
                            eventTime(event.common.timestamp), dx, dy});
             }
-#if defined(__APPLE__)
             if (event.type == SDL_MULTIGESTURE && input && !pointer.active() && !touches.active() &&
                 (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS)) {
                 const float pinchDy =
-                    darwin_pinch_scroll_delta(event.mgesture.numFingers, event.mgesture.dDist);
+                    pinch_scroll_delta(event.mgesture.numFingers, event.mgesture.dDist);
                 if (pinchDy != 0.0f) {
                     int w, h;
                     SDL_GetWindowSize(window.get(), &w, &h);
@@ -1420,27 +1412,6 @@ void present(const Surface& initial, const std::string& title, int frames,
                                eventTime(event.common.timestamp), 0.0f, pinchDy});
                 }
             }
-#endif
-#if defined(_WIN32)
-            if (event.type == SDL_MULTIGESTURE && input && !pointer.active() && !touches.active() &&
-                (SDL_GetWindowFlags(window.get()) & SDL_WINDOW_INPUT_FOCUS)) {
-                const float pinchDy =
-                    win32_pinch_scroll_delta(event.mgesture.numFingers, event.mgesture.dDist);
-                if (pinchDy != 0.0f) {
-                    int w, h;
-                    SDL_GetWindowSize(window.get(), &w, &h);
-                    int mx, my;
-                    SDL_GetMouseState(&mx, &my);
-                    auto mapped = map_pointer(
-                        {double(mx), double(my)},
-                        input_viewport(image.width, image.height, w, h, bool(displayChanged)),
-                        image.width, image.height);
-                    if (mapped)
-                        input({PointerAction::Scroll, *mapped, mouse_source,
-                               eventTime(event.common.timestamp), 0.0f, pinchDy});
-                }
-            }
-#endif
             if (!touches.active() && event.type == SDL_MOUSEMOTION &&
                 ownWindow(event.motion.windowID) && event.motion.which != SDL_TOUCH_MOUSEID) {
                 if (pointer.active() && event.motion.which == mouse)
@@ -1463,16 +1434,8 @@ void present(const Surface& initial, const std::string& title, int frames,
             if ((event.type == SDL_FINGERDOWN || event.type == SDL_FINGERMOTION ||
                  event.type == SDL_FINGERUP) &&
                 ownWindow(event.tfinger.windowID) && event.tfinger.touchId != SDL_MOUSE_TOUCHID) {
-#if defined(__APPLE__)
-                if (!darwin_allow_touch_device_type(
-                        int(SDL_GetTouchDeviceType(event.tfinger.touchId))))
+                if (!allow_touch_device_type(int(SDL_GetTouchDeviceType(event.tfinger.touchId))))
                     continue;
-#endif
-#if defined(_WIN32)
-                if (!win32_allow_touch_device_type(
-                        int(SDL_GetTouchDeviceType(event.tfinger.touchId))))
-                    continue;
-#endif
                 if (!pointer.active()) {
                     int w, h;
                     SDL_GetWindowSize(window.get(), &w, &h);

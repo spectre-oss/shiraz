@@ -36,7 +36,9 @@ final class ClipCoverage {
   return new ClipCoverage(bounds.left,bounds.top,width,height,result.pixels);
  }
  Rect nonzeroBounds(Rect limit){
+  if(width<=0||height<=0||limit.isEmpty())return new Rect();
   int l=Math.max(left,limit.left),t=Math.max(top,limit.top),r=Math.min(left+width,limit.right),b=Math.min(top+height,limit.bottom);
+  if(l>=r||t>=b)return new Rect();
   int minX=r,minY=b,maxX=l,maxY=t;
   for(int y=t;y<b;y++)for(int x=l;x<r;x++)if(at(x,y)!=0){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x+1);maxY=Math.max(maxY,y+1);}
   return minX>=maxX||minY>=maxY?new Rect():new Rect(minX,minY,maxX,maxY);

@@ -11,6 +11,7 @@ public final class RippleFixture {
  public interface Clock {void at(long time,Runnable work);}
  private static void check(boolean ok,String why){if(!ok)throw new AssertionError(why);}
  private static Bitmap draw(Drawable d){Bitmap b=Bitmap.createBitmap(40,40,Bitmap.Config.ARGB_8888);d.draw(new Canvas(b));return b;}
+ private static Bitmap drawView(View v){Bitmap b=Bitmap.createBitmap(40,40,Bitmap.Config.ARGB_8888);v.draw(new Canvas(b));return b;}
  private static int count(Bitmap b){int n=0;for(int y=0;y<40;y++)for(int x=0;x<40;x++)if((b.getPixel(x,y)>>>24)!=0)n++;return n;}
  private static final int[] PRESS={android.R.attr.state_enabled,android.R.attr.state_pressed},IDLE={android.R.attr.state_enabled};
  public static final class HotspotRipple extends RippleDrawable {float x,y;public HotspotRipple(){super(ColorStateList.valueOf(0xffff0000),null,null);}public void setHotspot(float x,float y){super.setHotspot(x,y);this.x=x;this.y=y;}}
@@ -68,12 +69,26 @@ public final class RippleFixture {
   clock.at(2680,new Runnable(){public void run(){Bitmap b=draw(hover);try{check((b.getPixel(20,20)>>>24)==51,"Hover endpoint");}finally{b.recycle();}hover.setState(new int[]{android.R.attr.state_enabled,android.R.attr.state_focused});}});
   clock.at(2760,new Runnable(){public void run(){Bitmap b=draw(hover);try{check((b.getPixel(20,20)>>>24)==153,"Focus endpoint at 60 percent");}finally{b.recycle();}}});
   final RippleDrawable pattern=new RippleDrawable(ColorStateList.valueOf(0x800066ff),null,new ColorDrawable(0xffffffff));pattern.setBounds(0,0,40,40);pattern.setHotspot(20,20);
-  clock.at(2800,new Runnable(){public void run(){pattern.setState(PRESS);}});
+  clock.at(2800,new Runnable(){public void run(){pattern.setState(PRESS);Bitmap b=draw(pattern);try{check((b.getPixel(20,20)>>>24)>0,"Patterned ripple renders immediately on quick press");}finally{b.recycle();}}});
   clock.at(2840,new Runnable(){public void run(){pattern.setState(IDLE);}});
   clock.at(2920,new Runnable(){public void run(){Bitmap b=draw(pattern);try{int center=b.getPixel(20,20)>>>24,edge=b.getPixel(2,2)>>>24;check(center>edge&&center>0,"Patterned ripple has soft radial coverage");}finally{b.recycle();}}});
   clock.at(3250,new Runnable(){public void run(){Bitmap b=draw(pattern);try{check((b.getPixel(20,20)>>>24)>40,"Patterned quick tap finishes 450ms entry");}finally{b.recycle();}}});
   clock.at(3500,new Runnable(){public void run(){Bitmap b=draw(pattern);try{int a=b.getPixel(20,20)>>>24;check(a>0&&a<40,"Patterned release fades over 375ms");}finally{b.recycle();}}});
   clock.at(3625,new Runnable(){public void run(){Bitmap b=draw(pattern);try{check(count(b)==0,"Patterned ripple exit complete");}finally{b.recycle();}}});
+  // AbsListView selector ripple: positioned at the clicked row/hotspot and kept visible through exit after ACTION_UP.
+  final android.widget.ListView list=new android.widget.ListView(context);
+  final RippleDrawable listSelector=new RippleDrawable(ColorStateList.valueOf(0x800066ff),null,new ColorDrawable(0xffffffff));
+  list.setSelector(listSelector);list.setDrawSelectorOnTop(true);
+  list.setAdapter(new android.widget.BaseAdapter(){
+   public int getCount(){return 2;}public Object getItem(int p){return p;}public long getItemId(int p){return p;}
+   public View getView(int p,View c,ViewGroup parent){View v=c!=null?c:new View(context);v.setLayoutParams(new android.widget.AbsListView.LayoutParams(40,20));return v;}
+  });
+  list.measure(View.MeasureSpec.makeMeasureSpec(40,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(40,View.MeasureSpec.EXACTLY));
+  list.layout(0,0,40,40);
+  clock.at(4000,new Runnable(){public void run(){MotionEvent down=MotionEvent.obtain(4000,4000,MotionEvent.ACTION_DOWN,30,30,0);try{list.dispatchTouchEvent(down);}finally{down.recycle();}Bitmap b=drawView(list);try{check((b.getPixel(30,30)>>>24)>0&&b.getPixel(5,5)==0,"List selector ripple starts at clicked row hotspot");}finally{b.recycle();}}});
+  clock.at(4040,new Runnable(){public void run(){MotionEvent up=MotionEvent.obtain(4000,4040,MotionEvent.ACTION_UP,30,30,0);try{list.dispatchTouchEvent(up);}finally{up.recycle();}}});
+  clock.at(4200,new Runnable(){public void run(){Bitmap b=drawView(list);try{check((b.getPixel(30,30)>>>24)>0&&b.getPixel(5,5)==0,"List selector ripple continues animating after ACTION_UP");}finally{b.recycle();}}});
+  clock.at(4900,new Runnable(){public void run(){Bitmap b=drawView(list);try{check(count(b)==0,"List selector ripple finishes cleanly");}finally{b.recycle();}}});
   System.out.println("RIPPLE_ANIMATION_HOTSPOT_OK");
  }
 }

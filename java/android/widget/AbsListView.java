@@ -28,10 +28,10 @@ public abstract class AbsListView extends AdapterView<ListAdapter> {
  public int getListPaddingTop(){return getPaddingTop()+selectorPadding.top;}
  public int getListPaddingRight(){return getPaddingRight()+selectorPadding.right;}
  public int getListPaddingBottom(){return getPaddingBottom()+selectorPadding.bottom;}
- private Drawable selector;private boolean selectorOnTop,touchSelection;
+ private Drawable selector;private boolean selectorOnTop,touchSelection;private int selectorPosition=INVALID_POSITION;private View pressedRow;
  public void setDrawSelectorOnTop(boolean value){selectorOnTop=value;invalidate();}
  public void setSelector(int resource){setSelector(resource==0?null:getResources().getDrawable(resource,getContext().getTheme()));}
- public void setSelector(Drawable value){if(selector==value)return;if(selector!=null){selector.setCallback(null);unscheduleDrawable(selector);}selector=value;selectorPadding.set(0,0,0,0);if(value!=null)value.getPadding(selectorPadding);if(value!=null){value.setCallback(this);value.setState(getDrawableState());value.setVisible(getVisibility()==VISIBLE,false);}requestLayout();invalidate();}
+ public void setSelector(Drawable value){if(selector==value)return;if(selector!=null){selector.setCallback(null);unscheduleDrawable(selector);}selector=value;selectorPosition=INVALID_POSITION;selectorPadding.set(0,0,0,0);if(value!=null)value.getPadding(selectorPadding);if(value!=null){value.setCallback(this);value.setState(getDrawableState());value.setVisible(getVisibility()==VISIBLE,false);}requestLayout();invalidate();}
  public Drawable getSelector(){return selector;}
  public static final int CHOICE_MODE_NONE=0,CHOICE_MODE_SINGLE=1,CHOICE_MODE_MULTIPLE=2,CHOICE_MODE_MULTIPLE_MODAL=3;
  private int choiceMode=CHOICE_MODE_NONE;
@@ -46,12 +46,29 @@ public abstract class AbsListView extends AdapterView<ListAdapter> {
  public int getCheckedItemCount(){return checked.size();}
  public long[] getCheckedItemIds(){if(adapter==null||!adapter.hasStableIds())return new long[0];long[] ids=new long[checked.size()];int n=0;for(int i=0;i<checked.size();i++)if(checked.valueAt(i))ids[n++]=adapter.getItemId(checked.keyAt(i));if(n==ids.length)return ids;return java.util.Arrays.copyOf(ids,n);}
  @Override protected boolean verifyDrawable(Drawable d){return d==selector&&d!=null||super.verifyDrawable(d);}
- @Override protected void drawableStateChanged(){super.drawableStateChanged();if(selector!=null){selector.setState(getDrawableState());invalidate();}}
+ @Override protected void drawableStateChanged(){super.drawableStateChanged();if(!isEnabled()){selectorPosition=INVALID_POSITION;releasePressedRow();}if(selector!=null){selector.setState(getDrawableState());invalidate();}}
  @Override protected void onVisibilityChanged(View changed,int visibility){super.onVisibilityChanged(changed,visibility);if(selector!=null)selector.setVisible(isShown(),false);}
  @Override public void jumpDrawablesToCurrentState(){super.jumpDrawablesToCurrentState();if(selector!=null)selector.jumpToCurrentState();}
  @Override public void drawableHotspotChanged(float x,float y){super.drawableHotspotChanged(x,y);if(selector!=null)selector.setHotspot(x,y);}
- @Override protected void onDetachedFromWindow(){setPressed(false);dragging=false;super.onDetachedFromWindow();}
- private void drawSelector(Canvas canvas){if(selector==null||!isEnabled()||dragging)return;int position=isPressed()?downPosition:!touchSelection&&isFocused()?getSelectedItemPosition():-1;if(position<0||position>=count()||!adapter.isEnabled(position))return;View row=getChildAt(position-firstPosition);if(row==null)return;Rect padding=new Rect();selector.getPadding(padding);selector.setState(getDrawableState());selector.setLayoutDirection(getLayoutDirection());selector.setBounds(row.getLeft()-padding.left,row.getTop()-padding.top,row.getRight()+padding.right,row.getBottom()+padding.bottom);int saved=canvas.save();try{if(getClipToPadding())canvas.clipRect(getPaddingLeft(),getPaddingTop(),getWidth()-getPaddingRight(),getHeight()-getPaddingBottom());selector.draw(canvas);}finally{canvas.restoreToCount(saved);}}
+ @Override protected void onDetachedFromWindow(){releasePressedRow();selectorPosition=INVALID_POSITION;setPressed(false);dragging=false;super.onDetachedFromWindow();}
+ private void releasePressedRow(){if(pressedRow!=null){pressedRow.setPressed(false);pressedRow=null;}}
+ private boolean selectorAnimating(){return selector instanceof android.graphics.drawable.RippleDrawable&&((android.graphics.drawable.RippleDrawable)selector).shirazIsAnimating();}
+ private void positionSelector(int position,View row){
+  selectorPosition=position;if(selector==null||row==null)return;
+  Rect bounds=new Rect(row.getLeft(),row.getTop(),row.getRight(),row.getBottom());
+  if(row instanceof SelectionBoundsAdjuster)((SelectionBoundsAdjuster)row).adjustListItemSelectionBounds(bounds);
+  Rect padding=new Rect();selector.getPadding(padding);
+  selector.setLayoutDirection(getLayoutDirection());
+  selector.setBounds(bounds.left-padding.left,bounds.top-padding.top,bounds.right+padding.right,bounds.bottom+padding.bottom);
+ }
+ private void drawSelector(Canvas canvas){
+  if(selector==null||!isEnabled()||dragging)return;
+  int position=isPressed()?downPosition:!touchSelection&&isFocused()?getSelectedItemPosition():selectorPosition>=0&&selectorAnimating()?selectorPosition:-1;
+  if(position<0||position>=count()||!adapter.isEnabled(position)){if(!isPressed())selectorPosition=INVALID_POSITION;return;}
+  View row=getChildAt(position-firstPosition);if(row==null){if(!isPressed())selectorPosition=INVALID_POSITION;return;}
+  positionSelector(position,row);selector.setState(getDrawableState());
+  int saved=canvas.save();try{if(getClipToPadding())canvas.clipRect(getPaddingLeft(),getPaddingTop(),getWidth()-getPaddingRight(),getHeight()-getPaddingBottom());selector.draw(canvas);}finally{canvas.restoreToCount(saved);}
+ }
  @Override protected void dispatchDraw(Canvas canvas){if(!selectorOnTop)drawSelector(canvas);super.dispatchDraw(canvas);if(selectorOnTop)drawSelector(canvas);}
  // Configuration recreation is in-process; BaseSavedState explicitly rejects parcel transport.
  private static final class SavedState extends BaseSavedState {
@@ -104,7 +121,7 @@ public abstract class AbsListView extends AdapterView<ListAdapter> {
  public ListAdapter getAdapter(){return adapter;}
  @Override public int getCount(){return count();}
  @Override public void setEmptyView(View view){super.setEmptyView(view);shirazUpdateEmpty(count()==0);}
- public void setAdapter(ListAdapter value){setPressed(false);touchSelection=false;if(adapter!=null)adapter.unregisterDataSetObserver(observer);clearRows(false);scrap.clear();scrapCount=0;adapter=value;invalid=false;firstPosition=0;offset=0;dirty=true;clearChoices();shirazSelect(-1);if(value!=null)value.registerDataSetObserver(observer);shirazUpdateEmpty();requestLayout();invalidate();}
+ public void setAdapter(ListAdapter value){releasePressedRow();selectorPosition=INVALID_POSITION;setPressed(false);touchSelection=false;if(adapter!=null)adapter.unregisterDataSetObserver(observer);clearRows(false);scrap.clear();scrapCount=0;adapter=value;invalid=false;firstPosition=0;offset=0;dirty=true;clearChoices();shirazSelect(-1);if(value!=null)value.registerDataSetObserver(observer);shirazUpdateEmpty();requestLayout();invalidate();}
  private int count(){int n=invalid||adapter==null?0:adapter.getCount();if(n<0||n>1000000)throw new IllegalArgumentException("List item count bound");return n;}
  public View getSelectedView(){return getChildAt(getSelectedItemPosition()-firstPosition);}
  public void setSelection(int position){setSelectionFromTop(position,0);}
@@ -113,7 +130,7 @@ public abstract class AbsListView extends AdapterView<ListAdapter> {
  public void setOnScrollListener(OnScrollListener value){listener=value;if(value!=null)value.onScroll(this,firstPosition,getChildCount(),count());}
  protected int rowGap(){return 0;}
  private void recycle(View v,Integer type){if(type==null||type<0||scrapCount>=256)return;ArrayDeque<View> pool=scrap.get(type);if(pool==null){pool=new ArrayDeque<View>();scrap.put(type,pool);}pool.addLast(v);scrapCount++;if(recyclerListener!=null)recyclerListener.onMovedToScrapHeap(v);}
- private void clearRows(boolean reuse){while(getChildCount()>0){View v=getChildAt(getChildCount()-1);Integer type=rowTypes.remove(v);shirazRemoveRow(getChildCount()-1);if(reuse)recycle(v,type);}}
+ private void clearRows(boolean reuse){releasePressedRow();selectorPosition=INVALID_POSITION;while(getChildCount()>0){View v=getChildAt(getChildCount()-1);Integer type=rowTypes.remove(v);shirazRemoveRow(getChildCount()-1);if(reuse)recycle(v,type);}}
  private View obtain(int position){int types=adapter.getViewTypeCount(),type=adapter.getItemViewType(position);if(types<1||types>256||type>=types||type< -2)throw new IllegalArgumentException("List view type");ArrayDeque<View> pool=scrap.get(type);View old=pool==null?null:pool.pollFirst();if(old!=null)scrapCount--;View v=adapter.getView(position,old,this);boolean attachedFixed=measuring&&v!=null&&type==-2&&v.getParent()==this&&Integer.valueOf(-2).equals(rowTypes.get(v));if(v==null||v.getParent()!=null&&!attachedFixed)throw new IllegalStateException("Adapter must return an unparented row");if(v!=old&&old!=null)recycle(old,type);ViewGroup.LayoutParams params=v.getLayoutParams();if(params==null)params=new LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.WRAP_CONTENT);if(!attachedFixed)v.setLayoutParams(params);int parentWidth=measuring?measureWidthSpec:MeasureSpec.makeMeasureSpec(getMeasuredWidth(),MeasureSpec.EXACTLY);int width=getChildMeasureSpec(parentWidth,getListPaddingLeft()+getListPaddingRight(),params.width);v.measure(width,MeasureSpec.makeMeasureSpec(Math.max(0,params.height),params.height>=0?MeasureSpec.EXACTLY:MeasureSpec.UNSPECIFIED));if(v.getMeasuredHeight()<0||v.getMeasuredHeight()>65536)throw new IllegalArgumentException("List row height bound");rowTypes.put(v,type);return v;}
  private void discard(View v){if(v.getParent()==this)return;recycle(v,rowTypes.remove(v));}
  protected final void layoutRows(){if(laying)return;laying=true;try{int n=count();restorePending(n);clearRows(true);if(n==0){firstPosition=0;offset=0;dirty=false;shirazSelect(-1);return;}firstPosition=Math.min(firstPosition,n-1);int top=getListPaddingTop(),bottom=getHeight()-getListPaddingBottom(),gap=rowGap(),steps=0;
@@ -140,8 +157,23 @@ public abstract class AbsListView extends AdapterView<ListAdapter> {
  @Override public boolean canScrollVertically(int direction){return canScrollList(direction);}
  public int pointToPosition(int x,int y){for(int i=0;i<getChildCount();i++){View v=getChildAt(i);if(x>=v.getLeft()&&x<v.getRight()&&y>=v.getTop()&&y<v.getBottom())return firstPosition+i;}return INVALID_POSITION;}
  public long pointToRowId(int x,int y){return getItemIdAtPosition(pointToPosition(x,y));}
- private void down(MotionEvent e){downY=lastY=e.getY();downPosition=pointToPosition((int)e.getX(),(int)e.getY());dragging=false;touchSelection=true;setPressed(downPosition>=0&&downPosition<count()&&adapter.isEnabled(downPosition));drawableHotspotChanged(e.getX(),e.getY());}
- @Override public boolean onInterceptTouchEvent(MotionEvent e){if(!isEnabled())return false;if(e.getActionMasked()==MotionEvent.ACTION_DOWN){down(e);if(choiceMode!=CHOICE_MODE_NONE)return true;}if(e.getActionMasked()==MotionEvent.ACTION_MOVE&&Math.abs(e.getY()-downY)>ViewConfiguration.get(getContext()).getScaledTouchSlop()){if(!dragging&&listener!=null)listener.onScrollStateChanged(this,OnScrollListener.SCROLL_STATE_TOUCH_SCROLL);dragging=true;setPressed(false);return true;}return dragging||(choiceMode!=CHOICE_MODE_NONE&&e.getActionMasked()!=MotionEvent.ACTION_DOWN&&downPosition>=0);}
+ private void recordDown(MotionEvent e){downY=lastY=e.getY();downPosition=pointToPosition((int)e.getX(),(int)e.getY());dragging=false;touchSelection=true;}
+ private void down(MotionEvent e){
+  recordDown(e);releasePressedRow();
+  boolean enabled=downPosition>=0&&downPosition<count()&&adapter.isEnabled(downPosition);
+  View row=enabled?getChildAt(downPosition-firstPosition):null;
+  if(enabled&&row!=null){
+   positionSelector(downPosition,row);
+   drawableHotspotChanged(e.getX(),e.getY());
+   row.drawableHotspotChanged(e.getX()-row.getLeft(),e.getY()-row.getTop());
+   row.setPressed(true);pressedRow=row;
+   setPressed(true);
+  }else{
+   selectorPosition=INVALID_POSITION;setPressed(false);
+  }
+ }
+ private void cancelSelector(){releasePressedRow();selectorPosition=INVALID_POSITION;setPressed(false);if(selector!=null)selector.jumpToCurrentState();}
+ @Override public boolean onInterceptTouchEvent(MotionEvent e){if(!isEnabled())return false;if(e.getActionMasked()==MotionEvent.ACTION_DOWN){recordDown(e);if(choiceMode!=CHOICE_MODE_NONE)return true;}if(e.getActionMasked()==MotionEvent.ACTION_MOVE&&Math.abs(e.getY()-downY)>ViewConfiguration.get(getContext()).getScaledTouchSlop()){if(!dragging&&listener!=null)listener.onScrollStateChanged(this,OnScrollListener.SCROLL_STATE_TOUCH_SCROLL);dragging=true;cancelSelector();return true;}return dragging||(choiceMode!=CHOICE_MODE_NONE&&e.getActionMasked()!=MotionEvent.ACTION_DOWN&&downPosition>=0);}
  @Override public boolean onGenericMotionEvent(MotionEvent event){if(event.getActionMasked()==MotionEvent.ACTION_SCROLL&&isEnabled()&&!dragging){float value=event.getAxisValue(MotionEvent.AXIS_VSCROLL);if(value!=0){scrollListBy(Math.max(-8192,Math.min(8192,Math.round(-value*ViewConfiguration.get(getContext()).getScaledVerticalScrollFactor()))));return true;}}return super.onGenericMotionEvent(event);}
- @Override public boolean onTouchEvent(MotionEvent e){if(!isEnabled())return false;switch(e.getActionMasked()){case MotionEvent.ACTION_DOWN:down(e);return true;case MotionEvent.ACTION_MOVE:if(!dragging&&Math.abs(e.getY()-downY)>ViewConfiguration.get(getContext()).getScaledTouchSlop()){dragging=true;setPressed(false);if(listener!=null)listener.onScrollStateChanged(this,1);}if(dragging){scrollListBy(Math.max(-8192,Math.min(8192,Math.round(lastY-e.getY()))));if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(true);}lastY=e.getY();return true;case MotionEvent.ACTION_UP:int position=pointToPosition((int)e.getX(),(int)e.getY());if(!dragging&&position==downPosition&&position>=0&&adapter!=null&&adapter.isEnabled(position)){shirazSelect(position);View row=getChildAt(position-firstPosition);if("1".equals(System.getenv("SHIRAZ_TRACE_INPUT")))System.err.println("SHIRAZ_LIST_CLICK position="+position+" row="+(row==null?"null":row.getClass().getName())+" hasListener="+(getOnItemClickListener()!=null));performItemClick(row,position,adapter.getItemId(position));}case MotionEvent.ACTION_CANCEL:dragging=false;setPressed(false);if(listener!=null)listener.onScrollStateChanged(this,0);if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(false);return true;default:return true;}}
+ @Override public boolean onTouchEvent(MotionEvent e){if(!isEnabled())return false;switch(e.getActionMasked()){case MotionEvent.ACTION_DOWN:down(e);return true;case MotionEvent.ACTION_MOVE:if(!dragging&&Math.abs(e.getY()-downY)>ViewConfiguration.get(getContext()).getScaledTouchSlop()){dragging=true;cancelSelector();if(listener!=null)listener.onScrollStateChanged(this,1);}if(dragging){scrollListBy(Math.max(-8192,Math.min(8192,Math.round(lastY-e.getY()))));if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(true);}else if(isPressed()){drawableHotspotChanged(e.getX(),e.getY());if(pressedRow!=null)pressedRow.drawableHotspotChanged(e.getX()-pressedRow.getLeft(),e.getY()-pressedRow.getTop());}lastY=e.getY();return true;case MotionEvent.ACTION_UP:int position=pointToPosition((int)e.getX(),(int)e.getY());boolean click=!dragging&&position==downPosition&&position>=0&&adapter!=null&&adapter.isEnabled(position);View row=click?getChildAt(position-firstPosition):null;releasePressedRow();if(click){drawableHotspotChanged(e.getX(),e.getY());setPressed(false);shirazSelect(position);if("1".equals(System.getenv("SHIRAZ_TRACE_INPUT")))System.err.println("SHIRAZ_LIST_CLICK position="+position+" row="+(row==null?"null":row.getClass().getName())+" hasListener="+(getOnItemClickListener()!=null));performItemClick(row,position,adapter.getItemId(position));}else{cancelSelector();}dragging=false;if(listener!=null)listener.onScrollStateChanged(this,0);if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(false);return true;case MotionEvent.ACTION_CANCEL:dragging=false;cancelSelector();if(listener!=null)listener.onScrollStateChanged(this,0);if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(false);return true;default:return true;}}
 }

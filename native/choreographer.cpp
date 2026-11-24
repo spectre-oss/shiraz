@@ -2,6 +2,8 @@
 // Frame pacing for the host display. Callbacks run on the owning ALooper;
 // macOS tracks CoreVideo CVDisplayLink vsync, and Linux tracks display refresh
 // rate plus presenter vsync phase timestamps fed from presentation.cpp.
+// Both platforms share shiraz::VsyncPhaseTracker (include/shiraz/vsync_phase.hpp).
+#include "shiraz/vsync_phase.hpp"
 #include <atomic>
 #if defined(__APPLE__)
 #include <dlfcn.h>
@@ -63,9 +65,7 @@ const int64_t period = darwin_frame_period_ns();
 // Hardware vsync phase tracker via CoreVideo CVDisplayLink (loaded lazily via
 // dlopen so headless/CI binaries require no CoreVideo link dependency).
 struct DarwinVsyncTracker {
-    std::atomic<int64_t> lastTickNs{0};
-    std::atomic<int64_t> activePeriodNs{period};
-    std::atomic<uint64_t> tickCount{0};
+    shiraz::VsyncPhaseTracker phase{period};
 
     struct CVTimeLite {
         int64_t timeValue;
@@ -91,14 +91,12 @@ struct DarwinVsyncTracker {
         timespec ts{};
         clock_gettime(CLOCK_MONOTONIC, &ts);
         const int64_t tickNs = int64_t(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+        int64_t periodNs = 0;
         if (outputTime && outputTime->videoTimeScale > 0 && outputTime->videoRefreshPeriod > 0) {
-            const int64_t p = (outputTime->videoRefreshPeriod * 1000000000LL) /
-                              int64_t(outputTime->videoTimeScale);
-            if (p >= 2000000LL && p <= 50000000LL)
-                self->activePeriodNs.store(p, std::memory_order_relaxed);
+            periodNs = (outputTime->videoRefreshPeriod * 1000000000LL) /
+                       int64_t(outputTime->videoTimeScale);
         }
-        self->lastTickNs.store(tickNs, std::memory_order_release);
-        self->tickCount.fetch_add(1, std::memory_order_relaxed);
+        self->phase.noteVsync(tickNs, periodNs);
         return 0;
     }
 
@@ -126,23 +124,19 @@ struct DarwinVsyncTracker {
             CVTimeLite nom = getNominal(link);
             if (!(nom.flags & 1) && nom.timeScale > 0 && nom.timeValue > 0) {
                 const int64_t p = (nom.timeValue * 1000000000LL) / int64_t(nom.timeScale);
-                if (p >= 2000000LL && p <= 50000000LL)
-                    activePeriodNs.store(p, std::memory_order_relaxed);
+                phase.setPeriodNs(p);
             }
         }
         if (setCb(link, &DarwinVsyncTracker::onVsync, this) == 0)
             startLink(link);
     }
 
+    int64_t periodNs() const {
+        return phase.periodNs();
+    }
+
     int64_t nextDue(int64_t requested, int64_t current) const {
-        const int64_t p = activePeriodNs.load(std::memory_order_relaxed);
-        const int64_t anchor = lastTickNs.load(std::memory_order_acquire);
-        if (anchor > 0 && current >= anchor && (current - anchor) < 250000000LL) {
-            const int64_t delta = requested - anchor;
-            const int64_t steps = delta >= 0 ? (delta / p + 1) : 1;
-            return anchor + steps * p;
-        }
-        return (requested / p + 1) * p;
+        return phase.nextDue(requested, current);
     }
 };
 
@@ -151,60 +145,33 @@ DarwinVsyncTracker& darwin_vsync() {
     return *tracker;
 }
 #else
-constexpr int64_t kDefaultPeriodNs = 16666667;
-constexpr int64_t kMinPeriodNs = 2000000LL;  // 500 Hz
-constexpr int64_t kMaxPeriodNs = 50000000LL; // 20 Hz
-
 struct LinuxVsyncTracker {
-    std::atomic<int64_t> lastTickNs{0};
-    std::atomic<int64_t> activePeriodNs{kDefaultPeriodNs};
-    std::atomic<uint64_t> tickCount{0};
+    shiraz::VsyncPhaseTracker phase;
 
     LinuxVsyncTracker() {
         const char* envHz = std::getenv("SHIRAZ_REFRESH_HZ");
         if (envHz && *envHz) {
             char* end = nullptr;
             const double hz = std::strtod(envHz, &end);
-            if (end != envHz && hz >= 24.0 && hz <= 480.0) {
-                activePeriodNs.store(static_cast<int64_t>(std::llround(1000000000.0 / hz)),
-                                     std::memory_order_relaxed);
-            }
+            if (end != envHz)
+                phase.setRefreshRate(hz);
         }
     }
 
     void setRefreshRate(float hz) {
-        if (hz >= 24.0f && hz <= 480.0f) {
-            const int64_t p =
-                static_cast<int64_t>(std::llround(1000000000.0 / static_cast<double>(hz)));
-            if (p >= kMinPeriodNs && p <= kMaxPeriodNs) {
-                activePeriodNs.store(p, std::memory_order_relaxed);
-            }
-        }
+        phase.setRefreshRate(static_cast<double>(hz));
     }
 
     void noteVsync(int64_t monotonicNs, int64_t periodNs) {
-        if (periodNs >= kMinPeriodNs && periodNs <= kMaxPeriodNs) {
-            activePeriodNs.store(periodNs, std::memory_order_relaxed);
-        }
-        if (monotonicNs > 0) {
-            lastTickNs.store(monotonicNs, std::memory_order_release);
-            tickCount.fetch_add(1, std::memory_order_relaxed);
-        }
+        phase.noteVsync(monotonicNs, periodNs);
     }
 
     int64_t periodNs() const {
-        return activePeriodNs.load(std::memory_order_relaxed);
+        return phase.periodNs();
     }
 
     int64_t nextDue(int64_t requested, int64_t current) const {
-        const int64_t p = activePeriodNs.load(std::memory_order_relaxed);
-        const int64_t anchor = lastTickNs.load(std::memory_order_acquire);
-        if (anchor > 0 && current >= anchor && (current - anchor) < 250000000LL) {
-            const int64_t delta = requested - anchor;
-            const int64_t steps = delta >= 0 ? (delta / p + 1) : 1;
-            return anchor + steps * p;
-        }
-        return (requested / p + 1) * p;
+        return phase.nextDue(requested, current);
     }
 };
 
@@ -334,7 +301,7 @@ struct AChoreographer {
             return;
         const int64_t current = now();
 #if defined(__APPLE__)
-        const int64_t framePeriod = period;
+        const int64_t framePeriod = darwin_vsync().periodNs();
 #else
         const int64_t framePeriod = linux_vsync().periodNs();
 #endif

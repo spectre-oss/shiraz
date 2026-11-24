@@ -5,6 +5,7 @@
 #include "shiraz/win32/d3d11_probe.hpp"
 #endif
 #include "shiraz/presentation.hpp"
+#include "shiraz/presentation_input.hpp"
 #if defined(__APPLE__)
 #include "shiraz/sdl_keyboard.hpp"
 #endif
@@ -46,6 +47,23 @@ int main() {
     const bool hostOnly = std::getenv("SHIRAZ_HOST_SDL_VIDEODRIVER") != nullptr;
     if (hostOnly)
         assert(!std::getenv("SDL_VIDEODRIVER") && !std::getenv("SDL_RENDER_DRIVER"));
+    // Cross-platform touchpad pinch zoom, indirect touch filtering, and live-resize policy.
+    assert(shiraz::allow_touch_device_type(-1));
+    assert(shiraz::allow_touch_device_type(0));
+    assert(!shiraz::allow_touch_device_type(1));
+    assert(!shiraz::allow_touch_device_type(2));
+    assert(shiraz::pinch_scroll_delta(1, 0.5f) == 0.0f);
+    assert(shiraz::pinch_scroll_delta(3, 0.5f) == 0.0f);
+    assert(shiraz::pinch_scroll_delta(2, 1e-6f) == 0.0f);
+    assert(shiraz::pinch_scroll_delta(2, 0.2f) > 3.0f);
+    assert(shiraz::pinch_scroll_delta(2, -0.2f) < -3.0f);
+    assert(!shiraz::should_enable_live_resize_watch(nullptr));
+    assert(!shiraz::should_enable_live_resize_watch("dummy"));
+    assert(!shiraz::should_enable_live_resize_watch("offscreen"));
+    assert(shiraz::should_enable_live_resize_watch("wayland"));
+    assert(shiraz::should_enable_live_resize_watch("x11"));
+    assert(shiraz::should_enable_live_resize_watch("cocoa"));
+    assert(shiraz::should_enable_live_resize_watch("windows"));
     auto hdpi = shiraz::DisplayGeometry::from(540, 1076, 1080, 2152);
     assert(hdpi.densityDpi == 320);
     auto fractional = shiraz::DisplayGeometry::from(800, 600, 1000, 750);

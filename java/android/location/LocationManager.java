@@ -21,10 +21,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
-import shiraz.runtime.DarwinLocation;
+import shiraz.runtime.HostLocation;
 import shiraz.runtime.TestLocationConfig;
 
-/** Optional mock GPS source, test provider registry, and macOS CoreLocation bridge. */
+/** Optional mock GPS source, test provider registry, and cross-platform host location bridge. */
 public class LocationManager {
     public static final String NETWORK_PROVIDER = "network";
     public static final String GPS_PROVIDER = "gps";
@@ -69,9 +69,9 @@ public class LocationManager {
     private static final boolean TRACE = "1".equals(System.getenv("SHIRAZ_TRACE_LOCATION"));
 
     private final Context context;
-    private final boolean darwinLive;
-    private long darwinHandle;
-    private boolean darwinFineActive;
+    private final boolean hostLive;
+    private long hostHandle;
+    private boolean hostFineActive;
     private TestLocationConfig fix;
     private Location last;
     private boolean foreground = true;
@@ -124,17 +124,17 @@ public class LocationManager {
         }
     }
 
-    private LocationManager(Context context, TestLocationConfig fix, boolean allowDarwinLive) {
+    private LocationManager(Context context, TestLocationConfig fix, boolean allowHostLive) {
         if (context == null) {
             throw new NullPointerException("context");
         }
         this.context = context;
         this.fix = fix;
-        this.darwinLive =
-                allowDarwinLive
+        this.hostLive =
+                allowHostLive
                         && fix == null
-                        && DarwinLocation.isAvailable()
-                        && DarwinLocation.locationServicesEnabled();
+                        && HostLocation.isAvailable()
+                        && HostLocation.locationServicesEnabled();
         if (fix != null) {
             last = sample();
         }
@@ -148,40 +148,40 @@ public class LocationManager {
         return new LocationManager(context, fix, false);
     }
 
-    private static boolean isDarwinProvider(String provider) {
+    private static boolean isHostProvider(String provider) {
         return GPS_PROVIDER.equals(provider)
                 || NETWORK_PROVIDER.equals(provider)
                 || FUSED_PROVIDER.equals(provider);
     }
 
-    private boolean hasDarwinProvider(String provider) {
-        return darwinLive && isDarwinProvider(provider);
+    private boolean hasHostProvider(String provider) {
+        return hostLive && isHostProvider(provider);
     }
 
-    private void ensureDarwinSession(String provider, float minDistance) {
-        if (!hasDarwinProvider(provider)) {
+    private void ensureHostSession(String provider, float minDistance) {
+        if (!hasHostProvider(provider)) {
             return;
         }
         boolean wantFine = !NETWORK_PROVIDER.equals(provider);
-        if (darwinHandle != 0L && (!wantFine || darwinFineActive)) {
+        if (hostHandle != 0L && (!wantFine || hostFineActive)) {
             return;
         }
-        if (darwinHandle != 0L) {
-            DarwinLocation.stop(darwinHandle);
-            darwinHandle = 0L;
+        if (hostHandle != 0L) {
+            HostLocation.stop(hostHandle);
+            hostHandle = 0L;
         }
-        long handle = DarwinLocation.start(wantFine, Math.max(0.0f, minDistance));
+        long handle = HostLocation.start(wantFine, Math.max(0.0f, minDistance));
         if (handle != 0L) {
-            darwinHandle = handle;
-            darwinFineActive = wantFine;
+            hostHandle = handle;
+            hostFineActive = wantFine;
         }
     }
 
-    private void stopDarwinIfIdle() {
-        if (darwinHandle != 0L && subscriptions.isEmpty() && pendingSubscriptions.isEmpty()) {
-            DarwinLocation.stop(darwinHandle);
-            darwinHandle = 0L;
-            darwinFineActive = false;
+    private void stopHostIfIdle() {
+        if (hostHandle != 0L && subscriptions.isEmpty() && pendingSubscriptions.isEmpty()) {
+            HostLocation.stop(hostHandle);
+            hostHandle = 0L;
+            hostFineActive = false;
         }
     }
 
@@ -196,10 +196,10 @@ public class LocationManager {
         if (closed) {
             return providers;
         }
-        if ((fix != null || darwinLive) && !testProviders.containsKey(GPS_PROVIDER)) {
+        if ((fix != null || hostLive) && !testProviders.containsKey(GPS_PROVIDER)) {
             providers.add(GPS_PROVIDER);
         }
-        if (darwinLive) {
+        if (hostLive) {
             if (!testProviders.containsKey(NETWORK_PROVIDER)) {
                 providers.add(NETWORK_PROVIDER);
             }
@@ -219,10 +219,10 @@ public class LocationManager {
         if (closed) {
             return result;
         }
-        if ((fix != null || darwinLive) && !testProviders.containsKey(GPS_PROVIDER)) {
+        if ((fix != null || hostLive) && !testProviders.containsKey(GPS_PROVIDER)) {
             result.add(GPS_PROVIDER);
         }
-        if (darwinLive) {
+        if (hostLive) {
             if (!testProviders.containsKey(NETWORK_PROVIDER)) {
                 result.add(NETWORK_PROVIDER);
             }
@@ -289,7 +289,7 @@ public class LocationManager {
         }
         return testProviders.containsKey(provider)
                 || (fix != null && GPS_PROVIDER.equals(provider))
-                || hasDarwinProvider(provider);
+                || hasHostProvider(provider);
     }
 
     @Deprecated
@@ -313,7 +313,7 @@ public class LocationManager {
         if (fix != null && GPS_PROVIDER.equals(provider)) {
             return DEFAULT_GPS_PROPERTIES;
         }
-        if (hasDarwinProvider(provider)) {
+        if (hasHostProvider(provider)) {
             return NETWORK_PROVIDER.equals(provider)
                     ? DEFAULT_COARSE_PROPERTIES
                     : DEFAULT_GPS_PROPERTIES;
@@ -330,14 +330,14 @@ public class LocationManager {
         if (tp != null) {
             return tp.enabled;
         }
-        return (GPS_PROVIDER.equals(provider) && fix != null) || hasDarwinProvider(provider);
+        return (GPS_PROVIDER.equals(provider) && fix != null) || hasHostProvider(provider);
     }
 
     public synchronized boolean isLocationEnabled() {
         if (closed) {
             return false;
         }
-        if (fix != null || darwinLive) {
+        if (fix != null || hostLive) {
             return true;
         }
         for (TestProviderState tp : testProviders.values()) {
@@ -362,7 +362,7 @@ public class LocationManager {
             return context.checkCallingOrSelfPermission("android.permission.ACCESS_COARSE_LOCATION")
                     == PackageManager.PERMISSION_GRANTED;
         }
-        if (hasDarwinProvider(providerName)
+        if (hasHostProvider(providerName)
                 && (NETWORK_PROVIDER.equals(providerName) || FUSED_PROVIDER.equals(providerName))) {
             return context.checkCallingOrSelfPermission("android.permission.ACCESS_COARSE_LOCATION")
                     == PackageManager.PERMISSION_GRANTED;
@@ -377,7 +377,7 @@ public class LocationManager {
         if (closed) {
             throw new IllegalStateException("Location service is closed");
         }
-        if (testProviders.containsKey(provider) || hasDarwinProvider(provider)) {
+        if (testProviders.containsKey(provider) || hasHostProvider(provider)) {
             return;
         }
         if (fix == null) {
@@ -400,7 +400,7 @@ public class LocationManager {
         if (closed) {
             throw new IllegalStateException("Location service is closed");
         }
-        if (fix == null && !darwinLive && testProviders.isEmpty()) {
+        if (fix == null && !hostLive && testProviders.isEmpty()) {
             throw new UnsupportedOperationException("No configured location backend");
         }
         String best = getBestProvider(criteria, false);
@@ -449,9 +449,9 @@ public class LocationManager {
             last = sample();
             return new Location(last);
         }
-        if (hasDarwinProvider(providerName)) {
-            ensureDarwinSession(providerName, 0.0f);
-            Location polled = DarwinLocation.toLocation(providerName, DarwinLocation.pollFix(darwinHandle));
+        if (hasHostProvider(providerName)) {
+            ensureHostSession(providerName, 0.0f);
+            Location polled = HostLocation.toLocation(providerName, HostLocation.pollFix(hostHandle));
             if (polled != null) {
                 last = polled;
                 return new Location(polled);
@@ -480,7 +480,7 @@ public class LocationManager {
             }
             return new Location(tp.location);
         }
-        if (hasDarwinProvider(provider)) {
+        if (hasHostProvider(provider)) {
             return sampleForProvider(provider);
         }
         Location result = new Location(last);
@@ -749,7 +749,7 @@ public class LocationManager {
                     + " listener=" + ((Object) listener).getClass().getName());
         }
         subscriptions.put(listener, subscription);
-        ensureDarwinSession(provider, minDistance);
+        ensureHostSession(provider, minDistance);
         if (deliveryAllowed()) {
             if (handler != null) {
                 if (effectiveInterval != Long.MAX_VALUE && !handler.post(subscription)) {
@@ -853,7 +853,7 @@ public class LocationManager {
         if (subscription != null && subscription.handler != null) {
             subscription.handler.removeCallbacks(subscription);
         }
-        stopDarwinIfIdle();
+        stopHostIfIdle();
     }
 
     public synchronized void removeUpdates(PendingIntent pendingIntent) {
@@ -864,7 +864,7 @@ public class LocationManager {
         if (sub != null && sub.handler != null) {
             sub.handler.removeCallbacks(sub);
         }
-        stopDarwinIfIdle();
+        stopHostIfIdle();
     }
 
     public void addTestProvider(
@@ -1218,10 +1218,10 @@ public class LocationManager {
             }
         }
         pendingSubscriptions.clear();
-        if (darwinHandle != 0L) {
-            DarwinLocation.stop(darwinHandle);
-            darwinHandle = 0L;
-            darwinFineActive = false;
+        if (hostHandle != 0L) {
+            HostLocation.stop(hostHandle);
+            hostHandle = 0L;
+            hostFineActive = false;
         }
         proximityAlerts.clear();
         testProviders.clear();

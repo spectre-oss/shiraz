@@ -379,7 +379,7 @@ public class Canvas {
         int rx=(int)Math.round((Math.sqrt(1+4*sx*sx)-1)/2),ry=(int)Math.round((Math.sqrt(1+4*sy*sy)-1)/2);int pad=3*Math.max(rx,ry)+2;Bitmap dst=target();long w=(long)state.right-state.left+2*pad,h=(long)state.bottom-state.top+2*pad;
         if(w>8192||h>8192||w*h>4L*1024*1024)throw new IllegalArgumentException("Shadow mask exceeds 4M pixels");
         // Three box-blur passes have finite support: retain a halo around only the output clip.
-        Bitmap mask=Bitmap.createBitmap((int)w,(int)h,Bitmap.Config.ARGB_8888);try{Canvas c=new Canvas(mask);c.state=new State(state);c.state.left=c.state.top=0;c.state.right=(int)w;c.state.bottom=(int)h;c.state.tx=finite(state.tx+pad-state.left+paint.getShadowLayerDx()*state.sx);c.state.ty=finite(state.ty+pad-state.top+paint.getShadowLayerDy()*state.sy);Paint p=new Paint(paint);p.clearShadowLayer();p.setXfermode(null);p.setColor(Color.WHITE);p.setColorFilter(null);draw.draw(c,p,false);
+        Bitmap mask=Bitmap.createBitmap((int)w,(int)h,Bitmap.Config.ARGB_8888);try{Canvas c=new Canvas(mask);c.state=new State(state);c.state.clip=null;c.state.coverage=null;c.state.left=c.state.top=0;c.state.right=(int)w;c.state.bottom=(int)h;c.state.tx=finite(state.tx+pad-state.left+paint.getShadowLayerDx()*state.sx);c.state.ty=finite(state.ty+pad-state.top+paint.getShadowLayerDy()*state.sy);Paint p=new Paint(paint);p.clearShadowLayer();p.setXfermode(null);p.setColor(Color.WHITE);p.setColorFilter(null);draw.draw(c,p,false);
             shiraz.runtime.NativeBitmap.shadow(dst.pixels,dst.width,dst.height,mask.pixels,(int)w,(int)h,pad,rx,ry,color,mode,state.left,state.top,state.right,state.bottom);
         }finally{mask.recycle();}
     }

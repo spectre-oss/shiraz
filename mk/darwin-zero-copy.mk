@@ -9,7 +9,7 @@
 MACOS_ANDROID_SOURCES    += native/darwin/shared_event.mm
 MACOS_ANDROID_FRAMEWORKS += -framework Metal -framework Foundation
 # Prerequisites need explicit lines (parse-time expansion).
-MACOS_ZC_QUEUE_FILES := native/darwin/shared_event.mm native/darwin/window_queue.inc include/shiraz/darwin/window_queue.h mk/darwin-zero-copy.mk
+MACOS_ZC_QUEUE_FILES := native/darwin/shared_event.mm native/darwin/window_queue.inc include/shiraz/darwin/window_queue.h include/shiraz/window_queue_common.hpp mk/darwin-zero-copy.mk
 $(MACOS_OUT)/libandroid.so: $(MACOS_ZC_QUEUE_FILES)
 $(MACOS_OUT)/libEGL_shim.so: native/darwin/egl_shim_iosurface.inc include/shiraz/darwin/window_queue.h mk/darwin-zero-copy.mk
 $(MACOS_OUT)/libshiraz-gpu.so: native/darwin/gpu_iosurface.inc include/shiraz/darwin/window_queue.h mk/darwin-zero-copy.mk

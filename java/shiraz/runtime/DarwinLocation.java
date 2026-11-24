@@ -34,6 +34,10 @@ public final class DarwinLocation {
         testBackend = replacement;
     }
 
+    static HostLocationBackend getBackendForTest() {
+        return testBackend;
+    }
+
     public static boolean isAvailable() {
         DarwinLocationBackend b = testBackend;
         return b != null ? b.isAvailable() : loaded;

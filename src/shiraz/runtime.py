@@ -947,6 +947,8 @@ def runtime_inputs(system, root, host, execution_mode):
         *(host / 'framework' / jar for jar in JARS),
     ]
     required.append(root / 'build/libshiraz-power.so')
+    required.append(root / 'build/libshiraz-location.so')
+    required.append(root / 'build/libshiraz-trust.so')
     required.append(root / 'build/libshiraz-gles1.so')
     required.append(root / 'build/libshiraz-gles2.so')
     required.extend(root / '.local/share/shiraz/fonts' / name for name in BUNDLED_FONTS)

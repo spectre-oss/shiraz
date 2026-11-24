@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "shiraz/presentation_input.hpp"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -41,21 +42,13 @@ inline int win32_dpi_to_android_density(unsigned int win32Dpi) {
     return static_cast<int>(std::lround(scaled));
 }
 
-// Filters SDL_TouchDeviceType on Windows: allow direct touchscreens (0) and
-// synthetic test events (-1), reject indirect touchpad devices (1, 2) so
-// Precision Touchpad fingers never inject phantom Android touch events.
+// Delegates to shared cross-platform touch/pinch helpers in presentation_input.hpp.
 inline bool win32_allow_touch_device_type(int touchDeviceType) {
-    return touchDeviceType != 1 && touchDeviceType != 2;
+    return allow_touch_device_type(touchDeviceType);
 }
 
-// Translates a Windows Precision Touchpad two-finger pinch gesture into a
-// vertical scroll zoom delta for Android MotionEvent.ACTION_SCROLL.
 inline float win32_pinch_scroll_delta(int numFingers, float dDist) {
-    if (numFingers != 2 || !(dDist > -10.0f && dDist < 10.0f))
-        return 0.0f;
-    if (dDist > -1e-4f && dDist < 1e-4f)
-        return 0.0f;
-    return dDist * 18.0f;
+    return pinch_scroll_delta(numFingers, dDist);
 }
 
 #if defined(_WIN32)

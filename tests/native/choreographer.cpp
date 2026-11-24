@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "shiraz/vsync_phase.hpp"
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -94,5 +95,17 @@ int main() {
     shiraz_choreographer_set_refresh_rate(60.0f);
     assert(shiraz_choreographer_period_ns() == 16666667LL);
 #endif
+    // Shared VsyncPhaseTracker phase alignment + stale-anchor fallback.
+    {
+        shiraz::VsyncPhaseTracker tracker;
+        tracker.setRefreshRate(120.0);
+        assert(tracker.periodNs() == 8333333LL);
+        tracker.noteVsync(1000000000LL, 8333333LL);
+        assert(tracker.nextDue(1001000000LL, 1001000000LL) == 1008333333LL);
+        assert(tracker.nextDue(1009000000LL, 1001000000LL) == 1016666666LL);
+        // Stale anchor (>250ms old) falls back to period grid.
+        assert(tracker.nextDue(1500000000LL, 1500000000LL) ==
+               (1500000000LL / 8333333LL + 1) * 8333333LL);
+    }
     std::puts("NDK_CHOREOGRAPHER_OK");
 }

@@ -17,6 +17,7 @@ public final class HostTlsProvider extends Provider {
         if(unavailable())return;
         if(Security.getProvider("wolfJSSE")==null)throw new NoSuchProviderException("Pinned wolfJSSE provider is unavailable");
         if(HostOs.darwin())HostTrustProvider.install();
+        else if(HostOs.linux())HostTrustProvider.installIfAvailable();
         SSLContext oldContext=SSLContext.getDefault();
         SSLSocketFactory oldSocket=(SSLSocketFactory)SSLSocketFactory.getDefault();
         SSLSocketFactory oldHttps=HttpsURLConnection.getDefaultSSLSocketFactory();

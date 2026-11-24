@@ -29,7 +29,7 @@ build/libEGL.so.1: build/libEGL_shim.so
 build/version.hpp: VERSION
 	@mkdir -p build
 	@python3 -c 'from pathlib import Path; import json; v=Path("VERSION").read_text().strip(); Path("build/version.hpp").write_text("#define SHIRAZ_VERSION " + json.dumps(v) + "\n")'
-build/shiraz-preview: native/main.cpp native/presentation.cpp include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/native_window.h build/version.hpp build/libandroid.so $(SDL_LOCAL_LIBRARY)
+build/shiraz-preview: native/main.cpp native/presentation.cpp native/linux/osk_dbus.inc include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/native_window.h build/version.hpp build/libandroid.so $(SDL_LOCAL_LIBRARY)
 	@pkg-config --exists sdl2 || { echo 'SDL2 missing. Run make deps (local source build), or install SDL2 development files.'; exit 1; }
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SDL_CFLAGS) native/main.cpp native/presentation.cpp -o $@ -Lbuild -landroid -Wl,-rpath,'$$ORIGIN' $(SDL_LIBS)
 build/test-compositor: tests/compositor.cpp include/shiraz/compositor.hpp
@@ -47,7 +47,7 @@ build/test-linux-zero-copy: tests/native/linux_zero_copy.cpp build/libandroid.so
 .PHONY: linux-zero-copy-smoke
 linux-zero-copy-smoke: build/test-linux-zero-copy
 	SHIRAZ_EGL_ZERO_COPY=require ./build/test-linux-zero-copy
-build/libandroid.so: native/native_window.cpp native/linux/window_queue.inc include/shiraz/linux/window_queue.h native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp native/ndk_surface_control.cpp native/ndk_imagedecoder.cpp native/ndk_system_services.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h include/shiraz/ndk/configuration.h include/shiraz/ndk/input.h include/shiraz/ndk/native_activity.h include/shiraz/ndk/asset_manager.h include/shiraz/ndk/surface_control.h include/shiraz/ndk/imagedecoder.h include/shiraz/ndk/system_services.h
+build/libandroid.so: native/native_window.cpp native/linux/window_queue.inc include/shiraz/linux/window_queue.h include/shiraz/window_queue_common.hpp include/shiraz/vsync_phase.hpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp native/ndk_surface_control.cpp native/ndk_imagedecoder.cpp native/ndk_system_services.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h include/shiraz/ndk/configuration.h include/shiraz/ndk/input.h include/shiraz/ndk/native_activity.h include/shiraz/ndk/asset_manager.h include/shiraz/ndk/surface_control.h include/shiraz/ndk/imagedecoder.h include/shiraz/ndk/system_services.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) $(IMAGE_CFLAGS) -fPIC -shared -Wl,-z,defs native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp native/ndk_surface_control.cpp native/ndk_imagedecoder.cpp native/ndk_system_services.cpp -o $@ -pthread -ldl -lgbm -lGLESv2 $(IMAGE_LIBS) $(shell pkg-config --cflags --libs fontconfig)
 
@@ -134,7 +134,7 @@ interpreter-smoke:
 interpreter-bench:
 	python3 scripts/interpreter_bench.py --runs 5
 
-build/libshiraz-jni.so: include/shiraz/window_snapshot.hpp native/jni_surface.cpp native/presentation.cpp include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/native_window.h build/version.hpp build/libandroid.so $(SDL_LOCAL_LIBRARY)
+build/libshiraz-jni.so: include/shiraz/window_snapshot.hpp native/jni_surface.cpp native/presentation.cpp native/linux/osk_dbus.inc include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp include/shiraz/native_window.h build/version.hpp build/libandroid.so $(SDL_LOCAL_LIBRARY)
 	@pkg-config --exists sdl2
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SDL_CFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/jni_surface.cpp native/presentation.cpp -o $@ -Lbuild -landroid -Wl,-rpath,'$$ORIGIN' $(SDL_LIBS)
 jni-smoke: framework build/libshiraz-jni.so build/libshiraz-test-input.so
@@ -163,9 +163,12 @@ apk-smoke: build framework apk-fixture
 	python3 scripts/apk_smoke.py
 
 .PHONY: presentation-smoke
-build/test-presentation: tests/presentation.cpp native/presentation.cpp include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp $(SDL_LOCAL_LIBRARY)
+build/test-presentation: tests/presentation.cpp native/presentation.cpp native/linux/osk_dbus.inc include/shiraz/presentation.hpp include/shiraz/keyboard.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/pointer.hpp include/shiraz/compositor.hpp $(SDL_LOCAL_LIBRARY)
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SDL_CFLAGS) tests/presentation.cpp native/presentation.cpp -o $@ $(SDL_LIBS)
+build/test-linux-osk-dbus: tests/native/linux_osk_dbus.cpp native/linux/osk_dbus.inc
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/native/linux_osk_dbus.cpp -o $@ -pthread -ldl
 presentation-smoke: build/test-presentation
 	SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software timeout 10 ./build/test-presentation
 	env -u SDL_VIDEODRIVER -u SDL_RENDER_DRIVER SHIRAZ_HOST_SDL_VIDEODRIVER=dummy SHIRAZ_HOST_SDL_RENDER_DRIVER=software timeout 10 ./build/test-presentation
@@ -1205,8 +1208,8 @@ gpu-presentation-smoke: build/test-presentation-gpu
 	SDL_VIDEODRIVER=dummy SHIRAZ_RENDERER=software timeout 20 ./build/test-presentation-gpu
 	LIBGL_ALWAYS_SOFTWARE=1 SDL_VIDEODRIVER=offscreen SHIRAZ_RENDERER=auto timeout 20 ./build/test-presentation-gpu
 
-# Display scale changes affect every presentation entry point.
-build/shiraz-preview build/libshiraz-jni.so build/test-presentation build/test-presentation-gpu: include/shiraz/display_geometry.hpp
+# Display scale and presentation input helpers affect every presentation entry point.
+build/shiraz-preview build/libshiraz-jni.so build/test-presentation build/test-presentation-gpu build/test-presentation-damage build/test-live-input build/test-color-cursor: include/shiraz/display_geometry.hpp include/shiraz/presentation_input.hpp
 
 # Skia Ganesh is shared by presentation and Java Canvas JNI; one context per UI thread.
 .deps/skia/out/shiraz/libskia.a .deps/skia/out/shiraz/libpathkit.a &: scripts/bootstrap_skia.py
@@ -1409,9 +1412,9 @@ asset-stream-smoke: build/test-asset-stream build/asset-stream-fixture.apk
 	LD_LIBRARY_PATH="$(ART_HOST)/lib64:$(CURDIR)/build:$${LD_LIBRARY_PATH}" $(ASSET_STREAM_RUNNER) ./build/test-asset-stream build/asset-stream-fixture.apk
 check: asset-stream-smoke
 
-build/test-choreographer: tests/native/choreographer.cpp native/choreographer.cpp native/looper.cpp
+build/test-choreographer: tests/native/choreographer.cpp native/choreographer.cpp native/looper.cpp include/shiraz/vsync_phase.hpp
 	@mkdir -p build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@ -pthread
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/native/choreographer.cpp native/choreographer.cpp native/looper.cpp -o $@ -pthread
 .PHONY: choreographer-smoke
 choreographer-smoke: build/test-choreographer
 	./build/test-choreographer
@@ -1801,10 +1804,55 @@ build/macos/libshiraz-job-network.dylib: native/darwin/job_network.cpp
 	xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -fblocks -dynamiclib $< -framework Network -o $@
 
 # Optional logind backend, loaded dynamically without desktop-shell dependencies.
-build: build/libshiraz-power.so
+build: build/libshiraz-power.so build/libshiraz-location.so build/libshiraz-trust.so
 build/libshiraz-power.so: native/power.cpp include/shiraz/logind_power.hpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/power.cpp -o $@ -ldl
+
+# Linux host location bridge (GeoClue2 + XDG Desktop Portal via dlopen libdbus-1).
+build/libshiraz-location.so: native/linux/location.cpp
+	@mkdir -p build
+	@pkg-config --exists dbus-1 || { echo 'Linux location bridge requires libdbus-1 headers.'; exit 1; }
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) $(NOTIFICATION_CFLAGS) -fPIC -shared -Wl,-z,defs native/linux/location.cpp -o $@ -pthread -ldl
+
+build/libshiraz-mock-location-dbus.so: tests/native/linux_location_dbus_fixture.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(NOTIFICATION_CFLAGS) -fPIC -shared tests/native/linux_location_dbus_fixture.cpp -o $@ -pthread
+build/test-linux-location: tests/native/linux_location.cpp build/libshiraz-location.so build/libshiraz-mock-location-dbus.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/native/linux_location.cpp -o $@ -pthread -ldl
+.PHONY: linux-location-smoke
+linux-location-smoke: build/test-linux-location build/libshiraz-location.so build/libshiraz-mock-location-dbus.so
+	./build/test-linux-location "$(CURDIR)/build/libshiraz-location.so" "$(CURDIR)/build/libshiraz-mock-location-dbus.so"
+check: linux-location-smoke
+
+# Linux host TLS CA trust store bridge (reads system PEM CA bundles).
+build/libshiraz-trust.so: native/linux/trust.cpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -fPIC -shared -Wl,-z,defs native/linux/trust.cpp -o $@
+
+build/test-linux-trust: tests/native/linux_trust.cpp build/libshiraz-trust.so
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/native/linux_trust.cpp -o $@ -ldl
+.PHONY: linux-trust-smoke
+linux-trust-smoke: build/test-linux-trust build/libshiraz-trust.so
+	./build/test-linux-trust "$(CURDIR)/build/libshiraz-trust.so"
+check: linux-trust-smoke
+
+build/test-window-queue-common: tests/native/window_queue_common.cpp include/shiraz/window_queue_common.hpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/native/window_queue_common.cpp -o $@ -pthread
+.PHONY: window-queue-common-smoke
+window-queue-common-smoke: build/test-window-queue-common
+	./build/test-window-queue-common
+check: window-queue-common-smoke
+
+.PHONY: host-location-manager-smoke
+host-location-manager-smoke: framework
+	mkdir -p build/host-location-manager-smoke
+	javac --release 8 -cp build/framework/classes -d build/host-location-manager-smoke tests/java/HostLocationManagerSmoke.java
+	$(JAVA) -cp build/host-location-manager-smoke:build/framework/classes HostLocationManagerSmoke
+check: host-location-manager-smoke
 
 .PHONY: native-power-smoke
 native-power-smoke: build/shiraz-framework.jar build/libshiraz-power.so build/libshiraz-host.so

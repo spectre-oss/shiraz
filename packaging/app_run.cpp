@@ -652,6 +652,7 @@ int main(int argc, char** argv) {
                  "-Djavax.net.ssl.trustStore=" + (share / "cacerts.jks").string(),
                  "-Djavax.net.ssl.trustStoreType=JKS",
                  "-Djavax.net.ssl.trustStorePassword=changeit",
+                 "-Dshiraz.hostTrustStoreFallback=true",
                  "-Djava.io.tmpdir=" + (work / "tmp").string(),
                  "-Duser.home=" + (work / "home").string(),
                  "-cp",

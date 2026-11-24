@@ -30,6 +30,32 @@ public final class CircularRevealSmoke {
  MotionEvent.PointerProperties prop=new MotionEvent.PointerProperties();prop.id=0;MotionEvent.PointerCoords point=new MotionEvent.PointerCoords();point.x=15;point.y=15;point.orientation=.3f;
  event=MotionEvent.obtain(5,5,MotionEvent.ACTION_DOWN,1,new MotionEvent.PointerProperties[]{prop},new MotionEvent.PointerCoords[]{point},0,0,1,1,0,0,0,0);group.dispatchTouchEvent(event);event.recycle();scaled.setScaleX(Float.MIN_VALUE);event=MotionEvent.obtain(5,6,MotionEvent.ACTION_MOVE,15,15,0);group.dispatchTouchEvent(event);event.recycle();check(canceled[0],"unrepresentable inverse cancels capture");
  android.widget.TextView label=new android.widget.TextView(new android.content.ContextWrapper(null){public android.content.res.Resources getResources(){return android.content.res.Resources.getSystem();}});label.setText("Configure map حافظ");label.setTextSize(12);group.removeAllViews();group.addView(label,new android.widget.FrameLayout.LayoutParams(40,40));label.layout(0,0,40,40);label.setScaleX(.4f);label.setScaleY(.4f);Animator textReveal=ViewAnimationUtils.createCircularReveal(label,20,20,30,30);textReveal.start();Bitmap labelPixels=draw(group);boolean labelInk=false;for(int yy=3;yy<40;yy++)for(int xx=3;xx<40;xx++)labelInk|=labelPixels.getPixel(xx,yy)!=0;check(labelInk,"intermediate dashboard scale renders text");textReveal.end();
+ // Regression: empty (radius=0) reveal on a translated/scaled container whose child clips
+ // to a positive offset must stay empty instead of inverting nonzeroBounds into [0,0,tx,ty].
+ android.widget.FrameLayout revealHost=new android.widget.FrameLayout(new android.content.ContextWrapper(null));
+ View nested=new View(new android.content.ContextWrapper(null));nested.setBackgroundColor(0xffff0000);
+ revealHost.addView(nested,new android.widget.FrameLayout.LayoutParams(40,40));
+ group.removeAllViews();group.addView(revealHost,new android.widget.FrameLayout.LayoutParams(40,40));
+ group.layout(0,0,40,40);revealHost.layout(0,0,40,40);nested.layout(0,0,40,40);
+ revealHost.setScaleX(.13f);revealHost.setScaleY(.13f);revealHost.setTranslationX(8f);revealHost.setTranslationY(8f);
+ Animator zeroReveal=ViewAnimationUtils.createCircularReveal(revealHost,20,20,0,0);zeroReveal.start();
+ Bitmap zeroPixels=draw(group);
+ for(int yy=2;yy<40;yy++)for(int xx=2;xx<40;xx++)check(zeroPixels.getPixel(xx,yy)==0,"zero reveal translated child has no ink");
+ zeroReveal.end();
+ // Regression: non-empty reveal whose child rect lies completely to the bottom-right of the
+ // coverage mask must not invert disjoint nonzeroBounds and fail NativeBitmap.applyClip.
+ revealHost.setScaleX(1);revealHost.setScaleY(1);revealHost.setTranslationX(0);revealHost.setTranslationY(0);
+ revealHost.removeAllViews();
+ View inside=new View(new android.content.ContextWrapper(null));inside.setBackgroundColor(0xff0000ff);
+ View disjoint=new View(new android.content.ContextWrapper(null));disjoint.setBackgroundColor(0xffff0000);
+ revealHost.addView(inside,new android.widget.FrameLayout.LayoutParams(16,16));
+ revealHost.addView(disjoint,new android.widget.FrameLayout.LayoutParams(15,15));
+ inside.layout(0,0,16,16);disjoint.layout(25,25,40,40);
+ Animator smallReveal=ViewAnimationUtils.createCircularReveal(revealHost,8,8,6,6);smallReveal.start();
+ Bitmap disjointPixels=draw(group);
+ check(disjointPixels.getPixel(8,8)==0xff0000ff,"inside child renders under reveal");
+ check(disjointPixels.getPixel(30,30)==0&&disjointPixels.getPixel(18,18)==0,"disjoint bottom-right child clipped cleanly");
+ smallReveal.end();
  System.out.println("CIRCULAR_REVEAL_OK");
  }finally{Looper.shirazShutdownMain();}}
 }
