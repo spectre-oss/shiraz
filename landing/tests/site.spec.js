@@ -160,6 +160,34 @@ test('package format cards switch between AppImage and Flatpak with keyboard and
   await expect(page.locator('#assemble')).toBeEnabled();
 });
 
+test('macOS sidecar format switches with keyboard, exposes Seatbelt sandbox toggle and rejects bad checksums', async ({page}) => {
+  const macBody = Buffer.from('PKmacbase');
+  await page.route('**/release.json', route => route.fulfill({json:{
+    version:'1.2.3',
+    architectures:{
+      x86_64:{base_file:'base/Shiraz-Browser-Base-1.2.3-x86_64.AppImage',base_size:4,base_sha256:'0'.repeat(64)},
+      arm64:{formats:{macos:{base_file:'base/Shiraz-macOS-Base-1.2.3-arm64.zip',base_size:macBody.length,base_sha256:'e'.repeat(64)}}}
+    }
+  }}));
+  await page.route('**/base/*.zip', route => route.fulfill({body:macBody}));
+  await page.goto('/');
+  const flatpak = page.getByRole('radio', {name:/Flatpak/});
+  const macos = page.getByRole('radio', {name:/macOS/});
+  await flatpak.click();
+  await page.keyboard.press('ArrowRight');
+  await expect(macos).toBeChecked();
+  await expect(page.locator('#assemble')).toContainText('Build macOS ZIP');
+  await expect(page.locator('.builder-base p')).toContainText('macOS (.app sidecar)');
+  await expect(page.locator('#base')).toHaveAttribute('accept', '.zip');
+  await expect(page.locator('#macos-sandbox')).toBeChecked();
+  await expect(page.locator('.architecture-options')).toHaveCount(0);
+
+  await page.locator('#apk').setInputFiles({name:'fixture.apk',mimeType:'application/zip',buffer:Buffer.from('PKfixture')});
+  await page.locator('#assemble').click();
+  await expect(page.locator('#status')).toHaveText('Base checksum mismatch.', {timeout:30000});
+  await expect(page.locator('#assemble')).toBeEnabled();
+});
+
 
 test('social previews are present before JavaScript and use a real PNG card', async ({request}) => {
   const html = await (await request.get('/')).text();
@@ -239,7 +267,7 @@ test('compatibility visualizations render progress tiles, engine chips, domain m
   await expect(page.locator('.compat-table tbody tr')).toHaveCount(catalog.applications.length);
   // Host OS progress cards expose audited checklist counts and expandable areas.
   const macCard = page.locator('.host-platform-card', {hasText: 'macOS'});
-  await expect(macCard).toContainText('46/91 verified');
+  await expect(macCard).toContainText('48/91 verified');
   await macCard.locator('.host-breakdown summary').click();
   await expect(macCard.locator('.area-bars li')).toHaveCount(8);
   const winCard = page.locator('.host-platform-card', {hasText: 'Windows'});
@@ -276,7 +304,7 @@ test('compatibility alphabet filters and preserves alphabetical row order', asyn
   const names = await page.locator('.compat-table tbody th').allTextContents();
   expect(names).toEqual([...names].sort((a,b)=>a.localeCompare(b,'en',{numeric:true})));
   await page.getByRole('navigation',{name:'Filter apps by first letter'}).getByRole('button',{name:'S',exact:true}).click();
-  await expect(page.locator('.compat-table tbody tr')).toHaveCount(2);
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(3);
   await expect(page.locator('.compat-table tbody th').first()).toHaveText('SEN-214 Calculator');
 });
 

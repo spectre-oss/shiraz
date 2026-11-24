@@ -82,8 +82,9 @@ flatpak run io.github.spectre_oss.shiraz.PACKAGE --version
 ```
 
 The WASM APIs are:
-- `shirazBuildFromApk(baseBytes, apkBytes, version)` → `{bytes: Uint8Array, sha256: string, package: string, architecture: string}` or `{error: string}`.
-- `shirazBuildFlatpakFromApk(baseBytes, apkBytes, version, {allowNetwork?: boolean})` → `{bytes: Uint8Array, sha256: string, package: string, appId: string, architecture: string, filename: string}` or `{error: string}`.
+- `shirazBuildFromApk(baseBytes, apkBytes, version, {allowDigitalis?: boolean})` → `{bytes: Uint8Array, sha256: string, package: string, architecture: string, digitalis?: boolean}` or `{error: string}`.
+- `shirazBuildFlatpakFromApk(baseBytes, apkBytes, version, {allowNetwork?: boolean, allowDigitalis?: boolean})` → `{bytes: Uint8Array, sha256: string, package: string, appId: string, architecture: string, filename: string, digitalis?: boolean}` or `{error: string}`.
+- `shirazBuildMacAppFromApk(baseZipBytes, apkBytes, version, {allowNetwork?: boolean, sandbox?: boolean})` → `{bytes: Uint8Array, sha256: string, package: string, architecture: "arm64", filename: string, native: boolean}` or `{error: string}`. Keeps the signed `Shiraz.app/` inside `baseZipBytes` byte-for-byte untouched and places `original.apk`, `launch.properties`, `application.properties`, and `manifest.json` beside it under `AppData/`.
 The older `shirazAssemble` API remains available for producing an AppDir archive.
 
 ## Limits

@@ -38,11 +38,11 @@ export const compatibilityFaqs = [
   },
   {
     q: 'Which real Android apps and engines have been tested in Shiraz?',
-    a: 'The public catalog records 14 real applications across 8 frameworks and engines: OsmAnd+ and Telegram (Android framework + JNI), 2048 and F-Droid (Android framework), Obtainium and Ember Quest (Flutter), Joplin and SEN-214 Calculator (React Native), Lucas Doggiehood (Unity), Unciv (libGDX), Tiny Crate and Abra-Ca Bubble (Godot), SuperTux (SDL), and Mindustry (Arc), each with observed flows and open limitations documented.'
+    a: 'The public catalog records 18 real applications across 8 frameworks and engines: OsmAnd+, F-Droid v2.0.2, Math, and Telegram (Android framework + JNI), 2048, Editor, Crossword, and SolitaireCG (Android framework), Obtainium and Ember Quest (Flutter), Joplin and SEN-214 Calculator (React Native), Lucas Doggiehood (Unity), Unciv (libGDX), Tiny Crate and Abra-Ca Bubble (Godot), SuperTux (SDL), and Mindustry (Arc), each with observed flows and open limitations documented.'
   },
   {
     q: 'How far along are the native macOS and Windows ports?',
-    a: 'On Apple Silicon macOS, 46 of 91 tracked native host checklist items are verified and 19 are partial, with live OsmAnd+ vector map, offline search, turn-by-turn pedestrian routing/navigation, 468 MB live HTTPS offline map downloads, resize, and zoom-persistence walkthroughs on Metal/ANGLE plus a pre-warmed WarmArtPool standby. On Windows x64/ARM64, 32 of 37 native host items pass 3-OS CI and the remaining 5 are partial foundations (including ANGLE-D3D11 Per-Monitor V2 DPI, Win32 guest ELF/SysV↔Win64 thunks, and bootstrap_windows.py ART orchestrator) while live Win32 libart.dll execution remains open.'
+    a: 'On Apple Silicon macOS, 48 of 91 tracked native host checklist items are verified and 21 are partial, with live Metal/ANGLE walkthroughs of OsmAnd+ (vector maps, offline search, turn-by-turn routing/navigation, 468 MB HTTPS downloads, resize, zoom persistence), F-Droid v2.0.2, Math, Editor, Crossword, SolitaireCG, and 2048 (402 ms WarmArtPool standby reuse = 2.67× faster), plus verified ART MAP_JIT/mach_vm_remap/fault primitives and live MoltenVK v1.4.2 Metal Vulkan 1.4.357 (Apple M2 Pro, PackageManager level=1). On Windows x64/ARM64, 32 of 37 native host items pass 3-OS CI and the remaining 5 are partial foundations (including ANGLE-D3D11 Per-Monitor V2 DPI, Win32 ART NativeBridge v3 + guest ELF/SysV↔Win64 thunks, Media Foundation IMFSourceReader camera capture, and pinned patches/art-win32-build.patch) while live Win32 libart.dll execution remains open.'
   },
   {
     q: 'Why does Shiraz not publish a single whole-Android compatibility percentage?',

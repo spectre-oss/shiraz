@@ -9,7 +9,7 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "Component and app flows",
-      "notes": "Standalone ART (with pre-warmed WarmArtPool standby daemon on both Linux and macOS, plus AOT/page-cache pre-warming on Linux), multi-DEX loading and all 4,445 Android API 35 android.* class surfaces compile and smoke-test on OpenJDK and ART. Complete method-level Android behavior and macOS ART JIT remain incremental.",
+      "notes": "Standalone ART (with pre-warmed WarmArtPool standby wired into HostSession and ShirazDaemon on both Linux and macOS, ART MAP_JIT/mach_vm_remap/ARM64 fault-handler primitives on Darwin, and AOT/page-cache pre-warming on Linux), active-session AlarmManager wakeup delivery (unblocking AndroidX WorkManager), multi-DEX loading, and all 4,445 Android API 35 android.* class surfaces compile and smoke-test on OpenJDK and ART. Complete method-level Android behavior and Darwin libart-compiler.so JIT remain incremental.",
       "evidence": "docs/framework_final_goal.md"
     },
     {
@@ -117,7 +117,7 @@
       "scope": "Linux and macOS ARM64",
       "status": "Partial",
       "verification": "Native unit tests and nm audit",
-      "notes": "All 15 tracked Android API 35 NDK shared libraries (887/887 cataloged C symbols across libandroid, libjnigraphics, libmediandk, libsync, libOpenSLES, libaaudio, liblog, libicu, libamidi, libcamera2ndk, libOpenMAXAL, libbinder_ndk, libneuralnetworks, libvulkan and libnativewindow) build and pass native behavioral tests, including VK_KHR_android_surface ANativeWindow swapchain, AHardwareBuffer memory bridges, Darwin guest libvulkan.so AAPCS64 thunks, real-ICD PackageManager Vulkan feature probing, and AppImage/Flatpak bundling; live Vulkan game rendering requires a host ICD and physical Camera2 hardware capture remains host-dependent.",
+      "notes": "All 15 tracked Android API 35 NDK shared libraries (887/887 cataloged C symbols across libandroid, libjnigraphics, libmediandk, libsync, libOpenSLES, libaaudio, liblog, libicu, libamidi, libcamera2ndk, libOpenMAXAL, libbinder_ndk, libneuralnetworks, libvulkan and libnativewindow) build and pass native behavioral tests, including VK_KHR_android_surface ANativeWindow swapchain, AHardwareBuffer memory bridges, pinned MoltenVK v1.4.2 live Metal Vulkan 1.4.357 on Apple M2 Pro (host libvulkan.so, Darwin guest AAPCS64 thunks, and Java PackageManager level=1), and AppImage/Flatpak bundling; live Vulkan game rendering remains unverified and physical Camera2 hardware capture remains host-dependent.",
       "evidence": "docs/ndk_final_goal.md"
     },
     {
@@ -126,7 +126,7 @@
       "scope": "macOS ARM64",
       "status": "Partial",
       "verification": "App and component tests",
-      "notes": "Opt-in guest loader (SHIRAZ_GUEST_LOADER=1) boots OsmAnd+ (7 native libs, 4,090 TPIDR rewrites, live Tehran vector maps, turn-by-turn pedestrian routing & 468 MB HTTPS downloads) and Telegram (18 constructors, JNI_OnLoad), adds Darwin guest libvulkan.so AAPCS64 thunks, powl/sqrtl, property read callbacks, dynamic library admission, and unified 16 KB page-size policy. M5 strict hardened-runtime signing gate and full syscall coverage remain open.",
+      "notes": "Opt-in guest loader (SHIRAZ_GUEST_LOADER=1) boots OsmAnd+ (7 native libs, 4,090 TPIDR rewrites, live Tehran vector maps, turn-by-turn pedestrian routing & 468 MB HTTPS downloads), F-Droid v2.0.2, Math (2 ARM64 libs), and Telegram (18 constructors, JNI_OnLoad), adds pinned MoltenVK v1.4.2 live Metal Vulkan 1.4.357 + Darwin guest libvulkan.so AAPCS64 thunks, powl/sqrtl, property read callbacks, dynamic library admission, and unified 16 KB page-size policy. M5 strict hardened-runtime signing gate and full syscall coverage remain open.",
       "evidence": "docs/macos_final_goal.md"
     },
     {
@@ -162,7 +162,7 @@
       "scope": "macOS ARM64",
       "status": "Partial",
       "verification": "macOS build and bundle tests",
-      "notes": "Builds self-contained signed Shiraz.app bundles with hardened runtime, allow-jit and optional --sandbox App Sandbox entitlements, @rpath library closure and generated .icns icons; notarized release distribution is not yet published.",
+      "notes": "Builds self-contained signed Shiraz.app bundles with hardened runtime, allow-jit and optional --sandbox App Sandbox entitlements, @rpath library closure and generated .icns icons, plus browser Go/WASM .app sidecar zip packaging (keeping signed Shiraz.app byte-for-byte untouched beside AppData/) and SwiftUI Launcher default-on Seatbelt + MoltenVK ICD wiring; notarized release distribution is not yet published.",
       "evidence": "docs/macos_final_goal.md"
     },
     {
@@ -207,7 +207,7 @@
       "scope": "Windows x64 / ARM64",
       "status": "Partial",
       "verification": "Windows CI native unit tests",
-      "notes": "32/37 goal checklist items CI-verified and 5 partial (0 open): CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe, EnumDisplaySettingsW refresh rate, Per-Monitor V2 DPI & ANGLE-D3D11 window wiring, DXGI shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing, libvulkan.dll ANativeWindow swapchain/AHB bridge, SDL2 Win32 presentation/IME/clipboard/keyboard (test-presentation.exe), CreateProcessW spawning, SetThreadExecutionState, Job Object + Restricted Token sandbox, Win32 guest ELF loader with W^X VirtualAlloc & SysV↔Win64 thunks, bootstrap_windows.py ART orchestrator, and HostOs/rundll32 launchers. Live Win32 libart.dll execution remains open.",
+      "notes": "32/37 goal checklist items CI-verified and 5 partial (0 open): CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe, EnumDisplaySettingsW refresh rate, Per-Monitor V2 DPI & ANGLE-D3D11 window wiring, DXGI shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing, libvulkan.dll ANativeWindow swapchain/AHB bridge, SDL2 Win32 presentation/IME/clipboard/keyboard (test-presentation.exe), CreateProcessW spawning, SetThreadExecutionState, Job Object + Restricted Token sandbox, Win32 ART NativeBridge v3 C ABI adapter (libshiraz-win32-guest.dll) + guest ELF loader with W^X VirtualAlloc & SysV↔Win64 thunks, pinned patches/art-win32-build.patch + bootstrap_windows.py ART orchestrator, and HostOs/rundll32 launchers. Live Win32 libart.dll execution remains open.",
       "evidence": "docs/windows_final_goal.md"
     },
     {
@@ -216,7 +216,7 @@
       "scope": "Windows x64 / ARM64",
       "status": "Partial",
       "verification": "Windows CI native unit tests",
-      "notes": "WASAPI PCM16 playback & capture bridge backing libaaudio.dll and libOpenSLES.dll, Media Foundation H.264/HEVC decoder probing and MFEnumDeviceSources camera enumeration, DirectWrite system font enumeration, GetAdaptersAddresses connectivity, DPAPI keystore, SAPI5 speech probe, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass MinGW-w64 CI tests (make windows-check); interactive end-to-end app media playback on Windows is not yet verified.",
+      "notes": "WASAPI PCM16 playback & capture bridge backing libaaudio.dll and libOpenSLES.dll, Media Foundation H.264/HEVC decoder probing, MFEnumDeviceSources camera enumeration and IMFSourceReader RGBA8888 frame capture (shiraz_win32_camera_capture_frame), DirectWrite system font enumeration, GetAdaptersAddresses connectivity, DPAPI keystore, SAPI5 speech probe, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass MinGW-w64 CI tests (make windows-check); interactive end-to-end app media playback on Windows is not yet verified.",
       "evidence": "docs/windows_final_goal.md"
     },
     {

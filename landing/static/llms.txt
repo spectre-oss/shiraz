@@ -2,7 +2,7 @@
 
 > Shiraz is an open-source (GPL-3.0-only), GTK-free Android compatibility layer that runs supported Android APKs directly on Linux, Apple Silicon macOS (experimental), and Windows (experimental foundation) using standalone ART, SDL2, and native graphics/audio/OS bridges — without booting an Android system image, virtual machine, container, or kernel binder module.
 
-Snapshot version: v0.364.0 (data updated 2026-11-24).
+Snapshot version: v0.365.0 (data updated 2026-11-24).
 
 ## Core Facts
 
@@ -11,10 +11,10 @@ Snapshot version: v0.364.0 (data updated 2026-11-24).
 - **API 35 NDK C/C++ surface:** 15 of 15 tracked NDK shared libraries built, exporting 887 of 887 cataloged C symbols (audited with `nm`).
 - **Host OS backends:**
   - **Linux (x86_64, ARM64 — primary):** Standalone ART, warm standby pool, GBM/DMA-BUF zero-copy swapchain, ALSA/PipeWire AAudio, bundled `libvulkan.so` with real-ICD `PackageManager` probe, default-on Landlock + `PR_SET_NO_NEW_PRIVS` sandboxing (`--no-sandbox` opt-out, `--no-network`/`--no-internet` seccomp), WebRTC streaming, AppImage & sandboxed Flatpak (`.flatpak`) builders (CLI `--digitalis` ARM64 bundling).
-  - **macOS (Apple Silicon ARM64 — experimental port):** 46 verified, 19 partial, 26 open goal checklist items; ANGLE-Metal zero-copy IOSurface swapchain, SurfaceTexture, `MTLSharedEvent` native fences, 120 Hz `CVDisplayLink` vsync, VideoToolbox/AudioToolbox, pre-warmed `WarmArtPool`, opt-in guest ELF/Bionic loader + guest `libvulkan.so` AAPCS64 bridge booting OsmAnd+ (routing & 468 MB HTTPS downloads) & Telegram, default-on Seatbelt sandboxing, signed `.app` bundler.
-  - **Windows (x64, ARM64 — experimental foundation):** 32 verified, 5 partial, 0 open items (CI-verified Win32 primitives, SDL2 presentation/IME/clipboard, DXGI shared AHB, `libvulkan.dll`, WASAPI AAudio/OpenSL ES, Media Foundation, DirectWrite, Job Object/Restricted Token sandbox, portable/MSIX bundler; partial foundations for ANGLE-D3D11 Per-Monitor V2 DPI, Win32 guest ELF/SysV↔Win64 thunks, and `bootstrap_windows.py` ART orchestrator). Live Win32 `libart.dll` execution remains open.
-- **Recorded apps:** 14 apps (12 Partial, 1 Blocked, 1 Historical) across 8 engines (Android framework, Flutter, React Native, Unity, libGDX, Godot, SDL, Arc).
-- **Packaging:** Browser-based Go/WASM Builder produces standalone Linux AppImages and sandboxed Flatpak (`.flatpak`) bundles locally without uploading the APK; CLI also supports `--digitalis` ARM64-on-x86_64 bundling, builds signed macOS `.app` and Windows portable/MSIX bundles, and runs `shiraz install-desktop`.
+  - **macOS (Apple Silicon ARM64 — experimental port):** 48 verified, 21 partial, 22 open goal checklist items; ART `mach_vm_remap`/`MAP_JIT`/ARM64 fault primitives, wired `WarmArtPool` standby (`2.67×` faster launch on 2048), ANGLE-Metal zero-copy IOSurface swapchain, SurfaceTexture, `MTLSharedEvent` native fences, 120 Hz `CVDisplayLink` vsync, pinned **MoltenVK v1.4.2** (live Metal Vulkan 1.4.357 on Apple M2 Pro across host/guest thunks & Java `PackageManager` `level=1`), VideoToolbox/AudioToolbox, opt-in guest ELF/Bionic loader booting OsmAnd+, F-Droid v2.0.2, Math & Telegram, default-on Seatbelt sandboxing, signed `.app` bundler, and browser `.app` sidecar zip packaging.
+  - **Windows (x64, ARM64 — experimental foundation):** 32 verified, 5 partial, 0 open items (CI-verified Win32 primitives, SDL2 presentation/IME/clipboard, DXGI shared AHB, `libvulkan.dll`, WASAPI AAudio/OpenSL ES, Media Foundation decode + `IMFSourceReader` camera capture, DirectWrite, Job Object/Restricted Token sandbox, portable/MSIX bundler; partial foundations for ANGLE-D3D11 Per-Monitor V2 DPI, Win32 ART `NativeBridge` v3 + guest ELF/SysV↔Win64 thunks, and pinned `patches/art-win32-build.patch` + `bootstrap_windows.py` ART orchestrator). Live Win32 `libart.dll` execution remains open.
+- **Recorded apps:** 18 apps (17 Partial, 1 Blocked, 0 Historical) across 8 engines (Android framework, Flutter, React Native, Unity, libGDX, Godot, SDL, Arc).
+- **Packaging:** Browser-based Go/WASM Builder produces standalone Linux AppImages, sandboxed Flatpak (`.flatpak`) bundles (with Digitalis ARM64 bundling support), and unmodified signed macOS `.app` sidecar zips locally without uploading the APK; CLI also supports `--digitalis` ARM64-on-x86_64 bundling, builds signed macOS `.app` and Windows portable/MSIX bundles, and runs `shiraz install-desktop`.
 
 ## Explicit Boundaries (Do Not Misstate)
 

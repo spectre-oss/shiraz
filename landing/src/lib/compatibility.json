@@ -7,17 +7,63 @@
       "name": "OsmAnd",
       "framework": "Android framework + JNI",
       "status": "Partial",
-      "observed": "Live 2026-11-23–24 macOS ARM64 Metal/ANGLE walkthrough of OsmAnd+ rendered native vector maps (with Persian RTL labels), ran offline search (185 results), completed turn-by-turn pedestrian routing & navigation (maneuver countdown, live GPS updates, TTS prompts, arrival), downloaded offline maps over HTTPS (World_basemap.obf 468 MB & altitude data), resized portrait ↔ landscape, and persisted zoom across restart (9.84 s warm first present). Earlier Linux runs also reached maps, drawer, and route details.",
-      "limitations": "Full ART JIT (MAP_JIT compiler heap-base decoding), M5 hardened-runtime signing gates, and Linux/Waydroid visual parity comparison remain open.",
+      "observed": "Live 2026-11-23–24 macOS ARM64 Metal/ANGLE walkthrough of OsmAnd+ rendered native vector maps (with Persian RTL labels), ran offline search (185 results), completed turn-by-turn pedestrian routing & navigation (maneuver countdown, live GPS updates, TTS prompts, arrival), downloaded offline maps over HTTPS (World_basemap.obf 468 MB & altitude data), resized portrait ↔ landscape, and persisted zoom across restart (9.42 s WarmArtPool standby reuse / 9.84 s warm first present). Earlier Linux runs also reached maps, drawer, and route details.",
+      "limitations": "Building libart-compiler.so for ART JIT (beyond MAP_JIT code cache/remap/fault primitives), M5 hardened-runtime signing gates, and Linux/Waydroid visual parity comparison remain open.",
       "source": "tested.md"
     },
     {
       "id": "f-droid",
       "name": "F-Droid",
+      "packageId": "org.fdroid.fdroid",
+      "version": "2.0.2",
+      "framework": "Android framework + JNI",
+      "status": "Partial",
+      "observed": "Live 2026-11-24 macOS ARM64 Metal/ANGLE walkthrough of F-Droid v2.0.2 (Jetpack Compose + WorkManager + Room SQLite) rendered Material 3 Discover, Search, My apps, and Repositories screens, switched to two-pane tablet landscape (left navigation rail + detail pane) and back to portrait, and triggered RepoUpdateWorker on Fetch repositories.",
+      "limitations": "Full index-v2 repository ingestion did not finish within 50 s under -Xint, clean exit waits on background coroutine threads, and APK installation via F-Droid remains unverified.",
+      "source": "tested.md"
+    },
+    {
+      "id": "math-hpl",
+      "name": "Math",
+      "packageId": "hpl.apps.android.math",
+      "version": "1.0.2",
+      "framework": "Android framework + JNI",
+      "status": "Partial",
+      "observed": "Live 2026-11-24 macOS ARM64 Metal/ANGLE walkthrough loaded its 2 arm64-v8a native libraries, evaluated 7×6 = 42 via live pointer taps, switched to the Material 3 Unit Converter tab, relaid out across 3-column portrait ↔ 5-column landscape ↔ portrait, and exited cleanly.",
+      "limitations": "Full scientific/graphing coverage and restart persistence remain unverified.",
+      "source": "tested.md"
+    },
+    {
+      "id": "editor-billthefarmer",
+      "name": "Editor",
+      "packageId": "org.billthefarmer.editor",
+      "version": "1.98",
       "framework": "Android framework",
-      "status": "Historical",
-      "observed": "Earlier web-runner testing rendered the main screen.",
-      "limitations": "Repository refresh and complete app installation workflows are not established.",
+      "status": "Partial",
+      "observed": "Live 2026-11-24 macOS ARM64 Metal/ANGLE walkthrough dismissed the Files permission dialog, accepted live UTF-8 keyboard text entry, relaid out across portrait ↔ landscape ↔ portrait, and exited cleanly.",
+      "limitations": "File save/open round-trips and full menu actions remain unverified.",
+      "source": "tested.md"
+    },
+    {
+      "id": "crossword-billthefarmer",
+      "name": "Crossword",
+      "packageId": "org.billthefarmer.crossword",
+      "version": "1.26",
+      "framework": "Android framework",
+      "status": "Partial",
+      "observed": "Live 2026-11-24 macOS ARM64 Metal/ANGLE walkthrough entered pattern 123s567, ran live dictionary word lookup returning matching words (abasers, abashed, abashes, abasing, abusage, abusers, abusing), relaid out across portrait ↔ landscape ↔ portrait, and exited cleanly.",
+      "limitations": "Anagram/clue solver modes and navigation drawer actions remain unverified.",
+      "source": "tested.md"
+    },
+    {
+      "id": "solitaire-cg",
+      "name": "SolitaireCG",
+      "packageId": "net.sourceforge.solitaire_cg",
+      "version": "4.1",
+      "framework": "Android framework",
+      "status": "Partial",
+      "observed": "Live 2026-11-24 macOS ARM64 Metal/ANGLE walkthrough dealt cards from the stock pile (15 → 9), updated the live game clock, relaid out across portrait ↔ landscape ↔ portrait, exited cleanly, and restored the exact dealt cards, stock counter, and running timer across restart.",
+      "limitations": "Drag-and-drop card plays, full game completion, and alternate game modes remain unverified.",
       "source": "tested.md"
     },
     {
@@ -71,7 +117,7 @@
       "framework": "Godot",
       "status": "Blocked",
       "observed": "The ARM64 build reaches an interactive Vulkan requirements warning.",
-      "limitations": "Host libvulkan.so/.dll, Darwin guest libvulkan.so, and real-ICD PackageManager Vulkan feature probing are wired, but live Vulkan game rendering in Abra-Ca Bubble on a Vulkan ICD host remains unverified.",
+      "limitations": "Host libvulkan.so/.dll, Darwin guest libvulkan.so, pinned in-tree MoltenVK v1.4.2 (live Vulkan 1.4.357 on Apple M2 Pro with PackageManager level=1), and real-ICD Vulkan feature probing are wired, but live Vulkan game rendering inside Abra-Ca Bubble remains unverified.",
       "source": "experiments/godot/ABRA_CA_BUBBLE.md"
     },
     {
@@ -117,7 +163,7 @@
       "version": "1.3.3",
       "framework": "Android framework",
       "status": "Partial",
-      "observed": "Upstream 1.3.3 renders the board; pointer swipes move tiles, two 2 tiles merge into 4 and score increases. Landscape relayout works; board, score and high score survive a clean restart.",
+      "observed": "Upstream 1.3.3 renders the board; pointer swipes move tiles, two 2 tiles merge into 4 and score increases. Landscape relayout works; board, score and high score survive a clean restart. On macOS Apple Silicon, wired WarmArtPool standby reuse launches in 402 ms vs 1,072 ms direct (2.67× faster).",
       "limitations": "A dismissible Google Play Services warning appears on startup and activity recreation. Long games, reaching 2048, Play services features and the current Google Play build remain unverified.",
       "source": "tested.md"
     },

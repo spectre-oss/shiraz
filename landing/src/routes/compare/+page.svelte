@@ -78,39 +78,39 @@
       url: 'https://github.com/spectre-oss/shiraz',
       tagline: 'This project',
       stack: [
-        { stage: 'App code', title: 'Standalone ART', detail: 'Warm standby pool on Linux & macOS; AOT on Linux' },
+        { stage: 'App code', title: 'Standalone ART', detail: 'Warm standby pool on Linux & macOS (2.67×); MAP_JIT/remap' },
         { stage: 'Framework', title: '4,445 API 35 classes', detail: '49/49 packages in Java + JNI (bounded behavior)' },
-        { stage: 'Native ABI', title: '15 NDK libs · 887 syms', detail: 'Host ELF, Digitalis bundling, macOS guest loader, Win32 ELF' },
-        { stage: 'Graphics', title: 'GLES · Metal · Vulkan', detail: 'Zero-copy GBM/DMA-BUF & IOSurface, guest/host libvulkan' },
+        { stage: 'Native ABI', title: '15 NDK libs · 887 syms', detail: 'Host ELF, Digitalis, macOS guest loader, Win32 NativeBridge v3' },
+        { stage: 'Graphics', title: 'GLES · Metal · Vulkan', detail: 'Zero-copy GBM/IOSurface, live MoltenVK 1.4.2 Metal Vulkan' },
         { stage: 'Window', title: 'SDL2 on 3 OSes', detail: 'Linux, macOS Cocoa & Windows Win32 — no GTK' }
       ],
       scores: { host: 'good', binder: 'good', window: 'good', graphics: 'warn', webview: 'warn', isolation: 'good', arm: 'warn', dist: 'good', apps: 'warn' },
       host: [
-        'Three native desktop OSes: Linux x86-64 & ARM64 (primary), Apple Silicon macOS (46/91 goal items verified), and Windows x64 & ARM64 (32/37 CI-verified, 5 partial, 0 open).',
+        'Three native desktop OSes: Linux x86-64 & ARM64 (primary), Apple Silicon macOS (48/91 goal items verified, 21 partial), and Windows x64 & ARM64 (32/37 CI-verified, 5 partial, 0 open).',
         'good'
       ],
-      code: ['Standalone ART with pre-warmed WarmArtPool standby daemon on both Linux and macOS, plus AOT/page-cache pre-warming on Linux (-Xint on macOS).'],
+      code: ['Standalone ART with WarmArtPool standby daemon wired on both Linux and macOS (2.67× faster launch on 2048), AOT/page-cache pre-warming on Linux, and verified Darwin MAP_JIT, mach_vm_remap & ARM64 fault-handler primitives (-Xint until libart-compiler.so lands).'],
       framework: ['All 4,445 Android™ API 35 class surfaces across 49 packages in Java + C++ JNI (bounded subsystem behavior), plus attributed AOSP code.'],
       native: [
-        'All 15 tracked API 35 NDK libraries (887/887 audited symbols) built for Linux and macOS ARM64; ALSA/PipeWire AAudio on Linux; opt-in macOS guest ELF/Bionic loader + guest libvulkan.so boots OsmAnd+ & Telegram; CoreAudio/VideoToolbox/CoreLocation/Metal on macOS; CI-verified Win32 WASAPI (AAudio & OpenSL ES), Media Foundation, DirectWrite, DXGI & Win32 guest ELF/SysV↔Win64 thunk foundation on Windows.'
+        'All 15 tracked API 35 NDK libraries (887/887 audited symbols) built for Linux and macOS ARM64; ALSA/PipeWire AAudio on Linux; opt-in macOS guest ELF/Bionic loader + pinned MoltenVK v1.4.2 guest libvulkan.so boots OsmAnd+, F-Droid v2.0.2, Math & Telegram; CoreAudio/VideoToolbox/CoreLocation/Metal on macOS; CI-verified Win32 WASAPI (AAudio & OpenSL ES), Media Foundation (decode + IMFSourceReader capture), DirectWrite, DXGI & Win32 ART NativeBridge v3 / guest ELF SysV↔Win64 thunks on Windows.'
       ],
-      arm: ['Digitalis ARM64-on-x86_64 bridge works in CLI runs and bundles into Linux AppImages and Flatpaks via --digitalis; native ARM64 on Apple Silicon and Linux ARM64. No 32-bit ARM; prebuilt browser bases do not bundle Digitalis yet.', 'warn'],
+      arm: ['Digitalis ARM64-on-x86_64 bridge works in CLI runs, CLI --digitalis AppImage/Flatpak builds, and browser WASM assembly (when the base includes Digitalis); native ARM64 on Apple Silicon and Linux ARM64. No 32-bit ARM; published browser bases do not bundle Digitalis yet.', 'warn'],
       graphics: [
-        'EGL/GLES + Skia Ganesh + bundled libvulkan.so/.dll (VK_KHR_android_surface swapchain, AHB, Darwin guest libvulkan.so AAPCS64 thunks, and real-ICD PackageManager Vulkan feature probe); zero-copy GBM/DMA-BUF swapchain & vsync choreographer on Linux; zero-copy IOSurface swapchain, MTLSharedEvent fences & 120 Hz CVDisplayLink vsync on macOS; DXGI shared buffers, DwmFlush & Per-Monitor V2 DPI/ANGLE-D3D11 wiring on Windows. End-to-end Vulkan games remain unverified.',
+        'EGL/GLES + Skia Ganesh + bundled libvulkan.so/.dll (VK_KHR_android_surface swapchain, AHB, and real-ICD PackageManager probe); zero-copy GBM/DMA-BUF swapchain & vsync choreographer on Linux; zero-copy IOSurface swapchain, MTLSharedEvent fences, 120 Hz CVDisplayLink vsync & pinned MoltenVK v1.4.2 live Metal Vulkan 1.4.357 on Apple M2 Pro (host/guest thunks + Java PackageManager level=1) on macOS; DXGI shared buffers, DwmFlush & Per-Monitor V2 DPI/ANGLE-D3D11 wiring on Windows. End-to-end Vulkan games remain unverified.',
         'warn'
       ],
       window: ['SDL2 across Linux (Wayland & X11), macOS Cocoa (Retina, Cmd shortcuts, live resize) and Windows Win32 (Per-Monitor V2 DPI, IME, clipboard, Precision Touchpad). Any desktop, no GTK.', 'good'],
       binder: ['None needed — no kernel binder module or root container.', 'good'],
       webview: ['Embedded pure-Java HTML5 DOM, CSS selectors, interactive contentEditable editing, Selection/Range, execCommand, MutationObserver, timers, DOM storage, step-budgeted JS evaluator & @JavascriptInterface bridge; not a full Blink/V8 layout engine yet.', 'warn'],
       isolation: [
-        'On by default across CLI, desktop launchers, daemon, and Linux AppImages (--no-sandbox opt-out, --no-network/--no-internet): Linux Landlock LSM + PR_SET_NO_NEW_PRIVS + seccomp-BPF, macOS Seatbelt SBPL + App Sandbox entitlements, Windows Job Object + Restricted Token, plus Flatpak bubblewrap bundles.',
+        'On by default across CLI, desktop launchers, macOS Launcher, daemon, and Linux AppImages (--no-sandbox opt-out, --no-network/--no-internet): Linux Landlock LSM + PR_SET_NO_NEW_PRIVS + seccomp-BPF, macOS Seatbelt SBPL + App Sandbox entitlements, Windows Job Object + Restricted Token, plus Flatpak bubblewrap bundles.',
         'good'
       ],
-      dist: ['Browser & CLI builders make per-app Linux AppImages and sandboxed Flatpak (.flatpak) bundles (CLI supports --digitalis & bundles libvulkan.so); signed macOS .app & Windows portable/MSIX bundlers; shiraz install-desktop on all 3 OSes; WebRTC browser streaming.', 'good'],
+      dist: ['Browser & CLI builders make per-app Linux AppImages and sandboxed Flatpak (.flatpak) bundles (with Digitalis ARM64 support & bundled libvulkan.so); signed macOS .app bundler + browser .app sidecar zip packager; Windows portable/MSIX bundler; shiraz install-desktop on all 3 OSes; WebRTC browser streaming.', 'good'],
       license: ['GPL-3.0-only.'],
       repo: [`spectre-oss/shiraz, version ${__SHIRAZ_VERSION__}.`],
       apps: [
-        '14 recorded apps across 8 engines: live Apple Silicon OsmAnd+ walkthrough (vector maps, offline search, turn-by-turn routing/navigation, 468 MB live HTTPS downloads, resize, zoom persistence), Telegram 13.2.1 auth, Obtainium, Joplin, Unciv, Mindustry, SuperTux, Tiny Crate, Ember Quest, 2048 & more, with open limits documented.',
+        '18 recorded apps across 8 engines: live Apple Silicon walkthroughs of OsmAnd+ (vector maps, offline search, turn-by-turn routing/navigation, 468 MB HTTPS downloads, resize, zoom persistence), F-Droid v2.0.2 (Material 3 Compose + two-pane landscape), Math (ARM64 native), Editor, Crossword, SolitaireCG (with restart persistence), 2048 (402 ms warm standby), Telegram 13.2.1 auth, plus Obtainium, Joplin, Unciv, Mindustry, SuperTux, Tiny Crate, Ember Quest & more, with open limits documented.',
         'warn'
       ]
     },
@@ -369,18 +369,18 @@
   ];
 
   const leads = [
-    'The only open project here natively spanning Linux (x86-64 & ARM64), Apple Silicon macOS (46/91 goal items verified) and Windows (32/37 CI-verified, 5 partial, 0 open) in one codebase.',
-    'Default-on OS process sandboxing across CLI, desktop launchers, daemon, AppImages and Flatpaks (--no-sandbox opt-out) via Landlock/seccomp, Seatbelt, and Win32 Job Objects.',
+    'The only open project here natively spanning Linux (x86-64 & ARM64), Apple Silicon macOS (48/91 goal items verified, 21 partial) and Windows (32/37 CI-verified, 5 partial, 0 open) in one codebase.',
+    'Default-on OS process sandboxing across CLI, desktop launchers, macOS Launcher, daemon, AppImages and Flatpaks (--no-sandbox opt-out) via Landlock/seccomp, Seatbelt, and Win32 Job Objects.',
     'Complete API 35 Java class surface (4,445/4,445 across 49 packages) and all 15 tracked NDK C/C++ libraries (887/887 audited symbols).',
-    'The only one that packages an APK into a standalone Linux AppImage or sandboxed Flatpak (.flatpak) directly in the browser (plus CLI --digitalis ARM64 bundling), alongside signed macOS .app, Windows MSIX and cross-OS install-desktop.',
-    'The only one that streams a running Android app to any browser over WebRTC, with zero-copy GBM/DMA-BUF & IOSurface graphics and a warm ART standby pool on both Linux and macOS.',
-    'No GTK, no Wayland-only lock-in, no kernel binder, and interactive walkthrough evidence across 8 app engines (Android, Flutter, React Native, Unity, libGDX, Godot, SDL, Arc).'
+    'The only one that packages an APK into a standalone Linux AppImage, sandboxed Flatpak (.flatpak), or unmodified signed macOS .app sidecar zip directly in the browser, alongside CLI --digitalis, Windows MSIX and cross-OS install-desktop.',
+    'The only one that streams a running Android app to any browser over WebRTC, with zero-copy GBM/DMA-BUF & IOSurface graphics, live MoltenVK v1.4.2 Metal Vulkan on Apple Silicon, and a warm ART standby pool on both Linux and macOS (2.67× faster launch).',
+    'No GTK, no Wayland-only lock-in, no kernel binder, and interactive walkthrough evidence across 18 recorded apps and 8 engines (Android, Flutter, React Native, Unity, libGDX, Godot, SDL, Arc).'
   ];
   const trails = [
-    'Host/guest libvulkan.so/.dll and real-ICD PackageManager Vulkan probing are wired, but end-to-end Vulkan game titles are still unverified.',
+    'Live Metal Vulkan 1.4.357 (MoltenVK v1.4.2) passes host, guest ELF64, and Java PackageManager probes on Apple Silicon, but end-to-end Vulkan game titles are still unverified.',
     'WebView uses an embedded pure-Java DOM/JS/contentEditable engine rather than a full Blink/V8 browser engine (Joplin CodeMirror 6 retesting remains open).',
-    'OsmAnd+ reached live vector maps, search, turn-by-turn routing, 468 MB HTTPS downloads, resize and zoom persistence on macOS, but full ART JIT, M5 hardened signing and Linux/Waydroid parity remain open.',
-    'No 32-bit ARM support, prebuilt browser bases do not ship Digitalis yet (CLI --digitalis only), and live Win32 libart.dll execution is still in progress.',
+    'OsmAnd+, F-Droid v2.0.2, Math, Editor, Crossword, SolitaireCG and 2048 ran interactively on Apple Silicon, but building libart-compiler.so JIT, M5 hardened signing and Linux/Waydroid parity remain open.',
+    'No 32-bit ARM support, published browser bases do not ship Digitalis or macOS signed bases yet, and live Win32 libart.dll execution is still in progress.',
     'Fewer fully verified end-to-end apps than Mac.apk (52/66) or apklayer (40+) report.'
   ];
 
@@ -450,7 +450,7 @@
         <li><strong>3 OSes</strong><span>Linux · macOS · Windows</span></li>
         <li><strong>4,445</strong><span>API 35 classes</span></li>
         <li><strong>15 / 887</strong><span>NDK libs &amp; symbols</span></li>
-        <li><strong>14</strong><span>Recorded apps</span></li>
+        <li><strong>18</strong><span>Recorded apps</span></li>
       </ul>
       <div class="hero-actions">
         <a class="button primary" href="#capability-map">See capability map</a>
