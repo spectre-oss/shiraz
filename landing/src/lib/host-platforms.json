@@ -8,14 +8,14 @@
       "name": "Linux",
       "architectures": "x86_64 · ARM64",
       "maturity": "Primary target",
-      "summary": "Standalone ART with warm standby daemon, host-ABI and optional Digitalis ARM64 native execution, 15/15 NDK libraries, SDL2/EGL/GLES with GBM/DMA-BUF zero-copy swapchain and vsync choreographer, Vulkan ANativeWindow swapchain/AHB bridge, ALSA/PipeWire AAudio, Landlock + seccomp CLI sandboxing, WebRTC browser streaming, desktop entries, and per-app AppImages and sandboxed Flatpak (.flatpak) bundles.",
+      "summary": "Standalone ART with warm standby daemon, host-ABI and optional Digitalis ARM64 native execution (including --digitalis AppImage & Flatpak bundling), 15/15 NDK libraries, SDL2/EGL/GLES with GBM/DMA-BUF zero-copy swapchain and vsync choreographer, bundled libvulkan.so with real-ICD PackageManager probe, ALSA/PipeWire AAudio, default-on Landlock + PR_SET_NO_NEW_PRIVS sandboxing (--no-sandbox opt-out, --no-network/--no-internet seccomp), WebRTC browser streaming, desktop entries, and per-app AppImages and sandboxed Flatpak (.flatpak) bundles.",
       "evidence": "docs/cross_platform.md",
       "progress": {
         "label": "Core host layers",
         "verified": 6,
         "partial": 0,
         "open": 0,
-        "note": "All 6 native host layers active on x86_64 and ARM64 (including GBM/DMA-BUF zero-copy and Flatpak bundles); default CLI launcher sandboxing, end-to-end Vulkan titles, and AppImage ARM translation remain open.",
+        "note": "All 6 native host layers active on x86_64 and ARM64, with default-on OS sandboxing across CLI/desktop/daemon/AppImage, Flatpak bubblewrap bundles, bundled libvulkan.so, and --digitalis ARM64-on-x86_64 packaging; end-to-end Vulkan game rendering remains unverified.",
         "areas": [
           { "name": "Runtime & warm ART daemon", "verified": 1, "partial": 0, "open": 0 },
           { "name": "Graphics, GBM/DMA-BUF & Vulkan", "verified": 1, "partial": 0, "open": 0 },
@@ -31,14 +31,14 @@
       "name": "macOS",
       "architectures": "Apple Silicon ARM64",
       "maturity": "Experimental port",
-      "summary": "Standalone ART, opt-in guest ELF/Bionic loader (booting OsmAnd+ and Telegram native libs), 15/15 NDK libraries, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, CoreAudio AAudio/AudioQueue, VideoToolbox H.264/HEVC/VP9/AV1 & AudioToolbox Opus, Retina & Cmd-key input parity, Security.framework TLS trust (wolfJSSE + OkHttp), CoreLocation, UNUserNotificationCenter, Seatbelt sandbox, and signed Shiraz.app bundles.",
+      "summary": "Standalone ART with pre-warmed WarmArtPool standby, opt-in guest ELF/Bionic loader (booting OsmAnd+ routing/downloads and Telegram native libs) plus Darwin guest libvulkan.so AAPCS64 bridge, 15/15 NDK libraries, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, CoreAudio AAudio/AudioQueue, VideoToolbox H.264/HEVC/VP9/AV1 & AudioToolbox Opus, Retina & Cmd-key input parity, Security.framework TLS trust (wolfJSSE + OkHttp), CoreLocation, UNUserNotificationCenter, default-on Seatbelt sandboxing, and signed Shiraz.app bundles.",
       "evidence": "docs/macos_final_goal.md",
       "progress": {
         "label": "macOS goal checklist (91 items)",
         "verified": 46,
         "partial": 19,
         "open": 26,
-        "note": "Counts audited directly from docs/macos_final_goal.md. Guest ELF loader runs OsmAnd+ & Telegram opt-in; its 18 strict checklist rows stay open until M5 hardened-runtime signing passes.",
+        "note": "Counts audited directly from docs/macos_final_goal.md. Guest ELF loader runs live OsmAnd+ routing/468 MB HTTPS downloads & Telegram opt-in (WarmArtPool ready in 2.197 s); its 18 strict checklist rows stay open until M5 hardened-runtime signing passes.",
         "areas": [
           { "name": "Graphics & Metal/ANGLE", "verified": 10, "partial": 7, "open": 0 },
           { "name": "Platform services", "verified": 9, "partial": 1, "open": 0 },
@@ -56,22 +56,22 @@
       "name": "Windows",
       "architectures": "x64 · ARM64",
       "maturity": "Experimental foundation",
-      "summary": "CI-verified native Win32 shared memory, WaitForMultipleObjects looper, Named Pipe IPC, DXGI GPU/display refresh & shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer, libvulkan.dll (ANativeWindow swapchain & AHB bridge), SDL2 Win32 presentation/IME/clipboard/keyboard suite, WASAPI audio + libaaudio.dll & libOpenSLES.dll, Media Foundation decoder & camera enumeration, DirectWrite fonts, Shell_NotifyIconW, Windows Location COM, DPAPI/SAPI/GetAdaptersAddresses services, Job Object + Restricted Token sandbox, and portable/MSIX bundler. Full ART + guest ELF execution on Windows is still in progress.",
+      "summary": "CI-verified native Win32 shared memory, WaitForMultipleObjects looper, Named Pipe IPC, DXGI GPU/display refresh & shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer, libvulkan.dll (ANativeWindow swapchain & AHB bridge), SDL2 Win32 presentation/IME/clipboard/keyboard suite + Per-Monitor V2 DPI & ANGLE-D3D11 wiring, WASAPI audio + libaaudio.dll & libOpenSLES.dll, Media Foundation decoder & camera enumeration, DirectWrite fonts, Shell_NotifyIconW, Windows Location COM, DPAPI/SAPI/GetAdaptersAddresses services, Job Object + Restricted Token sandbox, Win32 guest ELF loader (SysV↔Win64 6-arg thunks), bootstrap_windows.py ART orchestrator, and portable/MSIX bundler. Live Windows libart.dll execution remains open.",
       "evidence": "docs/windows_final_goal.md",
       "progress": {
         "label": "Windows goal checklist (37 items)",
         "verified": 32,
-        "partial": 2,
-        "open": 3,
-        "note": "Counts audited directly from docs/windows_final_goal.md and exercised in 3-OS GitHub Actions CI. Remaining open items: Win32 ART build, guest ELF loader, and ANGLE-D3D11 window wiring.",
+        "partial": 5,
+        "open": 0,
+        "note": "Counts audited directly from docs/windows_final_goal.md and exercised in 3-OS GitHub Actions CI. 32 verified + 5 partial (including ANGLE-D3D11 DPI wiring, Win32 guest ELF/SysV↔Win64 thunks, and bootstrap_windows.py ART orchestrator); live Windows libart.dll execution & ANGLE GPU smokes remain open.",
         "areas": [
           { "name": "Platform services", "verified": 7, "partial": 1, "open": 0 },
-          { "name": "Graphics & DXGI/Vulkan", "verified": 6, "partial": 0, "open": 1 },
+          { "name": "Graphics & DXGI/Vulkan", "verified": 6, "partial": 1, "open": 0 },
           { "name": "OS primitives & sandbox", "verified": 6, "partial": 0, "open": 0 },
           { "name": "Media & WASAPI/MF", "verified": 4, "partial": 1, "open": 0 },
           { "name": "Input & Win32 windowing", "verified": 3, "partial": 0, "open": 0 },
           { "name": "Build, MSIX & CI", "verified": 3, "partial": 0, "open": 0 },
-          { "name": "Runtime & ABI host", "verified": 3, "partial": 0, "open": 2 }
+          { "name": "Runtime & ABI host", "verified": 3, "partial": 2, "open": 0 }
         ]
       }
     }
@@ -80,18 +80,18 @@
     {
       "id": "runtime-abi",
       "layer": "Runtime & native ABI",
-      "status": { "linux": "ready", "macos": "partial", "windows": "progress" },
-      "linux": "Standalone ART with warm standby pool & daemon, host ELF + Bionic bridge, optional Digitalis ARM64 on x86_64, 15/15 API 35 NDK libraries (887/887 symbols).",
-      "macos": "Standalone ART (-Xint), opt-in guest ARM64 ELF/Bionic loader (OsmAnd+ & Telegram libs), 15/15 API 35 NDK libraries, unified 16 KB page-size policy; ART JIT & M5 signing gate open.",
-      "windows": "Unified HostOs / ABI / page-size policy, CreateProcessW process spawning, and MinGW-w64 / Clang-UCRT64 build rules (mk/windows.mk); Win32 ART & guest ELF runtime integration in progress."
+      "status": { "linux": "ready", "macos": "partial", "windows": "partial" },
+      "linux": "Standalone ART with warm standby pool & daemon, host ELF + Bionic bridge, Digitalis ARM64-on-x86_64 (CLI + AppImage/Flatpak --digitalis), 15/15 API 35 NDK libraries (887/887 symbols).",
+      "macos": "Standalone ART (-Xint) with pre-warmed WarmArtPool standby (2.197 s ready), opt-in guest ARM64 ELF/Bionic loader + guest libvulkan.so AAPCS64 bridge (OsmAnd+ & Telegram libs), 15/15 API 35 NDK libraries, unified 16 KB page-size policy; ART JIT & M5 signing gate open.",
+      "windows": "Unified HostOs / ABI / page-size policy, CreateProcessW process spawning, MinGW-w64 / Clang-UCRT64 build rules (mk/windows.mk), cross-platform tested Win32 guest ELF loader with W^X VirtualAlloc & SysV↔Win64 6-arg thunks, and bootstrap_windows.py ART build orchestrator; live Win32 libart.dll execution open."
     },
     {
       "id": "graphics-window",
       "layer": "Graphics, windowing & input",
       "status": { "linux": "ready", "macos": "ready", "windows": "partial" },
-      "linux": "SDL2 windows (Wayland & X11, GTK-free), upfront GLES2 window, EGL/GLES, zero-copy GBM/DMA-BUF swapchain, SurfaceTexture, AHB EGLImage & EGL_ANDROID_native_fence_sync, vsync AChoreographer pacing, libvulkan.so (VK_KHR_android_surface swapchain & AHB), Shiraz Web WebRTC streaming.",
-      "macos": "SDL2 / Cocoa windows, ANGLE Metal GLES, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, live resize watch, Retina 2×/fractional pointer mapping, Cmd→Ctrl shortcuts, trackpad pinch & touch filter.",
-      "windows": "CI-verified SDL2 / Win32 presentation (WM_SIZE live resize, IMM32/TSF IME, keyboard & clipboard), libvulkan.dll (VK_KHR_android_surface ANativeWindow swapchain & AHB bridge), DXGI adapter probe, EnumDisplaySettingsW refresh rate, shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing & Precision Touchpad hooks; ANGLE-D3D11 window wiring open."
+      "linux": "SDL2 windows (Wayland & X11, GTK-free), upfront GLES2 window, EGL/GLES, zero-copy GBM/DMA-BUF swapchain, SurfaceTexture, AHB EGLImage & EGL_ANDROID_native_fence_sync, vsync AChoreographer pacing, bundled libvulkan.so with real-ICD PackageManager probe, Shiraz Web WebRTC streaming.",
+      "macos": "SDL2 / Cocoa windows, ANGLE Metal GLES, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, Darwin guest libvulkan.so AAPCS64 bridge + real-ICD PackageManager probe, live resize watch, Retina 2×/fractional pointer mapping, Cmd→Ctrl shortcuts, trackpad pinch & touch filter.",
+      "windows": "CI-verified SDL2 / Win32 presentation (WM_SIZE live resize, IMM32/TSF IME, keyboard & clipboard), Per-Monitor V2 DPI & ANGLE-D3D11 window wiring, libvulkan.dll (VK_KHR_android_surface ANativeWindow swapchain & AHB bridge), DXGI adapter probe, EnumDisplaySettingsW refresh rate, shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing & Precision Touchpad hooks; live Windows GPU ANGLE-D3D11 smoke open."
     },
     {
       "id": "audio-video",
@@ -105,9 +105,9 @@
       "id": "os-primitives",
       "layer": "OS primitives, IPC & isolation",
       "status": { "linux": "ready", "macos": "ready", "windows": "ready" },
-      "linux": "POSIX memfd/ashmem, epoll ALooper, Unix sockets, Linux Landlock LSM filesystem isolation + PR_SET_NO_NEW_PRIVS + CLI --sandbox / --no-network seccomp policy + Flatpak bubblewrap sandbox.",
-      "macos": "POSIX/Mach shared memory, kqueue ALooper, CLOCK_UPTIME_RAW/CLOCK_MONOTONIC clocks, POSIX_SPAWN_CLOEXEC_DEFAULT process isolation, FD_CLOEXEC helpers, SDK SQLite, Unix sockets, App Nap guard, macOS Seatbelt (sandbox-exec) SBPL profile & App Sandbox bundle entitlements.",
-      "windows": "CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, SetThreadExecutionState, Job Object + Restricted Token sandbox."
+      "linux": "POSIX memfd/ashmem, epoll ALooper, Unix sockets, default-on Linux Landlock LSM + PR_SET_NO_NEW_PRIVS across CLI/desktop/daemon/AppImage (--no-sandbox opt-out, --no-network/--no-internet seccomp) + Flatpak bubblewrap sandbox.",
+      "macos": "POSIX/Mach shared memory, kqueue ALooper, CLOCK_UPTIME_RAW/CLOCK_MONOTONIC clocks, POSIX_SPAWN_CLOEXEC_DEFAULT process isolation, FD_CLOEXEC helpers, SDK SQLite, Unix sockets, App Nap guard, default-on macOS Seatbelt (sandbox-exec) SBPL profile (--no-sandbox opt-out) & App Sandbox bundle entitlements.",
+      "windows": "CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, SetThreadExecutionState, default-on Job Object + Restricted Token sandbox."
     },
     {
       "id": "services-fonts",
@@ -121,9 +121,9 @@
       "id": "packaging-ci",
       "layer": "Packaging & CI",
       "status": { "linux": "ready", "macos": "ready", "windows": "ready" },
-      "linux": "Browser & CLI per-app AppImage and sandboxed Flatpak (.flatpak) builders, .deb packages, shiraz install-desktop, Linux x86_64 & ARM64 CI releases.",
-      "macos": "Signed Shiraz.app bundle builder (hardened runtime, allow-jit, optional --sandbox entitlements, @rpath closure, .icns), per-APK install-desktop (~/Applications), macOS ARM64 CI.",
-      "windows": "Portable Shiraz\\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Start Menu install-desktop, Windows x64 MinGW-w64 CI (make windows-check & windows-presentation-check)."
+      "linux": "Browser & CLI per-app AppImage and sandboxed Flatpak (.flatpak) builders (with bundled libvulkan.so, default-on Landlock sandbox, and CLI --digitalis ARM64-on-x86_64), .deb packages, shiraz install-desktop, Linux x86_64 & ARM64 CI releases.",
+      "macos": "Signed Shiraz.app bundle builder (hardened runtime, allow-jit, optional --sandbox entitlements, @rpath closure, .icns), per-APK install-desktop (~/Applications, default-on Seatbelt), macOS ARM64 CI.",
+      "windows": "Portable Shiraz\\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Start Menu install-desktop, Windows x64 MinGW-w64 CI (make windows-check, windows-presentation-check & test-win32-guest-elf.exe)."
     }
   ]
 }

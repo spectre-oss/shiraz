@@ -5,9 +5,9 @@ platforms without virtual machines, containers, or emulators:
 
 | Platform | Architectures | Graphics | Audio | Video Decode | OS Primitives & Isolation | Packaging | Goal Spec |
 |---|---|---|---|---|---|---|---|
-| **Linux** | `x86_64`, `aarch64` | SDL2 + EGL/GLES + Skia Ganesh + zero-copy GBM/DMA-BUF swapchain, `SurfaceTexture`, `AHardwareBuffer` `EGLImage` (`EGL_LINUX_DMA_BUF_EXT`) & `EGL_ANDROID_native_fence_sync` + live refresh-rate / presenter vsync `AChoreographer` pacing + Vulkan (`VK_KHR_android_surface` / AHB) | PulseAudio / PipeWire / ALSA (OpenSL ES & AAudio via runtime `libasound`) | FFmpeg / VA-API | `epoll`, `eventfd`, `timerfd`, `memfd_create`, Unix sockets, Landlock LSM + `PR_SET_NO_NEW_PRIVS` + optional `--no-internet` seccomp + Flatpak bubblewrap sandbox | AppImage, Flatpak (`.flatpak` CLI & browser WASM), `.deb`, desktop `.desktop` | [framework_final_goal.md](framework_final_goal.md) |
-| **macOS** | `arm64` (Apple Silicon) | SDL2 Cocoa + ANGLE Metal + Skia Ganesh + zero-copy `IOSurface` swapchain, `SurfaceTexture`, `AHardwareBuffer` `EGLImage` (`EGL_METAL_TEXTURE_ANGLE`) & `EGL_ANDROID_native_fence_sync` (`MTLSharedEvent`) + 120 Hz `CVDisplayLink` vsync pacing | CoreAudio / AudioToolbox (`AudioQueue`, `AudioConverter`, `AAudio`, `OpenSL ES`) | VideoToolbox (`VTDecompressionSession`) + AudioToolbox Opus | `kqueue`, `EVFILT_USER`/`TIMER`, `shm_open`, `LOCAL_PEERPID`, `posix_spawn` (`POSIX_SPAWN_CLOEXEC_DEFAULT`), SDK `sqlite3`, Seatbelt SBPL + App Sandbox entitlements | Signed `Shiraz.app` (`scripts/build_macos_app.py --sandbox`) | [macos_final_goal.md](macos_final_goal.md) |
-| **Windows** | `x86_64` (`AMD64`), `arm64` (`ARM64`) | SDL2 Win32 (`test-presentation.exe` CI-verified) + ANGLE D3D11 + DXGI shared `AHardwareBuffer` pool + `EnumDisplaySettingsW`/`DwmFlush` pacing + `libvulkan.dll` (`VK_KHR_android_surface` swapchain) | WASAPI (`IAudioClient`, `OpenSL ES`, `AAudio`) | Media Foundation (`IMFTransform` decode + `MFEnumDeviceSources` camera probe) | `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `CreateFileMappingW`, Named Pipes, Win32 sync fences, Win32 clipboard, Job Object + Restricted Token sandbox | Portable `Shiraz\` + MSIX (`scripts/build_windows_app.py`) | [windows_final_goal.md](windows_final_goal.md) |
+| **Linux** | `x86_64`, `aarch64` | SDL2 + EGL/GLES + Skia Ganesh + zero-copy GBM/DMA-BUF swapchain, `SurfaceTexture`, `AHardwareBuffer` `EGLImage` (`EGL_LINUX_DMA_BUF_EXT`) & `EGL_ANDROID_native_fence_sync` + live refresh-rate / presenter vsync `AChoreographer` pacing + Vulkan (`libvulkan.so`, `VK_KHR_android_surface` / AHB, real-ICD `PackageManager` probe) | PulseAudio / PipeWire / ALSA (OpenSL ES & AAudio via runtime `libasound`) | FFmpeg / VA-API | `epoll`, `eventfd`, `timerfd`, `memfd_create`, Unix sockets, **default-on** Landlock LSM + `PR_SET_NO_NEW_PRIVS` across CLI/desktop/daemon/AppImage (`--no-sandbox` opt-out, `--no-network`/`--no-internet` seccomp) + Flatpak bubblewrap sandbox | AppImage & Flatpak (`.flatpak`, CLI with `--digitalis` ARM64-on-x86_64 & browser WASM), `.deb`, desktop `.desktop` | [framework_final_goal.md](framework_final_goal.md) |
+| **macOS** | `arm64` (Apple Silicon) | SDL2 Cocoa + ANGLE Metal + Skia Ganesh + zero-copy `IOSurface` swapchain, `SurfaceTexture`, `AHardwareBuffer` `EGLImage` (`EGL_METAL_TEXTURE_ANGLE`) & `EGL_ANDROID_native_fence_sync` (`MTLSharedEvent`) + 120 Hz `CVDisplayLink` vsync pacing + Darwin guest `libvulkan.so` AAPCS64 bridge | CoreAudio / AudioToolbox (`AudioQueue`, `AudioConverter`, `AAudio`, `OpenSL ES`) | VideoToolbox (`VTDecompressionSession`) + AudioToolbox Opus | `kqueue`, `EVFILT_USER`/`TIMER`, `shm_open`, `LOCAL_PEERPID`, `posix_spawn` (`POSIX_SPAWN_CLOEXEC_DEFAULT`), SDK `sqlite3`, pre-warmed `WarmArtPool` standby, **default-on** Seatbelt SBPL (`--no-sandbox` opt-out) + App Sandbox entitlements | Signed `Shiraz.app` (`scripts/build_macos_app.py --sandbox`) | [macos_final_goal.md](macos_final_goal.md) |
+| **Windows** | `x86_64` (`AMD64`), `arm64` (`ARM64`) | SDL2 Win32 (`test-presentation.exe` CI-verified) + Per-Monitor V2 DPI & ANGLE-D3D11 wiring + DXGI shared `AHardwareBuffer` pool + `EnumDisplaySettingsW`/`DwmFlush` pacing + `libvulkan.dll` (`VK_KHR_android_surface` swapchain) | WASAPI (`IAudioClient`, `OpenSL ES`, `AAudio`) | Media Foundation (`IMFTransform` decode + `MFEnumDeviceSources` camera probe) | `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `CreateFileMappingW`, Named Pipes, Win32 sync fences, Win32 clipboard, Job Object + Restricted Token sandbox, Win32 guest ELF loader (`SysV ↔ Win64` thunks) & `bootstrap_windows.py` ART orchestrator | Portable `Shiraz\` + MSIX (`scripts/build_windows_app.py`) | [windows_final_goal.md](windows_final_goal.md) |
 
 ## Shared Cross-Platform Layers
 
@@ -22,8 +22,10 @@ platforms without virtual machines, containers, or emulators:
    - `host_layout.py`: maps build host tags (`linux-x86`, `darwin-x86`,
      `windows-x86`).
    - `sandbox.py` & `sandbox_exec.py`: unified cross-platform `SandboxPolicy`,
-     `prepare_sandbox_launch(...)`, and `shiraz run --sandbox [--no-network]`
-     enforcement applying Linux Landlock LSM + seccomp-BPF network deny, macOS
+     `prepare_sandbox_launch(...)`, and **default-on** OS sandboxing across
+     `shiraz run`, `shiraz install-desktop`, `shiraz daemon`, and Linux AppImages
+     (`--no-sandbox` opt-out, `--no-network` / `--no-internet`) applying Linux
+     Landlock LSM + `PR_SET_NO_NEW_PRIVS` + seccomp-BPF network deny, macOS
      `/usr/bin/sandbox-exec` Seatbelt profiles / App Sandbox entitlements, and
      Windows Win32 Job Object limits (`CreateJobObjectW` / `AssignProcessToJobObject`).
    - `desktop_install.py`: per-APK native launcher installation via
@@ -39,9 +41,13 @@ platforms without virtual machines, containers, or emulators:
    - `HostContentPicker.java` & `HostConnectivity.java`: native file picker and
      connectivity hooks across Linux, macOS, and Windows.
    - `ShirazWebDom.java`, `ShirazJsEngine.java`, and `WebView.java`: pure-Java
-     HTML5 DOM parser, CSS selector matcher, step-budgeted JavaScript evaluator,
-     `@JavascriptInterface` reflection bridge (blocking unannotated methods),
-     `postWebMessage`, `findAllAsync`, and multi-entry back/forward history.
+     HTML5 DOM parser, CSS selector matcher, interactive `contentEditable` /
+     `<textarea>` / `<input>` editing bridged to `EditText`, `Selection`/`Range`
+     & `document.execCommand`, `MutationObserver`, `Handler`-backed timers
+     (`setTimeout`/`requestAnimationFrame`/`queueMicrotask`), `localStorage` /
+     `sessionStorage`, step-budgeted JavaScript evaluator, `@JavascriptInterface`
+     reflection bridge (blocking unannotated methods), `postWebMessage`,
+     `findAllAsync`, and multi-entry back/forward history.
 3. **Native C/C++ platform split (`include/shiraz/`, `native/`, `mk/`)**
    - Linux stays the clean baseline; `scripts/darwin_linux_guard.py` guarantees
      shared C/C++ files compile identically on Linux.

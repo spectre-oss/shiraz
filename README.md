@@ -25,7 +25,7 @@
 [Shiraz](https://www.openstreetmap.org/node/26082452) is an experimental, open-source (**GPL-3.0-only**) Android™ compatibility layer that runs supported Android APKs directly on **Linux** (`x86_64` and `ARM64`), with an active native port for **Apple Silicon macOS**, a CI-verified native **Windows** (`x64` and `ARM64`) foundation, and a long-term goal of supporting **Linux phones**. It executes app bytecode on standalone **ART** and translates Android framework and NDK calls directly to host OS libraries — without booting an Android system image, running a virtual machine, requiring kernel binder or root, or depending on GTK.
 
 > [!WARNING]
-> **Experimental — opt-in isolation only on CLI/AppImage.** Flatpak bundles run inside the Flatpak bubblewrap sandbox, and the CLI supports opt-in isolation via `shiraz run --sandbox [--no-network]`. Default CLI and AppImage runs execute with the privileges of the launching user and can access that user's files and network. **Only run APKs you trust.** When testing unfamiliar APKs, use an isolated environment such as an unprivileged LXC container or a dedicated VM without exposing personal files or sensitive host resources. See [SECURITY.md](SECURITY.md).
+> **Experimental — OS process sandboxing on by default, not a full Android SELinux sandbox.** `shiraz run`, `shiraz install-desktop`, `shiraz daemon`, and Linux AppImages now apply OS-level confinement by default (`--no-sandbox` opt-out; `--no-network`/`--no-internet` to deny sockets): Linux Landlock LSM + `PR_SET_NO_NEW_PRIVS`, macOS Seatbelt SBPL, and Windows Job Objects + Restricted Tokens, alongside Flatpak bubblewrap bundles. This confines writes to the app's own data/cache directories and temp space, but is not Android's full per-UID/SELinux sandbox. **Only run APKs you trust.** When testing unfamiliar APKs, use an isolated environment such as an unprivileged LXC container or a dedicated VM without exposing personal files or sensitive host resources. See [SECURITY.md](SECURITY.md).
 
 ## One runtime, four ways to use it
 
@@ -42,9 +42,9 @@ Builder creates standalone Linux applications, Web streams from a Linux host, an
 
 Shiraz executes Android DEX bytecode with a standalone host build of **ART** (Android's runtime) and translates Android framework, resource, and JNI/NDK calls into native host functionality using **SDL2**, **EGL/GLES**, **Skia Ganesh**, and OS-specific bridges:
 
-- **Linux (`x86_64`, `aarch64`):** Warm ART standby daemon & AOT/page-cache pre-warming, zero-copy GBM/DMA-BUF swapchain, `SurfaceTexture`, `EGL_ANDROID_native_fence_sync`, live vsync `AChoreographer`, ALSA/PipeWire AAudio & OpenSL ES, `libvulkan.so` (`VK_KHR_android_surface` & `AHardwareBuffer`), Landlock + seccomp `--sandbox`, optional [Digitalis](https://digitalisx64.github.io/) ARM64 translation on `x86_64`, plus AppImage and sandboxed Flatpak packaging.
-- **macOS (Apple Silicon `arm64`):** Native Mach-O ART (`-Xint`), opt-in guest ARM64 ELF/Bionic loader, **ANGLE (Metal)** zero-copy `IOSurface` swapchain, `SurfaceTexture`, `AHardwareBuffer` `EGLImage`, `MTLSharedEvent` native fences, 120 Hz `CVDisplayLink` vsync, VideoToolbox H.264/HEVC/VP9/AV1, AudioToolbox AAudio/Opus, `Security.framework` TLS trust (`wolfJSSE` + OkHttp), CoreLocation, `UNUserNotificationCenter`, Seatbelt sandbox, and signed `.app` bundling.
-- **Windows (`x64`, `arm64`):** CI-verified native Win32 primitives (`CreateFileMappingW`, `WaitForMultipleObjects`, Named Pipe IPC, Job Object + Restricted Token sandbox), SDL2 Win32 presentation/IME/clipboard/keyboard, DXGI shared `AHardwareBuffer` pool, `DwmFlush` choreographer, `libvulkan.dll`, WASAPI `libaaudio.dll` & `libOpenSLES.dll`, Media Foundation, DirectWrite, and portable/MSIX bundler (Win32 ART & guest ELF integration in progress).
+- **Linux (`x86_64`, `aarch64`):** Warm ART standby daemon & AOT/page-cache pre-warming, zero-copy GBM/DMA-BUF swapchain, `SurfaceTexture`, `EGL_ANDROID_native_fence_sync`, live vsync `AChoreographer`, ALSA/PipeWire AAudio & OpenSL ES, `libvulkan.so` (`VK_KHR_android_surface`, `AHardwareBuffer`, real-ICD `PackageManager` probe, bundled in AppImages/Flatpaks), default-on Landlock + `PR_SET_NO_NEW_PRIVS` sandboxing (`--no-sandbox` opt-out, `--no-network`/`--no-internet` seccomp), [Digitalis](https://digitalisx64.github.io/) ARM64-on-`x86_64` bundling (`--digitalis`), plus AppImage and sandboxed Flatpak packaging.
+- **macOS (Apple Silicon `arm64`):** Native Mach-O ART (`-Xint`) with pre-warmed `WarmArtPool` standby, opt-in guest ARM64 ELF/Bionic loader + guest `libvulkan.so` AAPCS64 bridge, **ANGLE (Metal)** zero-copy `IOSurface` swapchain, `SurfaceTexture`, `AHardwareBuffer` `EGLImage`, `MTLSharedEvent` native fences, 120 Hz `CVDisplayLink` vsync, VideoToolbox H.264/HEVC/VP9/AV1, AudioToolbox AAudio/Opus, `Security.framework` TLS trust (`wolfJSSE` + OkHttp), CoreLocation, `UNUserNotificationCenter`, default-on Seatbelt sandboxing, and signed `.app` bundling.
+- **Windows (`x64`, `arm64`):** CI-verified native Win32 primitives (`CreateFileMappingW`, `WaitForMultipleObjects`, Named Pipe IPC, Job Object + Restricted Token sandbox), SDL2 Win32 presentation/IME/clipboard/keyboard + Per-Monitor V2 DPI & ANGLE-D3D11 wiring, DXGI shared `AHardwareBuffer` pool, `DwmFlush` choreographer, `libvulkan.dll`, WASAPI `libaaudio.dll` & `libOpenSLES.dll`, Media Foundation, DirectWrite, Win32 guest ELF loader (`SysV ↔ Win64` thunks), `bootstrap_windows.py` ART build orchestrator, and portable/MSIX bundler (live Win32 `libart.dll` execution in progress).
 
 | Layer | Role | Source |
 | --- | --- | --- |
@@ -59,8 +59,8 @@ Shiraz executes Android DEX bytecode with a standalone host build of **ART** (An
 | Platform | State | Current scope & limits |
 | --- | --- | --- |
 | **Linux** (`x86_64`, `aarch64`) | Experimental · Primary | Prebuilt `x86_64` and `aarch64` browser base AppImages and Flatpak bases, the browser builder, and an `amd64` `shiraz-web` Debian package are published on [GitHub Releases](https://github.com/spectre-oss/shiraz/releases). 14 recorded apps across 8 engines ([tested applications](docs/tested.md), [compatibility tracker](https://spectre-oss.github.io/shiraz/compatibility/)) with behavioral limits documented. |
-| **macOS** (Apple Silicon) | Experimental · Active port | **46 verified / 19 partial / 26 open** items in [docs/macos_final_goal.md](docs/macos_final_goal.md). Live interactive OsmAnd+ walkthrough on Apple Silicon Metal/ANGLE reached native Tehran vector maps (Persian RTL), offline search (`185` results), HTTPS online index fetch, portrait↔landscape resize, and zoom persistence across restart; Telegram 13.2.1 reached authentication. ART JIT, M5 hardened signing gate, and full OsmAnd+ routing remain open. |
-| **Windows** (`x64`, `arm64`) | Experimental · Foundation | **32 verified / 2 partial / 3 open** CI-verified native Win32 items in [docs/windows_final_goal.md](docs/windows_final_goal.md) (SDL2 Win32 presentation, DXGI, `libvulkan.dll`, WASAPI, Media Foundation, DirectWrite, portable/MSIX bundler). Full Win32 ART and guest ELF execution remain in progress. |
+| **macOS** (Apple Silicon) | Experimental · Active port | **46 verified / 19 partial / 26 open** items in [docs/macos_final_goal.md](docs/macos_final_goal.md). Live interactive OsmAnd+ walkthrough on Apple Silicon Metal/ANGLE verified native Tehran vector maps (Persian RTL), offline search (`185` results), turn-by-turn pedestrian routing & navigation (maneuver widgets, live GPS countdown, TTS prompts, arrival), live HTTPS offline map downloads (`World_basemap.obf` 468 MB & altitude data), portrait↔landscape resize, and zoom persistence (`9.84 s` warm first present; `WarmArtPool` standby ready in `2.197 s`); Telegram 13.2.1 reached authentication. Full ART JIT, M5 hardened signing gate, and Linux/Waydroid parity remain open. |
+| **Windows** (`x64`, `arm64`) | Experimental · Foundation | **32 verified / 5 partial / 0 open** items in [docs/windows_final_goal.md](docs/windows_final_goal.md) (CI-verified SDL2 Win32 presentation, DXGI, `libvulkan.dll`, WASAPI, Media Foundation, DirectWrite, portable/MSIX bundler, plus cross-platform tested Per-Monitor V2 DPI/ANGLE-D3D11 layer, Win32 guest ELF loader with `SysV ↔ Win64` thunks, and `bootstrap_windows.py` ART orchestrator). Live Win32 `libart.dll` execution remains open. |
 | **Linux phones** | Future goal | Long-term target. `aarch64` base AppImages/Flatpaks build in CI and Shiraz Web targets mobile touch and keyboard controls, but phone-level compatibility is not yet established. |
 
 - **Framework & NDK coverage:** All **4,445 / 4,445** Android API 35 `android.*` framework class surfaces (`49 / 49` areas) and all **15 / 15** tracked API 35 NDK C/C++ libraries (`887 / 887` symbols) are built and audited — see [Framework APIs goal](docs/framework_final_goal.md), [NDK libraries goal](docs/ndk_final_goal.md), and [missing Android libraries](docs/MISSING_ANDROID_LIBRARIES.md). Class/symbol presence is not CTS certification or a whole-Android compatibility percentage.
@@ -98,13 +98,16 @@ On Apple Silicon macOS, build the native app shelf with `make launcher-app` — 
 <details>
 <summary><strong>Advanced runtime &amp; developer flags</strong></summary>
 
-- **Opt-in cross-platform sandboxing (`--sandbox`, `--no-network`):**
+- **Default-on cross-platform sandboxing (`--no-sandbox` opt-out, `--no-network`):**
 
   ```sh
-  PYTHONPATH=src python3 -m shiraz run /absolute/path/application.apk --sandbox --no-network
+  # Sandboxed by default across CLI, install-desktop, daemon, and AppImages:
+  PYTHONPATH=src python3 -m shiraz run /absolute/path/application.apk --no-network
+  # Explicitly opt out for debugging only:
+  PYTHONPATH=src python3 -m shiraz run /absolute/path/application.apk --no-sandbox
   ```
 
-  Applies Linux Landlock LSM + `PR_SET_NO_NEW_PRIVS` + seccomp-BPF network deny, macOS Seatbelt (`/usr/bin/sandbox-exec`) SBPL profile, or Windows Job Object limits.
+  Applies Linux Landlock LSM + `PR_SET_NO_NEW_PRIVS` + seccomp-BPF network deny, macOS Seatbelt (`/usr/bin/sandbox-exec`) SBPL profile, or Windows Job Object limits by default.
 
 - **Block direct internet access in a packaged Linux AppImage (`--no-internet`):**
 
@@ -112,7 +115,7 @@ On Apple Silicon macOS, build the native app shelf with `make launcher-app` — 
   ./YourApp.AppImage --no-internet
   ```
 
-  Enables a Linux seccomp policy that blocks non-Unix socket creation in Java/native code and child processes, closes inherited sockets, and disables `io_uring`. Launch fails closed if the policy cannot be installed. Local Unix IPC remains available for display and audio; this is not a complete sandbox and does not prevent network access through an external local service. Apps requiring servers may not function offline. Use `--diagnose` to inspect the selected policy without launching.
+  Enables a Linux seccomp policy (on top of default-on Landlock filesystem confinement, `--no-sandbox` to disable) that blocks non-Unix socket creation in Java/native code and child processes, closes inherited sockets, and disables `io_uring`. Launch fails closed if the policy cannot be installed. Local Unix IPC remains available for display and audio; this is not a complete Android SELinux sandbox and does not prevent network access through an external local service. Apps requiring servers may not function offline. Use `--diagnose` to inspect the selected policy without launching.
 
 - **Native-only ABI splits (`--native-split`):**
 
@@ -123,7 +126,7 @@ On Apple Silicon macOS, build the native app shelf with `make launcher-app` — 
   Accepts a matching native-only ABI split without modifying the APKs. Package/version mismatches and code or resource splits are rejected. This is not general APKM installation support.
 
 - **Experimental ARM64 translation on `x86_64` Linux (Digitalis):**
-  Point to the built bridge via `SHIRAZ_DIGITALIS_LIBRARY=/absolute/path/libberberis_arm64.so`. Build its core with `make runtime-digitalis` and platform proxies with `make digitalis-platform-proxies`. The pinned Digitalis guest-support libraries must be visible under `/system` inside the test process's private namespace (never install them over the host). Run `make digitalis-platform-smoke DIGITALIS_GUEST_SYSTEM=/path/to/guest/system` to check translated math, thread attributes/signals/exit, and the existing NDK media subset. Unsupported media APIs fail explicitly. Digitalis is not yet wired into the AppImage packager.
+  Point to the built bridge via `SHIRAZ_DIGITALIS_LIBRARY=/absolute/path/libberberis_arm64.so`, or bundle Digitalis directly into an AppImage or Flatpak with `--digitalis` (`--digitalis-dir /path/to/digitalis`) in `scripts/build_appimage.py` / `scripts/build_flatpak.py`. Build its core with `make runtime-digitalis` and platform proxies with `make digitalis-platform-proxies`. The pinned Digitalis guest-support libraries must be visible under `/system` inside the test process's private namespace (never install them over the host). Run `make digitalis-platform-smoke DIGITALIS_GUEST_SYSTEM=/path/to/guest/system` to check translated math, thread attributes/signals/exit, and the existing NDK media subset. Unsupported media APIs fail explicitly.
 
 - **Virtual touch from mouse drags (`SHIRAZ_MOUSE_AS_TOUCH=1`):**
   Exposes a virtual single-touch device and translates left-button mouse drags into Android finger gestures. Physical touch input and host mouse capture remain available; unset it for normal mouse events.

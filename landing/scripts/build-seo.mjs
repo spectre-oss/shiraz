@@ -32,23 +32,23 @@ Snapshot version: v${version} (data updated ${inventory.updated}).
 
 ## Core Facts
 
-- **Execution model:** App-only API translation layer on standalone ART (with warm standby daemon on Linux). No Android VM, LXC container, or binder kernel driver.
+- **Execution model:** App-only API translation layer on standalone ART (with pre-warmed WarmArtPool standby daemon on Linux and macOS). No Android VM, LXC container, or binder kernel driver.
 - **API 35 Java surface:** ${inventory.inventory.present.toLocaleString('en')} of ${inventory.inventory.reference.toLocaleString('en')} Android 15 / API 35 \`android.*\` class names present across ${inventory.inventory.packages.length} packages (class-name presence is not CTS certification or full behavioral parity).
 - **API 35 NDK C/C++ surface:** ${ndk.librariesPresent} of ${ndk.librariesTotal} tracked NDK shared libraries built, exporting ${ndk.symbolsPresent.toLocaleString('en')} of ${ndk.symbolsReference.toLocaleString('en')} cataloged C symbols (audited with \`nm\`).
 - **Host OS backends:**
-  - **Linux (x86_64, ARM64 — primary):** Standalone ART, warm standby pool, GBM/DMA-BUF zero-copy swapchain, ALSA/PipeWire AAudio, Vulkan ANativeWindow swapchain/AHB bridge, Landlock + seccomp CLI sandboxing, WebRTC streaming, AppImage & sandboxed Flatpak (\`.flatpak\`) builders.
-  - **macOS (Apple Silicon ARM64 — experimental port):** ${macHost.progress.verified} verified, ${macHost.progress.partial} partial, ${macHost.progress.open} open goal checklist items; ANGLE-Metal zero-copy IOSurface swapchain, SurfaceTexture, \`MTLSharedEvent\` native fences, 120 Hz \`CVDisplayLink\` vsync, VideoToolbox/AudioToolbox, opt-in guest ELF/Bionic loader booting OsmAnd+ & Telegram, signed \`.app\` bundler.
-  - **Windows (x64, ARM64 — experimental foundation):** ${winHost.progress.verified} verified, ${winHost.progress.partial} partial, ${winHost.progress.open} open CI-verified items (Win32 primitives, SDL2 presentation/IME/clipboard, DXGI shared AHB, \`libvulkan.dll\`, WASAPI AAudio/OpenSL ES, Media Foundation, DirectWrite, Job Object/Restricted Token sandbox, portable/MSIX bundler). Win32 ART and guest ELF loader remain in progress.
+  - **Linux (x86_64, ARM64 — primary):** Standalone ART, warm standby pool, GBM/DMA-BUF zero-copy swapchain, ALSA/PipeWire AAudio, bundled \`libvulkan.so\` with real-ICD \`PackageManager\` probe, default-on Landlock + \`PR_SET_NO_NEW_PRIVS\` sandboxing (\`--no-sandbox\` opt-out, \`--no-network\`/\`--no-internet\` seccomp), WebRTC streaming, AppImage & sandboxed Flatpak (\`.flatpak\`) builders (CLI \`--digitalis\` ARM64 bundling).
+  - **macOS (Apple Silicon ARM64 — experimental port):** ${macHost.progress.verified} verified, ${macHost.progress.partial} partial, ${macHost.progress.open} open goal checklist items; ANGLE-Metal zero-copy IOSurface swapchain, SurfaceTexture, \`MTLSharedEvent\` native fences, 120 Hz \`CVDisplayLink\` vsync, VideoToolbox/AudioToolbox, pre-warmed \`WarmArtPool\`, opt-in guest ELF/Bionic loader + guest \`libvulkan.so\` AAPCS64 bridge booting OsmAnd+ (routing & 468 MB HTTPS downloads) & Telegram, default-on Seatbelt sandboxing, signed \`.app\` bundler.
+  - **Windows (x64, ARM64 — experimental foundation):** ${winHost.progress.verified} verified, ${winHost.progress.partial} partial, ${winHost.progress.open} open items (CI-verified Win32 primitives, SDL2 presentation/IME/clipboard, DXGI shared AHB, \`libvulkan.dll\`, WASAPI AAudio/OpenSL ES, Media Foundation, DirectWrite, Job Object/Restricted Token sandbox, portable/MSIX bundler; partial foundations for ANGLE-D3D11 Per-Monitor V2 DPI, Win32 guest ELF/SysV↔Win64 thunks, and \`bootstrap_windows.py\` ART orchestrator). Live Win32 \`libart.dll\` execution remains open.
 - **Recorded apps:** ${compat.applications.length} apps (${partialApps} Partial, ${blockedApps} Blocked, ${historicalApps} Historical) across 8 engines (Android framework, Flutter, React Native, Unity, libGDX, Godot, SDL, Arc).
-- **Packaging:** Browser-based Go/WASM Builder produces standalone Linux AppImages and sandboxed Flatpak (\`.flatpak\`) bundles locally without uploading the APK; CLI also builds signed macOS \`.app\` and Windows portable/MSIX bundles and runs \`shiraz install-desktop\`.
+- **Packaging:** Browser-based Go/WASM Builder produces standalone Linux AppImages and sandboxed Flatpak (\`.flatpak\`) bundles locally without uploading the APK; CLI also supports \`--digitalis\` ARM64-on-x86_64 bundling, builds signed macOS \`.app\` and Windows portable/MSIX bundles, and runs \`shiraz install-desktop\`.
 
 ## Explicit Boundaries (Do Not Misstate)
 
 - Shiraz is experimental. No whole-Android compatibility percentage or CTS certification is claimed.
 - Shiraz does **not** include the Google Play Store or Google Play Services.
-- CLI/AppImage runs are not sandboxed by default unless \`--sandbox\` / \`--no-network\` or a sandboxed Flatpak bundle is used.
-- WebView uses an embedded pure-Java HTML5 DOM and step-budgeted JS evaluator rather than Blink/V8.
-- 32-bit ARM (\`armeabi-v7a\`) native libraries are unsupported; ARM64 translation on x86_64 Linux uses optional Digitalis in developer builds (not yet in AppImages).
+- OS process sandboxing is enabled by default across \`shiraz run\`, \`shiraz install-desktop\`, \`shiraz daemon\`, Linux AppImages (\`--no-sandbox\` opt-out, \`--no-network\`/\`--no-internet\`), and Flatpak bundles, but this is OS process confinement rather than Android's full per-UID/SELinux sandbox.
+- WebView uses an embedded pure-Java HTML5 DOM/JS engine (including interactive \`contentEditable\`, \`Selection\`/\`Range\`, \`execCommand\`, \`MutationObserver\`, timers, and DOM storage) rather than a full Blink/V8 browser engine.
+- 32-bit ARM (\`armeabi-v7a\`) native libraries are unsupported; Digitalis ARM64 translation on \`x86_64\` Linux works in CLI runs and CLI \`--digitalis\` AppImage/Flatpak builds (not yet in prebuilt browser bases).
 
 ## Website Pages
 
@@ -129,7 +129,7 @@ Open Shiraz Builder at ${SITE}/#builder, choose your CPU architecture (x86_64 or
 - **vs. Mac.apk:** Mac.apk targets Apple Silicon Macs exclusively using dex2jvm on OpenJDK (AGPL-3.0 + commercial) and currently reports more verified consumer games (52/66). Shiraz runs DEX directly on standalone ART under GPL-3.0-only across Linux, Apple Silicon macOS, and Windows.
 
 ### Does Shiraz include Google Play Services or full sandboxing?
-No. Shiraz does not ship the Google Play Store or Google Play Services. For isolation, Shiraz provides sandboxed Flatpak bundles and opt-in \`shiraz run --sandbox [--no-network]\` (Linux Landlock + seccomp-BPF, macOS Seatbelt + App Sandbox entitlements, Windows Job Object + Restricted Token), while default CLI/AppImage runs still execute with the launching user's permissions. Only run APKs you trust.
+No. Shiraz does not ship the Google Play Store or Google Play Services. For isolation, OS-level sandboxing is enabled by default across \`shiraz run\`, \`shiraz install-desktop\`, \`shiraz daemon\`, and Linux AppImages (\`--no-sandbox\` opt-out; \`--no-network\` / \`--no-internet\` to deny sockets) via Linux Landlock LSM + \`PR_SET_NO_NEW_PRIVS\` + seccomp-BPF, macOS Seatbelt + App Sandbox entitlements, and Windows Job Objects + Restricted Tokens, alongside Flatpak bubblewrap bundles. Because host process confinement is not Android's full per-UID/SELinux sandbox, still only run APKs you trust.
 `;
 
 writeFileSync(`${root}landing/static/llms.txt`, llmsTxt);

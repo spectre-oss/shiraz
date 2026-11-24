@@ -23,7 +23,7 @@ export const homeFaqs = [
   },
   {
     q: 'Are Android apps sandboxed in Shiraz?',
-    a: 'Flatpak bundles run inside the Flatpak bubblewrap sandbox, and the CLI provides opt-in isolation through shiraz run --sandbox [--no-network] (Linux Landlock + seccomp-BPF, macOS Seatbelt + App Sandbox entitlements, Windows Job Object + Restricted Token). Standard AppImage and default CLI runs still execute with your user permissions, so only run APKs you trust.'
+    a: 'Yes, OS-level process sandboxing is enabled by default across shiraz run, shiraz install-desktop, shiraz daemon, and Linux AppImages (--no-sandbox to opt out; --no-network or --no-internet to deny sockets), using Linux Landlock LSM + PR_SET_NO_NEW_PRIVS + seccomp-BPF, macOS Seatbelt + App Sandbox entitlements, and Windows Job Objects + Restricted Tokens, alongside Flatpak bubblewrap bundles. Because host process confinement is not Android’s full per-UID/SELinux sandbox, still only run APKs you trust.'
   },
   {
     q: 'Does Shiraz include Google Play Services or the Play Store?',
@@ -42,7 +42,7 @@ export const compatibilityFaqs = [
   },
   {
     q: 'How far along are the native macOS and Windows ports?',
-    a: 'On Apple Silicon macOS, 46 of 91 tracked native host checklist items are verified and 19 are partial, with live OsmAnd+ vector map, offline search, HTTPS index, resize, and zoom-persistence walkthroughs on Metal/ANGLE. On Windows x64/ARM64, 32 of 37 native host items (Win32 primitives, SDL2 presentation, DXGI buffers, libvulkan.dll, WASAPI AAudio/OpenSL ES, Media Foundation, and MSIX bundling) pass 3-OS CI while Win32 ART and guest ELF integration remain open.'
+    a: 'On Apple Silicon macOS, 46 of 91 tracked native host checklist items are verified and 19 are partial, with live OsmAnd+ vector map, offline search, turn-by-turn pedestrian routing/navigation, 468 MB live HTTPS offline map downloads, resize, and zoom-persistence walkthroughs on Metal/ANGLE plus a pre-warmed WarmArtPool standby. On Windows x64/ARM64, 32 of 37 native host items pass 3-OS CI and the remaining 5 are partial foundations (including ANGLE-D3D11 Per-Monitor V2 DPI, Win32 guest ELF/SysV↔Win64 thunks, and bootstrap_windows.py ART orchestrator) while live Win32 libart.dll execution remains open.'
   },
   {
     q: 'Why does Shiraz not publish a single whole-Android compatibility percentage?',
@@ -146,14 +146,14 @@ export function homeJsonLd(version) {
         keywords:
           'Android on Linux, Android compatibility layer, run APK on Linux, APK to AppImage, APK to Flatpak, Android on Apple Silicon macOS, Waydroid alternative, GTK-free Android runtime, standalone ART',
         featureList: [
-          'Standalone ART execution with warm standby daemon on Linux',
+          'Standalone ART execution with pre-warmed WarmArtPool standby on Linux and macOS',
           'All 4,445 Android 15 / API 35 java framework class surfaces across 49 packages',
           'All 15 tracked API 35 NDK C/C++ libraries (887 audited symbols)',
-          'Zero-copy GBM/DMA-BUF graphics on Linux and ANGLE-Metal IOSurface on macOS',
-          'Client-side Go WebAssembly Builder for Linux AppImage and sandboxed Flatpak (.flatpak) bundles',
+          'Zero-copy GBM/DMA-BUF graphics on Linux and ANGLE-Metal IOSurface on macOS, plus guest/host Vulkan bridging',
+          'Client-side Go WebAssembly Builder for Linux AppImage and sandboxed Flatpak (.flatpak) bundles (CLI --digitalis ARM64 bundling)',
           'WebRTC browser streaming (Shiraz Web) for desktop and Linux phones',
           'GTK-free SDL2 presentation across Linux, macOS, and Windows',
-          'Opt-in cross-platform sandboxing (Landlock/seccomp, Seatbelt, Job Object) and Flatpak isolation'
+          'Default-on cross-platform OS sandboxing (Landlock/seccomp, Seatbelt, Job Object, and Flatpak bubblewrap)'
         ],
         offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
         sameAs: [REPO_URL]

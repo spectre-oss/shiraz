@@ -7,8 +7,8 @@
       "name": "OsmAnd",
       "framework": "Android framework + JNI",
       "status": "Partial",
-      "observed": "Live 2026-11-23 macOS ARM64 Metal/ANGLE walkthrough of OsmAnd+ rendered native vector maps (with Persian RTL labels), ran offline search (185 results), fetched online HTTPS indexes, resized portrait ↔ landscape, and persisted zoom across restart. Earlier Linux runs also reached maps, drawer, and route details.",
-      "limitations": "Turn-by-turn routing/navigation, map downloads, ART JIT startup speedup, hardened-runtime signing gates, and Linux/Waydroid visual parity remain open.",
+      "observed": "Live 2026-11-23–24 macOS ARM64 Metal/ANGLE walkthrough of OsmAnd+ rendered native vector maps (with Persian RTL labels), ran offline search (185 results), completed turn-by-turn pedestrian routing & navigation (maneuver countdown, live GPS updates, TTS prompts, arrival), downloaded offline maps over HTTPS (World_basemap.obf 468 MB & altitude data), resized portrait ↔ landscape, and persisted zoom across restart (9.84 s warm first present). Earlier Linux runs also reached maps, drawer, and route details.",
+      "limitations": "Full ART JIT (MAP_JIT compiler heap-base decoding), M5 hardened-runtime signing gates, and Linux/Waydroid visual parity comparison remain open.",
       "source": "tested.md"
     },
     {
@@ -35,7 +35,7 @@
       "framework": "React Native",
       "status": "Partial",
       "observed": "Notes list, Add menu, note screen, title entry, and title persistence across restart were verified.",
-      "limitations": "Body editing is unsupported: the WebView implementation has no JavaScript/DOM engine.",
+      "limitations": "Body editing is unsupported in Joplin's CodeMirror 6 APK until retested: Shiraz's pure-Java WebView now adds interactive contentEditable, Selection/Range, execCommand, MutationObserver, timers, and DOM storage, but is not a full Blink/V8 browser engine.",
       "source": "experiments/react-native/JOPLIN.md"
     },
     {
@@ -71,7 +71,7 @@
       "framework": "Godot",
       "status": "Blocked",
       "observed": "The ARM64 build reaches an interactive Vulkan requirements warning.",
-      "limitations": "Vulkan rendering is unsupported; no game scene was verified.",
+      "limitations": "Host libvulkan.so/.dll, Darwin guest libvulkan.so, and real-ICD PackageManager Vulkan feature probing are wired, but live Vulkan game rendering in Abra-Ca Bubble on a Vulkan ICD host remains unverified.",
       "source": "experiments/godot/ABRA_CA_BUBBLE.md"
     },
     {

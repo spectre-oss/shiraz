@@ -118,7 +118,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | [x] | Shared window frames | `native/shared_frame.cpp`, `native/native_window.cpp` | Unlinked `shm_open` (no seals) or IOSurface pixels; robust mutex → seqlock or `os_sync_wait_on_address` (shared) with owner-PID recovery | M |
 | [x] | Frame pacing / Choreographer vsync | `native/choreographer.cpp`, `native/darwin/display_pacing.mm` | CoreVideo `CVDisplayLink` hardware vsync phase-alignment & refresh period (`120.0 Hz` / `8,333,333 ns` on ProMotion) wired into `AChoreographer` via `dlopen` with CoreGraphics / 60 Hz kqueue headless fallback (`make macos-platform-extras-check`) | M |
 | [~] | Headless verification | `native/darwin/display_pacing.mm`, `tests/darwin/platform_extras.cpp` | Zero-copy `IOSurface` → Metal `MTLTexture` (`newTextureWithDescriptor:iosurface:plane:`) import & pixel readback verified from `ANativeWindow` frames (`make macos-platform-extras-check`) | M |
-| [~] | Vulkan (after GLES) | `native/ndk_vulkan.cpp`, `include/shiraz/ndk/vulkan.h` | `libvulkan.so` loads host `libvulkan.1.dylib`/`libMoltenVK.dylib` (with `VK_KHR_portability_enumeration`), implements `VK_KHR_android_surface` ANativeWindow swapchain present loop & AHardwareBuffer memory binding (`make macos-ndk-test`) | H |
+| [~] | Vulkan (after GLES) | `native/ndk_vulkan.cpp`, `include/shiraz/ndk/vulkan.h`, `native/darwin/guest/vulkan.cpp`, `native/gles_version.cpp` | `libvulkan.so` loads host `libvulkan.1.dylib`/`libMoltenVK.dylib` (with `VK_KHR_portability_enumeration`), implements `VK_KHR_android_surface` ANativeWindow swapchain present loop & AHardwareBuffer memory binding (`make macos-ndk-test`), Darwin guest `libvulkan.so` AAPCS64 thunk provider exposes all 34 exports with guest-callable proc wrappers (`make macos-guest-vulkan-check`: `M5_GUEST_VULKAN_PASS`), and `PackageManager.FEATURE_VULKAN_*` reports Vulkan only when a real host ICD enumerates a physical device; live Vulkan app rendering on a host ICD remains open | H |
 
 ### 4. Input and windowing
 
@@ -187,7 +187,7 @@ symbol lookup are reusable; the host-facing layer is new.
 | [x] | `.app` bundle builder | `scripts/build_macos_app.py`, `tests/test_build_macos_app.py` | `Contents/MacOS`, `Contents/Frameworks`, `Contents/Resources`, `Info.plist` (`CFBundleIdentifier`, `VERSION`, camera/microphone/location usage strings), PNG-to-`.icns` via `sips` + `iconutil`, recursive `otool -L` closure, `install_name_tool` `@rpath` rewriting (`make macos-app-bundle-check`) | M |
 | [~] | Code signing | `scripts/build_macos_app.py` | Ad-hoc `codesign --force --sign - --options runtime` with `com.apple.security.cs.allow-jit` (and `disable-library-validation` for local ad-hoc bundled dylibs), verified with `codesign --verify --deep --strict`; Developer ID + `notarytool` notarization optional | M |
 | [ ] | Browser Builder | `go-wasm/` | Do not append to a signed Mach-O; emit an unchanged signed `Shiraz.app` plus APK sidecar, or prove an in-browser ad-hoc signer | H |
-| [x] | Desktop integration | `src/shiraz/desktop_install.py`, `src/shiraz/cli.py`, `tests/test_desktop_install.py` | Per-APK wrapper `.app` in `~/Applications/<Label>.app` via `shiraz install-desktop` / `shiraz uninstall-desktop` (with `Info.plist`, privacy usage descriptions, `.icns` conversion, and optional `--sandbox`/`--no-network`) | L |
+| [x] | Desktop integration | `src/shiraz/desktop_install.py`, `src/shiraz/cli.py`, `tests/test_desktop_install.py` | Per-APK wrapper `.app` in `~/Applications/<Label>.app` via `shiraz install-desktop` / `shiraz uninstall-desktop` (with `Info.plist`, privacy usage descriptions, `.icns` conversion, and default-on Seatbelt sandboxing with `--no-sandbox` opt-out and `--no-network`) | L |
 | [x] | CI | `.github/workflows/macos.yml` | `macos-15` arm64 runner job: verifies 16 KiB page size and `MAP_JIT`, runs `macos-metal-probe-check`, `macos-video-check`, `macos-notifications-check`, `macos-location-check`, `macos-app-bundle-check`, `darwin_linux_guard.py`, and Python unit tests | M |
 | [x] | Version exposure | `build/macos/shiraz-preview`, `src/shiraz/cli.py`, `scripts/build_macos_app.py`, `src/shiraz/darwin_app.py` | `--version` on macOS binaries (`Shiraz 0.353.0`) and CLI, plus `CFBundleShortVersionString`/`CFBundleVersion` in `Info.plist` | L |
 
@@ -782,21 +782,36 @@ app-scoped `SHIRAZ_LIVE_INPUT` + `SHIRAZ_PRESENT_SNAPSHOT`:
 - Live offline search (`Azadi` → 185 results), map result selection with bottom-sheet
   actions, Configure Map settings sheet, and live HTTPS index fetch from
   `download.osmand.net` via `wolfJSSE` + `Security.framework` all succeeded.
+- On 2026-11-24, live turn-by-turn routing and navigation (`SHIRAZ_TEST_LOCATION="35.7120,51.3900,5"`)
+  ran end-to-end: native C++ `libosmand.so` calculated a Tehran pedestrian route
+  (`499 ms`, 6 pts, `185 MB` peak), rendered the route polyline, yellow turn arrow, and
+  maneuver distance widgets (`126 m` → `58 m`, `181 m` → `122 m`), emitted TTS prompts
+  (start, off-route, arrival), updated across live mock GPS fixes, displayed
+  `"You have arrived."`, and cleanly tore down `NavigationService`.
+- On 2026-11-24, live HTTPS offline map downloads ran end-to-end: warm launch reached
+  first GPU present in `9.84 s` (`12.17 s` settled map), fetched `get_indexes` over
+  `wolfJSSE` + `Security.framework`, updated APFS `statvfs` free space (`49.66 GB` →
+  `49.18 GB`), and downloaded, decompressed, indexed, and showed green installed badges
+  for `World_basemap.obf` (`468 MB` / `490,731,257` bytes) and
+  `World_altitude_correction_WW15MGH.extra` (`2.0 MB`).
 - Interactive portrait (`540x960`) → landscape (`960x540`) → portrait (`540x960`)
   resizing relaid out the UI and map with `SHIRAZ_EGL_SURFACE match=1` at every step;
   tapping `+` in landscape zoomed from `500 m` → `200 m`, and the `200 m` zoom level
   persisted cleanly across restart.
-- Warm launch under interpreter-only ART (`-Xint`) reached first GPU present in
-  `10.29 s` and first native vector map render in `10.68 s` with clean exit `0`
-  (`SHIRAZ_RUNTIME_CLEANUP_COMPLETE`). Run:
+- The pre-warmed ART standby pool (`native/warm_pool.cpp`, `src/shiraz/warm_pool.py`,
+  `build/macos/libshiraz-warm-pool.so`) now runs on macOS, completing its live
+  `READY` standby handshake in `2.197 s` (`DARWIN_WARM_POOL_LIVE_OK`). Direct warm
+  launch under interpreter-only ART (`-Xint`) reached first GPU present in `9.84 s`–`10.29 s`
+  with clean exit `0` (`SHIRAZ_RUNTIME_CLEANUP_COMPLETE`). Run:
 
 ```sh
 SHIRAZ_GUEST_LOADER=1 make run APK=context/apks/net.osmand.plus_541003.apk
 ```
 
 The loader remains explicitly opt-in while M5 hardened-runtime signing gates,
-turn-by-turn routing/navigation walkthrough, and ART JIT (`MAP_JIT`) speedup remain
-open. Full M6 OsmAnd+ acceptance and F-Droid compatibility are not claimed yet.
+ART JIT (`MAP_JIT` / `0x10000000000` heap-base compiler decoding), and Linux/Waydroid
+visual parity comparison remain open. Full M6 OsmAnd+ acceptance and F-Droid
+compatibility are not claimed yet.
 
 Additional service fixtures cover fortified memory/format operations, scanf,
 locale and multibyte translation, time/system queries, bounded scalar helpers,
