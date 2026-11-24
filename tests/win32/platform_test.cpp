@@ -3,6 +3,7 @@
 #include "shiraz/win32/d3d11_probe.hpp"
 
 #include <cassert>
+#include <cerrno>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -100,6 +101,9 @@ int shiraz_win32_audio_capture_probe(std::uint32_t* outSampleRate, std::uint16_t
 int shiraz_win32_clipboard_set_text(const char* utf8);
 int shiraz_win32_clipboard_get_text(char* outBuf, std::size_t outCap, std::size_t* outLen);
 int shiraz_win32_camera_probe(std::uint32_t* outDeviceCount);
+int shiraz_win32_camera_capture_frame(std::uint32_t deviceIndex, std::uint8_t* outRgba,
+                                      std::size_t outCap, std::uint32_t* outWidth,
+                                      std::uint32_t* outHeight, std::size_t* outBytes);
 
 void* shiraz_win32_sandbox_create_job(std::uint64_t memoryLimitBytes,
                                       std::uint32_t activeProcessLimit, int uiRestrictions);
@@ -352,11 +356,16 @@ int main() {
     }
     std::printf("WIN32_CLIPBOARD rc=%d\n", clipSetRc);
 
-    // Media Foundation video-capture camera device enumeration (headless-safe: 0 devices is valid)
+    // Media Foundation video-capture camera device enumeration & frame-capture bridge
     std::uint32_t cameraDevices = 0;
     const int camRc = shiraz_win32_camera_probe(&cameraDevices);
     assert(camRc == 0);
-    std::printf("WIN32_CAMERA rc=%d devices=%u\n", camRc, cameraDevices);
+    assert(shiraz_win32_camera_capture_frame(0, nullptr, 0, nullptr, nullptr, nullptr) == -EINVAL);
+    std::uint32_t camW = 0, camH = 0;
+    std::size_t camBytes = 0;
+    const int capRc = shiraz_win32_camera_capture_frame(0, nullptr, 0, &camW, &camH, &camBytes);
+    assert(capRc == -ENODEV || capRc == -ENOSPC || capRc == -EAGAIN || capRc == 0);
+    std::printf("WIN32_CAMERA rc=%d devices=%u capRc=%d\n", camRc, cameraDevices, capRc);
 #endif
 
     std::printf("CROSS_PLATFORM_NATIVE_PASS os=%s arch=%s\n", shiraz::host_os_name(),

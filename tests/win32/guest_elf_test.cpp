@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Behavioral tests for Win32 Guest ELF64 loader, RELA relocation, W^X policy,
-// ARM64 TEB/TLS scanner, and SysV x86_64 <-> Win64 ABI machine-code thunks.
+// ARM64 TEB/TLS scanner, NativeBridge v3 C ABI, and SysV x86_64 <-> Win64 thunks.
 #include "shiraz/win32/guest/elf_loader.hpp"
+#include "shiraz/win32/guest/native_bridge.hpp"
 
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <unordered_map>
 #include <vector>
 
@@ -162,6 +165,56 @@ int main() {
     // 6. Personality library table includes core Bionic + NDK graphics/audio/Vulkan libs.
     const auto& personality = win32_bionic_personality_libraries();
     assert(personality.size() >= 12U);
+
+    // 7. Win32 ART NativeBridge v3 C ABI adapter verification.
+    win32_native_bridge_reset_for_tests();
+    const auto* nb = win32_native_bridge_callbacks();
+    assert(nb != nullptr && nb == &NativeBridgeItf && nb->version == 3U);
+    assert(nb->isCompatibleWith(1U) && nb->isCompatibleWith(3U) && !nb->isCompatibleWith(4U));
+    assert(nb->getAppEnv("x86_64") != nullptr &&
+           std::strcmp(nb->getAppEnv("x86_64")->cpu_abi, "x86_64") == 0);
+    assert(nb->getAppEnv("arm64") != nullptr &&
+           std::strcmp(nb->getAppEnv("arm64")->cpu_abi, "arm64-v8a") == 0);
+    assert(nb->getAppEnv("mips") == nullptr);
+    assert(nb->isPathSupported("/app/lib/x86_64") && !nb->isPathSupported("../escape"));
+    assert(!nb->initialize(nullptr, "/tmp", "riscv64"));
+    assert(nb->initialize(nullptr, "/tmp", "x86_64"));
+    assert(nb->initAnonymousNamespace("libc.so", "/app/lib/x86_64"));
+    void* ns = nb->createNamespace("app-ns", "/app/lib/x86_64", "", 0, "", nullptr);
+    void* vendorNs = nb->getVendorNamespace();
+    assert(ns != nullptr && vendorNs != nullptr);
+    assert(nb->linkNamespaces(ns, vendorNs, "libandroid.so:libvulkan.so"));
+
+    const auto tmpDir = std::filesystem::temp_directory_path();
+    const auto validPath = tmpDir / "shiraz_win32_nb_valid.so";
+    const auto wxPath = tmpDir / "shiraz_win32_nb_wx.so";
+    {
+        std::ofstream f1(validPath, std::ios::binary | std::ios::trunc);
+        f1.write(reinterpret_cast<const char*>(validX64.data()),
+                 static_cast<std::streamsize>(validX64.size()));
+        std::ofstream f2(wxPath, std::ios::binary | std::ios::trunc);
+        f2.write(reinterpret_cast<const char*>(wxElf.data()),
+                 static_cast<std::streamsize>(wxElf.size()));
+    }
+    const std::string validStr = validPath.string();
+    const std::string wxStr = wxPath.string();
+    assert(nb->isSupported(validStr.c_str()));
+    assert(!nb->isSupported(wxStr.c_str()));
+    assert(nb->loadLibrary(wxStr.c_str(), 0) == nullptr);
+    assert(nb->getError() != nullptr);
+
+    void* handle = nb->loadLibraryExt(validStr.c_str(), 0, ns);
+    assert(handle != nullptr);
+    assert(nb->getTrampoline(handle, "missing_symbol", "()V", 3) == nullptr);
+    assert(win32_native_bridge_register_export(handle, "Java_test_add", 0x12345678ULL));
+    assert(nb->getTrampoline(handle, "Java_test_add", "(II)I", 5) ==
+           reinterpret_cast<void*>(static_cast<std::uintptr_t>(0x12345678ULL)));
+    assert(nb->unloadLibrary(handle) == 0);
+    assert(nb->unloadLibrary(handle) != 0);
+    std::error_code ec;
+    std::filesystem::remove(validPath, ec);
+    std::filesystem::remove(wxPath, ec);
+    win32_native_bridge_reset_for_tests();
 
 #if defined(_WIN32) && defined(__x86_64__)
     // 7. Live Windows x64 execution of a real W^X VirtualAlloc round-trip thunk chain:

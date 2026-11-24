@@ -1,0 +1,118 @@
+# SPDX-License-Identifier: Apache-2.0
+# Initial Windows UCRT64/MinGW-w64 standalone ART build scaffolding patch for
+# context/art_standalone (tracked by scripts/bootstrap_windows.py).
+# Provides the HOST_windows-x86_64 combo Makefile and Win32 virtual-memory /
+# VectoredExceptionHandler / instruction-cache compatibility header used as the
+# base for full Windows x64/ARM64 libart.dll builds.
+diff --git a/build/core/combo/HOST_windows-x86_64.mk b/build/core/combo/HOST_windows-x86_64.mk
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/build/core/combo/HOST_windows-x86_64.mk
+@@ -0,0 +1,28 @@
++# Shiraz Windows UCRT64/Clang64 standalone ART host combo definition.
++HOST_CC := clang
++HOST_CXX := clang++
++HOST_AR := llvm-ar
++HOST_STRIP := llvm-strip
++
++HOST_GLOBAL_CFLAGS += \
++    -D_WIN32_WINNT=0x0A00 \
++    -DWIN32_LEAN_AND_MEAN \
++    -DNOMINMAX \
++    -DART_HOST_WINDOWS=1 \
++    -DART_TARGET_ANDROID=0 \
++    -fvisibility=default
++
++HOST_GLOBAL_CPPFLAGS += \
++    -std=c++17 \
++    -fno-rtti
++
++HOST_GLOBAL_LDFLAGS += \
++    -lkernel32 \
++    -lws2_32 \
++    -lbcrypt \
++    -ladvapi32 \
++    -lole32 \
++    -pthread
++
++HOST_SHLIB_SUFFIX := .dll
++HOST_EXECUTABLE_SUFFIX := .exe
+diff --git a/art/libartbase/base/win32_compat.h b/art/libartbase/base/win32_compat.h
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/art/libartbase/base/win32_compat.h
+@@ -0,0 +1,72 @@
++// Shiraz Win32 standalone ART virtual-memory, W^X JIT, and VEH fault primitives.
++#ifndef ART_LIBARTBASE_BASE_WIN32_COMPAT_H_
++#define ART_LIBARTBASE_BASE_WIN32_COMPAT_H_
++
++#if defined(_WIN32)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#include <cstddef>
++#include <cstdint>
++
++namespace art {
++namespace win32 {
++
++constexpr size_t kAllocationGranularity = 65536U;
++
++inline void* ReserveAndCommitRw(size_t size_bytes) {
++  return ::VirtualAlloc(nullptr, size_bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++}
++
++inline bool ProtectRx(void* addr, size_t size_bytes) {
++  DWORD old_prot = 0;
++  if (!::VirtualProtect(addr, size_bytes, PAGE_EXECUTE_READ, &old_prot)) {
++    return false;
++  }
++  return ::FlushInstructionCache(::GetCurrentProcess(), addr, size_bytes) != 0;
++}
++
++inline bool ProtectRw(void* addr, size_t size_bytes) {
++  DWORD old_prot = 0;
++  return ::VirtualProtect(addr, size_bytes, PAGE_READWRITE, &old_prot) != 0;
++}
++
++inline bool ReleaseMapping(void* addr) {
++  return ::VirtualFree(addr, 0, MEM_RELEASE) != 0;
++}
++
++struct FaultSnapshot {
++  uintptr_t fault_addr = 0;
++  uintptr_t pc = 0;
++  uintptr_t sp = 0;
++};
++
++inline bool ExtractAccessViolation(EXCEPTION_POINTERS* info, FaultSnapshot* out) {
++  if (!info || !info->ExceptionRecord || !info->ContextRecord || !out) {
++    return false;
++  }
++  if (info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) {
++    return false;
++  }
++  out->fault_addr = info->ExceptionRecord->NumberParameters >= 2
++      ? static_cast<uintptr_t>(info->ExceptionRecord->ExceptionInformation[1])
++      : 0U;
++#if defined(_M_X64) || defined(__x86_64__)
++  out->pc = static_cast<uintptr_t>(info->ContextRecord->Rip);
++  out->sp = static_cast<uintptr_t>(info->ContextRecord->Rsp);
++#elif defined(_M_ARM64) || defined(__aarch64__)
++  out->pc = static_cast<uintptr_t>(info->ContextRecord->Pc);
++  out->sp = static_cast<uintptr_t>(info->ContextRecord->Sp);
++#endif
++  return true;
++}
++
++}  // namespace win32
++}  // namespace art
++
++#endif  // defined(_WIN32)
++#endif  // ART_LIBARTBASE_BASE_WIN32_COMPAT_H_

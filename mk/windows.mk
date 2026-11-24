@@ -29,7 +29,7 @@ WINDOWS_HOST_HEADERS := \
 	include/shiraz/platform.hpp \
 	include/shiraz/win32/d3d11_probe.hpp
 
-WINDOWS_LIBS := -lole32 -ld3d11 -ldxgi -ldwrite -lmf -lmfplat -lmfuuid -lshell32 -luser32 -lkernel32 -ladvapi32 -liphlpapi -lcrypt32 -luuid
+WINDOWS_LIBS := -lole32 -ld3d11 -ldxgi -ldwrite -lmf -lmfplat -lmfreadwrite -lmfuuid -lshell32 -luser32 -lkernel32 -ladvapi32 -liphlpapi -lcrypt32 -luuid
 
 .PHONY: windows-build windows-check windows-presentation-check windows-app-bundle-check cross-platform-native-check
 
@@ -63,8 +63,14 @@ $(WINDOWS_OUT)/libvulkan.dll: native/ndk_vulkan.cpp include/shiraz/ndk/vulkan.h 
 $(WINDOWS_OUT)/test-ndk-vulkan.exe: tests/ndk_vulkan.cpp $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/shiraz-win32-host.dll
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/ndk_vulkan.cpp -o $@ -L$(WINDOWS_OUT) -lvulkan -lshiraz-win32-host -pthread
 
-$(WINDOWS_OUT)/test-win32-guest-elf.exe: tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp include/shiraz/win32/guest/elf_loader.hpp $(WINDOWS_OUT)/.dir
-	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp -o $@ -lkernel32
+WINDOWS_GUEST_SOURCES := native/win32/guest/elf_loader.cpp native/win32/guest/native_bridge.cpp
+WINDOWS_GUEST_HEADERS := include/shiraz/win32/guest/elf_loader.hpp include/shiraz/win32/guest/native_bridge.hpp include/shiraz/platform.hpp
+
+$(WINDOWS_OUT)/libshiraz-win32-guest.dll: $(WINDOWS_GUEST_SOURCES) $(WINDOWS_GUEST_HEADERS) $(WINDOWS_OUT)/.dir
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) -shared -Wl,--out-implib,$(WINDOWS_OUT)/libshiraz-win32-guest.dll.a $(WINDOWS_GUEST_SOURCES) -o $@ -lkernel32
+
+$(WINDOWS_OUT)/test-win32-guest-elf.exe: tests/win32/guest_elf_test.cpp $(WINDOWS_GUEST_SOURCES) $(WINDOWS_GUEST_HEADERS) $(WINDOWS_OUT)/.dir
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/win32/guest_elf_test.cpp $(WINDOWS_GUEST_SOURCES) -o $@ -lkernel32
 
 WINDOWS_SDL_CFLAGS = $(shell sdl2-config --cflags 2>/dev/null | sed 's/-Dmain=SDL_main//g')
 WINDOWS_SDL_LIBS = $(shell sdl2-config --libs 2>/dev/null | sed 's/-lmingw32//g; s/-lSDL2main//g; s/-mwindows//g')
@@ -72,7 +78,7 @@ WINDOWS_SDL_LIBS = $(shell sdl2-config --libs 2>/dev/null | sed 's/-lmingw32//g;
 $(WINDOWS_OUT)/test-presentation.exe: tests/presentation.cpp native/presentation.cpp native/win32/d3d11_probe.cpp native/win32/gpu_stub.cpp include/shiraz/presentation.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/win32/d3d11_probe.hpp $(WINDOWS_OUT)/.dir
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) $(WINDOWS_SDL_CFLAGS) tests/presentation.cpp native/presentation.cpp native/win32/d3d11_probe.cpp native/win32/gpu_stub.cpp -o $@ $(WINDOWS_SDL_LIBS) -ld3d11 -ldxgi -luser32 -lkernel32 -pthread
 
-windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/test-ndk-vulkan.exe $(WINDOWS_OUT)/test-win32-guest-elf.exe
+windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/test-ndk-vulkan.exe $(WINDOWS_OUT)/libshiraz-win32-guest.dll $(WINDOWS_OUT)/test-win32-guest-elf.exe
 
 windows-check: windows-build
 	$(WINDOWS_OUT)/test-win32-platform.exe
@@ -93,9 +99,9 @@ build/test-cross-platform-native: tests/win32/platform_test.cpp $(WINDOWS_HOST_H
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/win32/platform_test.cpp -o $@
 
-build/test-win32-guest-elf: tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp include/shiraz/win32/guest/elf_loader.hpp
+build/test-win32-guest-elf: tests/win32/guest_elf_test.cpp $(WINDOWS_GUEST_SOURCES) $(WINDOWS_GUEST_HEADERS)
 	@mkdir -p build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/win32/guest_elf_test.cpp $(WINDOWS_GUEST_SOURCES) -o $@
 
 cross-platform-native-check: build/test-cross-platform-native build/test-win32-guest-elf
 	./build/test-cross-platform-native

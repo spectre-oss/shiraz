@@ -92,8 +92,16 @@ WIN32_ART_ADAPTATIONS = (
     },
     {
         'area': 'native_bridge',
-        'component': 'native/win32/guest/elf_loader.cpp',
-        'strategy': 'Win32 Guest ELF64 loader + SysV x86_64 <-> Win64 machine-code ABI thunks',
+        'component': 'native/win32/guest/native_bridge.cpp',
+        'strategy': 'Win32 ART NativeBridge v3 + Guest ELF64 loader + SysV x86_64 <-> Win64 machine-code ABI thunks',
+    },
+)
+
+WIN32_ART_PATCHES = (
+    {
+        'path': 'patches/art-win32-build.patch',
+        'sha256': 'a6b48fdfb096680e76d6c353fb3037a9924a48e9bdaa7e18bffa473dfc4da98d',
+        'scope': 'HOST_windows-x86_64 combo Makefile and Win32 MemMap/W^X/VEH compatibility header',
     },
 )
 
@@ -153,9 +161,21 @@ def build_plan(arch: str | None = None) -> dict:
         'prefix': str(PREFIX.relative_to(ROOT)),
         'build_dir': str(BUILD.relative_to(ROOT)),
         'dependencies': PINNED_DEPS,
+        'patches': list(WIN32_ART_PATCHES),
         'art_targets': list(ART_WINDOWS_TARGETS),
         'adaptations': list(WIN32_ART_ADAPTATIONS),
     }
+
+
+def verify_patches(root: Path = ROOT) -> list[dict]:
+    verified = []
+    for entry in WIN32_ART_PATCHES:
+        patch_path = root / entry['path']
+        if not patch_path.is_file():
+            raise RuntimeError(f'Missing pinned Win32 ART patch: {entry["path"]}')
+        verify_sha256(patch_path, entry['sha256'])
+        verified.append(dict(entry))
+    return verified
 
 
 def verify_sha256(path: Path, expected: str) -> None:
@@ -212,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     plan_cmd.add_argument('--output', type=Path, help='Optional path to write plan JSON')
 
     sub.add_parser('doctor', help='Check Windows UCRT64/Clang toolchain readiness')
+    sub.add_parser('check-patches', help='Verify pinned patches/art-win32-*.patch SHA-256 digests')
     sub.add_parser('fetch-deps', help='Download and verify pinned Windows ART dependency tarballs')
     sub.add_parser('art', help='Run pinned Windows ART build (requires Windows UCRT64 host)')
 
@@ -228,6 +249,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == 'doctor':
         sys.stdout.write(json.dumps(detect_toolchain(), indent=2) + '\n')
+        return 0
+
+    if args.command == 'check-patches':
+        verified = verify_patches()
+        for item in verified:
+            print(f'VERIFIED {item["path"]} ({item["sha256"][:12]})')
         return 0
 
     if args.command == 'fetch-deps':

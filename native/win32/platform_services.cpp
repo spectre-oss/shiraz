@@ -21,6 +21,7 @@
 #include <audioclient.h>
 #include <mfapi.h>
 #include <mfidl.h>
+#include <mfreadwrite.h>
 #include <mmdeviceapi.h>
 #include <objbase.h>
 
@@ -293,6 +294,160 @@ SHIRAZ_EXPORT int shiraz_win32_camera_probe(std::uint32_t* outDeviceCount) {
         }
     }
 
+    if (attrs)
+        attrs->Release();
+    MFShutdown();
+    if (needCoUninit)
+        CoUninitialize();
+    return status;
+}
+
+// Captures one RGBA8888 frame from the requested Media Foundation video capture
+// device via IMFSourceReader. Returns -ENODEV when no webcam is attached (e.g.
+// headless CI), -EINVAL on null output pointers, or -ENOSPC if the output
+// buffer is smaller than width * height * 4 (writing required dimensions/size).
+SHIRAZ_EXPORT int shiraz_win32_camera_capture_frame(std::uint32_t deviceIndex,
+                                                    std::uint8_t* outRgba, std::size_t outCap,
+                                                    std::uint32_t* outWidth,
+                                                    std::uint32_t* outHeight,
+                                                    std::size_t* outBytes) {
+    if (!outWidth || !outHeight || !outBytes)
+        return -EINVAL;
+    *outWidth = 0;
+    *outHeight = 0;
+    *outBytes = 0;
+
+    const HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool needCoUninit = SUCCEEDED(coHr);
+    if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_LITE))) {
+        if (needCoUninit)
+            CoUninitialize();
+        return -EIO;
+    }
+
+    IMFAttributes* attrs = nullptr;
+    IMFActivate** devices = nullptr;
+    IMFMediaSource* mediaSource = nullptr;
+    IMFSourceReader* reader = nullptr;
+    IMFMediaType* rgbType = nullptr;
+    IMFMediaType* currentType = nullptr;
+    IMFSample* sample = nullptr;
+    IMFMediaBuffer* buffer = nullptr;
+    UINT32 count = 0;
+    int status = -EIO;
+
+    do {
+        if (FAILED(MFCreateAttributes(&attrs, 1)) || !attrs ||
+            FAILED(attrs->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                                  MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID))) {
+            break;
+        }
+        if (FAILED(MFEnumDeviceSources(attrs, &devices, &count))) {
+            break;
+        }
+        if (count == 0 || deviceIndex >= count || !devices || !devices[deviceIndex]) {
+            status = -ENODEV;
+            break;
+        }
+        if (FAILED(devices[deviceIndex]->ActivateObject(__uuidof(IMFMediaSource),
+                                                        reinterpret_cast<void**>(&mediaSource))) ||
+            !mediaSource) {
+            status = -EIO;
+            break;
+        }
+        if (FAILED(MFCreateSourceReaderFromMediaSource(mediaSource, nullptr, &reader)) || !reader) {
+            status = -EIO;
+            break;
+        }
+        if (SUCCEEDED(MFCreateMediaType(&rgbType)) && rgbType) {
+            rgbType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+            rgbType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+            reader->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
+                                        nullptr, rgbType);
+        }
+        if (FAILED(reader->GetCurrentMediaType(
+                static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), &currentType)) ||
+            !currentType) {
+            status = -EIO;
+            break;
+        }
+        UINT32 width = 0;
+        UINT32 height = 0;
+        if (FAILED(MFGetAttributeSize(currentType, MF_MT_FRAME_SIZE, &width, &height)) ||
+            width == 0 || height == 0 || width > 8192 || height > 8192) {
+            status = -EIO;
+            break;
+        }
+        const std::size_t needed = static_cast<std::size_t>(width) * height * 4U;
+        *outWidth = static_cast<std::uint32_t>(width);
+        *outHeight = static_cast<std::uint32_t>(height);
+        *outBytes = needed;
+        if (!outRgba || outCap < needed) {
+            status = -ENOSPC;
+            break;
+        }
+        DWORD streamFlags = 0;
+        LONGLONG timestamp = 0;
+        bool captured = false;
+        for (int attempt = 0; attempt < 8 && !captured; ++attempt) {
+            if (sample) {
+                sample->Release();
+                sample = nullptr;
+            }
+            const HRESULT rhr =
+                reader->ReadSample(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0,
+                                   nullptr, &streamFlags, &timestamp, &sample);
+            if (FAILED(rhr)) {
+                break;
+            }
+            if (sample) {
+                captured = true;
+            }
+        }
+        if (!captured || !sample || FAILED(sample->ConvertToContiguousBuffer(&buffer)) || !buffer) {
+            status = -EAGAIN;
+            break;
+        }
+        BYTE* raw = nullptr;
+        DWORD maxLen = 0;
+        DWORD curLen = 0;
+        if (FAILED(buffer->Lock(&raw, &maxLen, &curLen)) || !raw) {
+            status = -EIO;
+            break;
+        }
+        const std::size_t copyBytes = curLen < needed ? static_cast<std::size_t>(curLen) : needed;
+        // Convert Media Foundation RGB32 (BGRA) to Android RGBA8888.
+        for (std::size_t i = 0; i + 3U < copyBytes; i += 4U) {
+            outRgba[i + 0U] = raw[i + 2U];
+            outRgba[i + 1U] = raw[i + 1U];
+            outRgba[i + 2U] = raw[i + 0U];
+            outRgba[i + 3U] = 0xFFU;
+        }
+        buffer->Unlock();
+        status = 0;
+    } while (false);
+
+    if (buffer)
+        buffer->Release();
+    if (sample)
+        sample->Release();
+    if (currentType)
+        currentType->Release();
+    if (rgbType)
+        rgbType->Release();
+    if (reader)
+        reader->Release();
+    if (mediaSource) {
+        mediaSource->Shutdown();
+        mediaSource->Release();
+    }
+    if (devices) {
+        for (UINT32 i = 0; i < count; ++i) {
+            if (devices[i])
+                devices[i]->Release();
+        }
+        CoTaskMemFree(devices);
+    }
     if (attrs)
         attrs->Release();
     MFShutdown();

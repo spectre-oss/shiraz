@@ -60,6 +60,10 @@ class BootstrapWindowsTests(unittest.TestCase):
             loaded = json.loads(out.read_text(encoding='utf-8'))
             self.assertEqual(loaded['host_tag'], 'windows-x86')
             self.assertEqual(len(loaded['adaptations']), 5)
+            self.assertGreaterEqual(len(loaded['patches']), 1)
+        self.assertEqual(bw.main(['check-patches']), 0)
+        verified = bw.verify_patches()
+        self.assertEqual(verified[0]['path'], 'patches/art-win32-build.patch')
         if not bw.host_is_windows():
             self.assertEqual(bw.main(['art']), 2)
 
