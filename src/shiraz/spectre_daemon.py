@@ -674,7 +674,7 @@ class ShirazDaemon:
         registry_dir: Optional[Path] = None,
         prewarm_memory: bool = True,
         aot_enabled: bool = True,
-        sandbox: bool = False,
+        sandbox: bool = True,
         width: int = 400,
         height: int = 765,
         scale: float = 1.0,

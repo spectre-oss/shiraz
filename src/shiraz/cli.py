@@ -78,12 +78,17 @@ def main(argv=None):
             p.add_argument(
                 '--sandbox',
                 action='store_true',
-                help='Isolate the app process using the native OS sandbox (Linux Landlock, macOS Seatbelt, Windows Job Object)',
+                help='Isolate the app process using the native OS sandbox (default; Linux Landlock, macOS Seatbelt, Windows Job Object)',
+            )
+            p.add_argument(
+                '--no-sandbox',
+                action='store_true',
+                help='Disable the default OS sandbox for this launch (incompatible with --no-network)',
             )
             p.add_argument(
                 '--no-network',
                 action='store_true',
-                help='Deny network access inside the app sandbox (implies --sandbox)',
+                help='Deny network access inside the app sandbox',
             )
         if command == 'plan':
             p.add_argument('--output', type=Path, required=True)
@@ -158,12 +163,17 @@ def main(argv=None):
     desktop_in.add_argument(
         '--sandbox',
         action='store_true',
-        help='Launch the installed app inside the native OS sandbox',
+        help='Launch the installed app inside the native OS sandbox (default)',
+    )
+    desktop_in.add_argument(
+        '--no-sandbox',
+        action='store_true',
+        help='Disable the default OS sandbox for the installed launcher',
     )
     desktop_in.add_argument(
         '--no-network',
         action='store_true',
-        help='Deny network access inside the installed app sandbox (implies --sandbox)',
+        help='Deny network access inside the installed app sandbox',
     )
     desktop_in.add_argument(
         '--applications-dir',
@@ -187,7 +197,12 @@ def main(argv=None):
     daemon_p.add_argument('--registry', type=Path, help='Override PackageRegistry directory')
     daemon_p.add_argument('--no-prewarm', action='store_true', help='Disable memory pre-warming')
     daemon_p.add_argument('--no-aot', action='store_true', help='Disable AOT compilation')
-    daemon_p.add_argument('--sandbox', action='store_true', help='Sandbox launched Android apps')
+    daemon_p.add_argument(
+        '--sandbox', action='store_true', help='Sandbox launched Android apps (default)'
+    )
+    daemon_p.add_argument(
+        '--no-sandbox', action='store_true', help='Disable default sandboxing for launched apps'
+    )
     daemon_p.add_argument('--width', type=int, default=400)
     daemon_p.add_argument('--height', type=int, default=765)
     daemon_p.add_argument('--scale', type=float, default=1.0)
@@ -241,11 +256,13 @@ def main(argv=None):
         if args.command == 'daemon':
             from .spectre_daemon import ShirazDaemon
 
+            if args.sandbox and args.no_sandbox:
+                raise FormatError('Cannot combine --sandbox and --no-sandbox')
             daemon = ShirazDaemon(
                 registry_dir=args.registry,
                 prewarm_memory=not args.no_prewarm,
                 aot_enabled=not args.no_aot,
-                sandbox=args.sandbox,
+                sandbox=not args.no_sandbox,
                 width=args.width,
                 height=args.height,
                 scale=args.scale,
@@ -405,8 +422,10 @@ def main(argv=None):
         if args.command == 'install-desktop':
             from .desktop_install import install_desktop_app
 
+            if args.no_sandbox and (args.sandbox or args.no_network):
+                raise FormatError('--no-sandbox cannot be combined with --sandbox or --no-network')
             label = args.name or resolve_label(args.apk) or report['package']
-            use_sandbox = bool(args.sandbox or args.no_network)
+            use_sandbox = not args.no_sandbox
             allow_network = not bool(args.no_network)
             installed = install_desktop_app(
                 args.apk,
@@ -425,7 +444,9 @@ def main(argv=None):
             sys.stdout.write(properties_text(registry_metadata(args.apk, report, args.installer)))
             return 0
         if args.command == 'run':
-            use_sandbox = bool(args.sandbox or args.no_network)
+            if args.no_sandbox and (args.sandbox or args.no_network):
+                raise FormatError('--no-sandbox cannot be combined with --sandbox or --no-network')
+            use_sandbox = not args.no_sandbox
             allow_network = not bool(args.no_network)
             if args.registry is not None:
                 if args.native_split is not None:

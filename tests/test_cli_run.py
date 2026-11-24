@@ -92,7 +92,7 @@ class CliRunTests(unittest.TestCase):
                     )
                     self.assertEqual(cli.main(command), expected)
 
-    def test_unregistered_run_keeps_direct_execution(self):
+    def test_unregistered_run_keeps_direct_execution_with_default_sandbox(self):
         with (
             patch.object(cli, 'inspect_apk', return_value={}),
             patch.object(cli, 'run_activity', return_value=7) as direct,
@@ -100,19 +100,30 @@ class CliRunTests(unittest.TestCase):
         ):
             self.assertEqual(cli.main(['run', 'fixture.apk', '--frames', '2']), 7)
             self.assertEqual(direct.call_args.kwargs['frames'], 2)
-            self.assertFalse(direct.call_args.kwargs['sandbox'])
+            self.assertTrue(direct.call_args.kwargs['sandbox'])
             self.assertTrue(direct.call_args.kwargs['allow_network'])
             host.assert_not_called()
 
-    def test_cli_sandbox_and_no_network_flags_forward_to_direct_and_supervised(self):
+    def test_cli_sandbox_opt_out_and_no_network_flags(self):
         report = dict(apk_sha256='a' * 64, manifest=dict(package='test.app'))
         with (
             patch.object(cli, 'inspect_apk', return_value=report),
             patch.object(cli, 'run_activity', return_value=0) as direct,
         ):
+            self.assertEqual(cli.main(['run', 'fixture.apk', '--no-sandbox']), 0)
+            self.assertFalse(direct.call_args.kwargs['sandbox'])
+            self.assertTrue(direct.call_args.kwargs['allow_network'])
             self.assertEqual(cli.main(['run', 'fixture.apk', '--no-network']), 0)
             self.assertTrue(direct.call_args.kwargs['sandbox'])
             self.assertFalse(direct.call_args.kwargs['allow_network'])
+        with (
+            patch.object(cli, 'inspect_apk', return_value=report),
+            patch.object(cli, 'run_activity', return_value=0) as direct,
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(cli.main(['run', 'fixture.apk', '--no-sandbox', '--no-network']), 1)
+            self.assertEqual(cli.main(['run', 'fixture.apk', '--no-sandbox', '--sandbox']), 1)
+            direct.assert_not_called()
         with (
             patch.object(cli, 'inspect_apk', return_value=report),
             patch('shiraz.host_session.HostSession') as factory,

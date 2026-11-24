@@ -2169,17 +2169,36 @@ def run_activity(
         if sandbox:
             from .sandbox import SandboxPolicy, prepare_sandbox_launch
 
+            ro_paths = [str(ROOT.resolve()), str(apk.resolve().parent)]
+            if live_input := env.get('SHIRAZ_LIVE_INPUT'):
+                ro_paths.append(str(Path(live_input).resolve().parent))
             extra_rw = [str(work.resolve())]
             if snapshot is not None:
                 extra_rw.append(str(snapshot.resolve().parent))
+            if present_snapshot := env.get('SHIRAZ_PRESENT_SNAPSHOT'):
+                extra_rw.append(str(Path(present_snapshot).resolve().parent))
+            if darwin:
+                fc_cache = (ROOT / '.local/var/cache/fontconfig').resolve()
+                extra_rw.append(str(fc_cache))
+                try:
+                    user_cache = os.confstr('CS_DARWIN_USER_CACHE_DIR')
+                    if user_cache:
+                        extra_rw.append(str(Path(user_cache).resolve()))
+                except (AttributeError, OSError, ValueError):
+                    pass
+            elif system == 'Linux':
+                xdg_runtime = env.get('XDG_RUNTIME_DIR')
+                if xdg_runtime and Path(xdg_runtime).is_absolute():
+                    extra_rw.append(xdg_runtime)
             policy = SandboxPolicy(
                 package_name=package,
                 data_dir=str(data.resolve()),
                 cache_dir=str((work / 'cache').resolve()),
-                read_only_paths=(str(ROOT.resolve()), str(apk.resolve().parent)),
+                read_only_paths=tuple(dict.fromkeys(ro_paths)),
                 extra_read_write_paths=tuple(dict.fromkeys(extra_rw)),
                 allow_network=allow_network,
-                allow_jit=execution_mode != 'interpreter',
+                allow_jit=execution_mode != 'interpreter'
+                or (darwin and os.environ.get('SHIRAZ_GUEST_LOADER') == '1'),
             )
             sandbox_launch = prepare_sandbox_launch(policy, command, work, system=system)
             command = sandbox_launch.command

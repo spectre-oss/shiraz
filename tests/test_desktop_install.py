@@ -233,6 +233,27 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertTrue(len(uninstalled['removed']) >= 1)
             self.assertFalse(Path(installed['launcher']).exists())
 
+            # Default install enables sandboxing; --no-sandbox opts out explicitly.
+            default_res = install_desktop_app(
+                apk,
+                'org.example.defaultsb',
+                'Default SB',
+                applications_dir=apps_dir,
+                python_executable='/usr/bin/python3',
+                system='Linux',
+            )
+            self.assertIn('--sandbox', default_res.launcher_path.read_text(encoding='utf-8'))
+            optout_res = install_desktop_app(
+                apk,
+                'org.example.optout',
+                'OptOut SB',
+                sandbox=False,
+                applications_dir=apps_dir,
+                python_executable='/usr/bin/python3',
+                system='Linux',
+            )
+            self.assertIn('--no-sandbox', optout_res.launcher_path.read_text(encoding='utf-8'))
+
 
 if __name__ == '__main__':
     unittest.main()

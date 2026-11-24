@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "shiraz/sandbox.hpp"
 namespace fs = std::filesystem;
 namespace {
 #if defined(__aarch64__)
@@ -251,14 +252,51 @@ std::pair<long long, long long> timestamps(const fs::path& data, const std::stri
 #include "desktop_install.h"
 #include "offline.h"
 
+void applyAppImageSandbox(const fs::path& root, const fs::path& data, const fs::path& cache,
+                          const std::string& snapshot) {
+    std::vector<std::string> roStrings;
+    auto addExisting = [](std::vector<std::string>& out, const fs::path& p) {
+        std::error_code ec;
+        if (!p.empty() && p.is_absolute() && fs::exists(p, ec))
+            out.push_back(p.string());
+    };
+    addExisting(roStrings, root);
+    for (const char* sysPath :
+         {"/usr", "/lib", "/lib64", "/bin", "/etc", "/proc", "/sys", "/dev", "/nix"})
+        addExisting(roStrings, fs::path(sysPath));
+    std::vector<std::string> rwStrings;
+    addExisting(rwStrings, data);
+    addExisting(rwStrings, cache);
+    addExisting(rwStrings, fs::path("/tmp"));
+    addExisting(rwStrings, fs::path("/dev/shm"));
+    if (const char* runtimeDir = std::getenv("XDG_RUNTIME_DIR"); runtimeDir && *runtimeDir)
+        addExisting(rwStrings, fs::path(runtimeDir));
+    if (snapshot != "-")
+        addExisting(rwStrings, fs::path(snapshot).parent_path());
+
+    std::vector<const char*> roPtrs, rwPtrs;
+    roPtrs.reserve(roStrings.size());
+    rwPtrs.reserve(rwStrings.size());
+    for (const auto& s : roStrings)
+        roPtrs.push_back(s.c_str());
+    for (const auto& s : rwStrings)
+        rwPtrs.push_back(s.c_str());
+    const int rc =
+        shiraz_sandbox_apply_landlock(roPtrs.data(), roPtrs.size(), rwPtrs.data(), rwPtrs.size());
+    if (rc != 0 && rc != -ENOSYS)
+        fail(std::string("Landlock filesystem sandbox failed: ") + std::strerror(-rc));
+}
+
 void help() {
     std::cout
         << "Usage: AppRun [--width N] [--height N] [--frames N]\n"
            "              [--snapshot /absolute/new.ppm] [--data-dir /absolute/directory]\n"
-           "              [--no-internet] [--version] [--diagnose] [--help]\n"
+           "              [--sandbox | --no-sandbox] [--no-internet]\n"
+           "              [--version] [--diagnose] [--help]\n"
            "       AppRun install  (extract runtime and register a per-user desktop launcher)\n"
            "Runs this packaged APK using standalone ART and Shiraz.\n"
-           "--no-internet blocks direct network sockets; local Unix IPC remains available.\n"
+           "Linux Landlock filesystem sandboxing is enabled by default outside Flatpak;\n"
+           "pass --no-sandbox to opt out. --no-internet blocks direct network sockets.\n"
            "Default display: 720x1280. SHIRAZ_ART_MODE=jit (default) or interpreter.\n"
            "SHIRAZ_ART_HEAP_MB: Java heap cap in MiB, 128..512 (default 512).\n"
            "Data persists under XDG_DATA_HOME/shiraz-apps/<package>; logs are under\n"
@@ -284,7 +322,7 @@ int main(int argc, char** argv) {
         auto facts = config(share / "launch.properties");
         int width = 720, height = 1280, frames = -1;
         std::string snapshot = "-", dataOption;
-        bool diagnose = false, noInternet = false;
+        bool diagnose = false, noInternet = false, noSandbox = false, explicitSandbox = false;
         const char* flatpakId = std::getenv("FLATPAK_ID");
         const bool inFlatpak = fs::exists("/.flatpak-info") || (flatpakId && *flatpakId);
         if (argc == 2 && std::string(argv[1]) == "install") {
@@ -302,6 +340,14 @@ int main(int argc, char** argv) {
             if (option == "--version") {
                 std::cout << "Shiraz " << facts["version"] << " (" << facts["package"] << ")\n";
                 return 0;
+            }
+            if (option == "--sandbox") {
+                explicitSandbox = true;
+                continue;
+            }
+            if (option == "--no-sandbox") {
+                noSandbox = true;
+                continue;
             }
             if (option == "--no-internet") {
                 noInternet = true;
@@ -328,6 +374,8 @@ int main(int argc, char** argv) {
             else
                 dataOption = value;
         }
+        if (noSandbox && explicitSandbox)
+            fail("Cannot combine --sandbox and --no-sandbox");
         if (static_cast<long long>(width) * height > 16 * 1024 * 1024)
             fail("Display exceeds 16 million pixel limit");
         const std::vector<std::string> jars = {"core-oj-hostdex.jar", "core-libart-hostdex.jar",
@@ -416,7 +464,11 @@ int main(int argc, char** argv) {
                       << (inFlatpak ? "Container: flatpak\n" : "")
                       << "Package: " << facts["package"] << "\nRuntime: " << facts["version"]
                       << "\nART mode: " << mode
-                      << "\nPackaged AOT: " << (packagedAot ? "yes" : "no") << "\nNetwork policy: "
+                      << "\nPackaged AOT: " << (packagedAot ? "yes" : "no") << "\nSandbox policy: "
+                      << (inFlatpak   ? "flatpak"
+                          : noSandbox ? "disabled (--no-sandbox)"
+                                      : "landlock (enforced at launch)")
+                      << "\nNetwork policy: "
                       << (noInternet ? "offline (enforced at launch)" : "unrestricted")
                       << "\nJava heap cap MiB: " << heapMiB << "\nData: " << data
                       << "\nCache: " << cache
@@ -601,6 +653,8 @@ int main(int argc, char** argv) {
         }
         if (chdir(data.c_str()))
             fail(error("enter app data directory"));
+        if (!inFlatpak && !noSandbox)
+            applyAppImageSandbox(root, data, cache, snapshot);
         std::vector<char*> raw;
         for (auto& arg : arguments)
             raw.push_back(arg.data());

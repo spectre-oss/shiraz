@@ -110,14 +110,13 @@ def _default_applications_dir(os_name: str) -> Path:
 def _build_run_args(
     apk_path: Path,
     *,
-    sandbox: bool = False,
+    sandbox: bool = True,
     allow_network: bool = True,
 ) -> List[str]:
     if not allow_network and not sandbox:
         raise ValueError('allow_network=False requires sandbox=True')
     args = ['-m', 'shiraz.cli', 'run', str(apk_path)]
-    if sandbox:
-        args.append('--sandbox')
+    args.append('--sandbox' if sandbox else '--no-sandbox')
     if not allow_network:
         args.append('--no-network')
     return args
@@ -169,7 +168,7 @@ def install_desktop_app(
     label: str,
     *,
     icon_path: Optional[Path] = None,
-    sandbox: bool = False,
+    sandbox: bool = True,
     allow_network: bool = True,
     applications_dir: Optional[Path] = None,
     python_executable: Optional[str] = None,

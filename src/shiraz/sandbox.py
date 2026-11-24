@@ -92,13 +92,22 @@ def build_linux_landlock_policy(policy: SandboxPolicy) -> Dict[str, Any]:
         '/usr',
         '/lib',
         '/lib64',
+        '/bin',
+        '/etc',
         '/etc/ssl',
         '/etc/fonts',
         '/proc',
+        '/sys',
         '/dev',
         *policy.read_only_paths,
     ]
-    read_write = [policy.data_dir, policy.cache_dir, *policy.extra_read_write_paths, '/tmp']
+    read_write = [
+        policy.data_dir,
+        policy.cache_dir,
+        *policy.extra_read_write_paths,
+        '/tmp',
+        '/dev/shm',
+    ]
     return {
         'backend': 'landlock-seccomp',
         'no_new_privs': True,
@@ -121,13 +130,23 @@ def build_macos_seatbelt_profile(policy: SandboxPolicy) -> str:
         '(allow process-fork)',
         '(allow signal (target self))',
         '(allow mach-lookup)',
+        '(allow iokit-open)',
+        '(allow ipc-posix-shm)',
         '(allow sysctl-read)',
+        '(allow file-read-metadata)',
         '(allow file-read*',
         '  (subpath "/System")',
         '  (subpath "/usr/lib")',
         '  (subpath "/usr/share")',
         '  (subpath "/Library/Fonts")',
+        '  (subpath "/Library/Keychains")',
+        '  (subpath "/Library/Preferences")',
+        '  (subpath "/Library/Security")',
         '  (subpath "/private/var/db/dyld")',
+        '  (subpath "/private/var/db/mds")',
+        '  (subpath "/private/var/db/crls")',
+        '  (subpath "/private/var/db/timezone")',
+        '  (subpath "/dev")',
     ]
     for path in dict.fromkeys(policy.read_only_paths):
         lines.append(f'  (subpath "{_escape_sbpl(path)}")')
@@ -141,6 +160,10 @@ def build_macos_seatbelt_profile(policy: SandboxPolicy) -> str:
         lines.append(f'  (subpath "{_escape_sbpl(path)}")')
     lines.extend(
         [
+            '  (literal "/dev/null")',
+            '  (literal "/dev/zero")',
+            '  (literal "/dev/dtracehelper")',
+            '  (subpath "/dev/fd")',
             '  (subpath "/private/tmp")',
             '  (subpath "/tmp")',
             ')',

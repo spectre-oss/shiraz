@@ -993,9 +993,9 @@ packaging-tools:
 appimage osmand-appimage flatpak: packaging-tools
 HOST_ARCH := $(shell uname -m)
 OSMAND_APK := context/apks/net.osmand.plus_$(if $(filter aarch64,$(HOST_ARCH)),541003,541002).apk
-build/shiraz-app: packaging/app_run.cpp packaging/desktop_install.h packaging/offline.h
+build/shiraz-app: packaging/app_run.cpp packaging/desktop_install.h packaging/offline.h native/sandbox_linux.cpp include/shiraz/sandbox.hpp
 	@mkdir -p build
-	$(CXX) $(CXXFLAGS) $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) packaging/app_run.cpp native/sandbox_linux.cpp -o $@
 appimage: build framework build/shiraz-app build/libEGL_shim.so
 	@test -n "$(APK)" || { echo 'Usage: make appimage APK=/absolute/path/app.apk [NAME=Title] [AOT=0]'; exit 1; }
 	python3 scripts/build_appimage.py --apk "$(APK)" $(if $(NAME),--name "$(NAME)",) $(if $(filter 0,$(AOT)),--no-aot,)
