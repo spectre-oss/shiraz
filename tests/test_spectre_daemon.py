@@ -252,6 +252,25 @@ class SpectreDaemonUnitTest(unittest.TestCase):
             self.assertEqual(env['FONTCONFIG_FILE'], str(root / '.local/etc/fonts/fonts.conf'))
             self.assertEqual(env['SHIRAZ_EGL_LIBRARY'], str(root / 'build/macos/libEGL.dylib'))
 
+    def test_collect_warm_files_darwin_includes_macos_dylibs(self):
+        with tempfile.TemporaryDirectory(prefix='shiraz-warm-darwin-') as tmp:
+            root = Path(tmp)
+            host = root / 'host'
+            (host / 'bin').mkdir(parents=True)
+            (host / 'bin/dalvikvm').write_bytes(b'vm')
+            (host / 'lib64').mkdir(parents=True)
+            (host / 'lib64/libicuuc.78.dylib').write_bytes(b'icu')
+            (root / 'build/macos').mkdir(parents=True)
+            (root / 'build/macos/libEGL.dylib').write_bytes(b'egl')
+            (root / 'build/macos/libshiraz-host.so').write_bytes(b'host')
+            with mock.patch.object(aot_cache, 'host_system', return_value='Darwin'):
+                files = aot_cache.collect_warm_files(root / 'cache', root=root, host=host)
+            names = {p.name for p in files}
+            self.assertIn('dalvikvm', names)
+            self.assertIn('libicuuc.78.dylib', names)
+            self.assertIn('libEGL.dylib', names)
+            self.assertIn('libshiraz-host.so', names)
+
 
 if __name__ == '__main__':
     unittest.main()

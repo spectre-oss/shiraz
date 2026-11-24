@@ -343,7 +343,7 @@ class HostSession:
                     package, identity['sha256'], process_name=process_name
                 ) as channel:
                     direct_launch = (
-                        sys.platform == 'linux'
+                        sys.platform in ('linux', 'darwin')
                         and os.environ.get('SHIRAZ_DIRECT_LAUNCH') == '1'
                         and component is None
                         and launch_channel is None
@@ -357,7 +357,14 @@ class HostSession:
                         from .runtime import prepare_direct_activity
                         from .warm_pool import DirectProcessControl
 
-                        env['SHIRAZ_GUEST_LOADER'] = '1' if settings.get('native_code') else '0'
+                        env['SHIRAZ_GUEST_LOADER'] = (
+                            '1'
+                            if (
+                                settings.get('native_code')
+                                or os.environ.get('SHIRAZ_GUEST_LOADER') == '1'
+                            )
+                            else '0'
+                        )
                         (
                             session_ctx,
                             art_cmd,
@@ -411,6 +418,10 @@ class HostSession:
                                                 'ANDROID_',
                                                 'XDG_',
                                                 'BIONIC_',
+                                                'FONTCONFIG_',
+                                                'MTL_',
+                                                'VK_',
+                                                'MVK_',
                                             )
                                         )
                                         or k in ('HOME', 'TMPDIR')

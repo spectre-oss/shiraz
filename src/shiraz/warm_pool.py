@@ -353,7 +353,10 @@ class WarmArtPool:
                 aot_dir=self.aot_dir,
                 control_fd=child_sock.fileno(),
             )
-            standby_log = self.root / 'build/warm-pool/standby.log'
+            darwin = host_system() == 'Darwin'
+            standby_log = self.root / (
+                'build/macos/warm-pool/standby.log' if darwin else 'build/warm-pool/standby.log'
+            )
             standby_log.parent.mkdir(parents=True, exist_ok=True)
             with child_sock, standby_log.open('wb') as log_out:
                 proc = subprocess.Popen(
@@ -366,7 +369,7 @@ class WarmArtPool:
                     pass_fds=(child_sock.fileno(),),
                     start_new_session=True,
                 )
-            parent_sock.settimeout(8.0)
+            parent_sock.settimeout(12.0 if darwin else 8.0)
             banner = parent_sock.recv(64)
             if banner != b'READY\n' or proc.poll() is not None:
                 raise RuntimeError(f'Warm standby failed readiness handshake: {banner!r}')

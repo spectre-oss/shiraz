@@ -1549,7 +1549,10 @@ def prepare_direct_activity(
         raise FormatError('frames must be between 1 and 600')
 
     system = host_system()
+    darwin = system == 'Darwin'
     execution_mode = env_in.get('SHIRAZ_ART_MODE', 'interpreter')
+    if darwin and env_in.get('SHIRAZ_DARWIN_JIT') != '1':
+        execution_mode = 'interpreter'
     execution_options = art_execution_options(execution_mode)
     manifest = normalize(apk, report['manifest'])
     minimum = manifest.get('min_sdk')
@@ -1664,6 +1667,14 @@ def prepare_direct_activity(
         facts.update(timestamps)
         metadata.write_text(properties_text(facts), encoding='utf-8')
         profile_values = validate_device_profile(device_profile) if device_profile else {}
+        darwin_gles = darwin and (ROOT / DARWIN_LIBRARIES / 'libEGL.dylib').is_file()
+        darwin_guest_bridge = (
+            ROOT / DARWIN_LIBRARIES / 'libshiraz-guest.so'
+            if darwin
+            and env_in.get('SHIRAZ_GUEST_LOADER') == '1'
+            and (ROOT / DARWIN_LIBRARIES / 'libshiraz-guest.so').is_file()
+            else None
+        )
         command, env = launch_command(
             system,
             root=ROOT,
@@ -1689,8 +1700,8 @@ def prepare_direct_activity(
             profile_values=profile_values,
             digitalis=None,
             version=(ROOT / 'VERSION').read_text(encoding='ascii').strip(),
-            gles=False,
-            guest_bridge=None,
+            gles=darwin_gles,
+            guest_bridge=darwin_guest_bridge,
             activity_process=activity_process,
         )
         env['SHIRAZ_BROKER_FD'] = str(broker_channel.fileno())

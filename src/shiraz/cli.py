@@ -247,6 +247,10 @@ def main(argv=None):
     launch_p.add_argument('--frames', type=int)
     launch_p.add_argument('--snapshot', type=Path)
     launch_p.add_argument('--timeout', type=int)
+    launch_p.add_argument('--no-sandbox', action='store_true', help='Disable default sandboxing')
+    launch_p.add_argument(
+        '--native-code', action='store_true', help='Enable native APK library loading'
+    )
 
     list_p = sub.add_parser('list-apps', help='List installed Shiraz Android apps')
     list_p.add_argument('--registry', type=Path)
@@ -313,6 +317,8 @@ def main(argv=None):
                 frames=args.frames,
                 snapshot=str(args.snapshot.resolve()) if args.snapshot else None,
                 timeout=args.timeout,
+                sandbox=False if args.no_sandbox else None,
+                native_code=True if args.native_code else None,
             )
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0

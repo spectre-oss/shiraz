@@ -77,7 +77,8 @@ def xdg_runtime_dir(env: Optional[Dict[str, str]] = None) -> Path:
     val = e.get('XDG_RUNTIME_DIR', '')
     if val and Path(val).is_absolute():
         return Path(val)
-    fallback = Path(tempfile.gettempdir()) / f'shiraz-runtime-{os.getuid()}'
+    base = Path('/tmp') if sys.platform == 'darwin' else Path(tempfile.gettempdir())
+    fallback = base / f'shiraz-rt-{os.getuid()}'
     fallback.mkdir(parents=True, exist_ok=True, mode=0o700)
     return fallback
 
@@ -763,7 +764,7 @@ class ShirazDaemon:
             # 2. Ensure shared AOT boot image + shiraz-framework.odex + installed app .odex files,
             #    plus warm inspect_apk binary caches and pre-extract native app_lib/*.so so the
             #    very first tap skips ZIP extraction and APK parsing completely.
-            if self.aot_enabled and not self._stop_event.is_set():
+            if self.aot_enabled and sys.platform == 'linux' and not self._stop_event.is_set():
                 ensure_boot_and_framework_aot(self.aot_root)
                 self._publish_status()
                 reg = PackageRegistry(self.registry_dir)
@@ -936,14 +937,17 @@ class ShirazDaemon:
         timeout = req.get('timeout')
         sandbox = bool(req['sandbox']) if 'sandbox' in req else self.sandbox
 
-        # Apply SpectreOS Wayland + Freedesktop + AOT fast-launch environment before spawn.
+        # Apply host Wayland (Linux) / Cocoa (Darwin) + fast-launch environment before spawn.
         saved_env: Dict[str, Optional[str]] = {}
-        wayland_display = self._resolve_wayland_display(
-            str(req.get('wayland_display') or '') or None
+        is_darwin = sys.platform == 'darwin'
+        wayland_display = (
+            ''
+            if is_darwin
+            else self._resolve_wayland_display(str(req.get('wayland_display') or '') or None)
         )
         launch_env = {
-            'SHIRAZ_ART_MODE': 'jit',
-            'SHIRAZ_AOT_DIR': str(self.aot_root) if self.aot_enabled else '',
+            'SHIRAZ_ART_MODE': 'interpreter' if is_darwin else 'jit',
+            'SHIRAZ_AOT_DIR': str(self.aot_root) if (self.aot_enabled and not is_darwin) else '',
             'SHIRAZ_CHECK_JNI': '0',
             'SHIRAZ_FAST_GC': '1',
             'SHIRAZ_FAST_INSPECT': '1',
@@ -954,14 +958,14 @@ class ShirazDaemon:
             'SHIRAZ_DESKTOP_ENTRY': f'{package}.Shiraz',
             'SDL_VIDEO_WAYLAND_WMCLASS': f'{package}.Shiraz',
         }
-        if wayland_display:
+        if wayland_display and not is_darwin:
             launch_env['WAYLAND_DISPLAY'] = wayland_display
             if (
                 'SDL_VIDEODRIVER' not in os.environ
                 and 'SHIRAZ_HOST_SDL_VIDEODRIVER' not in os.environ
             ):
                 launch_env['SDL_VIDEODRIVER'] = 'wayland'
-        if self.dbus_address:
+        if self.dbus_address and not is_darwin:
             launch_env['DBUS_SESSION_BUS_ADDRESS'] = self.dbus_address
 
         t0 = time.monotonic()
@@ -978,6 +982,9 @@ class ShirazDaemon:
                     'height': height,
                     'sandbox': sandbox,
                     'allow_network': True,
+                    'native_code': bool(req['native_code'])
+                    if 'native_code' in req
+                    else (os.environ.get('SHIRAZ_GUEST_LOADER') == '1'),
                 }
                 if frames is not None:
                     settings['frames'] = int(frames)
@@ -1128,7 +1135,8 @@ class ShirazDaemon:
                 pass
 
     def serve_forever(self) -> int:
-        ensure_mime_apk_handler()
+        if sys.platform == 'linux':
+            ensure_mime_apk_handler()
         self.registry_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.session = HostSession(self.registry_dir)
         self.session.warm_pool = self.warm_pool
@@ -1288,6 +1296,8 @@ def launch_app_via_daemon(
     frames: Optional[int] = None,
     snapshot: Optional[str] = None,
     timeout: Optional[int] = None,
+    sandbox: Optional[bool] = None,
+    native_code: Optional[bool] = None,
     env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, object]:
     """Launch an installed Android app via the warm Shiraz daemon (auto-starting if needed)."""
@@ -1304,6 +1314,10 @@ def launch_app_via_daemon(
         payload['snapshot'] = str(snapshot)
     if timeout is not None:
         payload['timeout'] = int(timeout)
+    if sandbox is not None:
+        payload['sandbox'] = bool(sandbox)
+    if native_code is not None:
+        payload['native_code'] = bool(native_code)
     resp = ctl_request(payload, env=env, timeout=30.0)
     if not resp.get('ok'):
         raise RuntimeError(str(resp.get('error') or 'Launch failed'))

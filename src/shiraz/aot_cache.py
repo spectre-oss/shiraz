@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .platform_paths import cache_home
-from .runtime import BUNDLED_FONTS, HOST, JARS, ROOT
+from .runtime import BUNDLED_FONTS, DARWIN_JARS, DARWIN_LIBRARIES, HOST, JARS, ROOT, host_system
 
 _ISA_MAP = {'x86_64': 'x86_64', 'aarch64': 'arm64', 'arm64': 'arm64'}
 
@@ -487,6 +487,7 @@ def collect_warm_files(
     cache = Path(cache_root) if cache_root is not None else aot_cache_root()
     candidates: List[Path] = []
 
+    darwin = host_system() == 'Darwin'
     # 1. ART VM binaries and core shared libraries
     for name in ('dalvikvm64', 'dalvikvm'):
         p = host / 'bin' / name
@@ -494,19 +495,23 @@ def collect_warm_files(
             candidates.append(p)
     host_lib = host / 'lib64'
     if host_lib.is_dir():
-        candidates.extend(
-            sorted(p for p in host_lib.glob('*.so*') if p.is_file() and not p.is_symlink())
-        )
+        patterns = ('*.so*', '*.dylib') if darwin else ('*.so*',)
+        for pat in patterns:
+            candidates.extend(
+                sorted(p for p in host_lib.glob(pat) if p.is_file() and not p.is_symlink())
+            )
 
     # 2. Shiraz native JNI + Skia + graphics/audio/notification libraries
-    build_dir = root / 'build'
+    build_dir = root / (DARWIN_LIBRARIES if darwin else 'build')
     if build_dir.is_dir():
-        candidates.extend(
-            sorted(p for p in build_dir.glob('*.so*') if p.is_file() and not p.is_symlink())
-        )
+        patterns = ('*.so*', '*.dylib') if darwin else ('*.so*',)
+        for pat in patterns:
+            candidates.extend(
+                sorted(p for p in build_dir.glob(pat) if p.is_file() and not p.is_symlink())
+            )
 
     # 3. Boot jars, framework jar & resources
-    candidates.extend(host / 'framework' / name for name in JARS)
+    candidates.extend(host / 'framework' / name for name in (DARWIN_JARS if darwin else JARS))
     candidates.append(root / 'build/shiraz-framework.jar')
     candidates.append(root / 'build/framework-res/framework-res.apk')
 
