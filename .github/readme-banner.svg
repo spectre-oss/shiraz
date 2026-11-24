@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title desc">
   <!-- SPDX-License-Identifier: GPL-3.0-only -->
   <title id="title">Shiraz — Your Android™ apps. A little more at home.</title>
-  <desc id="desc">Native Android compatibility layer for Linux and Apple Silicon macOS. No virtual machine, no full Android system, GTK-free.</desc>
+  <desc id="desc">Open-source, GTK-free Android compatibility layer for Linux, Apple Silicon macOS, and Windows. Standalone ART, 4,445 API 35 classes, 15 NDK libraries, and local AppImage &amp; Flatpak packaging — no virtual machine.</desc>
   <defs>
     <linearGradient id="cardBg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#2b0f1c"/>
@@ -105,12 +105,12 @@
     <text x="60" y="218" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="48" font-weight="700" letter-spacing="-1" fill="#f7ecdc">A little more at home.</text>
 
     <!-- Subtitle -->
-    <text x="60" y="264" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#d6c0bd">Native Android™ compatibility for Linux and Apple Silicon macOS.</text>
-    <text x="60" y="290" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#b59da0">No virtual machine. No full Android™ system. GTK-free.</text>
+    <text x="60" y="264" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#d6c0bd">Native Android™ compatibility for Linux, Apple Silicon macOS &amp; Windows.</text>
+    <text x="60" y="290" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="400" fill="#b59da0">AppImage &amp; Flatpak builder. No virtual machine. GTK-free.</text>
 
     <!-- Bottom accent line -->
     <circle cx="66" cy="329" r="4" fill="#f4b63f"/>
-    <text x="80" y="334" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#d6c0bd">Open source · GPL-3.0-only · ART + SDL + EGL/GLES · Experimental</text>
+    <text x="80" y="334" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="500" fill="#d6c0bd">GPL-3.0-only · ART · 4,445 API 35 classes · 15 NDK libs · SDL2 + EGL/GLES/Metal</text>
   </g>
 
   <rect x="1" y="1" width="1198" height="378" rx="20" fill="none" stroke="#5b2d40" stroke-width="1.5"/>

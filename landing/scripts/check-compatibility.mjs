@@ -181,3 +181,19 @@ for (const row of hosts.layers) {
 console.log(
   `Validated ${support.areas.length} subsystem notes, ${hosts.platforms.length} host platforms (${hosts.layers.length} layers), ${classes.reference} reference classes, ${ndk.librariesTotal} NDK libraries (${ndk.symbolsPresent}/${ndk.symbolsReference} symbols) and ${planned.total} planned assertions`
 );
+
+// Verify SEO, GEO and AEO static discovery assets.
+const robots = readFileSync(`${root}landing/static/robots.txt`, 'utf8');
+if (!robots.includes('Sitemap: https://spectre-oss.github.io/shiraz/sitemap.xml')) throw Error('robots.txt missing canonical Sitemap directive');
+const sitemap = readFileSync(`${root}landing/static/sitemap.xml`, 'utf8');
+for (const loc of ['https://spectre-oss.github.io/shiraz/', 'https://spectre-oss.github.io/shiraz/compatibility/', 'https://spectre-oss.github.io/shiraz/compare/']) {
+  if (!sitemap.includes(`<loc>${loc}</loc>`)) throw Error(`sitemap.xml missing ${loc}`);
+}
+if (!/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/.test(sitemap)) throw Error('sitemap.xml missing ISO lastmod dates');
+const manifest = JSON.parse(readFileSync(`${root}landing/static/manifest.webmanifest`, 'utf8'));
+if (!manifest.name || !manifest.short_name || !Array.isArray(manifest.icons) || manifest.icons.length < 2) throw Error('Invalid web app manifest');
+for (const file of ['llms.txt', 'llms-full.txt']) {
+  const text = readFileSync(`${root}landing/static/${file}`, 'utf8');
+  if (!text.startsWith('# Shiraz\n') || !text.includes('4,445') || !text.includes('887')) throw Error(`Invalid or stale ${file}`);
+}
+console.log('Validated SEO/GEO/AEO assets (robots.txt, sitemap.xml, manifest.webmanifest, llms.txt, llms-full.txt)');

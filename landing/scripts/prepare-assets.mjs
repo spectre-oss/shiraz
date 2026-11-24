@@ -14,9 +14,22 @@ if (process.env.SHIRAZ_PREBUILT_WASM !== '1') {
 }
 for (const name of ['shiraz-assemble.wasm', 'wasm_exec.js']) copyFileSync(`${root}go-wasm/${name}`, `${root}landing/static/${name}`);
 
-// Raster preview for Open Graph clients that do not support SVG cards.
+// Raster preview for Open Graph clients and PNG touch/manifest icons from SVG sources.
 const { default: sharp } = await import('sharp');
 await sharp(`${root}landing/src/lib/social-card.svg`).png().toFile(`${root}landing/static/social-card.png`);
+const ghostSvg = readFileSync(`${root}landing/static/spectre.svg`, 'utf8');
+for (const [name, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512]]) {
+  const pad = Math.round(size * 0.16);
+  const inner = size - pad * 2;
+  const icon = await sharp(Buffer.from(ghostSvg)).resize(inner, inner, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  await sharp({ create: { width: size, height: size, channels: 4, background: '#2b0f1c' } })
+    .composite([{ input: icon, left: pad, top: pad }])
+    .png()
+    .toFile(`${root}landing/static/${name}`);
+}
+
+// Keep llms.txt and llms-full.txt synchronized with current VERSION and compatibility JSONs.
+execFileSync(process.execPath, [`${root}landing/scripts/build-seo.mjs`], { stdio: 'inherit' });
 
 // The launcher film and its poster are release assets, never source. media.json
 // pins their size and SHA-256. A file with other bytes stops the build. A file

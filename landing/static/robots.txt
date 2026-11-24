@@ -1,0 +1,31 @@
+# Shiraz — https://spectre-oss.github.io/shiraz/
+# Search engines and AI answer engines are welcome to index public documentation and compatibility data.
+
+User-agent: *
+Allow: /
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+Sitemap: https://spectre-oss.github.io/shiraz/sitemap.xml
+# AI-readable project summaries:
+# https://spectre-oss.github.io/shiraz/llms.txt
+# https://spectre-oss.github.io/shiraz/llms-full.txt

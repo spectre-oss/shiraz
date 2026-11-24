@@ -8,60 +8,68 @@
 
 <a href="https://github.com/spectre-oss/shiraz/releases"><img src="https://img.shields.io/github/v/tag/spectre-oss/shiraz?sort=semver&filter=v*&style=flat-square&label=version&labelColor=2b0f1c&color=f4b63f" alt="Version" /></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--only-25c4b4?style=flat-square&labelColor=2b0f1c" alt="License: GPL-3.0-only" /></a>
-<a href="#status"><img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20(exp.)-ff5d8f?style=flat-square&labelColor=2b0f1c" alt="Platforms: Linux and experimental macOS" /></a>
+<a href="#status"><img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20(exp.)-ff5d8f?style=flat-square&labelColor=2b0f1c" alt="Platforms: Linux, macOS, and Windows" /></a>
+<a href="docs/framework_final_goal.md"><img src="https://img.shields.io/badge/API%2035-4%2C445%20classes-f9b233?style=flat-square&labelColor=2b0f1c" alt="API 35: 4,445 classes" /></a>
+<a href="docs/ndk_final_goal.md"><img src="https://img.shields.io/badge/NDK-15%2F15%20libs%20(887%20syms)-3fbf78?style=flat-square&labelColor=2b0f1c" alt="NDK: 15 of 15 libraries, 887 symbols" /></a>
 <a href="#how-it-works"><img src="https://img.shields.io/badge/UI-GTK--free-4f6df0?style=flat-square&labelColor=2b0f1c" alt="GTK-free" /></a>
 <a href="https://github.com/spectre-oss/shiraz/actions/workflows/quality.yml"><img src="https://img.shields.io/github/actions/workflow/status/spectre-oss/shiraz/quality.yml?branch=main&style=flat-square&label=checks&labelColor=2b0f1c&color=3fbf78" alt="Code quality checks" /></a>
 
 <br /><br />
 
-[Try Builder](https://spectre-oss.github.io/shiraz/#builder) · [Compatibility](https://spectre-oss.github.io/shiraz/compatibility/) · [Shiraz Web](docs/WEB.md) · [macOS Launcher](macos/Launcher/README.md) · [Documentation](docs/README.md)
+[Try Builder](https://spectre-oss.github.io/shiraz/#builder) · [Compatibility](https://spectre-oss.github.io/shiraz/compatibility/) · [Compare Peers](https://spectre-oss.github.io/shiraz/compare/) · [Shiraz Web](docs/WEB.md) · [macOS Launcher](macos/Launcher/README.md) · [Documentation](docs/README.md)
 
 </div>
 
 ---
 
-[Shiraz](https://www.openstreetmap.org/node/26082452) is an experimental, open-source compatibility layer that brings Android™ apps to Linux desktops, with an early native port for Apple Silicon macOS and a long-term goal of supporting Linux phones. It runs app bytecode and native libraries directly on the host — without booting an Android system image, running a virtual machine, or depending on GTK.
+[Shiraz](https://www.openstreetmap.org/node/26082452) is an experimental, open-source (**GPL-3.0-only**) Android™ compatibility layer that runs supported Android APKs directly on **Linux** (`x86_64` and `ARM64`), with an active native port for **Apple Silicon macOS**, a CI-verified native **Windows** (`x64` and `ARM64`) foundation, and a long-term goal of supporting **Linux phones**. It executes app bytecode on standalone **ART** and translates Android framework and NDK calls directly to host OS libraries — without booting an Android system image, running a virtual machine, requiring kernel binder or root, or depending on GTK.
 
 > [!WARNING]
-> **Experimental — no app sandbox.** Shiraz does not provide Android-style app isolation. APKs execute with the privileges of the launching user and can access that user's files and network. **Only run APKs you trust.** When testing unfamiliar APKs, use an isolated environment such as an unprivileged LXC container or a dedicated VM without exposing personal files or sensitive host resources. See [SECURITY.md](SECURITY.md).
+> **Experimental — opt-in isolation only on CLI/AppImage.** Flatpak bundles run inside the Flatpak bubblewrap sandbox, and the CLI supports opt-in isolation via `shiraz run --sandbox [--no-network]`. Default CLI and AppImage runs execute with the privileges of the launching user and can access that user's files and network. **Only run APKs you trust.** When testing unfamiliar APKs, use an isolated environment such as an unprivileged LXC container or a dedicated VM without exposing personal files or sensitive host resources. See [SECURITY.md](SECURITY.md).
 
 ## One runtime, four ways to use it
 
 | Interface | What it does | Best for |
 | --- | --- | --- |
-| **Shiraz Runtime** | The core CLI, ART host, framework layer, and native adapters ([development guide](docs/DEVELOPMENT.md)). | Running APKs on Linux desktops and developing Android compatibility. |
-| **[Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder)** | Packages an APK and the runtime into a standalone Linux AppImage directly in your browser — your APK stays local ([guide](docs/BUILDER.md)). | Turning a supported APK into a single-file Linux application. |
+| **Shiraz Runtime** | The core CLI, standalone ART host (with warm standby daemon on Linux), framework layer, 15 NDK libraries, and native OS adapters ([development guide](docs/DEVELOPMENT.md)). | Running APKs directly on Linux/macOS desktops, installing desktop entries (`shiraz install-desktop`), and developing Android compatibility. |
+| **[Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder)** | Packages an APK and the runtime into a standalone Linux **AppImage** or sandboxed **Flatpak** (`.flatpak`) directly in your browser using Go WebAssembly — your APK stays local ([guide](docs/BUILDER.md)). | Turning a supported APK into a single-file or sandboxed Linux desktop application with no upload. |
 | **[Shiraz Web](docs/WEB.md)** | Runs an APK on a Linux host and streams its screen, touch, and keyboard to any browser over WebRTC. | Trying apps through a browser locally or on Linux phones from a host. |
 | **[Shiraz Launcher](macos/Launcher/README.md)** *(macOS, exp.)* | Native SwiftUI shelf for Apple Silicon Macs with per-app screen presets, F-Droid catalog browsing, Dock icons, and live console ([watch demo](https://spectre-oss.github.io/shiraz/#mac)). | Managing, configuring, and launching local APKs on Apple Silicon. |
 
-Builder creates a standalone Linux application, Web streams from a Linux host, and Launcher drives local runs on Apple Silicon. All of them share the Shiraz runtime and its compatibility limits.
+Builder creates standalone Linux applications, Web streams from a Linux host, and Launcher drives local runs on Apple Silicon. All of them share the Shiraz runtime and its recorded compatibility limits.
 
 ## How it works
 
-Shiraz executes Android DEX bytecode with a standalone host build of **ART** (Android's runtime) and translates Android framework, resource, and JNI calls into native Linux or macOS functionality using **SDL** and **EGL/GLES**. On Apple Silicon Macs, an in-process guest ELF loader, bionic ABI thunks, and **ANGLE (Metal)** run `arm64-v8a` native libraries directly; on `x86_64` Linux, optional ARM64 translation built on [Digitalis](https://digitalisx64.github.io/) runs supported ARM64 code from source builds.
+Shiraz executes Android DEX bytecode with a standalone host build of **ART** (Android's runtime) and translates Android framework, resource, and JNI/NDK calls into native host functionality using **SDL2**, **EGL/GLES**, **Skia Ganesh**, and OS-specific bridges:
+
+- **Linux (`x86_64`, `aarch64`):** Warm ART standby daemon & AOT/page-cache pre-warming, zero-copy GBM/DMA-BUF swapchain, `SurfaceTexture`, `EGL_ANDROID_native_fence_sync`, live vsync `AChoreographer`, ALSA/PipeWire AAudio & OpenSL ES, `libvulkan.so` (`VK_KHR_android_surface` & `AHardwareBuffer`), Landlock + seccomp `--sandbox`, optional [Digitalis](https://digitalisx64.github.io/) ARM64 translation on `x86_64`, plus AppImage and sandboxed Flatpak packaging.
+- **macOS (Apple Silicon `arm64`):** Native Mach-O ART (`-Xint`), opt-in guest ARM64 ELF/Bionic loader, **ANGLE (Metal)** zero-copy `IOSurface` swapchain, `SurfaceTexture`, `AHardwareBuffer` `EGLImage`, `MTLSharedEvent` native fences, 120 Hz `CVDisplayLink` vsync, VideoToolbox H.264/HEVC/VP9/AV1, AudioToolbox AAudio/Opus, `Security.framework` TLS trust (`wolfJSSE` + OkHttp), CoreLocation, `UNUserNotificationCenter`, Seatbelt sandbox, and signed `.app` bundling.
+- **Windows (`x64`, `arm64`):** CI-verified native Win32 primitives (`CreateFileMappingW`, `WaitForMultipleObjects`, Named Pipe IPC, Job Object + Restricted Token sandbox), SDL2 Win32 presentation/IME/clipboard/keyboard, DXGI shared `AHardwareBuffer` pool, `DwmFlush` choreographer, `libvulkan.dll`, WASAPI `libaaudio.dll` & `libOpenSLES.dll`, Media Foundation, DirectWrite, and portable/MSIX bundler (Win32 ART & guest ELF integration in progress).
 
 | Layer | Role | Source |
 | --- | --- | --- |
 | `01` **Your APK** | Inspects the unmodified package, manifest, resources, and native ABIs. | [`src/shiraz/`](src/shiraz) |
-| `02` **ART** | Standalone host build executes DEX bytecode (interpreter and AOT where supported). | [`scripts/bootstrap_runtime.py`](scripts/bootstrap_runtime.py) |
-| `03` **Android™ API layer** | All 4,445 Android API 35 `android.*` class surfaces in Java + ART boot jars (bounded per-subsystem behavior). | [`java/android/`](java/android) |
-| `04` **Native bridges** | JNI, bionic compatibility, Skia, fonts, audio, SQLite, EGL/GLES, and guest ELF loading. | [`native/`](native) |
-| `05` **Desktop host** | Presents windows, input, and lifecycle directly on Linux or macOS. | [`native/presentation.cpp`](native/presentation.cpp) |
+| `02` **ART** | Standalone host build executes DEX bytecode (interpreter, AOT, and warm standby pool on Linux). | [`scripts/bootstrap_runtime.py`](scripts/bootstrap_runtime.py) |
+| `03` **Android™ API layer** | All **4,445 / 4,445** Android 15 / API 35 `android.*` class surfaces across 49 packages in Java + ART boot jars (bounded per-subsystem behavior). | [`java/android/`](java/android) |
+| `04` **Native bridges** | All **15 / 15** tracked API 35 NDK C/C++ libraries (**887 / 887** audited symbols), JNI, Bionic compatibility, Skia, fonts, audio, SQLite, zero-copy EGL/GLES, Vulkan loader hooks, and guest ELF loading. | [`native/`](native) |
+| `05` **Desktop host** | Presents windows, input, services, and isolation directly on Linux, macOS, or Windows without GTK. | [`native/presentation.cpp`](native/presentation.cpp) |
 
 ## Status
 
 | Platform | State | Current scope & limits |
 | --- | --- | --- |
-| **Linux** (`x86_64`, `aarch64`) | Experimental · Active | Prebuilt `x86_64` and `aarch64` browser base AppImages, the browser builder, and an `amd64` `shiraz-web` Debian package are published on [GitHub Releases](https://github.com/spectre-oss/shiraz/releases). Selected apps and games work interactively ([tested applications](docs/tested.md), [compatibility tracker](https://spectre-oss.github.io/shiraz/compatibility/)), while behavioral gaps, graphics limits, and unsupported media features remain. |
-| **macOS** (Apple Silicon) | Experimental · Early | Native Mach-O ART, ANGLE-Metal GLES/Skia GPU canvas, guest ELF loader, bionic ABI adapters, and SwiftUI [Launcher](macos/Launcher/README.md). Loaded OsmAnd+'s seven native libraries through an OsmAndCore JNI round trip and Telegram's native initialization, but full app compatibility and a supported macOS release remain in progress ([macOS goal & checklist](docs/macos_final_goal.md)). |
-| **Linux phones** | Future goal | Long-term target. `aarch64` base AppImages build in CI and Shiraz Web targets mobile touch and keyboard controls, but phone-level compatibility is not yet established. |
+| **Linux** (`x86_64`, `aarch64`) | Experimental · Primary | Prebuilt `x86_64` and `aarch64` browser base AppImages and Flatpak bases, the browser builder, and an `amd64` `shiraz-web` Debian package are published on [GitHub Releases](https://github.com/spectre-oss/shiraz/releases). 14 recorded apps across 8 engines ([tested applications](docs/tested.md), [compatibility tracker](https://spectre-oss.github.io/shiraz/compatibility/)) with behavioral limits documented. |
+| **macOS** (Apple Silicon) | Experimental · Active port | **46 verified / 19 partial / 26 open** items in [docs/macos_final_goal.md](docs/macos_final_goal.md). Live interactive OsmAnd+ walkthrough on Apple Silicon Metal/ANGLE reached native Tehran vector maps (Persian RTL), offline search (`185` results), HTTPS online index fetch, portrait↔landscape resize, and zoom persistence across restart; Telegram 13.2.1 reached authentication. ART JIT, M5 hardened signing gate, and full OsmAnd+ routing remain open. |
+| **Windows** (`x64`, `arm64`) | Experimental · Foundation | **32 verified / 2 partial / 3 open** CI-verified native Win32 items in [docs/windows_final_goal.md](docs/windows_final_goal.md) (SDL2 Win32 presentation, DXGI, `libvulkan.dll`, WASAPI, Media Foundation, DirectWrite, portable/MSIX bundler). Full Win32 ART and guest ELF execution remain in progress. |
+| **Linux phones** | Future goal | Long-term target. `aarch64` base AppImages/Flatpaks build in CI and Shiraz Web targets mobile touch and keyboard controls, but phone-level compatibility is not yet established. |
 
-- **Framework API coverage:** All 4,445 / 4,445 Android API 35 `android.*` framework class surfaces (49 / 49 areas) are implemented and smoke-tested on OpenJDK and standalone ART; behavioral parity and hardware backends remain bounded per subsystem — see [Framework APIs goal](docs/framework_final_goal.md) and [missing Android libraries](docs/MISSING_ANDROID_LIBRARIES.md).
-- **Local verification:** With pinned development dependencies prepared, run `make check` on Linux (includes Linux EGL/JNI checks) or `make macos-guest-check` on Apple Silicon macOS.
+- **Framework & NDK coverage:** All **4,445 / 4,445** Android API 35 `android.*` framework class surfaces (`49 / 49` areas) and all **15 / 15** tracked API 35 NDK C/C++ libraries (`887 / 887` symbols) are built and audited — see [Framework APIs goal](docs/framework_final_goal.md), [NDK libraries goal](docs/ndk_final_goal.md), and [missing Android libraries](docs/MISSING_ANDROID_LIBRARIES.md). Class/symbol presence is not CTS certification or a whole-Android compatibility percentage.
+- **How Shiraz compares:** See [Shiraz and its peers](https://spectre-oss.github.io/shiraz/compare/) for a side-by-side comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper, Waydroid, and Android Emulator.
+- **Local verification:** With pinned development dependencies prepared, run `make check` on Linux or `make macos-guest-check` on Apple Silicon macOS.
 
 ## Get started
 
-- **Package an AppImage in your browser:** Open [Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder) — no upload, everything runs locally in WebAssembly ([Builder guide](docs/BUILDER.md)).
+- **Package an AppImage or Flatpak in your browser:** Open [Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder) — no upload, everything runs locally in WebAssembly ([Builder guide](docs/BUILDER.md)).
 - **Run apps through a browser:** Install the `shiraz-web` `.deb` package from [Releases](https://github.com/spectre-oss/shiraz/releases) or run `go-server` from source ([Web setup guide](docs/WEB.md)).
 - **Build and run from source:** With runtime dependencies prepared (see [development guide](docs/DEVELOPMENT.md) and [Makefile](Makefile)):
 
@@ -70,8 +78,12 @@ Shiraz executes Android DEX bytecode with a standalone host build of **ART** (An
 make build
 make run APK=/absolute/path/application.apk
 
-# Or package a standalone Linux AppImage
+# Package a standalone Linux AppImage or sandboxed Flatpak (.flatpak)
 make appimage APK=/absolute/path/application.apk
+make flatpak APK=/absolute/path/application.apk
+
+# Or install a per-APK desktop entry (Linux .desktop, macOS ~/Applications, Windows Start Menu)
+python3 -m shiraz install-desktop /absolute/path/application.apk
 ```
 
 To verify and fetch an open-source APK from F-Droid using Shiraz's pinned repository check:
@@ -85,6 +97,14 @@ On Apple Silicon macOS, build the native app shelf with `make launcher-app` — 
 
 <details>
 <summary><strong>Advanced runtime &amp; developer flags</strong></summary>
+
+- **Opt-in cross-platform sandboxing (`--sandbox`, `--no-network`):**
+
+  ```sh
+  PYTHONPATH=src python3 -m shiraz run /absolute/path/application.apk --sandbox --no-network
+  ```
+
+  Applies Linux Landlock LSM + `PR_SET_NO_NEW_PRIVS` + seccomp-BPF network deny, macOS Seatbelt (`/usr/bin/sandbox-exec`) SBPL profile, or Windows Job Object limits.
 
 - **Block direct internet access in a packaged Linux AppImage (`--no-internet`):**
 
@@ -110,18 +130,37 @@ On Apple Silicon macOS, build the native app shelf with `make launcher-app` — 
 
 </details>
 
+## Frequently asked questions
+
+**How is Shiraz different from Waydroid or Android emulators?**
+Waydroid boots a full LineageOS Android system in an LXC container and requires Linux kernel binder support; emulators boot Android inside a virtual machine. Shiraz runs only the app on standalone ART over native host libraries — no OS image, no VM, no binder kernel module, and no root.
+
+**How does Shiraz differ from Android Translation Layer (ATL)?**
+Both are GPL-3.0 standalone-ART translation layers (Shiraz ships ATL's `bionic_translation` linker under its original notice). Shiraz is GTK-free (SDL2 across Linux, macOS, and Windows), adds in-browser AppImage and Flatpak packaging, WebRTC streaming, warm ART pre-warming, and native macOS/Windows host backends. See [the full 7-project comparison](https://spectre-oss.github.io/shiraz/compare/).
+
+**Does Shiraz include Google Play Services or run every Android app?**
+No. Shiraz does not ship the Google Play Store or Google Play Services, and compatibility grows app by app. Check [the live compatibility catalog](https://spectre-oss.github.io/shiraz/compatibility/) and [docs/tested.md](docs/tested.md) for verified flows and open limits.
+
+**Can AI tools or search engines read a structured summary of Shiraz?**
+Yes — up-to-date machine-readable summaries are published at [`llms.txt`](https://spectre-oss.github.io/shiraz/llms.txt) and [`llms-full.txt`](https://spectre-oss.github.io/shiraz/llms-full.txt).
+
 ## Documentation
 
 | Topic | Guide |
 | --- | --- |
 | Full documentation index | [docs/README.md](docs/README.md) |
+| Cross-platform host architecture (Linux, macOS, Windows) | [docs/cross_platform.md](docs/cross_platform.md) |
 | Setup, architecture, builds, and tests | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | Observed app results and limits | [docs/tested.md](docs/tested.md) |
-| Browser AppImage builder (Go/WASM) | [docs/BUILDER.md](docs/BUILDER.md) |
+| Live compatibility & API 35/NDK tracker | [spectre-oss.github.io/shiraz/compatibility/](https://spectre-oss.github.io/shiraz/compatibility/) |
+| Comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper | [spectre-oss.github.io/shiraz/compare/](https://spectre-oss.github.io/shiraz/compare/) |
+| Browser AppImage & Flatpak builder (Go/WASM) | [docs/BUILDER.md](docs/BUILDER.md) |
 | WebRTC browser runner | [docs/WEB.md](docs/WEB.md) |
 | macOS Launcher (SwiftUI) | [macos/Launcher/README.md](macos/Launcher/README.md) |
-| Android API 35 roadmap (4,445 classes) | [docs/framework_final_goal.md](docs/framework_final_goal.md) |
+| Android API 35 Java roadmap (4,445 classes) | [docs/framework_final_goal.md](docs/framework_final_goal.md) |
+| Android API 35 NDK libraries roadmap (15 libs / 887 symbols) | [docs/ndk_final_goal.md](docs/ndk_final_goal.md) |
 | Native macOS (Apple Silicon) checklist | [docs/macos_final_goal.md](docs/macos_final_goal.md) |
+| Native Windows (`x64` / `arm64`) checklist | [docs/windows_final_goal.md](docs/windows_final_goal.md) |
 | AI-assisted isolated testing & PRs | [docs/AI_CONTRIBUTING.md](docs/AI_CONTRIBUTING.md) |
 | Security model and isolation boundaries | [SECURITY.md](SECURITY.md) |
 

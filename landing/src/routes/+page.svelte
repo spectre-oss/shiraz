@@ -8,6 +8,7 @@
   import { initIcons } from '#lib/icons.js';
   import { initInteractions } from '#lib/interactions.js';
   import media from '#lib/media.json';
+  import { ROBOTS_INDEX, homeFaqs, homeJsonLd, serializeJsonLd } from '#lib/seo.js';
   import '../styles.css';
   // The newest published tag when the build could ask GitHub; otherwise the
   // source version, linked to the release list because its tag may not exist.
@@ -50,13 +51,15 @@
   });
 </script>
 <svelte:head>
-  <title>Shiraz — Android™ apps on Linux, macOS and Windows.</title>
-  <meta name="description" content="Supported Android™ apps on Linux, with an experimental Apple Silicon macOS port and native Windows foundation. Build an AppImage or Flatpak locally in your browser with Shiraz." />
+  <title>Shiraz — Run Android™ apps natively on Linux, macOS and Windows</title>
+  <meta name="description" content="Run supported Android™ APKs natively on Linux, Apple Silicon macOS, and Windows without a virtual machine or Waydroid. Package an AppImage or sandboxed Flatpak locally in your browser." />
+  <meta name="robots" content={ROBOTS_INDEX} />
   <link rel="canonical" href="https://spectre-oss.github.io/shiraz/" />
   <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Shiraz" />
-  <meta property="og:title" content="Shiraz — Your Android™ apps, at home on Linux, macOS and Windows" />
-  <meta property="og:description" content="An experimental, open-source Android™ compatibility layer for Linux, macOS and Windows. Build an AppImage or Flatpak locally in your browser. No virtual machine." />
+  <meta property="og:title" content="Shiraz — Run Android™ apps natively on Linux, macOS and Windows" />
+  <meta property="og:description" content="Open-source, GTK-free Android™ compatibility layer for Linux, macOS and Windows. Build a Linux AppImage or Flatpak locally in your browser. No virtual machine." />
   <meta property="og:url" content="https://spectre-oss.github.io/shiraz/" />
   <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
   <meta property="og:image:type" content="image/png" />
@@ -64,11 +67,11 @@
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="Shiraz. Your Android™ apps. A little more at home. Android™ apps on Linux, macOS and Windows." />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Shiraz — Android™ apps on Linux, macOS and Windows" />
-  <meta name="twitter:description" content="Your Android™ apps. A little more at home. Explore Shiraz and package a supported APK locally in your browser." />
+  <meta name="twitter:title" content="Shiraz — Run Android™ apps natively on Linux, macOS and Windows" />
+  <meta name="twitter:description" content="Open-source Android™ compatibility layer for Linux, macOS and Windows. Package an AppImage or Flatpak locally in your browser with no VM." />
   <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
-  {@html '<script type="application/ld+json">' + JSON.stringify({"@context":"https://schema.org","@type":"SoftwareApplication","name":"Shiraz","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","license":"https://www.gnu.org/licenses/gpl-3.0.html","url":"https://spectre-oss.github.io/shiraz/","sameAs":"https://github.com/spectre-oss/shiraz","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}) + '</' + 'script>'}
   <meta name="twitter:image:alt" content="Shiraz — Your Android™ apps. A little more at home." />
+  {@html serializeJsonLd(homeJsonLd(__SHIRAZ_VERSION__))}
 </svelte:head>
 
   <a class="skip-link" href="#main">Skip to content</a>
@@ -175,6 +178,16 @@ make appimage APK=/path/to/app.apk
 make flatpak APK=/path/to/app.apk</code></pre><button class="copy-button" type="button" aria-label="Copy build commands"><svg class="icon" data-icon="copy" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.25 7.5V6.10822C8.25 4.97324 9.09499 4.01015 10.2261 3.91627C10.5994 3.88529 10.9739 3.85858 11.3495 3.83619M15.75 18H18C19.2426 18 20.25 16.9926 20.25 15.75V6.10822C20.25 4.97324 19.405 4.01015 18.2739 3.91627C17.9006 3.88529 17.5261 3.85858 17.1505 3.83619M17.1505 3.83619C16.8672 2.91757 16.0116 2.25 15 2.25H13.5C12.4884 2.25 11.6328 2.91757 11.3495 3.83619M17.1505 3.83619C17.2152 4.04602 17.25 4.26894 17.25 4.5V5.25H11.25V4.5C11.25 4.26894 11.2848 4.04602 11.3495 3.83619"/><path d="M6.75 7.5H4.875C4.25368 7.5 3.75 8.00368 3.75 8.625V20.625C3.75 21.2463 4.25368 21.75 4.875 21.75H14.625C15.2463 21.75 15.75 21.2463 15.75 20.625V16.5C15.75 11.5294 11.7206 7.5 6.75 7.5Z"/><path d="M15.75 18.75V16.875C15.75 15.011 14.239 13.5 12.375 13.5H10.875C10.2537 13.5 9.75 12.9963 9.75 12.375V10.875C9.75 9.01104 8.23896 7.5 6.375 7.5H5.25"/></svg></button></div><a class="guide-link" href="https://github.com/spectre-oss/shiraz/blob/main/docs/DEVELOPMENT.md">Development guide <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a><p class="copy-status" role="status" aria-live="polite"></p></div></details>
       <details class="source-build"><summary>Get an app from F-Droid<span class="disclosure-icon" aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span></summary><div class="build-content"><p>From a source checkout. Shiraz checks the signature on F-Droid’s index, then checks each download against the SHA-256 that index lists. Replace the package name with the app you want.</p><div class="code-area"><pre id="fdroid-command"><code>python3 -m shiraz fdroid sync --cache fdroid
 python3 -m shiraz fdroid fetch org.example.app --cache fdroid --output app.apk</code></pre><button class="copy-button" type="button" aria-label="Copy F-Droid commands"><svg class="icon" data-icon="copy" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8.25 7.5V6.10822C8.25 4.97324 9.09499 4.01015 10.2261 3.91627C10.5994 3.88529 10.9739 3.85858 11.3495 3.83619M15.75 18H18C19.2426 18 20.25 16.9926 20.25 15.75V6.10822C20.25 4.97324 19.405 4.01015 18.2739 3.91627C17.9006 3.88529 17.5261 3.85858 17.1505 3.83619M17.1505 3.83619C16.8672 2.91757 16.0116 2.25 15 2.25H13.5C12.4884 2.25 11.6328 2.91757 11.3495 3.83619M17.1505 3.83619C17.2152 4.04602 17.25 4.26894 17.25 4.5V5.25H11.25V4.5C11.25 4.26894 11.2848 4.04602 11.3495 3.83619"/><path d="M6.75 7.5H4.875C4.25368 7.5 3.75 8.00368 3.75 8.625V20.625C3.75 21.2463 4.25368 21.75 4.875 21.75H14.625C15.2463 21.75 15.75 21.2463 15.75 20.625V16.5C15.75 11.5294 11.7206 7.5 6.75 7.5Z"/><path d="M15.75 18.75V16.875C15.75 15.011 14.239 13.5 12.375 13.5H10.875C10.2537 13.5 9.75 12.9963 9.75 12.375V10.875C9.75 9.01104 8.23896 7.5 6.375 7.5H5.25"/></svg></button></div><a class="guide-link" href="https://github.com/spectre-oss/shiraz/blob/main/src/shiraz/fdroid.py">How the checks work <svg class="icon" data-icon="external" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25"/></svg></a><p class="copy-status" role="status" aria-live="polite"></p></div></details>
+      <div class="faq-block" id="faq" aria-labelledby="home-faq-title">
+        <p class="eyebrow">Frequently asked</p>
+        <h2 id="home-faq-title">Direct answers.</h2>
+        {#each homeFaqs as item (item.q)}
+          <details class="source-build faq-item">
+            <summary>{item.q}<span class="disclosure-icon" aria-hidden="true"><svg class="icon" data-icon="plus" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span></summary>
+            <div class="build-content"><p>{item.a}</p></div>
+          </details>
+        {/each}
+      </div>
     </section>
   </main>
   <section class="poem-section" aria-label="A poem by Saadi">

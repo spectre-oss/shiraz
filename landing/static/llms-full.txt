@@ -1,0 +1,213 @@
+# Shiraz
+
+> Shiraz is an open-source (GPL-3.0-only), GTK-free Android compatibility layer that runs supported Android APKs directly on Linux, Apple Silicon macOS (experimental), and Windows (experimental foundation) using standalone ART, SDL2, and native graphics/audio/OS bridges — without booting an Android system image, virtual machine, container, or kernel binder module.
+
+Snapshot version: v0.362.0 (data updated 2026-11-24).
+
+## Core Facts
+
+- **Execution model:** App-only API translation layer on standalone ART (with warm standby daemon on Linux). No Android VM, LXC container, or binder kernel driver.
+- **API 35 Java surface:** 4,445 of 4,445 Android 15 / API 35 `android.*` class names present across 49 packages (class-name presence is not CTS certification or full behavioral parity).
+- **API 35 NDK C/C++ surface:** 15 of 15 tracked NDK shared libraries built, exporting 887 of 887 cataloged C symbols (audited with `nm`).
+- **Host OS backends:**
+  - **Linux (x86_64, ARM64 — primary):** Standalone ART, warm standby pool, GBM/DMA-BUF zero-copy swapchain, ALSA/PipeWire AAudio, Vulkan ANativeWindow swapchain/AHB bridge, Landlock + seccomp CLI sandboxing, WebRTC streaming, AppImage & sandboxed Flatpak (`.flatpak`) builders.
+  - **macOS (Apple Silicon ARM64 — experimental port):** 46 verified, 19 partial, 26 open goal checklist items; ANGLE-Metal zero-copy IOSurface swapchain, SurfaceTexture, `MTLSharedEvent` native fences, 120 Hz `CVDisplayLink` vsync, VideoToolbox/AudioToolbox, opt-in guest ELF/Bionic loader booting OsmAnd+ & Telegram, signed `.app` bundler.
+  - **Windows (x64, ARM64 — experimental foundation):** 32 verified, 2 partial, 3 open CI-verified items (Win32 primitives, SDL2 presentation/IME/clipboard, DXGI shared AHB, `libvulkan.dll`, WASAPI AAudio/OpenSL ES, Media Foundation, DirectWrite, Job Object/Restricted Token sandbox, portable/MSIX bundler). Win32 ART and guest ELF loader remain in progress.
+- **Recorded apps:** 14 apps (12 Partial, 1 Blocked, 1 Historical) across 8 engines (Android framework, Flutter, React Native, Unity, libGDX, Godot, SDL, Arc).
+- **Packaging:** Browser-based Go/WASM Builder produces standalone Linux AppImages and sandboxed Flatpak (`.flatpak`) bundles locally without uploading the APK; CLI also builds signed macOS `.app` and Windows portable/MSIX bundles and runs `shiraz install-desktop`.
+
+## Explicit Boundaries (Do Not Misstate)
+
+- Shiraz is experimental. No whole-Android compatibility percentage or CTS certification is claimed.
+- Shiraz does **not** include the Google Play Store or Google Play Services.
+- CLI/AppImage runs are not sandboxed by default unless `--sandbox` / `--no-network` or a sandboxed Flatpak bundle is used.
+- WebView uses an embedded pure-Java HTML5 DOM and step-budgeted JS evaluator rather than Blink/V8.
+- 32-bit ARM (`armeabi-v7a`) native libraries are unsupported; ARM64 translation on x86_64 Linux uses optional Digitalis in developer builds (not yet in AppImages).
+
+## Website Pages
+
+- [Home & Browser Builder](https://spectre-oss.github.io/shiraz/): Architecture overview, Shiraz Web (WebRTC), macOS Launcher, and in-browser AppImage/Flatpak APK packager.
+- [Compatibility & Coverage Tracker](https://spectre-oss.github.io/shiraz/compatibility/): Filterable app compatibility catalog, 3-OS host matrix, 30 subsystem notes, 49-package API 35 breakdown, 15-library NDK audit, and behavioral probe tracker.
+- [Compare Shiraz and Its Peers](https://spectre-oss.github.io/shiraz/compare/): Side-by-side comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper, Waydroid, and Android Emulator.
+- [Full AI Context (llms-full.txt)](https://spectre-oss.github.io/shiraz/llms-full.txt): Complete single-file reference with app records, host layers, subsystem limits, and FAQs.
+
+## Documentation & Source
+
+- [GitHub Repository](https://github.com/spectre-oss/shiraz): GPL-3.0-only source code, releases, and issue tracker.
+- [Tested Applications](https://github.com/spectre-oss/shiraz/blob/main/docs/tested.md): Observed app walkthroughs and open limits.
+- [Cross-Platform Architecture](https://github.com/spectre-oss/shiraz/blob/main/docs/cross_platform.md): Linux, macOS, and Windows host layer summary.
+- [Framework APIs Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/framework_final_goal.md): All 4,445 Android API 35 classes across 49 areas.
+- [NDK Libraries Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/ndk_final_goal.md): All 15 tracked API 35 NDK libraries (887 symbols).
+- [macOS Native Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/macos_final_goal.md): Apple Silicon checklist and OsmAnd+ walkthrough notes.
+- [Windows Native Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/windows_final_goal.md): Win32/DXGI/WASAPI/MSIX checklist and CI coverage.
+- [Browser Builder Guide](https://github.com/spectre-oss/shiraz/blob/main/docs/BUILDER.md): Client-side Go/WASM AppImage and Flatpak assembly.
+- [Shiraz Web Guide](https://github.com/spectre-oss/shiraz/blob/main/docs/WEB.md): Streaming apps over WebRTC to any browser or Linux phone.
+- [Security Model](https://github.com/spectre-oss/shiraz/blob/main/SECURITY.md): Isolation boundaries and safe testing guidance.
+
+---
+
+## Detailed Host OS Capability Matrix (2026-11-24)
+
+### Runtime & native ABI
+- **Linux (ready):** Standalone ART with warm standby pool & daemon, host ELF + Bionic bridge, optional Digitalis ARM64 on x86_64, 15/15 API 35 NDK libraries (887/887 symbols).
+- **macOS (partial):** Standalone ART (-Xint), opt-in guest ARM64 ELF/Bionic loader (OsmAnd+ & Telegram libs), 15/15 API 35 NDK libraries, unified 16 KB page-size policy; ART JIT & M5 signing gate open.
+- **Windows (progress):** Unified HostOs / ABI / page-size policy, CreateProcessW process spawning, and MinGW-w64 / Clang-UCRT64 build rules (mk/windows.mk); Win32 ART & guest ELF runtime integration in progress.
+
+### Graphics, windowing & input
+- **Linux (ready):** SDL2 windows (Wayland & X11, GTK-free), upfront GLES2 window, EGL/GLES, zero-copy GBM/DMA-BUF swapchain, SurfaceTexture, AHB EGLImage & EGL_ANDROID_native_fence_sync, vsync AChoreographer pacing, libvulkan.so (VK_KHR_android_surface swapchain & AHB), Shiraz Web WebRTC streaming.
+- **macOS (ready):** SDL2 / Cocoa windows, ANGLE Metal GLES, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, live resize watch, Retina 2×/fractional pointer mapping, Cmd→Ctrl shortcuts, trackpad pinch & touch filter.
+- **Windows (partial):** CI-verified SDL2 / Win32 presentation (WM_SIZE live resize, IMM32/TSF IME, keyboard & clipboard), libvulkan.dll (VK_KHR_android_surface ANativeWindow swapchain & AHB bridge), DXGI adapter probe, EnumDisplaySettingsW refresh rate, shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing & Precision Touchpad hooks; ANGLE-D3D11 window wiring open.
+
+### Audio & video codecs
+- **Linux (ready):** ALSA / PulseAudio / PipeWire audio, OpenSL ES & runtime libasound AAudio, MediaCodec / libmediandk software and host codecs.
+- **macOS (partial):** AudioToolbox / CoreAudio AudioQueue hardware AAudio, OpenSL ES, PCM, WAV, AAC & Opus; VideoToolbox H.264, HEVC, VP9 & AV1 decode; video recording unsupported.
+- **Windows (partial):** WASAPI PCM16 playback & capture bridge backing libaaudio.dll & libOpenSLES.dll; Media Foundation H.264, HEVC, VP9 & AV1 decoder probe and MFEnumDeviceSources camera device enumeration.
+
+### OS primitives, IPC & isolation
+- **Linux (ready):** POSIX memfd/ashmem, epoll ALooper, Unix sockets, Linux Landlock LSM filesystem isolation + PR_SET_NO_NEW_PRIVS + CLI --sandbox / --no-network seccomp policy + Flatpak bubblewrap sandbox.
+- **macOS (ready):** POSIX/Mach shared memory, kqueue ALooper, CLOCK_UPTIME_RAW/CLOCK_MONOTONIC clocks, POSIX_SPAWN_CLOEXEC_DEFAULT process isolation, FD_CLOEXEC helpers, SDK SQLite, Unix sockets, App Nap guard, macOS Seatbelt (sandbox-exec) SBPL profile & App Sandbox bundle entitlements.
+- **Windows (ready):** CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, SetThreadExecutionState, Job Object + Restricted Token sandbox.
+
+### Desktop services, trust & fonts
+- **Linux (ready):** XDG directories, Fontconfig, desktop notifications, file picker, connectivity, Freedesktop .desktop install & URL/file launcher hooks.
+- **macOS (ready):** ~/Library paths, CoreText fonts, Security.framework trust anchors (wolfJSSE + OkHttp 32/32), AVFoundation speech voices, UNUserNotificationCenter, CoreLocation, /usr/bin/open & osascript picker.
+- **Windows (ready):** LOCALAPPDATA / APPDATA paths, DirectWrite fonts, native UTF-16/UTF-8 Win32 clipboard, DPAPI keystore, SAPI5 speech probe, GetAdaptersAddresses connectivity, Shell_NotifyIconW, Windows Location COM, WinForms picker & rundll32 URL launcher.
+
+### Packaging & CI
+- **Linux (ready):** Browser & CLI per-app AppImage and sandboxed Flatpak (.flatpak) builders, .deb packages, shiraz install-desktop, Linux x86_64 & ARM64 CI releases.
+- **macOS (ready):** Signed Shiraz.app bundle builder (hardened runtime, allow-jit, optional --sandbox entitlements, @rpath closure, .icns), per-APK install-desktop (~/Applications), macOS ARM64 CI.
+- **Windows (ready):** Portable Shiraz\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Start Menu install-desktop, Windows x64 MinGW-w64 CI (make windows-check & windows-presentation-check).
+
+---
+
+## Recorded Applications (14 total)
+
+- **OsmAnd** (Android framework + JNI) — **Partial**
+  - Observed: Live 2026-11-23 macOS ARM64 Metal/ANGLE walkthrough of OsmAnd+ rendered native vector maps (with Persian RTL labels), ran offline search (185 results), fetched online HTTPS indexes, resized portrait ↔ landscape, and persisted zoom across restart. Earlier Linux runs also reached maps, drawer, and route details.
+  - Limitations: Turn-by-turn routing/navigation, map downloads, ART JIT startup speedup, hardened-runtime signing gates, and Linux/Waydroid visual parity remain open.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/tested.md
+- **F-Droid** (Android framework) — **Historical**
+  - Observed: Earlier web-runner testing rendered the main screen.
+  - Limitations: Repository refresh and complete app installation workflows are not established.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/tested.md
+- **Obtainium** (Flutter) — **Partial**
+  - Observed: Settings, text input, theme persistence, GitHub release lookup, saved entries, resizing, and manual JSON export/import were exercised.
+  - Limitations: Release downloads encounter a storage-path assumption. Installation and clean-state restoration remain unverified.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/flutter/OBTAINIUM.md
+- **Joplin** (React Native) — **Partial**
+  - Observed: Notes list, Add menu, note screen, title entry, and title persistence across restart were verified.
+  - Limitations: Body editing is unsupported: the WebView implementation has no JavaScript/DOM engine.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/react-native/JOPLIN.md
+- **SEN-214 Calculator** (React Native) — **Partial**
+  - Observed: Basic arithmetic, sin(30), numeric dialog input, and 5P2 were verified.
+  - Limitations: Short-window controls overlap; result text may disappear after resize. Full scientific functionality and persistence remain unverified.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/react-native/SEN_214_CALCULATOR.md
+- **Lucas Doggiehood** (Unity) — **Partial**
+  - Observed: Animated scene, settings, camera drag, zoom, quests, item collection, and reward persistence were verified in successful runs.
+  - Limitations: Portrait clipping, intermittent startup stalls, lifecycle timeouts, audio, and longer progression remain open.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/unity/LUCAS_DOGGIEHOOD.md
+- **Unciv** (libGDX) — **Partial**
+  - Observed: Map interaction, exploration, city founding, save/reload, portrait relayout, research, and Worker production were verified.
+  - Limitations: Rendering stability and longer campaigns remain under test. PCM capture does not establish speaker output or audio timing.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/libgdx/UNCIV.md
+- **Abra-Ca Bubble** (Godot) — **Blocked**
+  - Observed: The ARM64 build reaches an interactive Vulkan requirements warning.
+  - Limitations: Vulkan rendering is unsupported; no game scene was verified.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/godot/ABRA_CA_BUBBLE.md
+- **SuperTux** (SDL) — **Partial**
+  - Observed: Menus, world map, movement, jumping, coin collection, death/restart, resizing, and selected-node restoration were exercised.
+  - Limitations: Level completion, campaign persistence, and speaker output remain unverified. Portrait controls overlap.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/sdl/SUPERTUX.md
+- **Tiny Crate** (Godot) — **Partial**
+  - Observed: Menu, keyboard movement, jumping, first two levels, crate handling, and two-star progress after restart were verified.
+  - Limitations: Full touch gameplay, physical audio, clean shutdown, and later levels remain unverified. Portrait rendering uses letterboxing.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/godot/TINY_CRATE.md
+- **Mindustry** (Arc) — **Partial**
+  - Observed: Campaign world, touch dragging, mining, drill/conveyor construction, core delivery, and saved progress were verified.
+  - Limitations: Portrait tutorial text clips. Tutorial completion, combat, and audio remain under test.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/arc/MINDUSTRY.md
+- **Ember Quest** (Flutter) — **Partial**
+  - Observed: Scene, menu, keyboard movement, jumping, Game Over, and Play Again were verified.
+  - Limitations: Portrait-to-landscape resize clips the player. Collection, progression, persistence, and audio remain unverified.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/experiments/flutter/EMBER_QUEST.md
+- **2048 (tpcstld)** v1.3.3 (Android framework) — **Partial**
+  - Observed: Upstream 1.3.3 renders the board; pointer swipes move tiles, two 2 tiles merge into 4 and score increases. Landscape relayout works; board, score and high score survive a clean restart.
+  - Limitations: A dismissible Google Play Services warning appears on startup and activity recreation. Long games, reaching 2048, Play services features and the current Google Play build remain unverified.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/tested.md
+- **Telegram** v13.2.1 (Android framework + JNI) — **Partial**
+  - Observed: Telegram 13.2.1 on macOS ARM64 loads its native library and supports onboarding, country selection, text input and portrait/landscape resizing. Authentication reached a successful server response.
+  - Limitations: Signed-in chat UI, saved login across restart, messaging, calls and physical microphone/camera capture remain unverified. Video recording and remote/cast routing are unsupported. Component media tests do not establish Telegram media support.
+  - Evidence: https://github.com/spectre-oss/shiraz/blob/main/docs/tested.md
+
+---
+
+## Maintained Android Subsystems (30 areas, reviewed 2026-11-24)
+
+- **Java / DEX runtime** [Shared framework · Partial · Component and app flows]: Standalone ART (with warm standby daemon & AOT/page-cache pre-warming on Linux), multi-DEX loading and all 4,445 Android API 35 android.* class surfaces compile and smoke-test on OpenJDK and ART. Complete method-level Android behavior and macOS ART JIT remain incremental.
+- **Views, input and lifecycle** [Shared framework · Partial · App and component tests]: Layouts, widgets, transitions, property animations, accessibility nodes, IME sessions, pointer input and resizing are exercised; complex custom app flows still expose gaps.
+- **Resources and themes** [Shared framework · Partial · App flows]: APK resources, binary XML attributes, ICU formatting, density/configuration changes and selected theme paths work; full Material theme parity remains incomplete.
+- **Files and preferences** [Shared framework · Partial · Component tests]: Committed preferences, queued apply writes, PreferenceScreen hierarchies, unified Linux/macOS/Windows OS data paths and DocumentsContract/MediaStore URI models pass OpenJDK/ART tests. Telegram saved-login persistence is still unverified.
+- **SQLite storage** [Shared framework · Partial · App and component tests]: Host SQLite, CursorWindow, MergeCursor, CursorJoiner, SQLiteQueryBuilder and SQLiteRawStatement are exercised; every Android SQLite edge case is not established.
+- **Networking and TLS** [Shared framework · Partial · Targeted probes]: Guest sockets, TLS, DnsResolver, HttpEngine over HttpURLConnection and LinkProperties/IKEv2 models exist; a historical targeted network run records 49 passes while the full suite remains unrun.
+- **Binder and Android services** [Shared framework · Partial · Component tests]: Selected in-process/host IPC services, AccountManager, Telecom CallControl and service SPI classes exist. Full Android system_server behavior and cross-process compatibility are not established.
+- **Canvas, EGL and GLES** [Shared framework · Partial · App and component tests]: Real apps render through software/host EGL/GLES paths alongside ColorSpace connectors, ImageDecoder, YuvImage and OpenGL Matrix/ETC1 helpers. Full hardware-accelerated RenderNode parity is not verified.
+- **PDF, print and gestures** [Shared framework · Partial · Component tests]: Pure-Java %PDF-1.4 writer, software PDF rasterizer, text search/selection/annotations, PrintDocumentAdapter pipelines and 2D gesture stroke recognition pass on OpenJDK and ART; host print spooling is not wired.
+- **Media containers, EXIF and RenderScript** [Shared framework · Partial · Component tests]: WAV/ISO-BMFF MediaExtractor and MediaMuxer, TIFF/JPEG ExifInterface read-write, DTMF ToneGenerator, Visualizer DFT and CPU RenderScript intrinsics pass component tests; broad codec coverage remains bounded.
+- **AppSearch, Health Connect and AdServices** [Shared framework · Partial · Component tests]: In-memory AppSearch BM25 indexing, Health Connect typed records/unit conversions and AdServices models pass on OpenJDK and ART; cross-app Android system stores are not emulated.
+- **Keystore, Identity, Credentials and NDEF** [Shared framework · Partial · Component tests]: Host keystore entries, ISO 18013-5 Identity Credential COSE/CBOR sessions, CredentialManager models and NFC Forum NDEF/BLE scan wire codecs work in-process; Secure Element, NFC RF and Bluetooth radios fail explicitly.
+- **NDK native C/C++ libraries** [Linux and macOS ARM64 · Partial · Native unit tests and nm audit]: All 15 tracked Android API 35 NDK shared libraries (887/887 cataloged C symbols across libandroid, libjnigraphics, libmediandk, libsync, libOpenSLES, libaaudio, liblog, libicu, libamidi, libcamera2ndk, libOpenMAXAL, libbinder_ndk, libneuralnetworks, libvulkan and libnativewindow) build and pass native behavioral tests, including VK_KHR_android_surface ANativeWindow swapchain and AHardwareBuffer memory bridges; Vulkan GPU execution requires a host ICD and physical Camera2 hardware capture remains host-dependent.
+- **Android native ELF / Bionic** [macOS ARM64 · Partial · App and component tests]: Opt-in guest loader (SHIRAZ_GUEST_LOADER=1) boots OsmAnd+ (7 native libs, 4,090 TPIDR rewrites, live Tehran vector maps) and Telegram (18 constructors, JNI_OnLoad) alongside unified 16 KB page-size and ABI policy. M5 strict hardened-runtime signing gate and full syscall coverage remain open.
+- **Audio playback, AAC and Opus** [macOS ARM64 · Partial · Component tests]: AudioToolbox AudioQueue hardware AAudio and PCM output, WAV/AAC/Opus decode (AudioToolbox), AAC encode and timestamps tested with synthetic media and live CoreAudio output. Telegram voice messages and calls remain unverified.
+- **VideoToolbox hardware decode** [macOS ARM64 · Partial · Native unit tests]: libshiraz-video.so decodes H.264, HEVC, VP9 and AV1 through VideoToolbox alongside AudioToolbox Opus; end-to-end app playback and DRM remain unverified.
+- **macOS notifications, location, Metal and gestures** [macOS ARM64 · Partial · Native and app tests]: UNUserNotificationCenter notifications, CoreLocation wired into Android LocationManager, 120 Hz CVDisplayLink hardware vsync pacing, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), Security.framework TLS trust (32/32 wolfJSSE/OkHttp + OsmAnd+ HTTPS fetch), AVFoundation speech voices, App Nap guard, Cocoa live-resize events, Retina 2x/fractional pointer mapping, Cmd-to-Ctrl shortcuts and trackpad pinch/touch filtering are verified on Apple Silicon; interactive TCC prompts in end-user apps remain under test.
+- **Signed macOS .app bundle builder** [macOS ARM64 · Partial · macOS build and bundle tests]: Builds self-contained signed Shiraz.app bundles with hardened runtime, allow-jit and optional --sandbox App Sandbox entitlements, @rpath library closure and generated .icns icons; notarized release distribution is not yet published.
+- **Microphone and camera** [macOS ARM64 · Partial · Hardware unverified]: Host bridges and foreground consent checks exist; physical capture in Telegram has not been verified. JPEG tests use synthetic pixels.
+- **Video recording** [macOS ARM64 · Unsupported · Explicit limitation]: The macOS video-recording pipeline is not implemented. Audio-only recording APIs do not imply video support.
+- **Android sensors** [macOS ARM64 · Unsupported · Explicit limitation]: No Android sensor event bridge is advertised on Darwin.
+- **Remote media / casting** [macOS ARM64 · Unsupported · Explicit limitation]: Only a local default audio route is provided. Remote and cast routing are unavailable.
+- **Windows Win32 host primitives and IPC** [Windows x64 / ARM64 · Partial · Windows CI native unit tests]: 32/37 goal checklist items CI-verified: CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe, EnumDisplaySettingsW refresh rate, DXGI shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing, libvulkan.dll ANativeWindow swapchain/AHB bridge, SDL2 Win32 presentation/IME/clipboard/keyboard (test-presentation.exe), CreateProcessW spawning, SetThreadExecutionState, Job Object + Restricted Token sandbox and HostOs/rundll32 launchers. Win32 ART, guest ELF loader, and ANGLE-D3D11 window wiring remain open.
+- **Windows WASAPI, Media Foundation, DirectWrite and services** [Windows x64 / ARM64 · Partial · Windows CI native unit tests]: WASAPI PCM16 playback & capture bridge backing libaaudio.dll and libOpenSLES.dll, Media Foundation H.264/HEVC decoder probing and MFEnumDeviceSources camera enumeration, DirectWrite system font enumeration, GetAdaptersAddresses connectivity, DPAPI keystore, SAPI5 speech probe, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass MinGW-w64 CI tests (make windows-check); interactive end-to-end app media playback on Windows is not yet verified.
+- **Windows portable and MSIX bundler** [Windows x64 / ARM64 · Partial · Python and Windows CI tests]: Portable Shiraz\ directory and MSIX AppxManifest.xml bundler with PE32/PE32+ import closure, .ico generation, and Start Menu install-desktop integration, validated in 3-OS CI; signed Windows installer releases are not yet published.
+- **App isolation and sandboxing** [All hosts · Partial · Native, CLI and Python policy tests]: Cross-platform SandboxPolicy wired into shiraz run --sandbox [--no-network] and shiraz install-desktop: maps to Linux Landlock LSM + PR_SET_NO_NEW_PRIVS + seccomp-BPF network deny (plus Flatpak bubblewrap bundles), macOS Seatbelt (sandbox-exec) SBPL profiles + App Sandbox bundle entitlements, and Windows Job Objects + Restricted Tokens; default-on enforcement in every CLI/AppImage launcher remains incremental.
+- **WebView JavaScript / DOM** [Shared framework · Partial · Component tests]: Embedded pure-Java HTML5 DOM parser, CSS selector engine, step-budgeted JavaScript evaluator, @JavascriptInterface reflection bridge, postWebMessage, findAllAsync and multi-entry back/forward history pass OpenJDK/ART tests; a full Blink/V8 CSS layout browser engine for rich web editors and modern SPAs is not bundled.
+- **Google Play services runtime** [Shared framework · Unsupported · Explicit limitation]: Shiraz does not provide the Google Play Store or Google Play system services. Bundled client libraries do not supply those services.
+- **Cellular telephony and SMS** [Shared framework · Unverified · Not accepted]: E.164 formatting, GSM 7-bit/UCS-2 SMS PDU codecs and CellInfo models work in Java, but Shiraz makes no claim of real modem control, phone calls or carrier SMS.
+- **Android platform certification** [All hosts · Unverified · Not measured]: No complete CTS/VTS run, complete API behavior result or whole-platform compatibility percentage is established.
+
+---
+
+## API 35 NDK Native Libraries (15/15 libs, 887/887 symbols)
+
+- `libandroid.so`: 316/316 symbols (ANativeWindow, AHardwareBuffer, ASharedMemory, ALooper, AChoreographer, ASensor, AFont, ATrace, AConfiguration, AInput, ANativeActivity, AAsset, ASurfaceControl, ASurfaceTexture, AImageDecoder, APerformanceHint, AThermal, AStorageManager)
+- `libjnigraphics.so`: 6/6 symbols (AndroidBitmap)
+- `libmediandk.so`: 132/132 symbols (AMediaFormat, AMediaCodec, AMediaExtractor, AMediaMuxer, AMediaDataSource, AMediaCrypto, AMediaDrm, AImageReader)
+- `libsync.so`: 4/4 symbols (sync)
+- `libOpenSLES.so`: 11/11 symbols (OpenSLES)
+- `libaaudio.so`: 65/65 symbols (AAudio)
+- `liblog.so`: 18/18 symbols (log)
+- `libicu.so`: 91/91 symbols (ICU4C)
+- `libamidi.so`: 14/14 symbols (AMidi)
+- `libcamera2ndk.so`: 45/45 symbols (ACamera2)
+- `libOpenMAXAL.so`: 13/13 symbols (OpenMAXAL)
+- `libbinder_ndk.so`: 83/83 symbols (AIBinder, AParcel, AStatus)
+- `libneuralnetworks.so`: 43/43 symbols (ANeuralNetworks)
+- `libvulkan.so`: 32/32 symbols (Vulkan)
+- `libnativewindow.so`: 14/14 symbols (ANativeWindow)
+
+---
+
+## Frequently Asked Questions (Direct Answers)
+
+### How does Shiraz run Android apps without a virtual machine or Waydroid?
+Shiraz executes Android DEX bytecode on a standalone host build of ART (Android Runtime) and translates Android framework, resource, and NDK calls directly into host OS APIs using SDL2, EGL/GLES (GBM/DMA-BUF zero-copy on Linux, ANGLE-Metal IOSurface on macOS), and native audio/IPC bridges. Unlike Waydroid or Android Emulator, Shiraz does not boot an Android OS image, does not require a virtual machine, and does not require the Linux binder kernel module or root access.
+
+### How do I convert an Android APK into a Linux AppImage or Flatpak?
+Open Shiraz Builder at https://spectre-oss.github.io/shiraz/#builder, choose your CPU architecture (x86_64 or ARM64) and output format (AppImage or sandboxed Flatpak `.flatpak`), select your local APK file, and click Build. Assembly runs locally in your browser via Go WebAssembly against a SHA-256-verified runtime base — the APK never leaves your device. From source, run `make appimage APK=/path/to/app.apk` or `make flatpak APK=/path/to/app.apk`.
+
+### How does Shiraz compare to ATL, Mac.apk, and Waydroid?
+- **vs. Waydroid / Android Emulator:** Waydroid boots a full LineageOS container requiring kernel binder; Shiraz runs only the app with no OS boot or binder module, trading full-Android breadth for desktop-native footprint.
+- **vs. Android Translation Layer (ATL):** Both are GPL-3.0 standalone-ART translation layers (Shiraz reuses ATL's bionic translation linker under its original notice). Shiraz is GTK-free (SDL2 across Linux, macOS, and Windows), adds browser AppImage/Flatpak packaging, WebRTC streaming, and warm ART pre-warming.
+- **vs. Mac.apk:** Mac.apk targets Apple Silicon Macs exclusively using dex2jvm on OpenJDK (AGPL-3.0 + commercial) and currently reports more verified consumer games (52/66). Shiraz runs DEX directly on standalone ART under GPL-3.0-only across Linux, Apple Silicon macOS, and Windows.
+
+### Does Shiraz include Google Play Services or full sandboxing?
+No. Shiraz does not ship the Google Play Store or Google Play Services. For isolation, Shiraz provides sandboxed Flatpak bundles and opt-in `shiraz run --sandbox [--no-network]` (Linux Landlock + seccomp-BPF, macOS Seatbelt + App Sandbox entitlements, Windows Job Object + Restricted Token), while default CLI/AppImage runs still execute with the launching user's permissions. Only run APKs you trust.

@@ -312,6 +312,22 @@ pre { margin: 0; font: 14px/1.9 var(--mono); white-space: pre-wrap; overflow-wra
 .copy-button:active { transform: scale(.94); }
 .build-content .copy-status { min-height: 24px; margin: 4px 0 0; font-size: 14px; color: var(--saffron); }
 
+/* Breadcrumbs and AEO FAQ disclosures. */
+.breadcrumbs { padding-top: 8px; font-size: 14px; color: var(--ink-faint); }
+.breadcrumbs ol { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.breadcrumbs li { display: inline-flex; align-items: center; gap: 8px; }
+.breadcrumbs li + li::before { content: "/"; color: var(--line-strong); }
+.breadcrumbs a { display: inline-flex; align-items: center; min-height: 36px; color: var(--ink-soft); }
+.breadcrumbs a:hover { color: var(--saffron); text-decoration: underline; text-underline-offset: 4px; }
+.breadcrumbs [aria-current=page] { color: var(--ink); font-weight: 500; }
+.faq-block { margin-top: 48px; max-width: 780px; }
+.faq-block h2 { font-size: clamp(2rem, 4vw, 3.2rem); margin-bottom: 16px; }
+.faq-subpage { padding-top: 40px; border-top: 1px solid var(--line); }
+.faq-wide { margin-top: 0; max-width: 860px; }
+.faq-item.source-build { max-width: none; }
+.faq-item.source-build summary { font-size: clamp(19px, 2vw, 22px); line-height: 1.3; padding-block: 14px; }
+.faq-item .build-content p { max-width: 72ch; font-size: 16px; line-height: 1.65; color: var(--ink-soft); }
+
 /* A closing verse over the Vakil Mosque. */
 @font-face { font-family: 'Arad'; font-style: normal; font-weight: 400; font-display: swap; src: url('https://cdn.jsdelivr.net/gh/MohamadDarvishi/Arad@ae7c35e3fa28eca3b1bdcce932205006186c905e/Fonts/Main_Fonts/Static_Webfont/Arad-Regular.woff2') format('woff2'); }
 .poem-section { position: relative; isolation: isolate; display: grid; place-items: center; min-height: max(460px, 62vh); padding: 72px 24px 88px; text-align: center; background: #160a10; color: #faf3e7; }

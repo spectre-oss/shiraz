@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+title: Shiraz
+message: If you reference or evaluate Shiraz in research, benchmarks, or compatibility surveys, please cite this repository.
+type: software
+authors:
+  - name: Mohammad Mahdi Afshar
+    alias: mamad
+  - name: Shiraz Contributors
+repository-code: https://github.com/spectre-oss/shiraz
+url: https://spectre-oss.github.io/shiraz/
+license: GPL-3.0-only
+abstract: >-
+  An open-source, GTK-free Android compatibility layer and local APK packaging
+  toolchain (AppImage, Flatpak, signed macOS .app, Windows portable/MSIX) built
+  on standalone ART, an API 35 Java framework surface, 15 NDK native libraries,
+  SDL2 presentation, and native host OS bridges without a virtual machine or
+  kernel binder module.
+keywords:
+  - android
+  - android-compatibility-layer
+  - android-runtime
+  - art
+  - apk
+  - appimage
+  - flatpak
+  - linux
+  - macos
+  - windows
+  - sdl2
+  - opengl-es
+  - vulkan
+  - webrtc
+  - webassembly

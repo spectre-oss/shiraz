@@ -91,6 +91,9 @@ __pycache__/
 /landing/test-results/
 /landing/playwright-report/
 /landing/static/social-card.png
+/landing/static/apple-touch-icon.png
+/landing/static/icon-192.png
+/landing/static/icon-512.png
 /landing/static/media/*
 !/landing/static/media/*.vtt
 

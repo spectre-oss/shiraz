@@ -1,0 +1,30 @@
+{
+  "name": "Shiraz — Android™ apps on Linux, macOS and Windows",
+  "short_name": "Shiraz",
+  "description": "Open-source, GTK-free Android™ compatibility layer and browser AppImage / Flatpak APK builder for Linux, macOS and Windows.",
+  "start_url": "/shiraz/",
+  "scope": "/shiraz/",
+  "display": "browser",
+  "background_color": "#2b0f1c",
+  "theme_color": "#2b0f1c",
+  "icons": [
+    {
+      "src": "spectre.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

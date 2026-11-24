@@ -404,3 +404,58 @@ test('every route shares one navigation and marks the current page', async ({pag
     else await expect(nav.locator('[aria-current=page]')).toHaveCount(0);
   }
 });
+
+test('SEO, GEO and AEO discovery files, JSON-LD graphs and matching FAQs are published on every route', async ({page, request}) => {
+  const robots = await request.get('/robots.txt');
+  expect(robots.ok()).toBe(true);
+  expect(await robots.text()).toContain('Sitemap: https://spectre-oss.github.io/shiraz/sitemap.xml');
+
+  const sitemap = await request.get('/sitemap.xml');
+  expect(sitemap.ok()).toBe(true);
+  const sitemapXml = await sitemap.text();
+  for (const url of ['https://spectre-oss.github.io/shiraz/', 'https://spectre-oss.github.io/shiraz/compatibility/', 'https://spectre-oss.github.io/shiraz/compare/']) {
+    expect(sitemapXml).toContain(`<loc>${url}</loc>`);
+  }
+
+  for (const path of ['/llms.txt', '/llms-full.txt']) {
+    const res = await request.get(path);
+    expect(res.ok()).toBe(true);
+    const body = await res.text();
+    expect(body).toContain('# Shiraz');
+    expect(body).toContain('4,445');
+  }
+
+  const manifestRes = await request.get('/manifest.webmanifest');
+  expect(manifestRes.ok()).toBe(true);
+  expect((await manifestRes.json()).short_name).toBe('Shiraz');
+
+  for (const [iconPath, size] of [['/apple-touch-icon.png', 180], ['/icon-192.png', 192], ['/icon-512.png', 512]]) {
+    const res = await request.get(iconPath);
+    expect(res.ok()).toBe(true);
+    const png = await res.body();
+    expect(png.subarray(1, 4).toString()).toBe('PNG');
+    expect(png.readUInt32BE(16)).toBe(size);
+    expect(png.readUInt32BE(20)).toBe(size);
+  }
+
+  const expectations = [
+    ['/', ['Organization', 'WebSite', 'SoftwareApplication', 'HowTo', 'FAQPage']],
+    ['/compatibility/', ['Organization', 'WebSite', 'WebPage', 'BreadcrumbList', 'Dataset', 'FAQPage']],
+    ['/compare/', ['Organization', 'WebSite', 'WebPage', 'BreadcrumbList', 'ItemList', 'FAQPage']]
+  ];
+  for (const [route, expectedTypes] of expectations) {
+    await page.goto(route);
+    await expect(page.locator('link[rel="alternate"][type="text/plain"][href$="/llms.txt"]')).toHaveCount(1);
+    await expect(page.locator('meta[name="robots"][content*="index"]')).toHaveCount(1);
+    await expect(page.locator('meta[property="og:locale"][content="en_US"]')).toHaveCount(1);
+    await expect(page.locator('meta[name="twitter:title"]')).toHaveCount(1);
+    const ldRaw = await page.locator('script[type="application/ld+json"]').textContent();
+    const graph = JSON.parse(ldRaw)['@graph'];
+    const types = graph.map(node => node['@type']);
+    for (const type of expectedTypes) expect(types).toContain(type);
+    const faq = graph.find(node => node['@type'] === 'FAQPage');
+    for (const entry of faq.mainEntity) {
+      await expect(page.locator('summary', {hasText: entry.name})).toBeVisible();
+    }
+  }
+});

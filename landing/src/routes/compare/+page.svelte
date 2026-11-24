@@ -7,6 +7,7 @@
   import { resolve } from '$app/paths';
   import Footer from '#lib/Footer.svelte';
   import SiteNav from '#lib/SiteNav.svelte';
+  import { ROBOTS_INDEX, compareFaqs, compareJsonLd, serializeJsonLd } from '#lib/seo.js';
   import '../../styles.css';
 
   const home = resolve('/').replace(/\/$/, '') + '/';
@@ -392,20 +393,30 @@
 </script>
 
 <svelte:head>
-  <title>Shiraz and its peers — Shiraz</title>
+  <title>Shiraz vs ATL, ACL, a4l, Mac.apk, apklayer &amp; Innkeeper — Shiraz</title>
   <meta
     name="description"
-    content="How Shiraz compares with ATL, ACL, a4l, Mac.apk, apklayer and Innkeeper: architecture, 3-OS host support, graphics, sandboxing, distribution and reported apps."
+    content="Compare Shiraz beside ATL, ACL, a4l, Mac.apk, apklayer and Innkeeper: Linux/macOS/Windows support, runtime architecture, graphics, sandboxing, AppImage/Flatpak packaging, and reported apps."
   />
+  <meta name="robots" content={ROBOTS_INDEX} />
   <link rel="canonical" href="https://spectre-oss.github.io/shiraz/compare/" />
-  <meta property="og:title" content="Shiraz and its peers" />
-  <meta property="og:description" content="Seven ways to run Android™ apps off Android, side by side." />
+  <meta property="og:title" content="Shiraz vs ATL, ACL, a4l, Mac.apk, apklayer &amp; Innkeeper" />
+  <meta property="og:description" content="Seven open-source ways to run Android™ apps off Android, compared across nine capabilities and fourteen technical dimensions." />
   <meta property="og:url" content="https://spectre-oss.github.io/shiraz/compare/" />
   <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Shiraz" />
   <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Seven open-source Android-on-desktop projects compared side by side with Shiraz." />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Shiraz vs ATL, ACL, a4l, Mac.apk, apklayer &amp; Innkeeper" />
+  <meta name="twitter:description" content="Seven open-source Android-on-desktop layers compared side by side: architecture, graphics, sandboxing, packaging, and tested apps." />
   <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta name="twitter:image:alt" content="Seven open-source Android-on-desktop projects compared side by side with Shiraz." />
+  {@html serializeJsonLd(compareJsonLd({ version: __SHIRAZ_VERSION__, updated: '2026-11-24', projects }))}
 </svelte:head>
 
 <a class="skip-link" href="#compare-main">Skip to the comparison</a>
@@ -418,6 +429,12 @@
 </header>
 
 <main id="compare-main">
+  <nav class="breadcrumbs wrap" aria-label="Breadcrumb">
+    <ol>
+      <li><a href={resolve('/')}>Home</a></li>
+      <li aria-current="page">Compare</li>
+    </ol>
+  </nav>
   <section class="peers-hero wrap">
     <div class="hero-copy">
       <p class="eyebrow">Shiraz v{__SHIRAZ_VERSION__} and its peers · updated 24 November 2026</p>
@@ -761,6 +778,21 @@
     <div class="stand-cta">
       <a class="button primary" href={home + '#builder'}>Try the builder</a>
       <a class="button secondary" href={resolve('/compatibility/')}>See compatibility tracker</a>
+    </div>
+  </section>
+
+  <section class="block wrap" aria-labelledby="compare-faq-title">
+    <header class="block-head">
+      <p class="eyebrow">Comparison questions</p>
+      <h2 id="compare-faq-title">Quick answers.</h2>
+    </header>
+    <div class="faq-block faq-wide">
+      {#each compareFaqs as item (item.q)}
+        <details class="source-build faq-item">
+          <summary>{item.q}<span class="disclosure-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg></span></summary>
+          <div class="build-content"><p>{item.a}</p></div>
+        </details>
+      {/each}
     </div>
   </section>
 

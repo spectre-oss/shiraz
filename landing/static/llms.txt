@@ -1,0 +1,45 @@
+# Shiraz
+
+> Shiraz is an open-source (GPL-3.0-only), GTK-free Android compatibility layer that runs supported Android APKs directly on Linux, Apple Silicon macOS (experimental), and Windows (experimental foundation) using standalone ART, SDL2, and native graphics/audio/OS bridges — without booting an Android system image, virtual machine, container, or kernel binder module.
+
+Snapshot version: v0.362.0 (data updated 2026-11-24).
+
+## Core Facts
+
+- **Execution model:** App-only API translation layer on standalone ART (with warm standby daemon on Linux). No Android VM, LXC container, or binder kernel driver.
+- **API 35 Java surface:** 4,445 of 4,445 Android 15 / API 35 `android.*` class names present across 49 packages (class-name presence is not CTS certification or full behavioral parity).
+- **API 35 NDK C/C++ surface:** 15 of 15 tracked NDK shared libraries built, exporting 887 of 887 cataloged C symbols (audited with `nm`).
+- **Host OS backends:**
+  - **Linux (x86_64, ARM64 — primary):** Standalone ART, warm standby pool, GBM/DMA-BUF zero-copy swapchain, ALSA/PipeWire AAudio, Vulkan ANativeWindow swapchain/AHB bridge, Landlock + seccomp CLI sandboxing, WebRTC streaming, AppImage & sandboxed Flatpak (`.flatpak`) builders.
+  - **macOS (Apple Silicon ARM64 — experimental port):** 46 verified, 19 partial, 26 open goal checklist items; ANGLE-Metal zero-copy IOSurface swapchain, SurfaceTexture, `MTLSharedEvent` native fences, 120 Hz `CVDisplayLink` vsync, VideoToolbox/AudioToolbox, opt-in guest ELF/Bionic loader booting OsmAnd+ & Telegram, signed `.app` bundler.
+  - **Windows (x64, ARM64 — experimental foundation):** 32 verified, 2 partial, 3 open CI-verified items (Win32 primitives, SDL2 presentation/IME/clipboard, DXGI shared AHB, `libvulkan.dll`, WASAPI AAudio/OpenSL ES, Media Foundation, DirectWrite, Job Object/Restricted Token sandbox, portable/MSIX bundler). Win32 ART and guest ELF loader remain in progress.
+- **Recorded apps:** 14 apps (12 Partial, 1 Blocked, 1 Historical) across 8 engines (Android framework, Flutter, React Native, Unity, libGDX, Godot, SDL, Arc).
+- **Packaging:** Browser-based Go/WASM Builder produces standalone Linux AppImages and sandboxed Flatpak (`.flatpak`) bundles locally without uploading the APK; CLI also builds signed macOS `.app` and Windows portable/MSIX bundles and runs `shiraz install-desktop`.
+
+## Explicit Boundaries (Do Not Misstate)
+
+- Shiraz is experimental. No whole-Android compatibility percentage or CTS certification is claimed.
+- Shiraz does **not** include the Google Play Store or Google Play Services.
+- CLI/AppImage runs are not sandboxed by default unless `--sandbox` / `--no-network` or a sandboxed Flatpak bundle is used.
+- WebView uses an embedded pure-Java HTML5 DOM and step-budgeted JS evaluator rather than Blink/V8.
+- 32-bit ARM (`armeabi-v7a`) native libraries are unsupported; ARM64 translation on x86_64 Linux uses optional Digitalis in developer builds (not yet in AppImages).
+
+## Website Pages
+
+- [Home & Browser Builder](https://spectre-oss.github.io/shiraz/): Architecture overview, Shiraz Web (WebRTC), macOS Launcher, and in-browser AppImage/Flatpak APK packager.
+- [Compatibility & Coverage Tracker](https://spectre-oss.github.io/shiraz/compatibility/): Filterable app compatibility catalog, 3-OS host matrix, 30 subsystem notes, 49-package API 35 breakdown, 15-library NDK audit, and behavioral probe tracker.
+- [Compare Shiraz and Its Peers](https://spectre-oss.github.io/shiraz/compare/): Side-by-side comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper, Waydroid, and Android Emulator.
+- [Full AI Context (llms-full.txt)](https://spectre-oss.github.io/shiraz/llms-full.txt): Complete single-file reference with app records, host layers, subsystem limits, and FAQs.
+
+## Documentation & Source
+
+- [GitHub Repository](https://github.com/spectre-oss/shiraz): GPL-3.0-only source code, releases, and issue tracker.
+- [Tested Applications](https://github.com/spectre-oss/shiraz/blob/main/docs/tested.md): Observed app walkthroughs and open limits.
+- [Cross-Platform Architecture](https://github.com/spectre-oss/shiraz/blob/main/docs/cross_platform.md): Linux, macOS, and Windows host layer summary.
+- [Framework APIs Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/framework_final_goal.md): All 4,445 Android API 35 classes across 49 areas.
+- [NDK Libraries Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/ndk_final_goal.md): All 15 tracked API 35 NDK libraries (887 symbols).
+- [macOS Native Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/macos_final_goal.md): Apple Silicon checklist and OsmAnd+ walkthrough notes.
+- [Windows Native Goal](https://github.com/spectre-oss/shiraz/blob/main/docs/windows_final_goal.md): Win32/DXGI/WASAPI/MSIX checklist and CI coverage.
+- [Browser Builder Guide](https://github.com/spectre-oss/shiraz/blob/main/docs/BUILDER.md): Client-side Go/WASM AppImage and Flatpak assembly.
+- [Shiraz Web Guide](https://github.com/spectre-oss/shiraz/blob/main/docs/WEB.md): Streaming apps over WebRTC to any browser or Linux phone.
+- [Security Model](https://github.com/spectre-oss/shiraz/blob/main/SECURITY.md): Isolation boundaries and safe testing guidance.

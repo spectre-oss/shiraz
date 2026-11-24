@@ -9,6 +9,7 @@
   import inventory from '#lib/android-inventory.json';
   import ndk from '#lib/ndk-inventory.json';
   import hostPlatforms from '#lib/host-platforms.json';
+  import { ROBOTS_INDEX, compatibilityFaqs, compatibilityJsonLd, serializeJsonLd } from '#lib/seo.js';
   import '../../styles.css';
   let dialog;
   let opener;
@@ -67,17 +68,37 @@
 </script>
 
 <svelte:head>
-  <title>App compatibility — Shiraz</title>
-  <meta name="description" content="Explore recorded Shiraz app compatibility, Linux/macOS/Windows host matrices, API 35 framework and NDK coverage, and public test reports." />
+  <title>App compatibility &amp; Android™ API 35 coverage — Shiraz</title>
+  <meta name="description" content="Explore recorded Shiraz app compatibility across 14 apps, Linux/macOS/Windows host OS matrices, 4,445 API 35 framework classes, 15 NDK libraries (887 C symbols), and public test reports." />
+  <meta name="robots" content={ROBOTS_INDEX} />
   <link rel="canonical" href="https://spectre-oss.github.io/shiraz/compatibility/" />
-  <meta property="og:title" content="Shiraz app compatibility" />
-  <meta property="og:description" content="What has been tested across apps, Linux, macOS ARM64, Windows, API 35 classes and NDK libraries." />
+  <meta property="og:title" content="App compatibility &amp; Android™ API 35 coverage — Shiraz" />
+  <meta property="og:description" content="Recorded app walkthroughs, Linux/macOS/Windows host backend progress, 4,445 API 35 classes, and 15/15 NDK libraries (887 C symbols)." />
   <meta property="og:url" content="https://spectre-oss.github.io/shiraz/compatibility/" />
   <meta property="og:type" content="website" />
+  <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Shiraz" />
   <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Shiraz app compatibility and Android API 35 coverage across Linux, macOS, and Windows." />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="App compatibility &amp; Android™ API 35 coverage — Shiraz" />
+  <meta name="twitter:description" content="Recorded app runs, 3-OS host progress, 4,445 API 35 classes, and 15/15 NDK libraries with explicit limits." />
   <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta name="twitter:image:alt" content="Shiraz app compatibility and Android API 35 coverage across Linux, macOS, and Windows." />
+  {@html serializeJsonLd(
+    compatibilityJsonLd({
+      version: inventory.runtimeVersion,
+      updated: inventory.updated,
+      appCount: applications.length,
+      classPresent: classes.present,
+      classReference: classes.reference,
+      ndkLibs: ndk.librariesPresent,
+      ndkSymbols: ndk.symbolsPresent
+    })
+  )}
 </svelte:head>
 <a class="skip-link" href="#compatibility-main">Skip to app results</a>
 <header id="top" class="compat-header wrap">
@@ -89,6 +110,12 @@
 </header>
 <main id="compatibility-main" class="compat-main wrap">
   <div class="compat-hero">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <ol>
+        <li><a href={resolve('/')}>Home</a></li>
+        <li aria-current="page">Compatibility</li>
+      </ol>
+    </nav>
     <header class="compat-intro">
       <p class="eyebrow">Progress snapshot · v{inventory.runtimeVersion} · updated {inventory.updated}</p>
       <h1>
@@ -341,6 +368,16 @@
     {/if}
   </section>
   <AndroidCoverage />
+  <section class="faq-block faq-subpage" aria-labelledby="compat-faq-title">
+    <p class="eyebrow">Compatibility questions</p>
+    <h2 id="compat-faq-title">How to read these numbers.</h2>
+    {#each compatibilityFaqs as item (item.q)}
+      <details class="source-build faq-item">
+        <summary>{item.q}<span class="disclosure-icon" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg></span></summary>
+        <div class="build-content"><p>{item.a}</p></div>
+      </details>
+    {/each}
+  </section>
   <section class="compat-contribute">
     <h2>Your app isn’t listed?</h2>
     <p>
