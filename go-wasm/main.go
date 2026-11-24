@@ -26,6 +26,7 @@ type metadata struct {
 	Version               string `json:"version"`
 	ApplicationProperties string `json:"application_properties"`
 	Label                 string `json:"label,omitempty"`
+	AllowDigitalis        bool   `json:"allow_digitalis,omitempty"`
 	IconRes               uint32 `json:"-"`
 }
 
@@ -85,28 +86,60 @@ func assemble(template, apk, raw []byte) ([]byte, error) {
 	seen := map[string]bool{}
 	var nativeBytes uint64
 	hasNative := false
+	selectedABI := abi
+	selectedMachine := machine
+	useDigitalis := false
+	collectABI := func(candidateABI string) ([]*zip.File, error) {
+		var found []*zip.File
+		localSeen := map[string]bool{}
+		var total uint64
+		for _, file := range apkZip.File {
+			if strings.HasPrefix(file.Name, "lib/"+candidateABI+"/") && !file.FileInfo().IsDir() {
+				name := strings.TrimPrefix(file.Name, "lib/"+candidateABI+"/")
+				if !nativeName.MatchString(name) || reserved[name] || localSeen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 256<<20 {
+					return nil, errors.New("unsupported native library")
+				}
+				localSeen[name] = true
+				total += file.UncompressedSize64
+				if len(localSeen) > 64 || total > 512<<20 {
+					return nil, errors.New("native payload exceeds limit")
+				}
+				found = append(found, file)
+			}
+		}
+		seen = localSeen
+		nativeBytes = total
+		return found, nil
+	}
 	for _, file := range apkZip.File {
 		if strings.HasPrefix(file.Name, "lib/") && strings.HasSuffix(file.Name, ".so") {
 			hasNative = true
-		}
-		if strings.HasPrefix(file.Name, "lib/"+abi+"/") && !file.FileInfo().IsDir() {
-			name := strings.TrimPrefix(file.Name, "lib/"+abi+"/")
-			if !nativeName.MatchString(name) || reserved[name] || seen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 256<<20 {
-				return nil, errors.New("unsupported native library")
-			}
-			seen[name] = true
-			nativeBytes += file.UncompressedSize64
-			if len(seen) > 64 || nativeBytes > 512<<20 {
-				return nil, errors.New("native payload exceeds limit")
-			}
-			nativeFiles = append(nativeFiles, file)
+			break
 		}
 	}
+	nativeFiles, err = collectABI(abi)
+	if err != nil {
+		return nil, err
+	}
+	if hasNative && len(nativeFiles) == 0 && abi == "x86_64" && meta.AllowDigitalis {
+		armFiles, err := collectABI("arm64-v8a")
+		if err != nil {
+			return nil, err
+		}
+		if len(armFiles) > 0 {
+			nativeFiles = armFiles
+			selectedABI = "arm64-v8a"
+			selectedMachine = 183
+			useDigitalis = true
+		}
+	}
+	_ = seen
+	_ = nativeBytes
 	if hasNative && len(nativeFiles) == 0 {
 		return nil, fmt.Errorf("APK has no %s native library candidate", abi)
 	}
 	sum := sha256.Sum256(apk)
-	launch := fmt.Sprintf("activity=%s\naot=false\napplication=%s\nnative=%t\npackage=%s\nsha256=%x\nversion=%s\n", property(meta.Activity), property(meta.Application), len(nativeFiles) > 0, property(meta.Package), sum, property(meta.Version))
+	launch := fmt.Sprintf("activity=%s\naot=false\napplication=%s\ndigitalis=%t\nnative=%t\nnative_abi=%s\npackage=%s\nsha256=%x\nversion=%s\n", property(meta.Activity), property(meta.Application), useDigitalis, len(nativeFiles) > 0, selectedABI, property(meta.Package), sum, property(meta.Version))
 	input, err := gzip.NewReader(bytes.NewReader(template))
 	if err != nil {
 		return nil, err
@@ -167,10 +200,14 @@ func assemble(template, apk, raw []byte) ([]byte, error) {
 		if len(data) > 256<<20 {
 			return nil, errors.New("native library exceeds size limit")
 		}
-		if len(data) < 20 || string(data[:6]) != "\x7fELF\x02\x01" || data[16] != 3 || data[17] != 0 || data[18] != machine || data[19] != 0 {
+		if len(data) < 20 || string(data[:6]) != "\x7fELF\x02\x01" || data[16] != 3 || data[17] != 0 || data[18] != selectedMachine || data[19] != 0 {
 			return nil, errors.New("native library architecture does not match the base")
 		}
-		name := "usr/android-lib/" + path.Base(file.Name)
+		libDir := "usr/android-lib/"
+		if useDigitalis {
+			libDir = "usr/android-lib-arm64/"
+		}
+		name := libDir + path.Base(file.Name)
 		if err := writer.WriteHeader(&tar.Header{Name: name, Mode: 0644, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
 			return nil, err
 		}
@@ -453,6 +490,9 @@ func jsBuildFlatpakFromApk(this js.Value, args []js.Value) any {
 		if v := args[3].Get("allowNetwork"); v.Type() == js.TypeBoolean {
 			opts.AllowNetwork = v.Bool()
 		}
+		if v := args[3].Get("allowDigitalis"); v.Type() == js.TypeBoolean {
+			opts.AllowDigitalis = v.Bool()
+		}
 	}
 	result, err := buildFlatpakFromApk(bytesFromJS(args[0]), bytesFromJS(args[1]), args[2].String(), opts)
 	if err != nil {
@@ -469,11 +509,40 @@ func jsBuildFlatpakFromApk(this js.Value, args []js.Value) any {
 		"filename":     result.Filename,
 	}
 }
+func jsBuildMacAppFromApk(this js.Value, args []js.Value) any {
+	if len(args) != 3 && len(args) != 4 {
+		return map[string]any{"error": "expected macOS base ZIP, APK, Shiraz version, and optional options"}
+	}
+	opts := macAppSidecarOptions{AllowNetwork: true, Sandbox: true}
+	if len(args) == 4 && args[3].Type() == js.TypeObject {
+		if v := args[3].Get("allowNetwork"); v.Type() == js.TypeBoolean {
+			opts.AllowNetwork = v.Bool()
+		}
+		if v := args[3].Get("sandbox"); v.Type() == js.TypeBoolean {
+			opts.Sandbox = v.Bool()
+		}
+	}
+	result, err := buildMacAppSidecarFromApk(bytesFromJS(args[0]), bytesFromJS(args[1]), args[2].String(), opts)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	array := js.Global().Get("Uint8Array").New(len(result.Bytes))
+	js.CopyBytesToJS(array, result.Bytes)
+	return map[string]any{
+		"bytes":        array,
+		"sha256":       result.SHA256,
+		"package":      result.Package,
+		"architecture": result.Architecture,
+		"filename":     result.Filename,
+		"native":       result.Native,
+	}
+}
 func main() {
 	js.Global().Set("shirazAssemble", js.FuncOf(jsAssemble))
 	js.Global().Set("shirazBuildStandalone", js.FuncOf(jsBuildStandalone))
 	js.Global().Set("shirazBuildFromApk", js.FuncOf(jsBuildFromApk))
 	js.Global().Set("shirazBuildFlatpakFromApk", js.FuncOf(jsBuildFlatpakFromApk))
+	js.Global().Set("shirazBuildMacAppFromApk", js.FuncOf(jsBuildMacAppFromApk))
 	js.Global().Set("shirazInspectApk", js.FuncOf(jsInspectApk))
 	js.Global().Set("shirazPrepareBrowserApk", js.FuncOf(jsPrepareBrowserApk))
 	select {}

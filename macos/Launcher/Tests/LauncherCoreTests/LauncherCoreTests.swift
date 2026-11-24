@@ -81,8 +81,26 @@ private let sampleReport = Data("""
         let old = #"{"width":360,"height":640,"logLevel":"INFO"}"#
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))
         #expect(settings == AppSettings())
-        let round = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(AppSettings(nativeCode: true)))
+        #expect(settings.sandbox)
+        let round = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(AppSettings(nativeCode: true, sandbox: false)))
         #expect(round.nativeCode)
+        #expect(!round.sandbox)
+    }
+
+    @Test func sandboxFlagAndVulkanEnvironment() throws {
+        let defaultArgs = RuntimeCommand.run(apk: URL(fileURLWithPath: "/x.apk"), settings: AppSettings())
+        #expect(!defaultArgs.contains("--no-sandbox"))
+        let unsandboxedArgs = RuntimeCommand.run(apk: URL(fileURLWithPath: "/x.apk"), settings: AppSettings(sandbox: false))
+        #expect(unsandboxedArgs.contains("--no-sandbox"))
+
+        let tmp = FileManager.default.temporaryDirectory.appending(path: "vk-env-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        #expect(RuntimeCommand.vulkanEnvironment(runtimeRoot: tmp).isEmpty)
+        let icdDir = tmp.appending(path: ".local/lib")
+        try FileManager.default.createDirectory(at: icdDir, withIntermediateDirectories: true)
+        let icd = icdDir.appending(path: "libMoltenVK.dylib")
+        try Data("molten".utf8).write(to: icd)
+        #expect(RuntimeCommand.vulkanEnvironment(runtimeRoot: tmp) == ["SHIRAZ_VULKAN_ICD": icd.standardizedFileURL.path])
     }
 }
 

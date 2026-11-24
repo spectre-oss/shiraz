@@ -48,6 +48,9 @@ public enum RuntimeCommand {
         if let timeout = settings.timeoutSeconds {
             arguments += ["--timeout", String(timeout)]
         }
+        if !settings.sandbox {
+            arguments.append("--no-sandbox")
+        }
         return arguments
     }
 
@@ -55,6 +58,13 @@ public enum RuntimeCommand {
     /// explicitly so a value inherited by the launcher never applies.
     public static func runEnvironment(settings: AppSettings) -> [String: String] {
         ["SHIRAZ_GUEST_LOADER": settings.nativeCode ? "1" : "0"]
+    }
+
+    /// In-tree MoltenVK ICD path when bootstrapped under `<runtimeRoot>/.local/lib`.
+    public static func vulkanEnvironment(runtimeRoot: URL) -> [String: String] {
+        let icd = runtimeRoot.appendingPathComponent(".local/lib/libMoltenVK.dylib").standardizedFileURL
+        guard FileManager.default.isReadableFile(atPath: icd.path) else { return [:] }
+        return ["SHIRAZ_VULKAN_ICD": icd.path]
     }
 
     /// Library and request directories for one session (LauncherInbox.java).

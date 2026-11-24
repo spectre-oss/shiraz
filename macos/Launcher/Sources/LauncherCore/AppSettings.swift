@@ -23,19 +23,23 @@ public struct AppSettings: Codable, Hashable, Sendable {
     /// loader (`SHIRAZ_GUEST_LOADER=1`). Off by default while the loader is
     /// unfinished; without it, native calls fail with UnsatisfiedLinkError.
     public var nativeCode: Bool
+    /// Isolate the running app process with the default macOS Seatbelt sandbox.
+    /// Turning this off passes `--no-sandbox` to `shiraz run`.
+    public var sandbox: Bool
 
     public init(width: Int = 360, height: Int = 640, logLevel: LogLevel = .info, timeoutSeconds: Int? = nil,
-                nativeCode: Bool = false) {
+                nativeCode: Bool = false, sandbox: Bool = true) {
         self.width = width
         self.height = height
         self.logLevel = logLevel
         self.timeoutSeconds = timeoutSeconds
         self.nativeCode = nativeCode
+        self.sandbox = sandbox
     }
 
-    enum CodingKeys: String, CodingKey { case width, height, logLevel, timeoutSeconds, nativeCode }
+    enum CodingKeys: String, CodingKey { case width, height, logLevel, timeoutSeconds, nativeCode, sandbox }
 
-    // entry.json files written before `nativeCode` existed still decode (as off).
+    // entry.json files written before `nativeCode` or `sandbox` existed still decode safely.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         width = try c.decode(Int.self, forKey: .width)
@@ -43,6 +47,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
         logLevel = try c.decode(LogLevel.self, forKey: .logLevel)
         timeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
         nativeCode = try c.decodeIfPresent(Bool.self, forKey: .nativeCode) ?? false
+        sandbox = try c.decodeIfPresent(Bool.self, forKey: .sandbox) ?? true
     }
 
     /// Mirrors the limits `shiraz run` enforces, so the UI can refuse early.

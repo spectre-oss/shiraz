@@ -99,3 +99,58 @@ func TestNativeArchitectureSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestDigitalisArm64OnX8664Selection(t *testing.T) {
+	var empty bytes.Buffer
+	gz := gzip.NewWriter(&empty)
+	tw := tar.NewWriter(gz)
+	tw.Close()
+	gz.Close()
+
+	var apk bytes.Buffer
+	zw := zip.NewWriter(&apk)
+	f, _ := zw.Create("lib/arm64-v8a/libgame.so")
+	f.Write(testELF(183))
+	zw.Close()
+
+	// Without AllowDigitalis, x86_64 rejects an arm64-only APK.
+	metaOff, _ := json.Marshal(metadata{Architecture: "x86_64", Package: "org.shiraz.dig", Application: "android.app.Application", Activity: "org.shiraz.dig.Main", Version: "1.0.0", AllowDigitalis: false})
+	if _, err := assemble(empty.Bytes(), apk.Bytes(), metaOff); err == nil {
+		t.Fatal("accepted arm64-only APK on x86_64 without AllowDigitalis")
+	}
+
+	// With AllowDigitalis, x86_64 packages arm64-v8a libraries under usr/android-lib-arm64/ and sets digitalis=true.
+	metaOn, _ := json.Marshal(metadata{Architecture: "x86_64", Package: "org.shiraz.dig", Application: "android.app.Application", Activity: "org.shiraz.dig.Main", Version: "1.0.0", AllowDigitalis: true})
+	result, err := assemble(empty.Bytes(), apk.Bytes(), metaOn)
+	if err != nil {
+		t.Fatalf("unexpected Digitalis assemble error: %v", err)
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(result))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	tr := tar.NewReader(reader)
+	foundArmLib := false
+	foundLaunchFlag := false
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h.Name == "usr/android-lib-arm64/libgame.so" {
+			b, _ := io.ReadAll(tr)
+			foundArmLib = len(b) >= 20 && b[18] == 183
+		}
+		if h.Name == "usr/share/shiraz/launch.properties" {
+			b, _ := io.ReadAll(tr)
+			foundLaunchFlag = bytes.Contains(b, []byte("digitalis=true\n")) && bytes.Contains(b, []byte("native_abi=arm64-v8a\n"))
+		}
+	}
+	if !foundArmLib || !foundLaunchFlag {
+		t.Fatalf("Digitalis bundle incomplete: armLib=%v launchFlag=%v", foundArmLib, foundLaunchFlag)
+	}
+}

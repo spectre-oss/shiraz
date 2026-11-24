@@ -191,6 +191,13 @@ struct SettingsSection: View {
                     Text("Runs the app's arm64-v8a libraries through Shiraz's guest loader, which is unfinished. Without it, features that need native code (such as OsmAnd's map) stay blank or fail.")
                 }
             }
+            Section {
+                Toggle("Isolate with macOS Seatbelt Sandbox", isOn: $draft.sandbox)
+            } header: {
+                Text("Security")
+            } footer: {
+                Text("Enabled by default. Confines app file writes to its own data and cache directories via Seatbelt; turning this off passes --no-sandbox.")
+            }
             Section("Input") {
                 LabeledContent("Keyboard Mapping") {
                     Button("Configure…") { model.attempt(.keyboardMapping) }
@@ -207,7 +214,7 @@ struct SettingsSection: View {
                 Toggle("Keep Mac Awake While Running", isOn: model.unimplemented(false, .keepAwake))
                 Toggle("Stop After a Time Limit", isOn: timeoutEnabled)
                 if let timeout = draft.timeoutSeconds {
-                    Stepper(value: Binding(get: { timeout }, set: { draft.timeoutSeconds = max(1, $0) }), in: 1...86_400, step: 30) {
+                    Stepper(value: Binding(get: { timeout }, set: { draft.timeoutSeconds = max(1, $0) }), in: 1 ... 86_400, step: 30) {
                         LabeledContent("Time Limit", value: Duration.seconds(timeout).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated)))
                     }
                 }

@@ -52,6 +52,7 @@ type flatpakFilesRootIndex struct {
 type flatpakBaseIndex struct {
 	Version           string                `json:"version"`
 	Architecture      string                `json:"architecture"`
+	Digitalis         bool                  `json:"digitalis,omitempty"`
 	RuntimeBranch     string                `json:"runtime_branch"`
 	RuntimeRepo       string                `json:"runtime_repo"`
 	Dirmeta0755SHA256 string                `json:"dirmeta_0755_sha256"`
@@ -74,8 +75,9 @@ type parsedFlatpakBase struct {
 }
 
 type flatpakBuildOptions struct {
-	AllowNetwork bool
-	Timestamp    uint64
+	AllowNetwork   bool
+	AllowDigitalis bool
+	Timestamp      uint64
 }
 
 type flatpakBuildResult struct {
@@ -415,24 +417,50 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 		return nil, err
 	}
 	var nativeFiles []*zip.File
-	seen := map[string]bool{}
-	var nativeBytes uint64
 	hasNative := false
+	selectedABI := abi
+	selectedMachine := machine
+	useDigitalis := false
+	collectFlatpakABI := func(candidateABI string) ([]*zip.File, error) {
+		var found []*zip.File
+		localSeen := map[string]bool{}
+		var total uint64
+		for _, file := range apkZip.File {
+			if strings.HasPrefix(file.Name, "lib/"+candidateABI+"/") && !file.FileInfo().IsDir() {
+				name := strings.TrimPrefix(file.Name, "lib/"+candidateABI+"/")
+				if !nativeName.MatchString(name) || reserved[name] || localSeen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 256<<20 {
+					return nil, errors.New("unsupported native library")
+				}
+				localSeen[name] = true
+				total += file.UncompressedSize64
+				if len(localSeen) > 64 || total > 512<<20 {
+					return nil, errors.New("native payload exceeds limit")
+				}
+				found = append(found, file)
+			}
+		}
+		return found, nil
+	}
 	for _, file := range apkZip.File {
 		if strings.HasPrefix(file.Name, "lib/") && strings.HasSuffix(file.Name, ".so") {
 			hasNative = true
+			break
 		}
-		if strings.HasPrefix(file.Name, "lib/"+abi+"/") && !file.FileInfo().IsDir() {
-			name := strings.TrimPrefix(file.Name, "lib/"+abi+"/")
-			if !nativeName.MatchString(name) || reserved[name] || seen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 256<<20 {
-				return nil, errors.New("unsupported native library")
-			}
-			seen[name] = true
-			nativeBytes += file.UncompressedSize64
-			if len(seen) > 64 || nativeBytes > 512<<20 {
-				return nil, errors.New("native payload exceeds limit")
-			}
-			nativeFiles = append(nativeFiles, file)
+	}
+	nativeFiles, err = collectFlatpakABI(abi)
+	if err != nil {
+		return nil, err
+	}
+	if hasNative && len(nativeFiles) == 0 && abi == "x86_64" && (opts.AllowDigitalis || base.index.Digitalis) {
+		armFiles, err := collectFlatpakABI("arm64-v8a")
+		if err != nil {
+			return nil, err
+		}
+		if len(armFiles) > 0 {
+			nativeFiles = armFiles
+			selectedABI = "arm64-v8a"
+			selectedMachine = 183
+			useDigitalis = true
 		}
 	}
 	if hasNative && len(nativeFiles) == 0 {
@@ -441,10 +469,12 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 
 	apkSum := sha256.Sum256(apkBytes)
 	launchProps := fmt.Sprintf(
-		"activity=%s\naot=false\napplication=%s\nnative=%t\npackage=%s\nsha256=%x\nversion=%s\n",
+		"activity=%s\naot=false\napplication=%s\ndigitalis=%t\nnative=%t\nnative_abi=%s\npackage=%s\nsha256=%x\nversion=%s\n",
 		property(meta.Activity),
 		property(meta.Application),
+		useDigitalis,
 		len(nativeFiles) > 0,
+		selectedABI,
 		property(meta.Package),
 		apkSum,
 		property(meta.Version),
@@ -507,7 +537,7 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 			if len(data) > 256<<20 {
 				return nil, errors.New("native library exceeds size limit")
 			}
-			if len(data) < 20 || string(data[:6]) != "\x7fELF\x02\x01" || data[16] != 3 || data[17] != 0 || data[18] != machine || data[19] != 0 {
+			if len(data) < 20 || string(data[:6]) != "\x7fELF\x02\x01" || data[16] != 3 || data[17] != 0 || data[18] != selectedMachine || data[19] != 0 {
 				return nil, errors.New("native library architecture does not match the base")
 			}
 			nativeEntries = append(nativeEntries, ostreeFileEntry{
@@ -516,7 +546,11 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 			})
 		}
 		androidLibTree := part1.addMeta(ostreeObjectDirTree, ostreeDirtreeBytes(nativeEntries, nil))
-		usrDirs = append(usrDirs, ostreeDirEntry{Name: "android-lib", TreeDigest: androidLibTree, MetaDigest: base.dirmeta0755})
+		libDirName := "android-lib"
+		if useDigitalis {
+			libDirName = "android-lib-arm64"
+		}
+		usrDirs = append(usrDirs, ostreeDirEntry{Name: libDirName, TreeDigest: androidLibTree, MetaDigest: base.dirmeta0755})
 	}
 	usrTree := part1.addMeta(ostreeObjectDirTree, ostreeDirtreeBytes(nil, usrDirs))
 
