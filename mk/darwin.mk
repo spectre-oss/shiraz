@@ -3383,4 +3383,11 @@ macos-platform-extras-check: $(MACOS_OUT)/test-platform-extras $(MACOS_OUT)/test
 	$(MACOS_OUT)/test-platform-extras
 	$(MACOS_OUT)/test-choreographer
 
+# Pre-warmed standalone ART standby handoff library on macOS.
+$(MACOS_OUT)/libshiraz-warm-pool.so: native/warm_pool.cpp mk/darwin.mk $(MACOS_OUT)/.dir
+	$(MACOS_CXX) $(MACOS_JNI_CFLAGS) -fPIC $(MACOS_DYLIB) native/warm_pool.cpp -o $@
+
+macos-runtime-libs: $(MACOS_OUT)/libshiraz-warm-pool.so
+
+
 

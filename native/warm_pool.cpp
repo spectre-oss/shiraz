@@ -58,9 +58,17 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_shiraz_runtime_WarmPoolRunner_signalReadyNative(JNIEnv*, jclass, jint sockFd) {
     static constexpr char kReady[] = "READY\n";
     ssize_t sent = -1;
+#if defined(__APPLE__)
+    int noSigPipe = 1;
+    setsockopt(sockFd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, sizeof(noSigPipe));
+    do {
+        sent = send(sockFd, kReady, sizeof(kReady) - 1, 0);
+    } while (sent < 0 && errno == EINTR);
+#else
     do {
         sent = send(sockFd, kReady, sizeof(kReady) - 1, MSG_NOSIGNAL);
     } while (sent < 0 && errno == EINTR);
+#endif
     return sent == ssize_t(sizeof(kReady) - 1) ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -115,6 +123,20 @@ Java_shiraz_runtime_WarmPoolRunner_receiveAndPrepareNative(JNIEnv* env, jclass, 
     }
 
     buf.resize(static_cast<size_t>(received));
+#if defined(__APPLE__)
+    while (buf.size() < kMaxPayloadBytes) {
+        uint8_t extra[4096];
+        const size_t remaining = kMaxPayloadBytes - buf.size();
+        const size_t space = sizeof(extra) < remaining ? sizeof(extra) : remaining;
+        ssize_t more = -1;
+        do {
+            more = recv(sockFd, extra, space, 0);
+        } while (more < 0 && errno == EINTR);
+        if (more <= 0)
+            break;
+        buf.insert(buf.end(), extra, extra + more);
+    }
+#endif
     size_t pos = 0;
     std::string dataDir, appLibDir, cpApk;
     uint32_t envCount = 0, propCount = 0, argCount = 0;

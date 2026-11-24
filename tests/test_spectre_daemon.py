@@ -217,6 +217,41 @@ class SpectreDaemonUnitTest(unittest.TestCase):
         ctrl.close()
         self.assertIsNone(ctrl.reported_pid())
 
+    def test_warm_pool_darwin_command_and_availability(self):
+        from shiraz.warm_pool import build_standby_command, warm_pool_available
+
+        with tempfile.TemporaryDirectory(prefix='shiraz-wp-darwin-') as tmp:
+            root = Path(tmp)
+            host = root / 'context/art_standalone/out/host/darwin-x86'
+            (root / 'build/macos').mkdir(parents=True)
+            (root / 'build/macos/libshiraz-warm-pool.so').write_bytes(b'stub')
+            (root / 'build/shiraz-framework.jar').write_bytes(b'jar')
+            (root / 'build/macos/libEGL.dylib').write_bytes(b'egl')
+            (root / 'build/macos/libshiraz-guest.so').write_bytes(b'guest')
+            self.assertTrue(warm_pool_available(root, system='Darwin'))
+            self.assertFalse(warm_pool_available(root, system='Linux'))
+            self.assertFalse(warm_pool_available(root, system='Windows'))
+
+            cmd, env = build_standby_command(
+                root=root,
+                host=host,
+                control_fd=7,
+                environ={'SHIRAZ_GUEST_LOADER': '1'},
+                system='Darwin',
+            )
+            self.assertIn('-Xint', cmd)
+            self.assertIn('-Xusejit:false', cmd)
+            self.assertNotIn('LD_PRELOAD', env)
+            self.assertTrue(any(arg.startswith('-XX:NativeBridge=') for arg in cmd))
+            self.assertTrue(
+                any(
+                    arg.startswith('-Djava.library.path=') and str(root / 'build/macos') in arg
+                    for arg in cmd
+                )
+            )
+            self.assertEqual(env['FONTCONFIG_FILE'], str(root / '.local/etc/fonts/fonts.conf'))
+            self.assertEqual(env['SHIRAZ_EGL_LIBRARY'], str(root / 'build/macos/libEGL.dylib'))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -10,13 +10,22 @@ import signal
 import socket
 import struct
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .runtime import HOST, JARS, ROOT, art_execution_options, host_system, runtime_inputs
+from .runtime import (
+    DARWIN_FONTCONFIG_FILE,
+    DARWIN_JARS,
+    DARWIN_LIBRARIES,
+    HOST,
+    JARS,
+    ROOT,
+    art_execution_options,
+    host_system,
+    runtime_inputs,
+)
 
 
 class DirectProcessControl:
@@ -80,14 +89,17 @@ def encode_handoff_payload(
     return b''.join(parts)
 
 
-def warm_pool_available(root: Path = ROOT) -> bool:
-    return (
-        sys.platform == 'linux'
-        and (root / 'build/libshiraz-warm-pool.so').is_file()
-        and (
-            (root / 'build/shiraz-warm-pool.jar').is_file()
-            or (root / 'build/shiraz-framework.jar').is_file()
-        )
+def warm_pool_available(root: Path = ROOT, system: Optional[str] = None) -> bool:
+    os_name = host_system() if system is None else system
+    if os_name == 'Linux':
+        lib = root / 'build/libshiraz-warm-pool.so'
+    elif os_name == 'Darwin':
+        lib = root / DARWIN_LIBRARIES / 'libshiraz-warm-pool.so'
+    else:
+        return False
+    return lib.is_file() and (
+        (root / 'build/shiraz-warm-pool.jar').is_file()
+        or (root / 'build/shiraz-framework.jar').is_file()
     )
 
 
@@ -98,17 +110,22 @@ def build_standby_command(
     aot_dir: Optional[Path] = None,
     environ: Optional[Dict[str, str]] = None,
     control_fd: int,
+    system: Optional[str] = None,
 ) -> Tuple[List[str], Dict[str, str]]:
     """Build the command and base env for one idle pre-warmed standby dalvikvm."""
     env_in = dict(os.environ if environ is None else environ)
-    system = host_system()
-    execution_mode = env_in.get('SHIRAZ_ART_MODE', 'jit')
+    os_name = host_system() if system is None else system
+    darwin = os_name == 'Darwin'
+    execution_mode = env_in.get('SHIRAZ_ART_MODE', 'interpreter' if darwin else 'jit')
+    if darwin:
+        execution_mode = 'interpreter'
     execution_options = art_execution_options(execution_mode)
-    vm, framework, framework_resources, _, _ = runtime_inputs(system, root, host, execution_mode)
-    boot = ':'.join(str(host / 'framework' / name) for name in JARS)
+    vm, framework, framework_resources, _, _ = runtime_inputs(os_name, root, host, execution_mode)
+    boot = ':'.join(str(host / 'framework' / name) for name in (DARWIN_JARS if darwin else JARS))
     local_lib_dir = env_in.get('SHIRAZ_LOCAL_LIB_DIR', '').strip() or str(root / '.local/lib')
+    native_lib_dir = str(root / DARWIN_LIBRARIES) if darwin else str(root / 'build')
 
-    standby_work = root / 'build/warm-pool'
+    standby_work = root / ('build/macos/warm-pool' if darwin else 'build/warm-pool')
     for sub in ('android-data/dalvik-cache', 'cache', 'tmp', 'home'):
         (standby_work / sub).mkdir(parents=True, exist_ok=True)
 
@@ -118,11 +135,25 @@ def build_standby_command(
         'ANDROID_DATA': str(standby_work / 'android-data'),
         'XDG_CACHE_HOME': str(standby_work / 'cache'),
         'BOOTCLASSPATH': boot,
-        'LD_LIBRARY_PATH': f'{host / "lib64"}:{local_lib_dir}:{root / "build"}',
         'SHIRAZ_FONT_DIR': str(root / '.local/share/shiraz/fonts'),
         'SHIRAZ_ANDROID_FONT_DIR': str(root / '.local/share/shiraz/fonts'),
         'XDG_DATA_DIRS': f'{root / ".local/share"}:/usr/share',
     }
+    if darwin:
+        env.pop('LD_PRELOAD', None)
+        env.pop('DYLD_INSERT_LIBRARIES', None)
+        fc_file = root / DARWIN_FONTCONFIG_FILE
+        env['FONTCONFIG_FILE'] = str(fc_file)
+        env['FONTCONFIG_PATH'] = str(fc_file.parent)
+        angle_egl = root / DARWIN_LIBRARIES / 'libEGL.dylib'
+        if angle_egl.is_file() and not env.get('SHIRAZ_EGL_LIBRARY'):
+            env['SHIRAZ_EGL_LIBRARY'] = str(angle_egl)
+        egl_shim = root / DARWIN_LIBRARIES / 'libEGL_shim.so'
+        if egl_shim.is_file():
+            env.setdefault('SHIRAZ_GUEST_EGL_SHIM', str(egl_shim))
+        env.setdefault('SHIRAZ_GUEST_ANDROID_LIB_DIR', native_lib_dir)
+    else:
+        env['LD_LIBRARY_PATH'] = f'{host / "lib64"}:{local_lib_dir}:{native_lib_dir}'
     for key in ('SDL_VIDEODRIVER', 'SDL_RENDER_DRIVER'):
         if key in env:
             env.setdefault('SHIRAZ_HOST_' + key, env.pop(key))
@@ -136,7 +167,7 @@ def build_standby_command(
     ):
         env.pop(strip_key, None)
 
-    if not env.get('SHIRAZ_AUDIO_DEVICE'):
+    if not darwin and not env.get('SHIRAZ_AUDIO_DEVICE'):
         xdg_rt = env.get('XDG_RUNTIME_DIR', '')
         if xdg_rt and (Path(xdg_rt) / 'pipewire-0').is_socket():
             for plugin_dir in (
@@ -149,15 +180,16 @@ def build_standby_command(
                     env['SHIRAZ_AUDIO_DEVICE'] = 'pipewire'
                     break
 
-    platform_libraries = (
-        root / 'build/libshiraz-android-process.so',
-        root / 'build/libandroid.so',
-        root / 'build/libshiraz-resources.so',
-        root / 'build/libshiraz-android-fonts.so',
-    )
-    env['LD_PRELOAD'] = ':'.join(map(str, platform_libraries)) + (
-        ':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else ''
-    )
+    if not darwin:
+        platform_libraries = (
+            root / 'build/libshiraz-android-process.so',
+            root / 'build/libandroid.so',
+            root / 'build/libshiraz-resources.so',
+            root / 'build/libshiraz-android-fonts.so',
+        )
+        env['LD_PRELOAD'] = ':'.join(map(str, platform_libraries)) + (
+            ':' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else ''
+        )
 
     cp_framework = framework
     aot_args: List[str] = []
@@ -198,6 +230,13 @@ def build_standby_command(
     warm_jar = root / 'build/shiraz-warm-pool.jar'
     classpath = f'{cp_framework}:{warm_jar}' if warm_jar.is_file() else str(cp_framework)
 
+    compiler_args = [] if darwin else ['-Xcompiler:' + str(host / 'bin/dex2oat')]
+    bridge_args: List[str] = []
+    if darwin and env_in.get('SHIRAZ_GUEST_LOADER') == '1':
+        guest_bridge = root / DARWIN_LIBRARIES / 'libshiraz-guest.so'
+        if guest_bridge.is_file():
+            bridge_args.append('-XX:NativeBridge=' + str(guest_bridge.resolve()))
+
     command: List[str] = [
         str(vm),
         *gc_args,
@@ -207,9 +246,10 @@ def build_standby_command(
         *execution_options,
         *check_jni_args,
         *trace_aot_args,
-        '-Xcompiler:' + str(host / 'bin/dex2oat'),
+        *compiler_args,
+        *bridge_args,
         *trust_store,
-        '-Djava.library.path=' + f'{host / "lib64"}:{root / "build"}',
+        '-Djava.library.path=' + f'{host / "lib64"}:{native_lib_dir}',
         '-Dshiraz.frameworkResources=' + str(framework_resources),
         '-Dshiraz.speechData=' + str(root / '.local/share'),
         '-cp',
@@ -219,7 +259,7 @@ def build_standby_command(
         # Trailing marker so ServiceProcess.configure() recognizes the ART command prefix.
         'shiraz.runtime.ActivityRunner',
     ]
-    if loader := env_in.get('SHIRAZ_RUNTIME_LOADER'):
+    if not darwin and (loader := env_in.get('SHIRAZ_RUNTIME_LOADER')):
         library_path = env.pop('LD_LIBRARY_PATH') + ':' + str(Path(loader).parent)
         if prepend := env_in.get('SHIRAZ_PREPEND_LIBRARY_PATH', '').strip():
             library_path = prepend + ':' + library_path
@@ -299,7 +339,12 @@ class WarmArtPool:
                 return
             if self._proc is not None and self._proc.poll() is None:
                 return
-        parent_sock, child_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        sock_type = (
+            socket.SOCK_SEQPACKET
+            if host_system() == 'Linux' and hasattr(socket, 'SOCK_SEQPACKET')
+            else socket.SOCK_STREAM
+        )
+        parent_sock, child_sock = socket.socketpair(socket.AF_UNIX, sock_type)
         proc: Optional[subprocess.Popen] = None
         try:
             command, env = build_standby_command(
