@@ -1339,8 +1339,18 @@ def darwin_guest_bridge(root, native_abis, environ):
     return library.resolve()
 
 
+def darwin_vulkan_environment(env, root):
+    """Point host and guest Vulkan bridges at the in-tree MoltenVK ICD when installed."""
+    if env.get('SHIRAZ_VULKAN_DISABLE') == '1' or env.get('SHIRAZ_VULKAN_ICD'):
+        return
+    molten = (root / '.local/lib/libMoltenVK.dylib').resolve()
+    if molten.is_file():
+        env['SHIRAZ_VULKAN_ICD'] = str(molten)
+
+
 def darwin_gles_environment(env, root, gles):
-    """Point EGL and SDL at the in-tree ANGLE when DARWIN_GLES is built (see there)."""
+    """Point EGL, SDL, and MoltenVK at in-tree libraries when built on macOS."""
+    darwin_vulkan_environment(env, root)
     if not gles:
         env.pop('SHIRAZ_EGL_LIBRARY', None)
         return

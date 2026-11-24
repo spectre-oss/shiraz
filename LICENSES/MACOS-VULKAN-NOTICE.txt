@@ -1,0 +1,20 @@
+macOS Vulkan-over-Metal ICD (not vendored in the source tree)
+
+On macOS arm64, `make macos-vulkan-deps` (`scripts/bootstrap_vulkan_darwin.py`)
+downloads and checksum-verifies the pinned upstream KhronosGroup MoltenVK
+release archive in the ignored `.deps/` directory and installs only the
+macOS dynamic library and its license/provenance files in the ignored `.local/`
+directory. Nothing is installed into the host system.
+
+MoltenVK (scripts/bootstrap_vulkan_darwin.py)
+  https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar
+  SHA-256: f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e
+  Installed library: .local/lib/libMoltenVK.dylib
+  ICD manifest:      .local/share/vulkan/icd.d/MoltenVK_icd.json
+  License & provenance: .local/share/licenses/moltenvk/{LICENSE,PROVENANCE}
+  - MoltenVK: Apache-2.0 (LICENSE), The Brenwill Workshop Ltd. / Khronos Group.
+  - Any redistribution of libMoltenVK.dylib alongside a Shiraz macOS bundle must
+    retain the Apache-2.0 LICENSE and PROVENANCE files.
+
+Shiraz's original Vulkan bridge (`native/ndk_vulkan.cpp`,
+`native/darwin/guest/vulkan.cpp`) and bootstrap script are GPL-3.0-only.

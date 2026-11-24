@@ -108,6 +108,8 @@ struct HostVulkanLoader {
 #if defined(_WIN32)
         candidates.emplace_back("vulkan-1.dll");
 #elif defined(__APPLE__)
+        candidates.emplace_back("@loader_path/libMoltenVK.dylib");
+        candidates.emplace_back("@loader_path/../../.local/lib/libMoltenVK.dylib");
         candidates.emplace_back("libvulkan.1.dylib");
         candidates.emplace_back("libvulkan.dylib");
         candidates.emplace_back("libMoltenVK.dylib");

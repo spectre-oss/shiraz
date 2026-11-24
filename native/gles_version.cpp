@@ -115,6 +115,8 @@ VulkanCaps probeHostVulkanCapabilities() {
         candidates.emplace_back(envIcd);
     }
 #if defined(__APPLE__)
+    candidates.emplace_back("@loader_path/libMoltenVK.dylib");
+    candidates.emplace_back("@loader_path/../../.local/lib/libMoltenVK.dylib");
     candidates.emplace_back("libvulkan.1.dylib");
     candidates.emplace_back("libvulkan.dylib");
     candidates.emplace_back("libMoltenVK.dylib");
@@ -159,6 +161,15 @@ VulkanCaps probeHostVulkanCapabilities() {
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
 #if defined(__APPLE__)
+        using EnumInstVerFn = VkResult (*)(uint32_t*);
+        auto enumVer = gipa ? vkCastPfn<EnumInstVerFn>(gipa(nullptr, "vkEnumerateInstanceVersion"))
+                            : vkLoadSym<EnumInstVerFn>(handle, "vkEnumerateInstanceVersion");
+        if (enumVer) {
+            uint32_t instVer = 0;
+            if (enumVer(&instVer) == VK_SUCCESS && instVer >= VK_API_VERSION_1_0) {
+                appInfo.apiVersion = instVer;
+            }
+        }
         const char* portabilityExt = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
         auto enumExt =
             gipa ? vkCastPfn<EnumInstExtFn>(gipa(nullptr, "vkEnumerateInstanceExtensionProperties"))

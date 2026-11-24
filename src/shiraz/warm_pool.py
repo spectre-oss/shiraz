@@ -151,6 +151,13 @@ def build_standby_command(
         egl_shim = root / DARWIN_LIBRARIES / 'libEGL_shim.so'
         if egl_shim.is_file():
             env.setdefault('SHIRAZ_GUEST_EGL_SHIM', str(egl_shim))
+        molten = root / '.local/lib/libMoltenVK.dylib'
+        if (
+            molten.is_file()
+            and env.get('SHIRAZ_VULKAN_DISABLE') != '1'
+            and not env.get('SHIRAZ_VULKAN_ICD')
+        ):
+            env['SHIRAZ_VULKAN_ICD'] = str(molten.resolve())
         env.setdefault('SHIRAZ_GUEST_ANDROID_LIB_DIR', native_lib_dir)
     else:
         env['LD_LIBRARY_PATH'] = f'{host / "lib64"}:{local_lib_dir}:{native_lib_dir}'

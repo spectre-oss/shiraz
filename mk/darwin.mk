@@ -3434,6 +3434,21 @@ macos-art-jit-remap-fault-check: $(MACOS_OUT)/art-jit-remap-fault-test $(MACOS_O
 	$(MACOS_OUT)/art-jit-remap-fault-test
 	$(MACOS_OUT)/art-jit-remap-fault-hardened
 
+# Pinned in-tree KhronosGroup MoltenVK v1.4.2 (Vulkan-over-Metal) bootstrap
+# and live Apple Silicon hardware Vulkan + guest ELF64 AAPCS64 verification.
+MACOS_MOLTENVK_STAMP := $(MACOS_OUT)/deps/moltenvk.stamp
+.PHONY: macos-vulkan-deps macos-live-vulkan-check
+macos-vulkan-deps:
+	python3 scripts/bootstrap_vulkan_darwin.py
+
+$(MACOS_OUT)/m5/live-moltenvk-test: tests/darwin/live_moltenvk_test.cpp native/darwin/guest/vulkan.cpp include/shiraz/darwin/guest/vulkan.hpp include/shiraz/ndk/vulkan.h $(MACOS_GUEST_SOURCES) $(MACOS_GUEST_HEADERS) $(MACOS_OUT)/libandroid.so $(MACOS_OUT)/libvulkan.so $(MACOS_OUT)/.dir
+	@mkdir -p $(dir $@)
+	$(CXX) $(MACOS_GUEST_CPPFLAGS) -std=c++17 -O2 -g -Wall -Wextra -Werror tests/darwin/live_moltenvk_test.cpp native/darwin/guest/vulkan.cpp $(MACOS_GUEST_SOURCES) $(MACOS_OUT)/libandroid.so -Wl,-rpath,@loader_path/.. -pthread -o $@
+
+macos-live-vulkan-check: macos-vulkan-deps macos-guest-vulkan-fixture $(MACOS_OUT)/m5/live-moltenvk-test $(MACOS_OUT)/libvulkan.so
+	SHIRAZ_VULKAN_ICD="$(CURDIR)/.local/lib/libMoltenVK.dylib" $(MACOS_OUT)/m5/live-moltenvk-test "$(CURDIR)/$(MACOS_OUT)/libvulkan.so" $(MACOS_GUEST_DEP_DIR)
+
+
 
 
 
