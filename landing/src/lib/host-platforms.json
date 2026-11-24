@@ -8,7 +8,7 @@
       "name": "Linux",
       "architectures": "x86_64 · ARM64",
       "maturity": "Primary target",
-      "summary": "Standalone ART, host-ABI and optional Digitalis ARM64 native execution, 15/15 NDK libraries, SDL2/EGL/GLES, Vulkan ANativeWindow swapchain/AHB bridge, Landlock app isolation, WebRTC browser streaming, and per-app AppImages.",
+      "summary": "Standalone ART, host-ABI and optional Digitalis ARM64 native execution, 15/15 NDK libraries, SDL2/EGL/GLES with GBM/DMA-BUF zero-copy swapchain, Vulkan ANativeWindow swapchain/AHB bridge, ALSA/PipeWire AAudio, Landlock app isolation, WebRTC browser streaming, and per-app AppImages and sandboxed Flatpak bundles.",
       "evidence": "docs/cross_platform.md"
     },
     {
@@ -67,7 +67,7 @@
     {
       "id": "packaging-ci",
       "layer": "Packaging & CI",
-      "linux": "Browser & CLI per-app AppImage builder, .deb packages, Linux x86_64 & ARM64 CI releases.",
+      "linux": "Browser & CLI per-app AppImage and Flatpak (.flatpak) builders, .deb packages, Linux x86_64 & ARM64 CI releases.",
       "macos": "Signed Shiraz.app bundle builder (hardened runtime, allow-jit, optional --sandbox entitlements, @rpath closure, .icns), per-APK install-desktop, macOS ARM64 CI.",
       "windows": "Portable Shiraz\\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Windows x64 MinGW-w64 CI (make windows-check & windows-presentation-check)."
     }

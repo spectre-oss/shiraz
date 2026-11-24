@@ -3,9 +3,12 @@
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   const base = resolve('/').replace(/\/$/, '');
+  let format = $state('appimage');
   let architecture = $state('x86_64');
+  let allowNetwork = $state(true);
   let apkFile = $state();
   let baseFile = $state();
+  let baseInput = $state();
   let manifest = $state(null);
   let releaseVersion = $state('Checking release…');
   let releaseDetail = $state('The matching runtime downloads only when you build.');
@@ -17,28 +20,56 @@
   let downloadUrl;
   let revokeTimer;
 
+  function formatLabel(kind) {
+    return kind === 'flatpak' ? 'Flatpak' : 'AppImage';
+  }
+
+  function expectedBaseFile(version, arch, kind) {
+    return kind === 'flatpak'
+      ? `base/Shiraz-Flatpak-Base-${version}-${arch}.flatpak-base`
+      : `base/Shiraz-Browser-Base-${version}-${arch}.AppImage`;
+  }
+
+  function resolveEntry(data, arch, kind) {
+    const archEntry = data.architectures?.[arch];
+    if (!archEntry) return null;
+    if (archEntry.formats?.[kind]) return archEntry.formats[kind];
+    if (kind === 'appimage' && archEntry.base_file) return archEntry;
+    return null;
+  }
+
+  function onFormatChange() {
+    baseFile = undefined;
+    if (baseInput) baseInput.value = '';
+    loadRelease();
+  }
+
   async function loadRelease() {
     const current = ++request;
+    const selectedFormat = format;
+    const selectedArch = architecture;
     manifest = null;
     releaseVersion = 'Checking release…';
     try {
       const response = await fetch(`${base}/release.json`, {cache: 'no-store'});
       if (!response.ok) throw new Error('No published base manifest.');
       const data = await response.json();
-      const entry = data.architectures?.[architecture];
+      const entry = resolveEntry(data, selectedArch, selectedFormat);
       if (!/^\d+\.\d+\.\d+$/.test(data.version) || !entry ||
-          entry.base_file !== `base/Shiraz-Browser-Base-${data.version}-${architecture}.AppImage` ||
+          entry.base_file !== expectedBaseFile(data.version, selectedArch, selectedFormat) ||
           !/^[0-9a-f]{64}$/.test(entry.base_sha256) || !Number.isSafeInteger(entry.base_size) || entry.base_size < 1) {
         throw new Error('Invalid runtime manifest.');
       }
       if (current !== request) return;
-      manifest = {...entry, version: data.version};
+      manifest = {...entry, version: data.version, format: selectedFormat, architecture: selectedArch};
       releaseVersion = `v${data.version}`;
-      releaseDetail = `${architecture} · ${(entry.base_size / 1048576).toFixed(0)} MiB · checksum verified before packaging`;
+      releaseDetail = `${selectedArch} · ${formatLabel(selectedFormat)} · ${(entry.base_size / 1048576).toFixed(0)} MiB · checksum verified before packaging`;
     } catch {
       if (current !== request) return;
       releaseVersion = 'Local base available';
-      releaseDetail = 'Select a local Shiraz browser base below, or use the published site for automatic runtime downloads.';
+      releaseDetail = selectedFormat === 'flatpak'
+        ? 'Select a local Shiraz Flatpak base (.flatpak-base) below, or use the published site once a Flatpak release is available.'
+        : 'Select a local Shiraz browser base below, or use the published site for automatic runtime downloads.';
     }
   }
 
@@ -56,13 +87,18 @@
     const response = await fetch(`${base}/shiraz-assemble.wasm`);
     if (!response.ok) throw new Error(`Builder download failed: HTTP ${response.status}`);
     const {instance} = await WebAssembly.instantiate(await response.arrayBuffer(), go.importObject);
-    // Go registers the synchronous assembly entry point before yielding.
+    // Go registers the synchronous assembly entry points before yielding.
     go.run(instance).catch(() => {});
-    if (typeof globalThis.shirazBuildFromApk !== 'function') throw new Error('Builder did not initialize.');
+    if (typeof globalThis.shirazBuildFromApk !== 'function' || typeof globalThis.shirazBuildFlatpakFromApk !== 'function') {
+      throw new Error('Builder did not initialize.');
+    }
   }
 
   async function assemble() {
     if (!apkFile?.[0]) { status = 'Select an APK to begin.'; state = 'error'; return; }
+    const selectedFormat = format;
+    const selectedArch = architecture;
+    const selectedNetwork = allowNetwork;
     busy = true;
     state = '';
     try {
@@ -72,43 +108,63 @@
       let version, bytes;
       const local = baseFile?.[0];
       if (local) {
-        const match = /^Shiraz-Browser-Base-(\d+\.\d+\.\d+)-(x86_64|aarch64)\.AppImage$/.exec(local.name);
-        if (!match) throw new Error('Select a versioned Shiraz browser base AppImage.');
-        if (match[2] !== architecture) throw new Error('Local base does not match the selected architecture.');
+        const pattern = selectedFormat === 'flatpak'
+          ? /^Shiraz-Flatpak-Base-(\d+\.\d+\.\d+)-(x86_64|aarch64)\.flatpak-base$/
+          : /^Shiraz-Browser-Base-(\d+\.\d+\.\d+)-(x86_64|aarch64)\.AppImage$/;
+        const match = pattern.exec(local.name);
+        if (!match) {
+          throw new Error(selectedFormat === 'flatpak'
+            ? 'Select a versioned Shiraz Flatpak base (.flatpak-base).'
+            : 'Select a versioned Shiraz browser base AppImage.');
+        }
+        if (match[2] !== selectedArch) throw new Error('Local base does not match the selected architecture.');
         version = match[1];
         status = 'Reading local base…';
         bytes = await local.arrayBuffer();
       } else {
-        if (!manifest) throw new Error('Select a local base AppImage. The published base is unavailable.');
+        if (!manifest || manifest.format !== selectedFormat || manifest.architecture !== selectedArch) {
+          throw new Error(selectedFormat === 'flatpak'
+            ? 'Select a local Flatpak base (.flatpak-base). The published Flatpak base is unavailable.'
+            : 'Select a local base AppImage. The published base is unavailable.');
+        }
         const selected = manifest;
         version = selected.version;
-        status = `Downloading runtime v${version}…`;
+        status = `Downloading ${formatLabel(selectedFormat)} runtime v${version}…`;
         const response = await fetch(`${base}/${selected.base_file}`);
         if (!response.ok) throw new Error(`Base download failed: HTTP ${response.status}`);
         bytes = await response.arrayBuffer();
         if (bytes.byteLength !== selected.base_size) throw new Error('Base download is incomplete.');
         const hash = await crypto.subtle.digest('SHA-256', bytes);
-        const digest = [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2,'0')).join('');
+        const digest = [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('');
         if (digest !== selected.base_sha256) throw new Error('Base checksum mismatch.');
       }
       status = 'Reading APK…';
       const apk = await apkFile[0].arrayBuffer();
-      if (apk.byteLength !== apkFile[0].size || apk.byteLength < 4 || new Uint8Array(apk)[0] !== 80 || new Uint8Array(apk)[1] !== 75) throw new Error('Select a complete APK/ZIP file.');
-      status = 'Assembling AppImage…';
+      if (apk.byteLength !== apkFile[0].size || apk.byteLength < 4 || new Uint8Array(apk)[0] !== 80 || new Uint8Array(apk)[1] !== 75) {
+        throw new Error('Select a complete APK/ZIP file.');
+      }
+      status = selectedFormat === 'flatpak' ? 'Assembling Flatpak…' : 'Assembling AppImage…';
       await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
-      const result = globalThis.shirazBuildFromApk(new Uint8Array(bytes), new Uint8Array(apk), version);
+      const result = selectedFormat === 'flatpak'
+        ? globalThis.shirazBuildFlatpakFromApk(new Uint8Array(bytes), new Uint8Array(apk), version, {allowNetwork: selectedNetwork})
+        : globalThis.shirazBuildFromApk(new Uint8Array(bytes), new Uint8Array(apk), version);
       if (result.error) throw new Error(result.error);
-      if (result.architecture !== architecture) throw new Error('Base architecture does not match the selected device.');
+      if (result.architecture !== selectedArch) throw new Error('Base architecture does not match the selected device.');
+      const filename = selectedFormat === 'flatpak'
+        ? (result.filename || `${result.appId}-Shiraz-${version}-${selectedArch}.flatpak`)
+        : `${result.package}-Shiraz-${version}-${selectedArch}.AppImage`;
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-      downloadUrl = URL.createObjectURL(new Blob([result.bytes], {type:'application/octet-stream'}));
+      downloadUrl = URL.createObjectURL(new Blob([result.bytes], {type: 'application/octet-stream'}));
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = `${result.package}-Shiraz-${version}-${architecture}.AppImage`;
+      link.download = filename;
       link.click();
       clearTimeout(revokeTimer);
       revokeTimer = setTimeout(() => { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }, 60000);
       state = 'success';
-      status = `AppImage ready. SHA-256: ${result.sha256}. On Linux, make it executable with chmod +x before running.`;
+      status = selectedFormat === 'flatpak'
+        ? `Flatpak ready. SHA-256: ${result.sha256}. On Linux, install with: flatpak install --user ./${filename} && flatpak run ${result.appId}`
+        : `AppImage ready. SHA-256: ${result.sha256}. On Linux, make it executable with chmod +x before running.`;
     } catch (error) { state = 'error'; status = error.message || String(error); }
     finally { busy = false; }
   }
@@ -119,10 +175,17 @@
 </script>
 
 <section class="builder" id="builder" aria-labelledby="builder-title">
-  <header class="builder-heading"><h2 id="builder-title">Your APK.<br><span>A Linux app.</span></h2><p>Drop in a supported APK. Get an AppImage back.<br>Built here, in your browser. Nothing is uploaded.</p></header>
+  <header class="builder-heading"><h2 id="builder-title">Your APK.<br><span>A Linux app.</span></h2><p>Drop in a supported APK. Get an AppImage or Flatpak back.<br>Built here, in your browser. Nothing is uploaded.</p></header>
   <form class="builder-panel" onsubmit={(event) => { event.preventDefault(); assemble(); }} aria-busy={busy}>
     <fieldset disabled={busy}>
-      <legend class="visually-hidden">AppImage build options</legend>
+      <legend class="visually-hidden">Linux package build options</legend>
+      <fieldset class="format-options">
+        <legend>Linux package format</legend>
+        <div class="format-cards">
+          <label class="format-card"><input type="radio" name="format" value="appimage" bind:group={format} onchange={onFormatChange} /><span><strong>AppImage</strong><small>Portable single file · chmod +x and run</small></span></label>
+          <label class="format-card"><input type="radio" name="format" value="flatpak" bind:group={format} onchange={onFormatChange} /><span><strong>Flatpak</strong><small>Sandboxed .flatpak bundle · flatpak install --user</small></span></label>
+        </div>
+      </fieldset>
       <fieldset class="architecture-options">
         <legend>Linux device architecture</legend>
         <div class="architecture-cards">
@@ -130,10 +193,13 @@
           <label class="architecture-card"><input type="radio" name="architecture" value="aarch64" bind:group={architecture} onchange={loadRelease} /><span><strong>ARM64</strong><small>Linux phones / ARM computers</small><em>Experimental</em></span></label>
         </div>
       </fieldset>
+      {#if format === 'flatpak'}
+        <label class="builder-checkbox" for="flatpak-network"><input id="flatpak-network" type="checkbox" bind:checked={allowNetwork} /><span>Allow network access in the Flatpak sandbox</span></label>
+      {/if}
       <div class="builder-base"><strong>{releaseVersion}</strong><p>{releaseDetail}</p></div>
-      <details><summary>Use a local base AppImage</summary><label for="base">Shiraz browser base</label><input id="base" type="file" accept=".AppImage" bind:files={baseFile} /></details>
+      <details><summary>{format === 'flatpak' ? 'Use a local Flatpak base' : 'Use a local base AppImage'}</summary><label for="base">{format === 'flatpak' ? 'Shiraz Flatpak base (.flatpak-base)' : 'Shiraz browser base (.AppImage)'}</label><input id="base" type="file" accept={format === 'flatpak' ? '.flatpak-base' : '.AppImage'} bind:files={baseFile} bind:this={baseInput} /></details>
       <label for="apk">Android™ APK</label><input id="apk" type="file" accept=".apk" bind:files={apkFile} />
-      <button class="button primary" id="assemble" type="submit">{busy ? 'Building…' : 'Build AppImage'}<svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></button>
+      <button class="button primary" id="assemble" type="submit">{busy ? 'Building…' : format === 'flatpak' ? 'Build Flatpak' : 'Build AppImage'}<svg class="icon" data-icon="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 4.5 21 12m0 0-7.5 7.5"/><path d="M21 12H3"/></svg></button>
     </fieldset>
     <p class="builder-status" id="status" data-state={state} role="status" aria-live="polite">{status}</p>
     <p class="builder-note">Packaged locally with WebAssembly. Compatibility and Linux phone support are experimental. Run only APKs you trust.</p>

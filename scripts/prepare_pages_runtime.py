@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import tempfile
 
+from package_browser_site import MAX_PAGES_SITE_BYTES, verify_flatpak_base
+
 
 def select_release(releases):
     candidates = []
@@ -28,6 +30,17 @@ def select_release(releases):
     return max(candidates, key=lambda entry: entry[0])[1]
 
 
+def _verify_sha256_file(path: Path, suffix: str) -> str:
+    digest, named = path.with_suffix(suffix + '.sha256').read_text().strip().split(None, 1)
+    if named != path.name or not re.fullmatch('[0-9a-f]{64}', digest):
+        raise RuntimeError('Invalid runtime checksum file: ' + path.name)
+    with path.open('rb') as stream:
+        actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if actual != digest:
+        raise RuntimeError('Published runtime checksum mismatch: ' + path.name)
+    return digest
+
+
 def install_runtime(site, source, version):
     from build_appimage import require_architecture
 
@@ -37,29 +50,46 @@ def install_runtime(site, source, version):
         path = source / name
         if not path.exists():
             continue
-        digest, named = path.with_suffix('.AppImage.sha256').read_text().strip().split(None, 1)
-        if named != name or not re.fullmatch('[0-9a-f]{64}', digest):
-            raise RuntimeError('Invalid runtime checksum file')
-        with path.open('rb') as stream:
-            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
-        if actual != digest:
-            raise RuntimeError('Published runtime checksum mismatch')
+        digest = _verify_sha256_file(path, '.AppImage')
         require_architecture(path, arch)
         (site / 'base').mkdir(exist_ok=True)
         shutil.copy2(path, site / 'base' / name)
-        bases[arch] = dict(
+        appimage_entry = dict(
             base_file='base/' + name, base_sha256=digest, base_size=path.stat().st_size
         )
+        formats = {'appimage': appimage_entry}
+
+        fp_name = f'Shiraz-Flatpak-Base-{version}-{arch}.flatpak-base'
+        fp_path = source / fp_name
+        if fp_path.exists():
+            fp_digest = _verify_sha256_file(fp_path, '.flatpak-base')
+            verify_flatpak_base(fp_path, arch)
+            shutil.copy2(fp_path, site / 'base' / fp_name)
+            formats['flatpak'] = dict(
+                base_file='base/' + fp_name,
+                base_sha256=fp_digest,
+                base_size=fp_path.stat().st_size,
+            )
+
+        bases[arch] = {**appimage_entry, 'formats': formats}
+
     if 'x86_64' not in bases:
         raise RuntimeError('Published x86_64 runtime missing')
     manifest = dict(
         version=version,
         architectures=bases,
-        **bases['x86_64'],
+        base_file=bases['x86_64']['base_file'],
+        base_sha256=bases['x86_64']['base_sha256'],
+        base_size=bases['x86_64']['base_size'],
         release_url=f'https://github.com/spectre-oss/shiraz/releases/tag/v{version}',
     )
     (site / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
     (site / '.nojekyll').touch()
+    total_site_bytes = sum(p.stat().st_size for p in site.rglob('*') if p.is_file())
+    if total_site_bytes > MAX_PAGES_SITE_BYTES:
+        raise RuntimeError(
+            f'Pages site ({total_site_bytes} bytes) exceeds budget ({MAX_PAGES_SITE_BYTES} bytes)'
+        )
 
 
 def main():
@@ -72,6 +102,7 @@ def main():
         subprocess.check_output(['gh', 'api', 'repos/spectre-oss/shiraz/releases?per_page=20'])
     )
     release = select_release(releases)
+    asset_names = {asset['name'] for asset in release.get('assets', [])}
     with tempfile.TemporaryDirectory(prefix='shiraz-pages-runtime-') as tmp:
         subprocess.run(
             [
@@ -88,6 +119,22 @@ def main():
             ],
             check=True,
         )
+        if any(name.startswith('Shiraz-Flatpak-Base-') for name in asset_names):
+            subprocess.run(
+                [
+                    'gh',
+                    'release',
+                    'download',
+                    release['tag_name'],
+                    '--repo',
+                    'spectre-oss/shiraz',
+                    '--pattern',
+                    'Shiraz-Flatpak-Base-*.flatpak-base*',
+                    '--dir',
+                    tmp,
+                ],
+                check=True,
+            )
         install_runtime(args.site, Path(tmp), release['tag_name'][1:])
     print('PAGES_RUNTIME_READY', release['tag_name'])
 

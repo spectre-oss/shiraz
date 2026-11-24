@@ -338,10 +338,36 @@ func jsInspectApk(this js.Value, args []js.Value) any {
 	}
 	return string(raw)
 }
+func jsBuildFlatpakFromApk(this js.Value, args []js.Value) any {
+	if len(args) != 3 && len(args) != 4 {
+		return map[string]any{"error": "expected Flatpak base, APK, Shiraz version, and optional options"}
+	}
+	opts := flatpakBuildOptions{AllowNetwork: true}
+	if len(args) == 4 && args[3].Type() == js.TypeObject {
+		if v := args[3].Get("allowNetwork"); v.Type() == js.TypeBoolean {
+			opts.AllowNetwork = v.Bool()
+		}
+	}
+	result, err := buildFlatpakFromApk(bytesFromJS(args[0]), bytesFromJS(args[1]), args[2].String(), opts)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	array := js.Global().Get("Uint8Array").New(len(result.Bytes))
+	js.CopyBytesToJS(array, result.Bytes)
+	return map[string]any{
+		"bytes":        array,
+		"sha256":       result.SHA256,
+		"package":      result.Package,
+		"appId":        result.AppID,
+		"architecture": result.Architecture,
+		"filename":     result.Filename,
+	}
+}
 func main() {
 	js.Global().Set("shirazAssemble", js.FuncOf(jsAssemble))
 	js.Global().Set("shirazBuildStandalone", js.FuncOf(jsBuildStandalone))
 	js.Global().Set("shirazBuildFromApk", js.FuncOf(jsBuildFromApk))
+	js.Global().Set("shirazBuildFlatpakFromApk", js.FuncOf(jsBuildFlatpakFromApk))
 	js.Global().Set("shirazInspectApk", js.FuncOf(jsInspectApk))
 	select {}
 }

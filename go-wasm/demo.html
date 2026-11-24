@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#000000">
-<title>Shiraz — Browser AppImage builder</title>
+<title>Shiraz — Browser AppImage &amp; Flatpak builder</title>
 <style>
 @font-face {
   font-family: Manrope;
@@ -37,12 +37,15 @@ summary { width: fit-content; color: #a8a8a8; cursor: pointer; font-size: 12px; 
 details .file-field { margin: 15px 0 0; }
 .file-field { display: block; margin: 0 0 23px; }
 .file-field > span { display: block; margin-bottom: 10px; color: #cfcfcf; font-size: 13px; font-weight: 650; }
+.check-field { display: flex; align-items: center; gap: 10px; margin: 0 0 23px; padding: 12px 14px; border: 1px solid #343434; border-radius: 8px; background: #0a0a0a; color: #cfcfcf; font-size: 13px; cursor: pointer; }
+.check-field[hidden] { display: none; }
+.check-field input { width: 16px; height: 16px; margin: 0; }
 select { width: 100%; padding: 12px; border: 1px solid #343434; border-radius: 8px; color: #ddd; background: #0a0a0a; font: inherit; }
 input[type=file] { width: 100%; padding: 12px; border: 1px solid #343434; border-radius: 8px; color: #bcbcbc; background: #0a0a0a; font: 13px Manrope, system-ui, sans-serif; cursor: pointer; }
 input[type=file]::file-selector-button { margin-right: 16px; padding: 10px 14px; border: 1px solid #4b4b4b; border-radius: 5px; color: #f2f2f2; background: #202020; font: 650 12px Manrope, system-ui, sans-serif; cursor: pointer; }
 input[type=file]:hover { border-color: #777; }
 input[type=file]::file-selector-button:hover { background: #303030; }
-select:focus-visible, input[type=file]:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+select:focus-visible, input[type=file]:focus-visible, input[type=checkbox]:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .actions { margin-top: 30px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 button { min-height: 48px; padding: 0 22px; border: 1px solid #fff; border-radius: 6px; background: #f1f1f1; color: #090909; font: 750 13px Manrope, system-ui, sans-serif; cursor: pointer; transition: background .2s, transform .2s; }
 button:hover { background: #d7d7d7; transform: translateY(-1px); }
@@ -61,18 +64,22 @@ footer a { text-decoration-color: #555; text-underline-offset: 3px; }
 </head>
 <body>
 <main>
-  <h1>Build an AppImage from an APK.</h1>
-  <p class="lead">Select your APK. Your browser packages it with the Shiraz runtime and libraries into one AppImage you can download and run on your Linux desktop. Your APK stays on your device.</p>
+  <h1>Build an AppImage or Flatpak from an APK.</h1>
+  <p class="lead">Select your APK. Your browser packages it with the Shiraz runtime into a portable AppImage or sandboxed Flatpak bundle you can run on Linux. Your APK stays on your device.</p>
   <section class="panel" aria-labelledby="panel-title">
-    <div class="panel-heading"><h2 id="panel-title">Base AppImage</h2><span class="arch">Runs on Linux<small>Desktop / phone</small></span></div>
+    <div class="panel-heading"><h2 id="panel-title">Base runtime</h2><span class="arch">Runs on Linux<small>Desktop / phone</small></span></div>
+    <label class="file-field" for="format"><span>Linux package format</span>
+      <select id="format"><option value="appimage">AppImage — portable single file (chmod +x)</option><option value="flatpak">Flatpak — sandboxed .flatpak bundle (flatpak install --user)</option></select>
+    </label>
     <label class="file-field" for="architecture"><span>Linux device architecture</span>
       <select id="architecture"><option value="x86_64">x86_64 — Intel / AMD</option><option value="aarch64">ARM64 — Linux phones / ARM computers (experimental)</option></select>
     </label>
+    <label class="check-field" id="network-row" for="allow-network" hidden><input id="allow-network" type="checkbox" checked><span>Allow network access in the Flatpak sandbox</span></label>
     <div class="base-info">
       <div class="base-top"><div><span class="base-title">Current prerelease</span><strong class="base-version" id="release-version">Checking GitHub Releases…</strong></div><a class="base-link" id="release-link" hidden>View release ↗</a></div>
       <p class="base-detail" id="release-detail">The matching Shiraz base will load when you build.</p>
     </div>
-    <details id="manual-base"><summary>Use a local base AppImage</summary><label class="file-field"><span>Shiraz base AppImage</span><input id="base" type="file" accept=".AppImage"></label></details>
+    <details id="manual-base"><summary id="manual-base-summary">Use a local base AppImage</summary><label class="file-field"><span id="manual-base-label">Shiraz base AppImage</span><input id="base" type="file" accept=".AppImage"></label></details>
     <label class="file-field"><span>Android APK</span><input id="apk" type="file" accept=".apk"></label>
     <div class="actions"><button id="assemble" type="button">Build AppImage ↗</button><span class="local-note">Your APK stays in your browser.<span>No backend—all packaging happens in your browser.</span></span></div>
     <span class="status-label">Build status</span>
@@ -95,17 +102,47 @@ const releaseVersion = document.getElementById('release-version');
 const releaseDetail = document.getElementById('release-detail');
 const releaseLink = document.getElementById('release-link');
 const manualBase = document.getElementById('manual-base');
+const manualBaseSummary = document.getElementById('manual-base-summary');
+const manualBaseLabel = document.getElementById('manual-base-label');
+const baseInput = document.getElementById('base');
+const formatSelect = document.getElementById('format');
 const architectureSelect = document.getElementById('architecture');
+const networkRow = document.getElementById('network-row');
+const allowNetworkBox = document.getElementById('allow-network');
 let ready;
+
+function expectedBaseName(version, architecture, format) {
+  return format === 'flatpak'
+    ? `Shiraz-Flatpak-Base-${version}-${architecture}.flatpak-base`
+    : `Shiraz-Browser-Base-${version}-${architecture}.AppImage`;
+}
+
+function updateFormatUi() {
+  const flatpak = formatSelect.value === 'flatpak';
+  networkRow.hidden = !flatpak;
+  manualBaseSummary.textContent = flatpak ? 'Use a local Flatpak base' : 'Use a local base AppImage';
+  manualBaseLabel.textContent = flatpak ? 'Shiraz Flatpak base (.flatpak-base)' : 'Shiraz base AppImage (.AppImage)';
+  baseInput.accept = flatpak ? '.flatpak-base' : '.AppImage';
+  baseInput.value = '';
+  button.textContent = flatpak ? 'Build Flatpak ↗' : 'Build AppImage ↗';
+}
+
 async function loadRelease() {
+  const format = formatSelect.value;
   const architecture = architectureSelect.value;
   let manifest;
   try {
     const response = await fetch('release.json', {cache: 'no-store'});
     if (response.ok) manifest = await response.json();
   } catch (_) { /* Local demo can use a selected base file. */ }
-  if (manifest?.architectures) manifest = {...manifest, ...manifest.architectures[architecture]};
-  else if (architecture !== 'x86_64') manifest = null;
+  let entry = null;
+  if (manifest?.architectures?.[architecture]) {
+    const archEntry = manifest.architectures[architecture];
+    entry = archEntry.formats?.[format] || (format === 'appimage' ? archEntry : null);
+  } else if (manifest && format === 'appimage' && architecture === 'x86_64') {
+    entry = manifest;
+  }
+  const resolved = entry ? {...manifest, ...entry} : null;
   let latest;
   try {
     const response = await fetch('https://api.github.com/repos/spectre-oss/shiraz/releases?per_page=20', {cache: 'no-store'});
@@ -114,7 +151,7 @@ async function loadRelease() {
       latest = releases.filter(release => {
         const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(release.tag_name);
         return !release.draft && release.prerelease && match &&
-          release.assets.some(asset => asset.name === `Shiraz-Browser-Base-${match[1]}.${match[2]}.${match[3]}-${architecture}.AppImage`);
+          release.assets.some(asset => asset.name === expectedBaseName(`${match[1]}.${match[2]}.${match[3]}`, architecture, format));
       }).sort((a, b) => {
         const left = a.tag_name.slice(1).split('.').map(Number);
         const right = b.tag_name.slice(1).split('.').map(Number);
@@ -122,34 +159,40 @@ async function loadRelease() {
       })[0];
     }
   } catch (_) { /* The site bundle remains usable when the API is unavailable. */ }
-  if (architecture !== architectureSelect.value) return null;
+  if (architecture !== architectureSelect.value || format !== formatSelect.value) return null;
   if (latest) {
     releaseVersion.textContent = latest.tag_name;
     releaseLink.href = `https://github.com/spectre-oss/shiraz/releases/tag/${latest.tag_name}`;
     releaseLink.hidden = false;
-  } else if (manifest) {
-    releaseVersion.textContent = `v${manifest.version}`;
-    releaseLink.href = manifest.release_url;
+  } else if (resolved) {
+    releaseVersion.textContent = `v${resolved.version}`;
+    releaseLink.href = resolved.release_url;
     releaseLink.hidden = false;
   }
-  if (!manifest || !/^\d+\.\d+\.\d+$/.test(manifest.version) ||
-      manifest.base_file !== `base/Shiraz-Browser-Base-${manifest.version}-${architecture}.AppImage` ||
-      !/^[0-9a-f]{64}$/.test(manifest.base_sha256) || !Number.isSafeInteger(manifest.base_size) || manifest.base_size < 1) {
+  if (!resolved || !/^\d+\.\d+\.\d+$/.test(resolved.version) ||
+      resolved.base_file !== `base/${expectedBaseName(resolved.version, architecture, format)}` ||
+      !/^[0-9a-f]{64}$/.test(resolved.base_sha256) || !Number.isSafeInteger(resolved.base_size) || resolved.base_size < 1) {
     if (!latest) releaseVersion.textContent = 'Local base required';
-    releaseDetail.textContent = 'Select a base AppImage below to build locally.';
+    releaseDetail.textContent = format === 'flatpak'
+      ? 'Select a local Flatpak base (.flatpak-base) below to build locally.'
+      : 'Select a base AppImage below to build locally.';
     manualBase.open = true;
     return null;
   }
-  if (latest && latest.tag_name !== `v${manifest.version}`) {
-    releaseDetail.textContent = `The site is updating from v${manifest.version}. Select a local base or reload shortly.`;
+  if (latest && latest.tag_name !== `v${resolved.version}`) {
+    releaseDetail.textContent = `The site is updating from v${resolved.version}. Select a local base or reload shortly.`;
     manualBase.open = true;
     return null;
   }
-  releaseDetail.textContent = `${architecture} base · ${(manifest.base_size / 1048576).toFixed(0)} MiB · loaded when you build`;
-  return manifest;
+  releaseDetail.textContent = `${architecture} · ${format === 'flatpak' ? 'Flatpak' : 'AppImage'} base · ${(resolved.base_size / 1048576).toFixed(0)} MiB · loaded when you build`;
+  return resolved;
 }
+
+updateFormatUi();
 let releaseReady = loadRelease();
+formatSelect.onchange = () => { updateFormatUi(); releaseReady = loadRelease(); };
 architectureSelect.onchange = () => { releaseReady = loadRelease(); };
+
 async function load() {
   const go = new Go();
   const response = await fetch('shiraz-assemble.wasm', {cache: 'no-store'});
@@ -158,30 +201,38 @@ async function load() {
   go.run(instance);
 }
 ready = load();
+
 button.onclick = async () => {
   button.disabled = true;
+  formatSelect.disabled = true;
   architectureSelect.disabled = true;
+  allowNetworkBox.disabled = true;
+  const format = formatSelect.value;
   const architecture = architectureSelect.value;
+  const allowNetwork = allowNetworkBox.checked;
   status.dataset.state = '';
   try {
     status.textContent = 'Preparing builder…';
     await ready;
     const apkFile = document.getElementById('apk').files[0];
     if (!apkFile) throw new Error('Select an APK.');
-    const baseFile = document.getElementById('base').files[0];
+    const baseFile = baseInput.files[0];
     let version, base;
     if (baseFile) {
-      const match = baseFile.name.match(/^Shiraz-Browser-Base-([0-9]+\.[0-9]+\.[0-9]+)-(x86_64|aarch64)\.AppImage$/);
+      const pattern = format === 'flatpak'
+        ? /^Shiraz-Flatpak-Base-([0-9]+\.[0-9]+\.[0-9]+)-(x86_64|aarch64)\.flatpak-base$/
+        : /^Shiraz-Browser-Base-([0-9]+\.[0-9]+\.[0-9]+)-(x86_64|aarch64)\.AppImage$/;
+      const match = baseFile.name.match(pattern);
       version = match?.[1];
       if (match && match[2] !== architecture) throw new Error('Local base does not match the selected architecture.');
-      if (!version) throw new Error('Select a versioned Shiraz browser base AppImage.');
-      status.textContent = 'Reading base AppImage…';
+      if (!version) throw new Error(format === 'flatpak' ? 'Select a versioned Shiraz Flatpak base (.flatpak-base).' : 'Select a versioned Shiraz browser base AppImage.');
+      status.textContent = 'Reading local base…';
       base = await baseFile.arrayBuffer();
     } else {
       const manifest = await releaseReady;
-      if (!manifest) throw new Error('The current base is unavailable. Select a local base AppImage.');
+      if (!manifest) throw new Error(format === 'flatpak' ? 'The current Flatpak base is unavailable. Select a local .flatpak-base.' : 'The current base is unavailable. Select a local base AppImage.');
       version = manifest.version;
-      status.textContent = `Downloading Shiraz base v${version}…`;
+      status.textContent = `Downloading Shiraz ${format === 'flatpak' ? 'Flatpak' : 'AppImage'} base v${version}…`;
       const response = await fetch(manifest.base_file);
       if (!response.ok) throw new Error(`Base download failed: HTTP ${response.status}`);
       base = await response.arrayBuffer();
@@ -196,20 +247,32 @@ button.onclick = async () => {
     if (apk.byteLength < 4 || new Uint8Array(apk, 0, 2).some((byte, index) => byte !== [0x50, 0x4b][index])) {
       throw new Error(`${apkFile.name} is not an APK/ZIP (${apk.byteLength} bytes). Select a complete APK download.`);
     }
-    status.textContent = 'Assembling…';
-    const result = shirazBuildFromApk(new Uint8Array(base), new Uint8Array(apk), version);
+    status.textContent = format === 'flatpak' ? 'Assembling Flatpak…' : 'Assembling AppImage…';
+    const result = format === 'flatpak'
+      ? shirazBuildFlatpakFromApk(new Uint8Array(base), new Uint8Array(apk), version, {allowNetwork})
+      : shirazBuildFromApk(new Uint8Array(base), new Uint8Array(apk), version);
     if (result.error) throw new Error(`${apkFile.name}: ${result.error}`);
     if (result.architecture !== architecture) throw new Error('Base architecture does not match the selected device.');
-    const url = URL.createObjectURL(new Blob([result.bytes], {type:'application/octet-stream'}));
+    const filename = format === 'flatpak'
+      ? (result.filename || `${result.appId}-Shiraz-${version}-${architecture}.flatpak`)
+      : `${result.package}-Shiraz-${version}-${architecture}.AppImage`;
+    const url = URL.createObjectURL(new Blob([result.bytes], {type: 'application/octet-stream'}));
     const link = document.createElement('a');
-    link.href = url; link.download = `${result.package}-Shiraz-${version}-${architecture}.AppImage`; link.click();
+    link.href = url; link.download = filename; link.click();
     status.dataset.state = 'success';
-    status.textContent = `AppImage ready. SHA-256: ${result.sha256}. On Linux, make it executable with chmod +x before running.`;
+    status.textContent = format === 'flatpak'
+      ? `Flatpak ready. SHA-256: ${result.sha256}. Install on Linux with: flatpak install --user ./${filename} && flatpak run ${result.appId}`
+      : `AppImage ready. SHA-256: ${result.sha256}. On Linux, make it executable with chmod +x before running.`;
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (error) {
     status.dataset.state = 'error';
     status.textContent = String(error);
-  } finally { button.disabled = false; architectureSelect.disabled = false; }
+  } finally {
+    button.disabled = false;
+    formatSelect.disabled = false;
+    architectureSelect.disabled = false;
+    allowNetworkBox.disabled = false;
+  }
 };
 </script>
 </body>

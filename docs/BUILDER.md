@@ -1,17 +1,18 @@
-# Shiraz browser AppImage builder
+# Shiraz browser AppImage & Flatpak builder
 
-Each generic x86_64 or ARM64 (aarch64) base AppImage contains the Shiraz runtime but no APK. This
-Go/WASM module reads an APK in the browser, parses its Android binary manifest,
-creates Shiraz launch metadata, and appends an application payload to the base.
-The downloaded result is one AppImage file. On Linux, its bundled launcher
-verifies and mounts that payload beside the prebuilt runtime, then starts Shiraz.
+Each generic x86_64 or ARM64 (aarch64) base contains the Shiraz runtime but no APK:
+- **AppImage base (`Shiraz-Browser-Base-<ver>-<arch>.AppImage`)**: the Go/WASM module parses the APK's Android binary manifest, generates Shiraz launch metadata, and appends an application overlay footer to the base AppImage.
+- **Flatpak base (`Shiraz-Flatpak-Base-<ver>-<arch>.flatpak-base`)**: contains a pre-compressed OSTree static-delta runtime part (`Part 0`) and subtree checksum index for `org.freedesktop.Platform/<arch>/24.08`. The Go/WASM module hashes only the APK, native libraries, desktop entry, icon, and Flatpak metadata into an uncompressed overlay part (`Part 1`) and emits a standard single-file `.flatpak` bundle installable with `flatpak install --user`.
 
-## Build the base once on Linux
+## Build the bases once on Linux
 
 From the Shiraz repository root, first build any supported APK with `AOT=0` so
-the prebuilt runtime components exist. Then run:
+the prebuilt runtime components exist.
+
+For an **AppImage** base:
 
 ```sh
+make appimage APK=/path/to/app.apk AOT=0
 python3 scripts/make_runtime_template.py build/appimage/PACKAGE.AppDir build/runtime-template.tar.gz
 cd go-wasm/launcher
 go build -o ../../build/shiraz-payload-launcher .
@@ -19,16 +20,27 @@ cd ../..
 python3 scripts/make_browser_base.py build/runtime-template.tar.gz build/shiraz-payload-launcher dist/Shiraz-Browser-Base-$(cat VERSION)-$(uname -m).AppImage
 ```
 
-The template script removes the source APK, native libraries, app launch files,
-desktop icon, and app-specific provenance. The base can be reused for APKs that
-the current Shiraz runtime supports.
+For a **Flatpak** base (or a direct native CLI Flatpak bundle):
 
-## Build an AppImage in the browser
+```sh
+make flatpak APK=/path/to/app.apk AOT=0
+python3 scripts/make_flatpak_base.py build/flatpak/io.github.spectre_oss.shiraz.PACKAGE.stage dist/Shiraz-Flatpak-Base-$(cat VERSION)-$(uname -m).flatpak-base
+```
+
+Both base scripts strip the source APK, native libraries, app launch files,
+desktop icon, and app-specific provenance so the base can be reused for any APK
+the current Shiraz runtime supports. Flatpak bundles derive their App ID as
+`io.github.spectre_oss.shiraz.<sanitized_package>` and target `org.freedesktop.Platform//24.08`
+(hardware GPU/Mesa via `--device=dri`, Wayland/X11, PipeWire/PulseAudio, notifications,
+portals, and optional `--no-internet` / sandbox network toggle).
+
+## Build an AppImage or Flatpak in the browser
 
 The [Shiraz site](https://spectre-oss.github.io/shiraz/#builder) includes the
-SvelteKit builder directly on the page. Select the Linux architecture and an APK,
-then choose **Build AppImage**. The published runtime is checked against its size
-and SHA-256 before assembly. APK data stays in the browser.
+SvelteKit builder directly on the page. Select the **Linux package format**
+(**AppImage** or **Flatpak**), choose the **Linux device architecture**
+(`x86_64` or `ARM64`), and select an APK, then build. The published runtime is
+checked against its size and SHA-256 before assembly. APK data stays in the browser.
 
 For the complete site locally, install Node 24+, npm and Go, then run from the
 repository root:
@@ -60,12 +72,18 @@ build. The integrated site uses its published release manifest; the standalone d
 checks the latest prerelease through the GitHub Releases API. Your APK is never uploaded. On Linux:
 
 ```sh
+# AppImage:
 chmod +x APK-Shiraz-VERSION-x86_64.AppImage
 ./APK-Shiraz-VERSION-x86_64.AppImage --version
+
+# Flatpak:
+flatpak install --user ./io.github.spectre_oss.shiraz.PACKAGE-Shiraz-VERSION-x86_64.flatpak
+flatpak run io.github.spectre_oss.shiraz.PACKAGE --version
 ```
 
-The WASM API is `shirazBuildFromApk(baseBytes, apkBytes, version)`. It returns
-`{bytes: Uint8Array, sha256: string, package: string, architecture: string}` or `{error: string}`.
+The WASM APIs are:
+- `shirazBuildFromApk(baseBytes, apkBytes, version)` → `{bytes: Uint8Array, sha256: string, package: string, architecture: string}` or `{error: string}`.
+- `shirazBuildFlatpakFromApk(baseBytes, apkBytes, version, {allowNetwork?: boolean})` → `{bytes: Uint8Array, sha256: string, package: string, appId: string, architecture: string, filename: string}` or `{error: string}`.
 The older `shirazAssemble` API remains available for producing an AppDir archive.
 
 ## Limits

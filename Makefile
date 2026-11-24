@@ -35,13 +35,19 @@ build/shiraz-preview: native/main.cpp native/presentation.cpp include/shiraz/pre
 build/test-compositor: tests/compositor.cpp include/shiraz/compositor.hpp
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/compositor.cpp -o $@
-build/libEGL_shim.so: native/egl_shim.cpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h build/libandroid.so
+build/libEGL_shim.so: native/egl_shim.cpp native/linux/egl_shim_dmabuf.inc include/shiraz/linux/window_queue.h include/shiraz/native_window.h include/shiraz/hardware_buffer.h build/libandroid.so
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/egl_shim.cpp -o $@ -Lbuild -landroid -lGLESv2 -ldl -Wl,-rpath,'$$ORIGIN'
 build/test-egl-window: tests/egl_window.cpp build/libandroid.so build/libEGL_shim.so include/shiraz/native_window.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/egl_window.cpp -o $@ -Lbuild -landroid -lEGL_shim -lGLESv2 -Wl,-rpath,'$$ORIGIN' -pthread
-build/libandroid.so: native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp native/ndk_surface_control.cpp native/ndk_imagedecoder.cpp native/ndk_system_services.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h include/shiraz/ndk/configuration.h include/shiraz/ndk/input.h include/shiraz/ndk/native_activity.h include/shiraz/ndk/asset_manager.h include/shiraz/ndk/surface_control.h include/shiraz/ndk/imagedecoder.h include/shiraz/ndk/system_services.h
+build/test-linux-zero-copy: tests/native/linux_zero_copy.cpp build/libandroid.so build/libEGL_shim.so include/shiraz/linux/window_queue.h include/shiraz/native_window.h include/shiraz/hardware_buffer.h
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) tests/native/linux_zero_copy.cpp -o $@ -Lbuild -landroid -lEGL_shim -lGLESv2 -Wl,-rpath,'$$ORIGIN' -pthread
+.PHONY: linux-zero-copy-smoke
+linux-zero-copy-smoke: build/test-linux-zero-copy
+	SHIRAZ_EGL_ZERO_COPY=require ./build/test-linux-zero-copy
+build/libandroid.so: native/native_window.cpp native/linux/window_queue.inc include/shiraz/linux/window_queue.h native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp native/ndk_surface_control.cpp native/ndk_imagedecoder.cpp native/ndk_system_services.cpp include/shiraz/shared_frame.hpp include/shiraz/native_window.h include/shiraz/hardware_buffer.h include/shiraz/window_frames.hpp include/shiraz/image_reader.h include/shiraz/media_crypto.h include/shiraz/ndk/configuration.h include/shiraz/ndk/input.h include/shiraz/ndk/native_activity.h include/shiraz/ndk/asset_manager.h include/shiraz/ndk/surface_control.h include/shiraz/ndk/imagedecoder.h include/shiraz/ndk/system_services.h
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) $(IMAGE_CFLAGS) -fPIC -shared -Wl,-z,defs native/native_window.cpp native/shared_frame.cpp native/from_surface.cpp native/surface_texture.cpp native/shared_memory.cpp native/hardware_buffer.cpp native/sync_fence.cpp native/image_reader.cpp native/media_crypto.cpp native/media_ndk.cpp native/system_fonts.cpp native/looper.cpp native/choreographer.cpp native/sensors.cpp native/trace.cpp native/ndk_configuration.cpp native/ndk_input.cpp native/ndk_native_activity.cpp native/ndk_assets.cpp native/ndk_surface_control.cpp native/ndk_imagedecoder.cpp native/ndk_system_services.cpp -o $@ -pthread -ldl -lgbm -lGLESv2 $(IMAGE_LIBS) $(shell pkg-config --cflags --libs fontconfig)
 
@@ -981,10 +987,10 @@ uri-matcher-smoke: build framework
 line-smoke: build framework
 	python3 scripts/line_smoke.py
 
-.PHONY: appimage osmand-appimage packaging-tools
+.PHONY: appimage osmand-appimage flatpak flatpak-smoke packaging-tools
 packaging-tools:
 	python3 scripts/bootstrap_patchelf.py
-appimage osmand-appimage: packaging-tools
+appimage osmand-appimage flatpak: packaging-tools
 HOST_ARCH := $(shell uname -m)
 OSMAND_APK := context/apks/net.osmand.plus_$(if $(filter aarch64,$(HOST_ARCH)),541003,541002).apk
 build/shiraz-app: packaging/app_run.cpp packaging/desktop_install.h packaging/offline.h
@@ -993,6 +999,9 @@ build/shiraz-app: packaging/app_run.cpp packaging/desktop_install.h packaging/of
 appimage: build framework build/shiraz-app build/libEGL_shim.so
 	@test -n "$(APK)" || { echo 'Usage: make appimage APK=/absolute/path/app.apk [NAME=Title] [AOT=0]'; exit 1; }
 	python3 scripts/build_appimage.py --apk "$(APK)" $(if $(NAME),--name "$(NAME)",) $(if $(filter 0,$(AOT)),--no-aot,)
+flatpak: build framework build/shiraz-app build/libEGL_shim.so
+	@test -n "$(APK)" || { echo 'Usage: make flatpak APK=/absolute/path/app.apk [NAME=Title] [APP_ID=id] [AOT=0] [NO_INTERNET=1]'; exit 1; }
+	python3 scripts/build_flatpak.py --apk "$(APK)" $(if $(NAME),--name "$(NAME)",) $(if $(APP_ID),--app-id "$(APP_ID)",) $(if $(filter 0,$(AOT)),--no-aot,) $(if $(filter 1,$(NO_INTERNET)),--no-internet,)
 osmand-appimage: build framework build/shiraz-app build/libEGL_shim.so
 	python3 scripts/build_appimage.py --apk "$(if $(APK),$(APK),$(OSMAND_APK))" $(if $(filter 0,$(AOT)),--no-aot,)
 
@@ -1000,6 +1009,9 @@ test: build/shiraz-app
 .PHONY: appimage-smoke
 appimage-smoke:
 	python3 scripts/appimage_smoke.py "$(if $(IMAGE),$(IMAGE),dist/OsmAnd-Shiraz-$(shell cat VERSION)-$(HOST_ARCH).AppImage)" $(if $(filter 1,$(AOT)),--require-aot,)
+flatpak-smoke:
+	@test -n "$(BUNDLE)" || { echo 'Usage: make flatpak-smoke BUNDLE=dist/App.flatpak [REQUIRE_RUN=1]'; exit 1; }
+	python3 scripts/flatpak_smoke.py "$(BUNDLE)" $(if $(filter 1,$(REQUIRE_RUN)),--require-install --require-run,)
 
 .PHONY: asset-list-smoke
 asset-list-smoke: build framework apk-fixture
@@ -1031,7 +1043,7 @@ runtime-memory:
 build/runtime-memory.stamp: scripts/bootstrap_runtime.py patches/art-low4g-fallback.patch
 	$(MAKE) runtime-memory
 	@touch $@
-build appimage: build/runtime-memory.stamp
+build appimage flatpak: build/runtime-memory.stamp
 art-low4g-smoke: build/runtime-memory.stamp
 	python3 scripts/art_low4g_smoke.py
 
@@ -1199,7 +1211,7 @@ build/shiraz-preview build/libshiraz-jni.so build/test-presentation build/test-p
 # Skia Ganesh is shared by presentation and Java Canvas JNI; one context per UI thread.
 .deps/skia/out/shiraz/libskia.a .deps/skia/out/shiraz/libpathkit.a &: scripts/bootstrap_skia.py
 	python3 scripts/bootstrap_skia.py
-build/libshiraz-gpu.so: native/ripple_gpu.inc native/gpu.exports native/gpu.cpp include/shiraz/gpu.hpp .deps/skia/out/shiraz/libskia.a .deps/skia/out/shiraz/libpathkit.a
+build/libshiraz-gpu.so: native/ripple_gpu.inc native/linux/gpu_dmabuf.inc include/shiraz/linux/window_queue.h native/gpu.exports native/gpu.cpp include/shiraz/gpu.hpp .deps/skia/out/shiraz/libskia.a .deps/skia/out/shiraz/libpathkit.a
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -isystem .deps/skia -DSK_GANESH -DSK_GL -DSK_R32_SHIFT=16 -fPIC -shared -Wl,-z,defs -Wl,--version-script=native/gpu.exports native/gpu.cpp .deps/skia/out/shiraz/libpathkit.a .deps/skia/out/shiraz/libskia.a -o $@ -lfreetype -lfontconfig -lGL -ldl -pthread
 build: build/libshiraz-gpu.so
 
@@ -1305,7 +1317,7 @@ system-video:
 	@if pkg-config --exists gstreamer-app-1.0 gstreamer-video-1.0 opus; then $(MAKE) build/libshiraz-video.so; else rm -f build/libshiraz-video.so; echo 'OS video adapter unavailable: GStreamer/Opus development files missing'; fi
 build/libshiraz-video.so: native/video_codec.cpp native/opus_codec.cpp build/libandroid.so
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(JNI_CFLAGS) -shared -fPIC native/video_codec.cpp native/opus_codec.cpp -o $@ -Lbuild -landroid $$(pkg-config --cflags --libs gstreamer-app-1.0 gstreamer-video-1.0) -Wl,-rpath,'$$ORIGIN'
-appimage: system-video
+appimage flatpak: system-video
 .PHONY: system-video-smoke
 system-video-smoke: build framework system-video
 	@test -n "$(VIDEO_SAMPLE)" || { echo 'Set VIDEO_SAMPLE to a local Annex-B H.264 clip with AUDs'; exit 1; }
@@ -1324,7 +1336,7 @@ opensles-smoke: build/test-opensles
 	printf 'pcm.null { type null }\npcm.shiraz_test { type file slave.pcm "null" file "$(CURDIR)/build/opensles-smoke/output.pcm" format "raw" }\n' > build/opensles-smoke/alsa.conf
 	ALSA_CONFIG_PATH=$(CURDIR)/build/opensles-smoke/alsa.conf SHIRAZ_AUDIO_DEVICE=shiraz_test build/test-opensles
 	python3 -c 'import array,pathlib; a=array.array("h",pathlib.Path("build/opensles-smoke/output.pcm").read_bytes()); assert len(a)==3840 and max(a)>11000 and min(a)<-11000; print("OPENSL_PCM_SIGNAL_OK samples="+str(len(a)))'
-appimage: build/libOpenSLES.so.1
+appimage flatpak: build/libOpenSLES.so.1
 .PHONY: opus-codec-smoke
 opus-codec-smoke: framework system-video
 	mkdir -p build/opus-smoke

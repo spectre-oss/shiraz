@@ -45,7 +45,7 @@ test('each command block copies its own commands', async ({page, context, browse
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('python3 -m shiraz fdroid fetch');
   await page.getByText('Build from source').click();
   await page.getByRole('button', {name:'Copy build commands'}).click();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('make build\nmake appimage APK=/path/to/app.apk');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('make build\nmake appimage APK=/path/to/app.apk\nmake flatpak APK=/path/to/app.apk');
 });
 
 test('responsive site keeps table columns aligned and has no accessibility violations', async ({page}) => {
@@ -122,6 +122,42 @@ test('architecture cards support radio keyboard selection and refresh the runtim
   await page.keyboard.press('ArrowRight');
   await expect(arm).toBeChecked();
   await expect(page.locator('.builder-base p')).toContainText('aarch64');
+});
+
+test('package format cards switch between AppImage and Flatpak with keyboard and reject bad Flatpak checksums', async ({page}) => {
+  const flatpakBody = Buffer.from('SHIRAZFPtest');
+  await page.route('**/release.json', route => route.fulfill({json:{
+    version:'1.2.3',
+    architectures:Object.fromEntries(['x86_64','aarch64'].map(arch => [arch,{
+      base_file:`base/Shiraz-Browser-Base-1.2.3-${arch}.AppImage`,
+      base_size:4,
+      base_sha256:'0'.repeat(64),
+      formats:{
+        appimage:{base_file:`base/Shiraz-Browser-Base-1.2.3-${arch}.AppImage`,base_size:4,base_sha256:'0'.repeat(64)},
+        flatpak:{base_file:`base/Shiraz-Flatpak-Base-1.2.3-${arch}.flatpak-base`,base_size:flatpakBody.length,base_sha256:'f'.repeat(64)}
+      }
+    }]))
+  }}));
+  await page.route('**/base/*.flatpak-base', route => route.fulfill({body:flatpakBody}));
+  await page.goto('/');
+  const appimage = page.getByRole('radio', {name:/AppImage/});
+  const flatpak = page.getByRole('radio', {name:/Flatpak/});
+  await expect(appimage).toBeChecked();
+  await expect(page.locator('#assemble')).toContainText('Build AppImage');
+  await expect(page.locator('#flatpak-network')).toHaveCount(0);
+
+  await appimage.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(flatpak).toBeChecked();
+  await expect(page.locator('#assemble')).toContainText('Build Flatpak');
+  await expect(page.locator('.builder-base p')).toContainText('Flatpak');
+  await expect(page.locator('#base')).toHaveAttribute('accept', '.flatpak-base');
+  await expect(page.locator('#flatpak-network')).toBeChecked();
+
+  await page.locator('#apk').setInputFiles({name:'fixture.apk',mimeType:'application/zip',buffer:Buffer.from('PKfixture')});
+  await page.locator('#assemble').click();
+  await expect(page.locator('#status')).toHaveText('Base checksum mismatch.', {timeout:30000});
+  await expect(page.locator('#assemble')).toBeEnabled();
 });
 
 

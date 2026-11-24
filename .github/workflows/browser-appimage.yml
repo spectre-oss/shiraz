@@ -64,14 +64,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            autoconf automake bison build-essential ca-certificates cmake flex \
+            autoconf automake bison build-essential ca-certificates cmake flatpak flex \
             gettext git libasound2-dev libcairo2-dev libcap-dev libdbus-1-dev libegl1-mesa-dev \
             libelf-dev libfontconfig1-dev libfreetype-dev libgbm-dev libgles2-mesa-dev libmd-dev \
             libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
             libharfbuzz-dev libicu-dev libjpeg-dev libopus-dev libpng-dev \
             libsndfile1-dev libsqlite3-dev libtool libudev-dev libvixl-dev libwebp-dev libx11-dev \
             libxcursor-dev libxext-dev libxfixes-dev libxi-dev libxrandr-dev \
-            libxkbcommon-dev libwayland-dev meson ninja-build openjdk-17-jdk \
+            libxkbcommon-dev libwayland-dev meson ninja-build openjdk-17-jdk ostree \
             pkg-config python3 python3-venv ripgrep weston xz-utils zlib1g-dev
           mkdir -p "$TMPDIR"
           if [ "$SHIRAZ_ARCH" = aarch64 ]; then
@@ -100,6 +100,7 @@ jobs:
             make android-tls-smoke
             make apk-fixture
             make appimage APK=build/apk-fixture/fixture.apk NAME=Shiraz-CI-Fixture AOT=0
+            make flatpak APK=build/apk-fixture/fixture.apk NAME=Shiraz-CI-Fixture AOT=0
           '
       - name: Smoke test packaged Wayland renderer
         run: |
@@ -140,6 +141,9 @@ jobs:
             python3 scripts/make_browser_base.py \
               build/runtime-template.tar.gz build/shiraz-payload-launcher \
               "dist/Shiraz-Browser-Base-${version}-${SHIRAZ_ARCH}.AppImage"
+            python3 scripts/make_flatpak_base.py \
+              build/flatpak/io.github.spectre_oss.shiraz.org_shiraz_fixture.stage \
+              "dist/Shiraz-Flatpak-Base-${version}-${SHIRAZ_ARCH}.flatpak-base"
             export SHIRAZ_WASM_GOROOT="$(go env GOROOT)"
             (cd go-wasm && GOOS=js GOARCH=wasm go test -exec="python3 ../scripts/run_wasm_test.py" ./... && GOOS=js GOARCH=wasm go build -o shiraz-assemble.wasm .)
             python3 go-wasm/bootstrap_font.py
@@ -150,9 +154,18 @@ jobs:
           version=$(cat VERSION)
           test "$version" = "${{ needs.version.outputs.version }}"
           test -s "dist/Shiraz-Browser-Base-${version}-${SHIRAZ_ARCH}.AppImage"
+          test -s "dist/Shiraz-Flatpak-Base-${version}-${SHIRAZ_ARCH}.flatpak-base"
           test -s go-wasm/shiraz-assemble.wasm
           (cd dist && sha256sum -c "Shiraz-Browser-Base-${version}-${SHIRAZ_ARCH}.AppImage.sha256")
-          nix develop -c node --max-old-space-size=4096 go-wasm/verify_kit.cjs
+          (cd dist && sha256sum -c "Shiraz-Flatpak-Base-${version}-${SHIRAZ_ARCH}.flatpak-base.sha256")
+          SHIRAZ_VERIFY_FLATPAK=1 SHIRAZ_FLATPAK_OUT="$TMPDIR/wasm-fixture.flatpak" \
+            nix develop -c node --max-old-space-size=4096 go-wasm/verify_kit.cjs
+          python3 scripts/flatpak_smoke.py --require-install \
+            --app-id io.github.spectre_oss.shiraz.org_shiraz_fixture \
+            "dist/Shiraz-CI-Fixture-Shiraz-${version}-${SHIRAZ_ARCH}.flatpak"
+          python3 scripts/flatpak_smoke.py --require-install \
+            --app-id io.github.spectre_oss.shiraz.org_shiraz_fixture \
+            "$TMPDIR/wasm-fixture.flatpak"
       - uses: actions/setup-go@v6
         with:
           go-version-file: go-server/go.mod
@@ -204,6 +217,8 @@ jobs:
           path: |
             dist/Shiraz-Browser-Base-*-${{ matrix.arch }}.AppImage
             dist/Shiraz-Browser-Base-*-${{ matrix.arch }}.AppImage.sha256
+            dist/Shiraz-Flatpak-Base-*-${{ matrix.arch }}.flatpak-base
+            dist/Shiraz-Flatpak-Base-*-${{ matrix.arch }}.flatpak-base.sha256
             dist/shiraz-web_*_amd64.deb
             dist/shiraz-web_*_amd64.deb.sha256
             go-wasm/shiraz-assemble.wasm
@@ -248,11 +263,12 @@ jobs:
           version=$(cat VERSION)
           tag="v${version}"
           assets=(dist/Shiraz-Browser-Base-${version}-*.AppImage dist/Shiraz-Browser-Base-${version}-*.AppImage.sha256
+                  dist/Shiraz-Flatpak-Base-${version}-*.flatpak-base dist/Shiraz-Flatpak-Base-${version}-*.flatpak-base.sha256
                   "dist/Shiraz-Browser-Builder-${version}.zip" dist/shiraz-web_*_amd64.deb dist/shiraz-web_*_amd64.deb.sha256)
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${assets[@]}" --clobber
           else
             gh release create "$tag" "${assets[@]}" \
               --target "$RELEASE_SHA" --title "Shiraz ${version}" --prerelease \
-              --notes "Native x86_64 and ARM64 Shiraz base AppImages, browser WASM assembler, and amd64 Debian web package. App and Linux phone compatibility remain experimental."
+              --notes "Native x86_64 and ARM64 Shiraz base AppImages and Flatpak bases, browser WASM assembler, and amd64 Debian web package. App and Linux phone compatibility remain experimental."
           fi

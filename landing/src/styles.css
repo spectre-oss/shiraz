@@ -278,17 +278,20 @@ li:nth-child(5).is-active > .slab::after { opacity: 1; }
 .builder-status { margin-block: 20px 12px; font: 14px/1.7 var(--mono); overflow-wrap: anywhere; }
 .builder-status[data-state=error] { color: #ffb4ab; }
 .builder-status[data-state=success] { color: var(--saffron); }
-.builder-panel .architecture-options { margin-bottom: 20px; }
-.architecture-options legend { margin-bottom: 10px; padding: 0; font-size: 15px; font-weight: 600; }
-.architecture-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.builder-panel .architecture-card { display: flex; align-items: flex-start; gap: 12px; margin: 0; padding: 16px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--wine); font-weight: 400; cursor: pointer; transition: border-color .2s ease, background-color .2s ease, transform .16s var(--ease-out); }
-.architecture-card:active { transform: scale(.98); }
-.architecture-card:has(:checked) { border-color: var(--saffron); box-shadow: inset 0 0 0 1px var(--saffron); background: #4a2130; }
-.architecture-card:has(:focus-visible) { outline: 2px solid var(--saffron); outline-offset: 4px; }
-.builder-panel .architecture-card input { flex: 0 0 auto; width: 18px; height: 18px; margin: 3px 0 0; padding: 0; accent-color: var(--saffron); }
-.architecture-card strong { display: block; font-size: 17px; font-weight: 600; }
-.architecture-card small { display: block; margin-top: 4px; font-size: 14px; line-height: 1.5; color: var(--ink-soft); }
-.architecture-card em { display: block; margin-top: 6px; font-size: 13px; font-style: normal; color: var(--saffron); }
+.builder-panel .architecture-options, .builder-panel .format-options { margin-bottom: 20px; }
+.architecture-options legend, .format-options legend { margin-bottom: 10px; padding: 0; font-size: 15px; font-weight: 600; }
+.architecture-cards, .format-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.builder-panel .architecture-card, .builder-panel .format-card { display: flex; align-items: flex-start; gap: 12px; margin: 0; padding: 16px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--wine); font-weight: 400; cursor: pointer; transition: border-color .2s ease, background-color .2s ease, transform .16s var(--ease-out); }
+.architecture-card:active, .format-card:active { transform: scale(.98); }
+.architecture-card:has(:checked), .format-card:has(:checked) { border-color: var(--saffron); box-shadow: inset 0 0 0 1px var(--saffron); background: #4a2130; }
+.architecture-card:has(:focus-visible), .format-card:has(:focus-visible) { outline: 2px solid var(--saffron); outline-offset: 4px; }
+.builder-panel .architecture-card input, .builder-panel .format-card input { flex: 0 0 auto; width: 18px; height: 18px; margin: 3px 0 0; padding: 0; accent-color: var(--saffron); }
+.architecture-card strong, .format-card strong { display: block; font-size: 17px; font-weight: 600; }
+.architecture-card small, .format-card small { display: block; margin-top: 4px; font-size: 14px; line-height: 1.5; color: var(--ink-soft); }
+.architecture-card em, .format-card em { display: block; margin-top: 6px; font-size: 13px; font-style: normal; color: var(--saffron); }
+.builder-panel .builder-checkbox { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 0 0 18px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--wine); font-size: 14px; font-weight: 500; cursor: pointer; }
+.builder-panel .builder-checkbox:has(:focus-visible) { outline: 2px solid var(--saffron); outline-offset: 4px; }
+.builder-panel .builder-checkbox input { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--saffron); }
 
 /* Project facts and source build. */
 .project-info { padding-bottom: clamp(56px, 8vw, 100px); }
@@ -603,8 +606,8 @@ input, textarea { caret-color: var(--saffron); }
   .comparison-table, .compat-table, .coverage-table { font-size: 18px; }
   .comparison-table tbody th, .compat-table tbody th { font-size: 27px; }
   .comparison-table thead th, .compat-table thead th, .coverage-table thead th, .comparison-table small { font-size: 15px; }
-  .builder-panel label, .architecture-options legend, .builder-panel input, .builder-panel details { font-size: 18px; }
-  .builder-base p, .builder-note, .architecture-card small { font-size: 16px; }
+  .builder-panel label, .architecture-options legend, .format-options legend, .builder-panel input, .builder-panel details { font-size: 18px; }
+  .builder-base p, .builder-note, .architecture-card small, .format-card small { font-size: 16px; }
   .site-footer { font-size: 17px; }
 }
 
@@ -662,7 +665,7 @@ input, textarea { caret-color: var(--saffron); }
 @media (max-width: 450px) {
   .github-word { display: none; }
   .site-header nav :is(.nav-builder, .nav-compare), .compat-header nav :is(.nav-builder, .nav-compare) { display: none; }
-  .architecture-cards { grid-template-columns: 1fr; }
+  .architecture-cards, .format-cards { grid-template-columns: 1fr; }
   .verse-line { min-height: 64px; padding-inline: 4px; }
   .limitations-dialog { padding: 26px 22px; }
   .actions .button { flex: 1 1 auto; }

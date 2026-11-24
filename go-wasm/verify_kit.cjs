@@ -8,6 +8,7 @@ const version = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim();
 const architecture = process.env.SHIRAZ_ARCH || 'x86_64';
 const base = fs.readFileSync(path.join(root, 'dist', `Shiraz-Browser-Base-${version}-${architecture}.AppImage`));
 const apk = fs.readFileSync(path.join(root, 'build/apk-fixture/fixture.apk'));
+const flatpakBasePath = path.join(root, 'dist', `Shiraz-Flatpak-Base-${version}-${architecture}.flatpak-base`);
 globalThis.crypto = crypto.webcrypto;
 require(path.join(__dirname, 'wasm_exec.js'));
 
@@ -16,12 +17,32 @@ require(path.join(__dirname, 'wasm_exec.js'));
   const wasm = fs.readFileSync(path.join(__dirname, 'shiraz-assemble.wasm'));
   const {instance} = await WebAssembly.instantiate(wasm, go.importObject);
   go.run(instance);
+
   const result = shirazBuildFromApk(new Uint8Array(base), new Uint8Array(apk), version);
   if (result.error) throw new Error(result.error);
   if (result.architecture !== architecture || result.package !== 'org.shiraz.fixture' || result.bytes.length <= base.length) {
     throw new Error('assembled AppImage is missing the fixture payload');
   }
-  console.log(`Browser kit assembled ${result.package}: ${result.bytes.length} bytes, SHA-256 ${result.sha256}`);
+  console.log(`Browser kit assembled AppImage ${result.package}: ${result.bytes.length} bytes, SHA-256 ${result.sha256}`);
+
+  const requireFlatpak = process.env.SHIRAZ_VERIFY_FLATPAK === '1';
+  if (fs.existsSync(flatpakBasePath) || requireFlatpak) {
+    const fpBase = fs.readFileSync(flatpakBasePath);
+    const fp = shirazBuildFlatpakFromApk(new Uint8Array(fpBase), new Uint8Array(apk), version, {allowNetwork: true});
+    if (fp.error) throw new Error(fp.error);
+    if (
+      fp.architecture !== architecture ||
+      fp.package !== 'org.shiraz.fixture' ||
+      fp.appId !== 'io.github.spectre_oss.shiraz.org_shiraz_fixture' ||
+      fp.bytes.length <= fpBase.length
+    ) {
+      throw new Error('assembled Flatpak bundle is invalid or missing fixture payload');
+    }
+    if (process.env.SHIRAZ_FLATPAK_OUT) {
+      fs.writeFileSync(process.env.SHIRAZ_FLATPAK_OUT, Buffer.from(fp.bytes));
+    }
+    console.log(`Browser kit assembled Flatpak ${fp.appId}: ${fp.bytes.length} bytes, SHA-256 ${fp.sha256}`);
+  }
   process.exit(0);
 })().catch(error => {
   console.error(error);
