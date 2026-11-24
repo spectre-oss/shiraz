@@ -63,19 +63,23 @@ $(WINDOWS_OUT)/libvulkan.dll: native/ndk_vulkan.cpp include/shiraz/ndk/vulkan.h 
 $(WINDOWS_OUT)/test-ndk-vulkan.exe: tests/ndk_vulkan.cpp $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/shiraz-win32-host.dll
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/ndk_vulkan.cpp -o $@ -L$(WINDOWS_OUT) -lvulkan -lshiraz-win32-host -pthread
 
+$(WINDOWS_OUT)/test-win32-guest-elf.exe: tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp include/shiraz/win32/guest/elf_loader.hpp $(WINDOWS_OUT)/.dir
+	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp -o $@ -lkernel32
+
 WINDOWS_SDL_CFLAGS = $(shell sdl2-config --cflags 2>/dev/null | sed 's/-Dmain=SDL_main//g')
 WINDOWS_SDL_LIBS = $(shell sdl2-config --libs 2>/dev/null | sed 's/-lmingw32//g; s/-lSDL2main//g; s/-mwindows//g')
 
 $(WINDOWS_OUT)/test-presentation.exe: tests/presentation.cpp native/presentation.cpp native/win32/d3d11_probe.cpp native/win32/gpu_stub.cpp include/shiraz/presentation.hpp include/shiraz/sdl_keyboard.hpp include/shiraz/live_input.hpp include/shiraz/win32/d3d11_probe.hpp $(WINDOWS_OUT)/.dir
 	$(WINDOWS_CXX) $(WINDOWS_CXXFLAGS) $(WINDOWS_SDL_CFLAGS) tests/presentation.cpp native/presentation.cpp native/win32/d3d11_probe.cpp native/win32/gpu_stub.cpp -o $@ $(WINDOWS_SDL_LIBS) -ld3d11 -ldxgi -luser32 -lkernel32 -pthread
 
-windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/test-ndk-vulkan.exe
+windows-build: $(WINDOWS_OUT)/shiraz-win32-host.dll $(WINDOWS_OUT)/test-win32-platform.exe $(WINDOWS_OUT)/libaaudio.dll $(WINDOWS_OUT)/test-ndk-aaudio.exe $(WINDOWS_OUT)/libOpenSLES.dll $(WINDOWS_OUT)/test-opensles.exe $(WINDOWS_OUT)/libvulkan.dll $(WINDOWS_OUT)/test-ndk-vulkan.exe $(WINDOWS_OUT)/test-win32-guest-elf.exe
 
 windows-check: windows-build
 	$(WINDOWS_OUT)/test-win32-platform.exe
 	$(WINDOWS_OUT)/test-ndk-aaudio.exe
 	$(WINDOWS_OUT)/test-opensles.exe
 	$(WINDOWS_OUT)/test-ndk-vulkan.exe
+	$(WINDOWS_OUT)/test-win32-guest-elf.exe
 
 windows-presentation-check: $(WINDOWS_OUT)/test-presentation.exe
 	@mkdir -p $(WINDOWS_OUT)/tmp
@@ -89,8 +93,13 @@ build/test-cross-platform-native: tests/win32/platform_test.cpp $(WINDOWS_HOST_H
 	@mkdir -p build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/win32/platform_test.cpp -o $@
 
-cross-platform-native-check: build/test-cross-platform-native
+build/test-win32-guest-elf: tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp include/shiraz/win32/guest/elf_loader.hpp
+	@mkdir -p build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) tests/win32/guest_elf_test.cpp native/win32/guest/elf_loader.cpp -o $@
+
+cross-platform-native-check: build/test-cross-platform-native build/test-win32-guest-elf
 	./build/test-cross-platform-native
+	./build/test-win32-guest-elf
 
 build/test-sandbox-linux: tests/sandbox_linux.cpp native/sandbox_linux.cpp include/shiraz/sandbox.hpp
 	@mkdir -p build

@@ -153,6 +153,12 @@ int main() {
     const float displayHz = shiraz::win32_presentation_refresh_hz();
     assert(displayHz >= 24.0f && displayHz <= 480.0f);
     std::printf("WIN32_DISPLAY refresh_hz=%.1f\n", displayHz);
+    const bool dpiAware = shiraz::win32_enable_per_monitor_v2_dpi();
+    const int dpiDensity = shiraz::win32_window_dpi_density(nullptr);
+    assert(dpiDensity >= 80 && dpiDensity <= 3200);
+    const bool angleReady = shiraz::win32_angle_d3d11_available();
+    std::printf("WIN32_DPI_ANGLE aware=%d density=%d angle=%d\n", dpiAware ? 1 : 0, dpiDensity,
+                angleReady ? 1 : 0);
     {
         shiraz::Win32PowerGuard guard;
         assert(guard.active());

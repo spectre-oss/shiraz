@@ -270,6 +270,34 @@ struct PresentationWindow {
                                       SDL_WINDOWPOS_UNDEFINED, width, height,
                                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                                           (embed_requested() ? SDL_WINDOW_HIDDEN : 0)));
+#elif defined(_WIN32)
+        win32_enable_per_monitor_v2_dpi();
+        const Uint32 baseFlags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+        const char* requested = std::getenv("SHIRAZ_RENDERER");
+        const bool softwareRequested = requested && std::string(requested) == "software";
+        const char* videoDriver = SDL_GetCurrentVideoDriver();
+        const bool isDummy = videoDriver && std::string(videoDriver) == "dummy";
+        if (!softwareRequested && !isDummy && win32_angle_d3d11_available()) {
+            const char* renderDriver = std::getenv("SHIRAZ_HOST_SDL_RENDER_DRIVER");
+            if (!renderDriver || !*renderDriver)
+                renderDriver = std::getenv("SDL_RENDER_DRIVER");
+            const bool explicitOther =
+                renderDriver && *renderDriver && std::string(renderDriver) != "opengles2";
+            if (!explicitOther) {
+                SDL_SetHintWithPriority("SDL_OPENGL_ES_DRIVER", "1", SDL_HINT_OVERRIDE);
+                SDL_SetHintWithPriority("SDL_RENDER_DRIVER", "opengles2", SDL_HINT_OVERRIDE);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+                window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED,
+                                              SDL_WINDOWPOS_UNDEFINED, width, height,
+                                              baseFlags | SDL_WINDOW_OPENGL));
+            }
+        }
+        if (!window) {
+            window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED,
+                                          SDL_WINDOWPOS_UNDEFINED, width, height, baseFlags));
+        }
 #else
         const Uint32 baseFlags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
         const char* requested = std::getenv("SHIRAZ_RENDERER");

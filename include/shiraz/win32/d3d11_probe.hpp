@@ -59,6 +59,18 @@ inline float win32_pinch_scroll_delta(int numFingers, float dDist) {
 }
 
 #if defined(_WIN32)
+// Enables Per-Monitor V2 DPI awareness via user32!SetProcessDpiAwarenessContext
+// (falling back to shcore!SetProcessDpiAwareness or SetProcessDPIAware).
+bool win32_enable_per_monitor_v2_dpi();
+
+// Queries the active DPI for a Win32 HWND via GetDpiForWindow (default 96) and
+// converts it into an Android DisplayMetrics densityDpi value.
+int win32_window_dpi_density(void* hwnd);
+
+// Checks whether an ANGLE-D3D11 EGL/GLESv2 runtime is configured via
+// SHIRAZ_EGL_LIBRARY or present beside the executable/PATH.
+bool win32_angle_d3d11_available();
+
 // Queries the primary hardware (or WARP fallback) DXGI/D3D11 adapter via
 // IDXGIFactory1::EnumAdapters1(). Writes UTF-8 deviceName and vendorName.
 bool win32_d3d11_device_info(char* deviceName, std::size_t deviceCap, char* vendorName,
