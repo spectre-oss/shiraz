@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Software frame pacing for the host display. Callbacks run on the owning
-// ALooper; this is not a compositor presentation-timestamp implementation.
-#if defined(__APPLE__)
+// Frame pacing for the host display. Callbacks run on the owning ALooper;
+// macOS tracks CoreVideo CVDisplayLink vsync, and Linux tracks display refresh
+// rate plus presenter vsync phase timestamps fed from presentation.cpp.
 #include <atomic>
+#if defined(__APPLE__)
 #include <dlfcn.h>
 #include <sys/types.h>
 #include <sys/event.h>
@@ -10,10 +11,13 @@
 #include <fcntl.h>
 #include <time.h>
 #else
+#include <cstdlib>
 #include <sys/timerfd.h>
+#include <time.h>
 #endif
 #include <unistd.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -147,7 +151,67 @@ DarwinVsyncTracker& darwin_vsync() {
     return *tracker;
 }
 #else
-constexpr int64_t period = 16666667;
+constexpr int64_t kDefaultPeriodNs = 16666667;
+constexpr int64_t kMinPeriodNs = 2000000LL;  // 500 Hz
+constexpr int64_t kMaxPeriodNs = 50000000LL; // 20 Hz
+
+struct LinuxVsyncTracker {
+    std::atomic<int64_t> lastTickNs{0};
+    std::atomic<int64_t> activePeriodNs{kDefaultPeriodNs};
+    std::atomic<uint64_t> tickCount{0};
+
+    LinuxVsyncTracker() {
+        const char* envHz = std::getenv("SHIRAZ_REFRESH_HZ");
+        if (envHz && *envHz) {
+            char* end = nullptr;
+            const double hz = std::strtod(envHz, &end);
+            if (end != envHz && hz >= 24.0 && hz <= 480.0) {
+                activePeriodNs.store(static_cast<int64_t>(std::llround(1000000000.0 / hz)),
+                                     std::memory_order_relaxed);
+            }
+        }
+    }
+
+    void setRefreshRate(float hz) {
+        if (hz >= 24.0f && hz <= 480.0f) {
+            const int64_t p =
+                static_cast<int64_t>(std::llround(1000000000.0 / static_cast<double>(hz)));
+            if (p >= kMinPeriodNs && p <= kMaxPeriodNs) {
+                activePeriodNs.store(p, std::memory_order_relaxed);
+            }
+        }
+    }
+
+    void noteVsync(int64_t monotonicNs, int64_t periodNs) {
+        if (periodNs >= kMinPeriodNs && periodNs <= kMaxPeriodNs) {
+            activePeriodNs.store(periodNs, std::memory_order_relaxed);
+        }
+        if (monotonicNs > 0) {
+            lastTickNs.store(monotonicNs, std::memory_order_release);
+            tickCount.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    int64_t periodNs() const {
+        return activePeriodNs.load(std::memory_order_relaxed);
+    }
+
+    int64_t nextDue(int64_t requested, int64_t current) const {
+        const int64_t p = activePeriodNs.load(std::memory_order_relaxed);
+        const int64_t anchor = lastTickNs.load(std::memory_order_acquire);
+        if (anchor > 0 && current >= anchor && (current - anchor) < 250000000LL) {
+            const int64_t delta = requested - anchor;
+            const int64_t steps = delta >= 0 ? (delta / p + 1) : 1;
+            return anchor + steps * p;
+        }
+        return (requested / p + 1) * p;
+    }
+};
+
+LinuxVsyncTracker& linux_vsync() {
+    static LinuxVsyncTracker* tracker = new LinuxVsyncTracker;
+    return *tracker;
+}
 #endif
 int64_t now() {
     timespec value{};
@@ -269,13 +333,18 @@ struct AChoreographer {
         if (!wide && !legacy)
             return;
         const int64_t current = now();
+#if defined(__APPLE__)
+        const int64_t framePeriod = period;
+#else
+        const int64_t framePeriod = linux_vsync().periodNs();
+#endif
         const uint64_t maximum =
-            (uint64_t(std::numeric_limits<int64_t>::max()) - current - period) / 1000000;
+            (uint64_t(std::numeric_limits<int64_t>::max()) - current - framePeriod) / 1000000;
         const int64_t requested = current + int64_t(std::min(delay, maximum)) * 1000000;
 #if defined(__APPLE__)
         const int64_t due = darwin_vsync().nextDue(requested, current);
 #else
-        const int64_t due = (requested / period + 1) * period;
+        const int64_t due = linux_vsync().nextDue(requested, current);
 #endif
         std::lock_guard<std::mutex> lock(mutex);
         pending.push_back({due, wide, legacy, data});
@@ -320,3 +389,14 @@ extern "C" void AChoreographer_postFrameCallbackDelayed64(AChoreographer* c,
     if (c)
         c->post(callback, nullptr, data, delay);
 }
+#if !defined(__APPLE__)
+extern "C" void shiraz_choreographer_set_refresh_rate(float hz) {
+    linux_vsync().setRefreshRate(hz);
+}
+extern "C" void shiraz_choreographer_note_vsync(int64_t monotonic_ns, int64_t period_ns) {
+    linux_vsync().noteVsync(monotonic_ns, period_ns);
+}
+extern "C" int64_t shiraz_choreographer_period_ns(void) {
+    return linux_vsync().periodNs();
+}
+#endif

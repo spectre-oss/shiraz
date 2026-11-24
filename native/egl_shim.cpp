@@ -16,6 +16,12 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#if defined(__linux__)
+#include "shiraz/linux/window_queue.h"
+#include <GLES2/gl2ext.h>
+#include <memory>
+#include <poll.h>
+#endif
 #if defined(__APPLE__)
 #include <fcntl.h>
 #include <poll.h>
@@ -476,6 +482,9 @@ BindFramebuffer realBindFramebuffer() {
         reinterpret_cast<BindFramebuffer>(dlsym(RTLD_NEXT, "glBindFramebuffer"));
     return bind;
 }
+#if defined(__linux__)
+#include "linux/egl_shim_dmabuf.inc"
+#endif
 bool prepare(Draw& draw, EGLContext context) {
     BindFramebuffer bind = realBindFramebuffer();
     if (!bind)
@@ -560,6 +569,9 @@ EGLSurface createWindow(EGLDisplay display, EGLConfig config, EGLNativeWindowTyp
 #if defined(__APPLE__)
         darwinRegister(reinterpret_cast<EGLSurface>(token), native, display);
 #endif
+#if defined(__linux__)
+        linux_zc_prod::registerSurface(reinterpret_cast<EGLSurface>(token), native, display);
+#endif
         return reinterpret_cast<EGLSurface>(token);
     }
     Proc proc = realProc();
@@ -575,6 +587,13 @@ EGLBoolean makeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface read, EGL
 #if defined(__APPLE__)
     {
         int result = darwinMakeCurrent(display, draw, read, context, real);
+        if (result >= 0)
+            return EGLBoolean(result);
+    }
+#endif
+#if defined(__linux__)
+    {
+        int result = linux_zc_prod::makeCurrent(display, draw, read, context, real);
         if (result >= 0)
             return EGLBoolean(result);
     }
@@ -634,6 +653,13 @@ EGLBoolean swapBuffers(EGLDisplay display, EGLSurface surface) {
 #if defined(__APPLE__)
     {
         int result = darwinSwap(surface);
+        if (result >= 0)
+            return EGLBoolean(result);
+    }
+#endif
+#if defined(__linux__)
+    {
+        int result = linux_zc_prod::swap(surface);
         if (result >= 0)
             return EGLBoolean(result);
     }
@@ -806,6 +832,10 @@ EGLBoolean destroySurface(EGLDisplay display, EGLSurface surface) {
     if (darwinDestroySurface(surface))
         return EGL_TRUE;
 #endif
+#if defined(__linux__)
+    if (linux_zc_prod::destroySurface(surface))
+        return EGL_TRUE;
+#endif
     Draw* found = nullptr;
     {
         std::lock_guard<std::mutex> guard(drawsMutex);
@@ -847,6 +877,10 @@ static void bindWindowFramebuffer(GLenum target, GLuint framebuffer) {
         return;
 #if defined(__APPLE__)
     if (darwinBindWindow(target, framebuffer, bind))
+        return;
+#endif
+#if defined(__linux__)
+    if (linux_zc_prod::bindWindow(target, framebuffer, bind))
         return;
 #endif
     // Engines may cache the window FBO returned by GL_FRAMEBUFFER_BINDING.
@@ -989,18 +1023,19 @@ extern "C" EGLBoolean eglChooseConfig(EGLDisplay d, const EGLint* a, EGLConfig* 
 }
 FORWARD(eglCreateContext, EGLContext, (EGLDisplay d, EGLConfig c, EGLContext s, const EGLint* a),
         (d, c, s, a))
-#if defined(__APPLE__)
 extern "C" EGLBoolean eglDestroyContext(EGLDisplay d, EGLContext c) {
     using Fn = EGLBoolean (*)(EGLDisplay, EGLContext);
     auto fn = reinterpret_cast<Fn>(symbol("eglDestroyContext"));
     if (!fn)
         return EGL_FALSE;
+#if defined(__APPLE__)
     darwinForgetContext(c); // before the handle can be handed out again
+#endif
+#if defined(__linux__)
+    linux_zc_prod::forgetContext(c);
+#endif
     return fn(d, c);
 }
-#else
-FORWARD(eglDestroyContext, EGLBoolean, (EGLDisplay d, EGLContext c), (d, c))
-#endif
 extern "C" EGLDisplay eglGetDisplay(EGLNativeDisplayType display) {
     // Android's default EGL display does not refer to an X11 connection. Our
     // window adapter owns presentation, so its contexts use Mesa's headless

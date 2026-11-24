@@ -33,6 +33,9 @@ typedef void* EGLNativeWindowType;
 #else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#if defined(__linux__)
+#include "shiraz/linux/window_queue.h"
+#endif
 #endif
 #include <dlfcn.h>
 #include <cstdio>
@@ -54,15 +57,15 @@ extern "C" JNIEXPORT jboolean JNICALL Java_android_view_Surface_nativeResizeWind
 }
 extern "C" JNIEXPORT void JNICALL Java_android_view_Surface_nativeReleaseWindow(JNIEnv*, jclass,
                                                                                 jlong window) {
-#if defined(__APPLE__)
-    // M4b: the Java owner let go; the consumer retires its cached images at its next frame.
+#if defined(__APPLE__) || defined(__linux__)
+    // The Java owner let go; the zero-copy consumer retires its cached images on next frame.
     shiraz_window_abandon(reinterpret_cast<ANativeWindow*>(window));
 #endif
     ANativeWindow_release(reinterpret_cast<ANativeWindow*>(window));
 }
-#if defined(__APPLE__)
-// M4b (C7): the revision the copied pixels belong to (materialised from the newest
-// queued IOSurface when the CPU copy is stale), or -1 on failure.
+#if defined(__APPLE__) || defined(__linux__)
+// Zero-copy (C7): the revision the copied pixels belong to (materialized from the newest
+// queued GPU slot when the CPU copy is stale), or -1 on failure.
 extern "C" JNIEXPORT jlong JNICALL Java_android_view_Surface_nativeCopyArgbRevision(
     JNIEnv* env, jclass, jlong window, jintArray pixels) {
     if (!window || !pixels)

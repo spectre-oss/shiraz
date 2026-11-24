@@ -30,10 +30,39 @@
 #include <chrono>
 #include <cstdio>
 #include <dlfcn.h>
+#elif defined(__linux__)
+#include <dlfcn.h>
 #endif
 
 namespace shiraz {
 namespace {
+#if defined(__linux__)
+void notify_linux_choreographer_refresh(float hz) {
+    using SetRateFn = void (*)(float);
+    static SetRateFn fn = nullptr;
+    if (!fn)
+        fn = reinterpret_cast<SetRateFn>(
+            dlsym(RTLD_DEFAULT, "shiraz_choreographer_set_refresh_rate"));
+    if (fn && hz >= 24.0f && hz <= 480.0f)
+        fn(hz);
+}
+void notify_linux_choreographer_vsync(float hz) {
+    using NoteVsyncFn = void (*)(int64_t, int64_t);
+    static NoteVsyncFn fn = nullptr;
+    if (!fn)
+        fn = reinterpret_cast<NoteVsyncFn>(dlsym(RTLD_DEFAULT, "shiraz_choreographer_note_vsync"));
+    if (!fn)
+        return;
+    timespec ts{};
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return;
+    const int64_t nowNs = int64_t(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+    const int64_t periodNs = (hz >= 24.0f && hz <= 480.0f)
+                                 ? static_cast<int64_t>(1000000000.0 / static_cast<double>(hz))
+                                 : 0;
+    fn(nowNs, periodNs);
+}
+#endif
 bool mouse_as_touch() {
     const char* value = std::getenv("SHIRAZ_MOUSE_AS_TOUCH");
     if (!value || !std::strcmp(value, "0"))
@@ -690,12 +719,15 @@ void present(const Surface& initial, const std::string& title, int frames,
 #endif
     if (rendererMode == "gpu" && !(rendererInfo.flags & SDL_RENDERER_ACCELERATED))
         throw std::runtime_error("GPU presentation requested but SDL selected software");
+    const float initialRefreshHz = presentation_refresh_rate();
+#if defined(__linux__)
+    notify_linux_choreographer_refresh(initialRefreshHz);
+#endif
     std::cerr << "SHIRAZ_PRESENTATION renderer="
               << (rendererInfo.name ? rendererInfo.name : "unknown")
               << " accelerated=" << ((rendererInfo.flags & SDL_RENDERER_ACCELERATED) != 0)
               << " vsync=" << ((rendererInfo.flags & SDL_RENDERER_PRESENTVSYNC) != 0)
-              << " requested=" << rendererMode << " refresh_hz=" << presentation_refresh_rate()
-              << "\n";
+              << " requested=" << rendererMode << " refresh_hz=" << initialRefreshHz << "\n";
     if (rendererInfo.flags & SDL_RENDERER_ACCELERATED)
         std::cerr << "SHIRAZ_GPU device=" << deviceName << " vendor=" << vendorName << "\n";
     const bool gpuCanvas = (rendererInfo.flags & SDL_RENDERER_ACCELERATED) &&
@@ -974,6 +1006,9 @@ void present(const Surface& initial, const std::string& title, int frames,
             upload();
         }
         lastGeometry = geometry;
+#if defined(__linux__)
+        notify_linux_choreographer_refresh(presentation_refresh_rate());
+#endif
     };
     syncGeometry();
     const double aspect =
@@ -1574,6 +1609,10 @@ void present(const Surface& initial, const std::string& title, int frames,
             }
 #endif
             SDL_RenderPresent(renderer.get());
+#if defined(__linux__)
+            if (rendererInfo.flags & SDL_RENDERER_PRESENTVSYNC)
+                notify_linux_choreographer_vsync(presentation_refresh_rate());
+#endif
             repaint = false;
             presentedWidth = w;
             presentedHeight = h;

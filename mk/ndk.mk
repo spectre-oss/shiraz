@@ -56,7 +56,7 @@ build/libOpenSLES.so: build/libOpenSLES.so.1
 
 build/libaaudio.so: native/ndk_aaudio.cpp include/shiraz/ndk/aaudio.h
 	@mkdir -p build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_aaudio.cpp -o $@ -pthread
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fPIC -shared -Wl,-z,defs native/ndk_aaudio.cpp -o $@ -pthread -ldl
 
 build/liblog.so: native/ndk_log.cpp include/shiraz/ndk/log.h
 	@mkdir -p build

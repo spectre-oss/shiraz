@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <thread>
+#include <time.h>
 struct ALooper;
 struct AChoreographer;
 extern "C" {
@@ -14,6 +15,11 @@ void AChoreographer_postFrameCallback64(AChoreographer*, void (*)(int64_t, void*
 void AChoreographer_postFrameCallbackDelayed64(AChoreographer*, void (*)(int64_t, void*), void*,
                                                uint32_t);
 void AChoreographer_postFrameCallback(AChoreographer*, void (*)(long, void*), void*);
+#if !defined(__APPLE__)
+void shiraz_choreographer_set_refresh_rate(float hz);
+void shiraz_choreographer_note_vsync(int64_t monotonic_ns, int64_t period_ns);
+int64_t shiraz_choreographer_period_ns(void);
+#endif
 }
 struct State {
     int calls = 0;
@@ -67,5 +73,26 @@ int main() {
             AChoreographer_postFrameCallbackDelayed64(AChoreographer_getInstance(), callback,
                                                       nullptr, 10000);
         }).join();
+#if !defined(__APPLE__)
+    // Dynamic display refresh rate + presenter vsync phase alignment on Linux.
+    shiraz_choreographer_set_refresh_rate(120.0f);
+    assert(shiraz_choreographer_period_ns() == 8333333LL);
+    // Out-of-range refresh rates must be ignored.
+    shiraz_choreographer_set_refresh_rate(0.0f);
+    shiraz_choreographer_set_refresh_rate(1000.0f);
+    assert(shiraz_choreographer_period_ns() == 8333333LL);
+    {
+        timespec ts{};
+        assert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0);
+        const int64_t anchor = int64_t(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+        shiraz_choreographer_note_vsync(anchor, 8333333LL);
+        State paced;
+        AChoreographer_postFrameCallback64(choreographer, callback, &paced);
+        wait(paced, 1);
+        assert(paced.stamp >= anchor + 8333333LL);
+    }
+    shiraz_choreographer_set_refresh_rate(60.0f);
+    assert(shiraz_choreographer_period_ns() == 16666667LL);
+#endif
     std::puts("NDK_CHOREOGRAPHER_OK");
 }

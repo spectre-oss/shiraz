@@ -48,8 +48,8 @@ public class Surface implements android.os.Parcelable {
  public static boolean shirazEglRelease() { return nativeEglMakeCurrent(0, 0); }
  public boolean shirazEglMakeCurrent(long context) { long window = shirazNativeWindow(); return window != 0 && context != 0 && nativeEglMakeCurrent(window, context); }
  public boolean shirazEglSwap() { long window = shirazNativeWindow(); return window != 0 && nativeEglSwap(window); }
- public long shirazOffscreenWindow(int w, int h) { shirazConfigure(w, h, PixelFormat.RGBA_8888); long window = shirazNativeWindow(); if (ShirazWindowDraw.MAC && window != 0) nativeMarkOffscreen(window); return window; }
- // macOS M4b natives (from_surface.cpp, __APPLE__); never called off macOS.
+ public long shirazOffscreenWindow(int w, int h) { shirazConfigure(w, h, PixelFormat.RGBA_8888); long window = shirazNativeWindow(); if (ShirazWindowDraw.ZERO_COPY_HOST && window != 0) nativeMarkOffscreen(window); return window; }
+ // Zero-copy host natives (from_surface.cpp, macOS + Linux).
  private static native long nativeCopyArgbRevision(long window, int[] pixels);
  private static native void nativeMarkOffscreen(long window);
  private static native void nativeCountCpuPublish(long window);
@@ -64,7 +64,7 @@ public class Surface implements android.os.Parcelable {
 
   int count = front.getWidth() * front.getHeight();
   if (published == null || published.length != count) published = new int[count];
-  if (ShirazWindowDraw.MAC) {
+  if (ShirazWindowDraw.ZERO_COPY_HOST) {
    // C7: the copy reports the revision its pixels belong to; continuous production no longer starves it.
    long got = nativeCopyArgbRevision(nativeWindow, published);
    if (got >= revision) {
@@ -112,9 +112,9 @@ public class Surface implements android.os.Parcelable {
   if(proxy)return delegate==null?PixelCopy.ERROR_SOURCE_INVALID:delegate.shirazCopyPixels(source,destination);
   if(!valid||front==null)return PixelCopy.ERROR_SOURCE_INVALID;
   if(!hasPostedFrame&&(nativeWindow==0||nativeWindowRevision(nativeWindow)<=initialNativeRevision))return PixelCopy.ERROR_SOURCE_NO_DATA;
-  long requestedAtEntry=ShirazWindowDraw.MAC&&nativeWindow!=0?nativeWindowRevision(nativeWindow):0;
+  long requestedAtEntry=ShirazWindowDraw.ZERO_COPY_HOST&&nativeWindow!=0?nativeWindowRevision(nativeWindow):0;
   publishWindow();
-  if(ShirazWindowDraw.MAC){if(nativeWindow!=0&&lastNativeRevision<requestedAtEntry)return PixelCopy.ERROR_TIMEOUT;}
+  if(ShirazWindowDraw.ZERO_COPY_HOST){if(nativeWindow!=0&&lastNativeRevision<requestedAtEntry)return PixelCopy.ERROR_TIMEOUT;}
   else if(nativeWindow!=0&&lastNativeRevision!=nativeWindowRevision(nativeWindow))return PixelCopy.ERROR_TIMEOUT;
   Rect crop=source==null?new Rect(0,0,width,height):new Rect(source);
   if(!crop.intersect(0,0,width,height))return PixelCopy.ERROR_SOURCE_INVALID;

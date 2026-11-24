@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Real Android NDK libaaudio.so implementation with state machine, ring buffer,
-// callback pump, monotonic timestamps, and optional CoreAudio output on macOS.
+// callback pump, monotonic timestamps, and host audio output (ALSA/PipeWire on
+// Linux, CoreAudio on macOS, WASAPI on Windows).
 #include "shiraz/ndk/aaudio.h"
 
 #include <algorithm>
@@ -30,6 +31,9 @@ int shiraz_win32_audio_write(ShirazWin32AudioStream* s, const std::int16_t* pcm,
                              std::size_t frames);
 void shiraz_win32_audio_close(ShirazWin32AudioStream* s);
 }
+#elif defined(__linux__)
+#include <cerrno>
+#include <dlfcn.h>
 #endif
 
 namespace {
@@ -182,6 +186,9 @@ struct AAudioStreamStruct {
     bool audioQueueStarted = false;
 #elif defined(_WIN32)
     ShirazWin32AudioStream* win32Audio = nullptr;
+#elif defined(__linux__)
+    std::mutex audioMu;
+    void* alsaPcm = nullptr;
 #endif
 
     std::thread worker;
@@ -214,8 +221,14 @@ struct AAudioStreamStruct {
             shiraz_win32_audio_close(win32Audio);
             win32Audio = nullptr;
         }
+#elif defined(__linux__)
+        closeLinuxAlsa();
 #endif
     }
+
+#if defined(__linux__)
+    void closeLinuxAlsa();
+#endif
 
     ~AAudioStreamStruct() {
         joinWorker();
@@ -223,7 +236,7 @@ struct AAudioStreamStruct {
 };
 
 namespace {
-#if defined(__APPLE__) || defined(_WIN32)
+#if defined(__APPLE__) || defined(_WIN32) || defined(__linux__)
 bool hostAudioBackendEnabled() {
     const char* backend = std::getenv("SHIRAZ_AUDIO_BACKEND");
     if (backend && std::strcmp(backend, "null") == 0) {
@@ -325,6 +338,133 @@ void submitWin32Audio(AAudioStreamStruct* s, const uint8_t* data, int32_t frames
     }
     shiraz_win32_audio_write(s->win32Audio, converted.data(), static_cast<std::size_t>(frames));
 }
+#elif defined(__linux__)
+struct LinuxAlsaApi {
+    using OpenFn = int (*)(void**, const char*, int, int);
+    using SetParamsFn = int (*)(void*, int, int, unsigned int, unsigned int, int, unsigned int);
+    using WriteiFn = long (*)(void*, const void*, unsigned long);
+    using RecoverFn = int (*)(void*, int, int);
+    using DropFn = int (*)(void*);
+    using PrepareFn = int (*)(void*);
+    using CloseFn = int (*)(void*);
+
+    OpenFn open = nullptr;
+    SetParamsFn setParams = nullptr;
+    WriteiFn writei = nullptr;
+    RecoverFn recover = nullptr;
+    DropFn drop = nullptr;
+    PrepareFn prepare = nullptr;
+    CloseFn close = nullptr;
+
+    LinuxAlsaApi() {
+        void* handle = dlopen("libasound.so.2", RTLD_LAZY | RTLD_LOCAL);
+        if (!handle) {
+            handle = dlopen("libasound.so", RTLD_LAZY | RTLD_LOCAL);
+        }
+        if (!handle) {
+            return;
+        }
+        open = reinterpret_cast<OpenFn>(dlsym(handle, "snd_pcm_open"));
+        setParams = reinterpret_cast<SetParamsFn>(dlsym(handle, "snd_pcm_set_params"));
+        writei = reinterpret_cast<WriteiFn>(dlsym(handle, "snd_pcm_writei"));
+        recover = reinterpret_cast<RecoverFn>(dlsym(handle, "snd_pcm_recover"));
+        drop = reinterpret_cast<DropFn>(dlsym(handle, "snd_pcm_drop"));
+        prepare = reinterpret_cast<PrepareFn>(dlsym(handle, "snd_pcm_prepare"));
+        close = reinterpret_cast<CloseFn>(dlsym(handle, "snd_pcm_close"));
+    }
+
+    bool ready() const {
+        return open && setParams && writei && recover && drop && prepare && close;
+    }
+};
+
+const LinuxAlsaApi& linuxAlsa() {
+    static const LinuxAlsaApi api;
+    return api;
+}
+
+int toAlsaFormat(aaudio_format_t fmt) {
+    // Linux ALSA snd_pcm_format_t ABI constants.
+    switch (fmt) {
+    case AAUDIO_FORMAT_PCM_I16:
+        return 2; // SND_PCM_FORMAT_S16_LE
+    case AAUDIO_FORMAT_PCM_I32:
+        return 10; // SND_PCM_FORMAT_S32_LE
+    case AAUDIO_FORMAT_PCM_FLOAT:
+        return 14; // SND_PCM_FORMAT_FLOAT_LE
+    case AAUDIO_FORMAT_PCM_I24_PACKED:
+        return 32; // SND_PCM_FORMAT_S24_3LE
+    default:
+        return -1;
+    }
+}
+
+void openLinuxAlsaAudio(AAudioStreamStruct* s) {
+    if (!s || s->direction != AAUDIO_DIRECTION_OUTPUT || !hostAudioBackendEnabled()) {
+        return;
+    }
+    const LinuxAlsaApi& api = linuxAlsa();
+    const int alsaFmt = toAlsaFormat(s->format);
+    if (!api.ready() || alsaFmt < 0) {
+        return;
+    }
+    const char* device = std::getenv("SHIRAZ_AUDIO_DEVICE");
+    if (!device || !*device) {
+        device = "default";
+    }
+    constexpr int kStreamPlayback = 0;      // SND_PCM_STREAM_PLAYBACK
+    constexpr int kNonblock = 1;            // SND_PCM_NONBLOCK
+    constexpr int kAccessRwInterleaved = 3; // SND_PCM_ACCESS_RW_INTERLEAVED
+    void* pcm = nullptr;
+    if (api.open(&pcm, device, kStreamPlayback, kNonblock) < 0 || !pcm) {
+        return;
+    }
+    const unsigned int latencyUs =
+        (s->performanceMode == AAUDIO_PERFORMANCE_MODE_LOW_LATENCY) ? 20000u : 40000u;
+    if (api.setParams(pcm, alsaFmt, kAccessRwInterleaved,
+                      static_cast<unsigned int>(s->channelCount),
+                      static_cast<unsigned int>(s->sampleRate), 1, latencyUs) < 0) {
+        api.close(pcm);
+        return;
+    }
+    std::lock_guard<std::mutex> audioLock(s->audioMu);
+    s->alsaPcm = pcm;
+}
+
+void submitLinuxAlsaAudio(AAudioStreamStruct* s, const uint8_t* data, int32_t frames) {
+    if (!s || !data || frames <= 0) {
+        return;
+    }
+    const LinuxAlsaApi& api = linuxAlsa();
+    if (!api.ready()) {
+        return;
+    }
+    std::lock_guard<std::mutex> audioLock(s->audioMu);
+    if (!s->alsaPcm) {
+        return;
+    }
+    long written = api.writei(s->alsaPcm, data, static_cast<unsigned long>(frames));
+    if (written < 0 && written != -EAGAIN) {
+        if (api.recover(s->alsaPcm, static_cast<int>(written), 1) == 0) {
+            (void)api.writei(s->alsaPcm, data, static_cast<unsigned long>(frames));
+        }
+    }
+}
+
+void resetLinuxAlsaAudio(AAudioStreamStruct* s) {
+    if (!s) {
+        return;
+    }
+    const LinuxAlsaApi& api = linuxAlsa();
+    if (!api.ready()) {
+        return;
+    }
+    std::lock_guard<std::mutex> audioLock(s->audioMu);
+    if (s->alsaPcm) {
+        api.drop(s->alsaPcm);
+        api.prepare(s->alsaPcm);
+    }
+}
 #endif
 
 void workerLoop(AAudioStreamStruct* s) {
@@ -378,6 +518,10 @@ void workerLoop(AAudioStreamStruct* s) {
             if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
                 submitWin32Audio(s, scratch.data(), burst);
             }
+#elif defined(__linux__)
+            if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
+                submitLinuxAlsaAudio(s, scratch.data(), burst);
+            }
 #endif
             std::lock_guard<std::mutex> lock(s->mu);
             if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
@@ -392,7 +536,7 @@ void workerLoop(AAudioStreamStruct* s) {
             }
         } else {
             // Blocking write/read mode: drain output ring or feed input silence.
-#if defined(__APPLE__) || defined(_WIN32)
+#if defined(__APPLE__) || defined(_WIN32) || defined(__linux__)
             int32_t drainedFrames = 0;
             std::unique_lock<std::mutex> lock(s->mu);
 #else
@@ -404,7 +548,7 @@ void workerLoop(AAudioStreamStruct* s) {
             if (s->direction == AAUDIO_DIRECTION_OUTPUT) {
                 const int32_t drain = std::min(burst, s->ringUsedFrames);
                 if (drain > 0) {
-#if defined(__APPLE__) || defined(_WIN32)
+#if defined(__APPLE__) || defined(_WIN32) || defined(__linux__)
                     for (int32_t i = 0; i < drain; ++i) {
                         const int32_t idx = (s->ringReadIdx + i) % s->bufferCapacityInFrames;
                         const size_t srcOff =
@@ -453,12 +597,29 @@ void workerLoop(AAudioStreamStruct* s) {
             if (drainedFrames > 0) {
                 submitWin32Audio(s, scratch.data(), drainedFrames);
             }
+#elif defined(__linux__)
+            lock.unlock();
+            if (drainedFrames > 0) {
+                submitLinuxAlsaAudio(s, scratch.data(), drainedFrames);
+            }
 #endif
         }
     }
 }
 
 } // namespace
+
+#if defined(__linux__)
+void AAudioStreamStruct::closeLinuxAlsa() {
+    const LinuxAlsaApi& api = linuxAlsa();
+    std::lock_guard<std::mutex> audioLock(audioMu);
+    if (alsaPcm && api.ready()) {
+        api.drop(alsaPcm);
+        api.close(alsaPcm);
+    }
+    alsaPcm = nullptr;
+}
+#endif
 
 extern "C" {
 
@@ -738,6 +899,8 @@ aaudio_result_t AAudioStreamBuilder_openStream(AAudioStreamBuilder* b, AAudioStr
     openDarwinAudioQueue(s);
 #elif defined(_WIN32)
     openWin32Audio(s);
+#elif defined(__linux__)
+    openLinuxAlsaAudio(s);
 #endif
     s->worker = std::thread(workerLoop, s);
 
@@ -804,6 +967,8 @@ aaudio_result_t AAudioStream_requestPause(AAudioStream* s) {
             s->audioQueueStarted = false;
         }
     }
+#elif defined(__linux__)
+    resetLinuxAlsaAudio(s);
 #endif
     s->setStateLocked(AAUDIO_STREAM_STATE_PAUSED);
     return AAUDIO_OK;
@@ -830,6 +995,8 @@ aaudio_result_t AAudioStream_requestFlush(AAudioStream* s) {
             AudioQueueReset(s->audioQueue);
         }
     }
+#elif defined(__linux__)
+    resetLinuxAlsaAudio(s);
 #endif
     s->setStateLocked(AAUDIO_STREAM_STATE_FLUSHED);
     return AAUDIO_OK;
@@ -851,6 +1018,8 @@ aaudio_result_t AAudioStream_requestStop(AAudioStream* s) {
             s->audioQueueStarted = false;
         }
     }
+#elif defined(__linux__)
+    resetLinuxAlsaAudio(s);
 #endif
     s->setStateLocked(AAUDIO_STREAM_STATE_STOPPED);
     return AAUDIO_OK;
@@ -1034,11 +1203,7 @@ int32_t AAudioStream_getChannelCount(AAudioStream* s) {
     return s ? s->channelCount : AAUDIO_ERROR_NULL;
 }
 aaudio_channel_mask_t AAudioStream_getChannelMask(AAudioStream* s) {
-#if defined(_WIN32)
     return s ? s->channelMask : static_cast<aaudio_channel_mask_t>(AAUDIO_UNSPECIFIED);
-#else
-    return s ? s->channelMask : AAUDIO_UNSPECIFIED;
-#endif
 }
 aaudio_direction_t AAudioStream_getDirection(AAudioStream* s) {
     return s ? s->direction : AAUDIO_ERROR_NULL;

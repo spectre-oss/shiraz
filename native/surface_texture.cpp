@@ -11,6 +11,12 @@
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
+#if defined(__linux__)
+#include "shiraz/linux/window_queue.h"
+#include <cerrno>
+#include <poll.h>
+#include <unistd.h>
+#endif
 #endif
 #include <jni.h>
 #include <dlfcn.h>
@@ -176,9 +182,14 @@ struct Api {
     void* library = nullptr;
     PFNEGLGETCURRENTCONTEXTPROC context = nullptr;
     PFNEGLGETCURRENTDISPLAYPROC display = nullptr;
+    PFNEGLQUERYSTRINGPROC queryString = nullptr;
     PFNEGLCREATEIMAGEKHRPROC create = nullptr;
     PFNEGLDESTROYIMAGEKHRPROC destroy = nullptr;
     PFNGLEGLIMAGETARGETTEXTURE2DOESPROC target = nullptr;
+    PFNEGLCREATESYNCKHRPROC createSync = nullptr;
+    PFNEGLDESTROYSYNCKHRPROC destroySync = nullptr;
+    PFNEGLWAITSYNCKHRPROC waitSync = nullptr;
+    PFNEGLDUPNATIVEFENCEFDANDROIDPROC dupFenceFd = nullptr;
     Api() {
         library = dlopen("libEGL_shiraz.so.1", RTLD_NOW | RTLD_LOCAL);
         if (!library)
@@ -191,16 +202,35 @@ struct Api {
             reinterpret_cast<PFNEGLGETCURRENTCONTEXTPROC>(dlsym(library, "eglGetCurrentContext"));
         display =
             reinterpret_cast<PFNEGLGETCURRENTDISPLAYPROC>(dlsym(library, "eglGetCurrentDisplay"));
+        queryString = reinterpret_cast<PFNEGLQUERYSTRINGPROC>(dlsym(library, "eglQueryString"));
         auto proc = reinterpret_cast<PFNEGLGETPROCADDRESSPROC>(dlsym(library, "eglGetProcAddress"));
         if (proc) {
             create = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(proc("eglCreateImageKHR"));
             destroy = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(proc("eglDestroyImageKHR"));
             target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
                 proc("glEGLImageTargetTexture2DOES"));
+            createSync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(proc("eglCreateSyncKHR"));
+            destroySync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(proc("eglDestroySyncKHR"));
+            waitSync = reinterpret_cast<PFNEGLWAITSYNCKHRPROC>(proc("eglWaitSyncKHR"));
+            dupFenceFd = reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(
+                proc("eglDupNativeFenceFDANDROID"));
         }
     }
     bool ready() const {
         return context && display && create && destroy && target;
+    }
+    bool hasExtension(EGLDisplay dpy, const char* name) const {
+        if (!queryString || dpy == EGL_NO_DISPLAY)
+            return false;
+        const char* list = queryString(dpy, EGL_EXTENSIONS);
+        if (!list)
+            return false;
+        const size_t len = std::strlen(name);
+        for (const char* at = std::strstr(list, name); at; at = std::strstr(at + 1, name)) {
+            if ((at == list || at[-1] == ' ') && (at[len] == ' ' || at[len] == 0))
+                return true;
+        }
+        return false;
     }
 };
 Api& api() {
@@ -217,8 +247,34 @@ struct Texture {
     uint64_t revision = 0;
     int width = 0, height = 0;
     std::vector<uint32_t> pixels;
+#if defined(__linux__)
+    uint64_t frameSerial = 0;
+    ANativeWindow* consumerWindow = nullptr;
+    struct SlotImage {
+        uint64_t generation = 0;
+        EGLImageKHR image = EGL_NO_IMAGE_KHR;
+    } slotImages[SHIRAZ_WINDOW_MAX_SLOTS];
+#endif
     Texture(GLuint value, bool enabled) : name(value), attached(enabled) {}
 };
+#if defined(__linux__)
+uint64_t linuxConsumerToken(const Texture* t) {
+    return reinterpret_cast<uint64_t>(t);
+}
+void linuxReleaseSlots(Texture* t) {
+    for (auto& slot : t->slotImages) {
+        if (slot.image != EGL_NO_IMAGE_KHR && t->display != EGL_NO_DISPLAY)
+            api().destroy(t->display, slot.image);
+        slot.image = EGL_NO_IMAGE_KHR;
+        slot.generation = 0;
+    }
+    if (t->consumerWindow) {
+        shiraz_window_consumer_detach(t->consumerWindow, linuxConsumerToken(t));
+        ANativeWindow_release(t->consumerWindow);
+        t->consumerWindow = nullptr;
+    }
+}
+#endif
 #endif
 void fail(JNIEnv* env, const char* message) {
     jclass cls = env->FindClass("java/lang/IllegalStateException");
@@ -259,6 +315,9 @@ bool current(JNIEnv* env, Texture* t) {
     return true;
 }
 void imageRelease(Texture* t) {
+#if defined(__linux__)
+    linuxReleaseSlots(t);
+#endif
     if (t->image != EGL_NO_IMAGE_KHR) {
         api().destroy(t->display, t->image);
         t->image = EGL_NO_IMAGE_KHR;
@@ -494,6 +553,115 @@ Java_android_graphics_SurfaceTexture_nativeUpdate(JNIEnv* env, jclass, jlong val
     uint64_t revision = shiraz_window_revision(w);
     if (!revision || revision == t->revision)
         return false;
+#if defined(__linux__)
+    // Zero-copy Linux DMA-BUF path: acquire queued GBM/DMA-BUF slot directly into
+    // GL_TEXTURE_EXTERNAL_OES via EGL_LINUX_DMA_BUF_EXT + EGL_ANDROID_native_fence_sync.
+    if (shiraz_zero_copy_mode() != 0 &&
+        api().hasExtension(t->display, "EGL_EXT_image_dma_buf_import")) {
+        ShirazWindowSlot slot{};
+        const uint64_t token = linuxConsumerToken(t);
+        int32_t acq = shiraz_window_acquire_slot(w, token, ++t->frameSerial, &slot);
+        if (acq == 0 && slot.buffer) {
+            int32_t fenceFd = slot.fence_fd;
+            slot.fence_fd = -1;
+            if (t->consumerWindow != w) {
+                linuxReleaseSlots(t);
+                ANativeWindow_acquire(w);
+                t->consumerWindow = w;
+            }
+            bool ok = true;
+            auto& slotImg = t->slotImages[slot.index];
+            if (slotImg.generation != slot.generation) {
+                if (slotImg.image != EGL_NO_IMAGE_KHR) {
+                    api().destroy(t->display, slotImg.image);
+                    slotImg.image = EGL_NO_IMAGE_KHR;
+                }
+                uint32_t fourcc = 0, pitch = 0;
+                int dmaFd = shiraz_hardware_buffer_export(slot.buffer, &fourcc, &pitch);
+                if (dmaFd >= 0) {
+                    const EGLint dmaAttribs[] = {EGL_WIDTH,
+                                                 EGLint(slot.width),
+                                                 EGL_HEIGHT,
+                                                 EGLint(slot.height),
+                                                 EGL_LINUX_DRM_FOURCC_EXT,
+                                                 EGLint(fourcc),
+                                                 EGL_DMA_BUF_PLANE0_FD_EXT,
+                                                 dmaFd,
+                                                 EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+                                                 0,
+                                                 EGL_DMA_BUF_PLANE0_PITCH_EXT,
+                                                 EGLint(pitch),
+                                                 EGL_NONE};
+                    slotImg.image = api().create(t->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
+                                                 nullptr, dmaAttribs);
+                    close(dmaFd);
+                }
+                slotImg.generation = slotImg.image == EGL_NO_IMAGE_KHR ? 0 : slot.generation;
+                if (slotImg.image == EGL_NO_IMAGE_KHR)
+                    ok = false;
+            }
+            const bool hasFence = api().createSync && api().destroySync && api().waitSync &&
+                                  api().dupFenceFd &&
+                                  api().hasExtension(t->display, "EGL_ANDROID_native_fence_sync") &&
+                                  api().hasExtension(t->display, "EGL_KHR_wait_sync");
+            if (ok && fenceFd >= 0) {
+                bool waitedGpu = false;
+                if (hasFence) {
+                    constexpr EGLenum kNativeFence = 0x3144;
+                    constexpr EGLint kNativeFenceFd = 0x3145;
+                    const EGLint attribs[] = {kNativeFenceFd, fenceFd, EGL_NONE};
+                    EGLSyncKHR sync = api().createSync(t->display, kNativeFence, attribs);
+                    if (sync != EGL_NO_SYNC_KHR) {
+                        fenceFd = -1;
+                        api().waitSync(t->display, sync, 0);
+                        api().destroySync(t->display, sync);
+                        waitedGpu = true;
+                    }
+                }
+                if (!waitedGpu && fenceFd >= 0) {
+                    pollfd pf{fenceFd, POLLIN, 0};
+                    while (poll(&pf, 1, 1000) < 0 && errno == EINTR) {
+                    }
+                    close(fenceFd);
+                    fenceFd = -1;
+                }
+            } else if (fenceFd >= 0) {
+                close(fenceFd);
+                fenceFd = -1;
+            }
+            if (ok) {
+                glBindTexture(GL_TEXTURE_EXTERNAL_OES, t->name);
+                api().target(GL_TEXTURE_EXTERNAL_OES, slotImg.image);
+                if (glGetError() != GL_NO_ERROR)
+                    ok = false;
+            }
+            int32_t releaseFd = -1;
+            if (ok && hasFence) {
+                constexpr EGLenum kNativeFence = 0x3144;
+                EGLSyncKHR sync = api().createSync(t->display, kNativeFence, nullptr);
+                if (sync != EGL_NO_SYNC_KHR) {
+                    glFlush();
+                    releaseFd = api().dupFenceFd(t->display, sync);
+                    api().destroySync(t->display, sync);
+                }
+            }
+            if (ok && releaseFd < 0)
+                glFlush();
+            shiraz_window_mark_sampled(w, token, slot.index, slot.generation, releaseFd);
+            if (ok) {
+                t->width = slot.width;
+                t->height = slot.height;
+                t->revision = slot.revision;
+                shiraz_zero_copy_count("surface_texture_zero_copy", 1);
+                if (std::getenv("SHIRAZ_TRACE_VIDEO") && ++t->updates <= 8)
+                    std::fprintf(stderr,
+                                 "SHIRAZ_TEXTURE_FRAME zero_copy=1 updates=%u revision=%llu\n",
+                                 t->updates, static_cast<unsigned long long>(slot.revision));
+                return true;
+            }
+        }
+    }
+#endif
     int width = ANativeWindow_getWidth(w), height = ANativeWindow_getHeight(w);
     if (width < 1 || height < 1 || width > 8192 || height > 8192 ||
         uint64_t(width) * height > 16 * 1024 * 1024) {
@@ -525,7 +693,8 @@ Java_android_graphics_SurfaceTexture_nativeUpdate(JNIEnv* env, jclass, jlong val
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &binding);
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    bool resized = width != t->width || height != t->height;
+    bool resized =
+        !t->source || t->image == EGL_NO_IMAGE_KHR || width != t->width || height != t->height;
     if (resized) {
         imageRelease(t);
         glGenTextures(1, &t->source);
@@ -579,6 +748,9 @@ extern "C" JNIEXPORT void JNICALL Java_android_graphics_SurfaceTexture_nativeRel
     auto* t = reinterpret_cast<Texture*>(value);
     if (!t)
         return;
+#if defined(__linux__)
+    linuxReleaseSlots(t);
+#endif
     if (t->image != EGL_NO_IMAGE_KHR)
         api().destroy(t->display, t->image);
     // GL names owned by a different context are reclaimed with that context.
