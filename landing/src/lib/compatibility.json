@@ -5,10 +5,10 @@
     {
       "id": "osmand",
       "name": "OsmAnd",
-      "framework": "Android framework",
-      "status": "Historical",
-      "observed": "Maps, navigation drawer, route details, and a packaged landscape run were observed in earlier walkthroughs.",
-      "limitations": "Complete search, routing, downloads, restart persistence, and visual parity remain unverified as a whole.",
+      "framework": "Android framework + JNI",
+      "status": "Partial",
+      "observed": "Live 2026-11-23 macOS ARM64 Metal/ANGLE walkthrough of OsmAnd+ rendered native vector maps (with Persian RTL labels), ran offline search (185 results), fetched online HTTPS indexes, resized portrait ↔ landscape, and persisted zoom across restart. Earlier Linux runs also reached maps, drawer, and route details.",
+      "limitations": "Turn-by-turn routing/navigation, map downloads, ART JIT startup speedup, hardened-runtime signing gates, and Linux/Waydroid visual parity remain open.",
       "source": "tested.md"
     },
     {

@@ -215,12 +215,59 @@ test('compatibility directory filters recorded evidence and handles empty search
 });
 
 test('compatibility mobile view stays within the viewport and is accessible', async ({page}) => {
-  await page.setViewportSize({width:390,height:844});
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({width, height: 844});
+    await page.goto('/compatibility/');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.addScriptTag({path: require.resolve('axe-core/axe.min.js')});
+    const violations = await page.evaluate(async () => (await window.axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa']}})).violations);
+    expect(violations).toEqual([]);
+  }
+});
+
+test('compatibility visualizations render progress tiles, engine chips, domain mosaic and NDK chart', async ({page}) => {
   await page.goto('/compatibility/');
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});
-  const violations = await page.evaluate(async()=> (await window.axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations);
-  expect(violations).toEqual([]);
+  await expect(page.locator('.progress-tile')).toHaveCount(4);
+  await expect(page.locator('.progress-overview')).toContainText('4,445');
+  await expect(page.locator('.progress-overview')).toContainText('15/15');
+  // Engine chip quick-filters the app table and toggles cleanly back to All.
+  const flutterChip = page.getByRole('group', {name: 'Quick filter by app engine'}).getByRole('button', {name: /Flutter/});
+  await flutterChip.click();
+  await expect(flutterChip).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(2);
+  await flutterChip.click();
+  await expect(page.locator('.compat-table tbody tr')).toHaveCount(catalog.applications.length);
+  // Host OS progress cards expose audited checklist counts and expandable areas.
+  const macCard = page.locator('.host-platform-card', {hasText: 'macOS'});
+  await expect(macCard).toContainText('46/91 verified');
+  await macCard.locator('.host-breakdown summary').click();
+  await expect(macCard.locator('.area-bars li')).toHaveCount(8);
+  const winCard = page.locator('.host-platform-card', {hasText: 'Windows'});
+  await expect(winCard).toContainText('32/37 verified');
+  // 5-domain API 35 mosaic & 15-library NDK bar landscape render all tracked data.
+  await expect(page.locator('.domain-card')).toHaveCount(5);
+  await expect(page.locator('.ndk-bars > li')).toHaveCount(15);
+  await expect(page.locator('.ndk-bars')).toContainText('316/316');
+});
+
+test('compare page renders visual heatmap, runtime pipelines, head-to-head sync and passes accessibility', async ({page}) => {
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({width, height: 844});
+    await page.goto('/compare/');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.addScriptTag({path: require.resolve('axe-core/axe.min.js')});
+    const violations = await page.evaluate(async () => (await window.axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa']}})).violations);
+    expect(violations).toEqual([]);
+  }
+  await page.setViewportSize({width: 1280, height: 844});
+  await page.goto('/compare/');
+  await expect(page.locator('.heatmap tbody tr')).toHaveCount(9);
+  await expect(page.locator('.pipeline-row')).toHaveCount(7);
+  await expect(page.locator('.pillar-col')).toHaveCount(7);
+  // Selecting a peer from the heatmap updates the head-to-head comparison and scorecard.
+  await page.locator('.heatmap').getByRole('button', {name: 'Mac.apk', exact: true}).click();
+  await expect(page.locator('.duel-scorecard')).toContainText('Mac.apk');
+  await expect(page.locator('.verdict')).toContainText('Where Mac.apk is ahead');
 });
 
 

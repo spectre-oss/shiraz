@@ -8,7 +8,7 @@ changes matter. New framework experiments run only in a separate test VM.
 
 | App | Evidence available | Limitations |
 | --- | --- | --- |
-| OsmAnd | Earlier walkthroughs reached maps, navigation drawer, and route-detail screens; a packaged run also verified landscape resizing. | Historical evidence, not a fresh result from this VM series. Complete search, routing, downloads, restart persistence, and Android visual parity remain unverified as a whole. |
+| OsmAnd | On 2026-11-23, unchanged OsmAnd+ (`net.osmand.plus_541003.apk`) was walked interactively on Apple Silicon macOS (ANGLE Metal + Skia Ganesh at 120 Hz, zero-copy IOSurface): native `libosmand.so` rendered the Tehran vector map with Persian RTL labels and POIs, ran offline search (`Azadi` → 185 results) and result bottom-sheet actions, opened Configure Map, fetched online indexes over HTTPS (`download.osmand.net` via `wolfJSSE` + `Security.framework`), relaid out across portrait (`540×960`) ↔ landscape (`960×540`) ↔ portrait resizes, and persisted zoom (`500 m` → `200 m`) across restart (`10.29 s` first present under `-Xint`). Earlier Linux walkthroughs also observed maps, navigation drawer, route details, and packaged landscape resizing. | Partial evidence; turn-by-turn routing/navigation, offline map downloads, ART JIT (`MAP_JIT`) startup speedup, hardened-runtime signing gates, Linux/Waydroid parity comparison, and full Android visual parity remain open. See [macos_final_goal.md](macos_final_goal.md). |
 | F-Droid | Earlier web-runner testing rendered its main screen. A later fix made the service's access-audit state directory writable. | Historical evidence. Complete repository refresh and app installation workflows are not established by those tests. |
 
 ## Current framework experiments

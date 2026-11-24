@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-11-23",
+  "updated": "2026-11-24",
   "note": "Maintained subsystem notes describe bounded development support. Partial never means a whole subsystem is complete. Shared framework rows do not certify every host backend.",
   "areas": [
     {
@@ -9,7 +9,7 @@
       "scope": "Shared framework",
       "status": "Partial",
       "verification": "Component and app flows",
-      "notes": "Standalone ART, multi-DEX loading and all 4,445 Android API 35 android.* class surfaces compile and smoke-test on OpenJDK and ART. Complete method-level Android behavior remains incremental.",
+      "notes": "Standalone ART (with warm standby daemon & AOT/page-cache pre-warming on Linux), multi-DEX loading and all 4,445 Android API 35 android.* class surfaces compile and smoke-test on OpenJDK and ART. Complete method-level Android behavior and macOS ART JIT remain incremental.",
       "evidence": "docs/framework_final_goal.md"
     },
     {
@@ -126,8 +126,8 @@
       "scope": "macOS ARM64",
       "status": "Partial",
       "verification": "App and component tests",
-      "notes": "Telegram library initialization and selected libc, socket, TLS and JNI bridges tested alongside unified 16 KB page-size and ABI policy. This is not complete syscall or native-ABI compatibility.",
-      "evidence": "docs/tested.md"
+      "notes": "Opt-in guest loader (SHIRAZ_GUEST_LOADER=1) boots OsmAnd+ (7 native libs, 4,090 TPIDR rewrites, live Tehran vector maps) and Telegram (18 constructors, JNI_OnLoad) alongside unified 16 KB page-size and ABI policy. M5 strict hardened-runtime signing gate and full syscall coverage remain open.",
+      "evidence": "docs/macos_final_goal.md"
     },
     {
       "id": "playback-macos",
@@ -152,8 +152,8 @@
       "name": "macOS notifications, location, Metal and gestures",
       "scope": "macOS ARM64",
       "status": "Partial",
-      "verification": "Native and component tests",
-      "notes": "UNUserNotificationCenter notifications, CoreLocation wired into Android LocationManager, ProMotion display refresh pacing, zero-copy IOSurface swapchain & SurfaceTexture (EGL_METAL_TEXTURE_ANGLE + MTLSharedEvent), Security.framework trust anchors, AVFoundation speech voices, App Nap guard, Cocoa live-resize events, Retina 2x/fractional pointer mapping, Cmd-to-Ctrl shortcut policy and trackpad pinch/touch filtering are verified on Apple Silicon; interactive TCC prompts in end-user apps remain under test.",
+      "verification": "Native and app tests",
+      "notes": "UNUserNotificationCenter notifications, CoreLocation wired into Android LocationManager, 120 Hz CVDisplayLink hardware vsync pacing, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), Security.framework TLS trust (32/32 wolfJSSE/OkHttp + OsmAnd+ HTTPS fetch), AVFoundation speech voices, App Nap guard, Cocoa live-resize events, Retina 2x/fractional pointer mapping, Cmd-to-Ctrl shortcuts and trackpad pinch/touch filtering are verified on Apple Silicon; interactive TCC prompts in end-user apps remain under test.",
       "evidence": "docs/macos_final_goal.md"
     },
     {
@@ -207,7 +207,7 @@
       "scope": "Windows x64 / ARM64",
       "status": "Partial",
       "verification": "Windows CI native unit tests",
-      "notes": "CI-verified native Win32 implementations cover CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe, EnumDisplaySettingsW refresh rate, DXGI shared buffer pool, Win32 sync fences, DwmFlush choreographer pacing, CreateProcessW spawning, SetThreadExecutionState, WM_SIZE/WM_SIZING live resize, portable keyboard table, Precision Touchpad hooks, Job Object + Restricted Token sandbox and HostOs/rundll32 launchers. Full ART and guest ELF execution on Windows is not yet complete.",
+      "notes": "32/37 goal checklist items CI-verified: CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, DXGI GPU probe, EnumDisplaySettingsW refresh rate, DXGI shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing, libvulkan.dll ANativeWindow swapchain/AHB bridge, SDL2 Win32 presentation/IME/clipboard/keyboard (test-presentation.exe), CreateProcessW spawning, SetThreadExecutionState, Job Object + Restricted Token sandbox and HostOs/rundll32 launchers. Win32 ART, guest ELF loader, and ANGLE-D3D11 window wiring remain open.",
       "evidence": "docs/windows_final_goal.md"
     },
     {
@@ -216,7 +216,7 @@
       "scope": "Windows x64 / ARM64",
       "status": "Partial",
       "verification": "Windows CI native unit tests",
-      "notes": "WASAPI PCM16 audio bridge backing libaaudio.dll and libOpenSLES.dll, Media Foundation H.264/HEVC decoder probing, DirectWrite system font enumeration, GetAdaptersAddresses connectivity, DPAPI keystore, SAPI5 speech probe, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass MinGW-w64 CI tests (make windows-check); interactive end-to-end app media playback on Windows is not yet verified.",
+      "notes": "WASAPI PCM16 playback & capture bridge backing libaaudio.dll and libOpenSLES.dll, Media Foundation H.264/HEVC decoder probing and MFEnumDeviceSources camera enumeration, DirectWrite system font enumeration, GetAdaptersAddresses connectivity, DPAPI keystore, SAPI5 speech probe, Shell_NotifyIconW notifications and Windows Location COM bridges build and pass MinGW-w64 CI tests (make windows-check); interactive end-to-end app media playback on Windows is not yet verified.",
       "evidence": "docs/windows_final_goal.md"
     },
     {
@@ -225,7 +225,7 @@
       "scope": "Windows x64 / ARM64",
       "status": "Partial",
       "verification": "Python and Windows CI tests",
-      "notes": "Portable Shiraz\\ directory and MSIX AppxManifest.xml bundler with PE32/PE32+ import closure and .ico generation, validated in 3-OS CI; signed Windows installer releases are not yet published.",
+      "notes": "Portable Shiraz\\ directory and MSIX AppxManifest.xml bundler with PE32/PE32+ import closure, .ico generation, and Start Menu install-desktop integration, validated in 3-OS CI; signed Windows installer releases are not yet published.",
       "evidence": "docs/windows_final_goal.md"
     },
     {
@@ -233,8 +233,8 @@
       "name": "App isolation and sandboxing",
       "scope": "All hosts",
       "status": "Partial",
-      "verification": "Native and Python policy tests",
-      "notes": "Cross-platform SandboxPolicy maps to Linux Landlock LSM + PR_SET_NO_NEW_PRIVS, macOS Seatbelt (sandbox-exec) SBPL profiles + App Sandbox bundle entitlements, and Windows Job Objects + Restricted Tokens; full per-app default enforcement in end-user launchers remains incremental.",
+      "verification": "Native, CLI and Python policy tests",
+      "notes": "Cross-platform SandboxPolicy wired into shiraz run --sandbox [--no-network] and shiraz install-desktop: maps to Linux Landlock LSM + PR_SET_NO_NEW_PRIVS + seccomp-BPF network deny (plus Flatpak bubblewrap bundles), macOS Seatbelt (sandbox-exec) SBPL profiles + App Sandbox bundle entitlements, and Windows Job Objects + Restricted Tokens; default-on enforcement in every CLI/AppImage launcher remains incremental.",
       "evidence": "docs/cross_platform.md"
     },
     {

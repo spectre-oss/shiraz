@@ -135,11 +135,45 @@ for (const platform of hosts.platforms) {
   if (!platform.evidence.startsWith('docs/') || !file.startsWith(root) || !existsSync(file)) {
     throw Error(`Invalid host platform evidence path: ${platform.evidence}`);
   }
+  const prog = platform.progress;
+  if (
+    !prog ||
+    typeof prog.label !== 'string' ||
+    !prog.label.trim() ||
+    typeof prog.note !== 'string' ||
+    !prog.note.trim() ||
+    !integer(prog.verified) ||
+    !integer(prog.partial) ||
+    !integer(prog.open) ||
+    prog.verified + prog.partial + prog.open === 0 ||
+    !Array.isArray(prog.areas) ||
+    !prog.areas.length
+  ) {
+    throw Error(`Invalid host platform progress: ${platform.id}`);
+  }
+  let vSum = 0;
+  let pSum = 0;
+  let oSum = 0;
+  for (const area of prog.areas) {
+    if (typeof area.name !== 'string' || !area.name.trim() || !integer(area.verified) || !integer(area.partial) || !integer(area.open) || area.verified + area.partial + area.open === 0) {
+      throw Error(`Invalid host platform progress area in ${platform.id}`);
+    }
+    vSum += area.verified;
+    pSum += area.partial;
+    oSum += area.open;
+  }
+  if (vSum !== prog.verified || pSum !== prog.partial || oSum !== prog.open) {
+    throw Error(`Host platform progress area totals disagree for ${platform.id}`);
+  }
 }
 const layerIds = new Set();
+const layerStates = new Set(['ready', 'partial', 'progress']);
 for (const row of hosts.layers) {
   for (const key of ['id', 'layer', 'linux', 'macos', 'windows']) {
     if (typeof row[key] !== 'string' || !row[key].trim()) throw Error(`Missing host matrix ${key}`);
+  }
+  if (!row.status || !['linux', 'macos', 'windows'].every(os => layerStates.has(row.status[os]))) {
+    throw Error(`Invalid host matrix status for ${row.id}`);
   }
   if (!/^[a-z0-9-]+$/.test(row.id) || layerIds.has(row.id)) throw Error(`Invalid host matrix layer id: ${row.id}`);
   layerIds.add(row.id);

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-11-23",
+  "updated": "2026-11-24",
   "note": "Host backends share the Java API 35 framework and C/C++ NDK layers, while translating OS primitives, graphics, media, services, isolation, and app packaging natively per operating system. Experimental ports do not imply full end-to-end app parity with Linux.",
   "platforms": [
     {
@@ -8,16 +8,48 @@
       "name": "Linux",
       "architectures": "x86_64 · ARM64",
       "maturity": "Primary target",
-      "summary": "Standalone ART, host-ABI and optional Digitalis ARM64 native execution, 15/15 NDK libraries, SDL2/EGL/GLES with GBM/DMA-BUF zero-copy swapchain, Vulkan ANativeWindow swapchain/AHB bridge, ALSA/PipeWire AAudio, Landlock app isolation, WebRTC browser streaming, and per-app AppImages and sandboxed Flatpak bundles.",
-      "evidence": "docs/cross_platform.md"
+      "summary": "Standalone ART with warm standby daemon, host-ABI and optional Digitalis ARM64 native execution, 15/15 NDK libraries, SDL2/EGL/GLES with GBM/DMA-BUF zero-copy swapchain and vsync choreographer, Vulkan ANativeWindow swapchain/AHB bridge, ALSA/PipeWire AAudio, Landlock + seccomp CLI sandboxing, WebRTC browser streaming, desktop entries, and per-app AppImages and sandboxed Flatpak (.flatpak) bundles.",
+      "evidence": "docs/cross_platform.md",
+      "progress": {
+        "label": "Core host layers",
+        "verified": 6,
+        "partial": 0,
+        "open": 0,
+        "note": "All 6 native host layers active on x86_64 and ARM64 (including GBM/DMA-BUF zero-copy and Flatpak bundles); default CLI launcher sandboxing, end-to-end Vulkan titles, and AppImage ARM translation remain open.",
+        "areas": [
+          { "name": "Runtime & warm ART daemon", "verified": 1, "partial": 0, "open": 0 },
+          { "name": "Graphics, GBM/DMA-BUF & Vulkan", "verified": 1, "partial": 0, "open": 0 },
+          { "name": "ALSA/PipeWire audio & codecs", "verified": 1, "partial": 0, "open": 0 },
+          { "name": "OS primitives, Landlock & Flatpak", "verified": 1, "partial": 0, "open": 0 },
+          { "name": "XDG services, fonts & portals", "verified": 1, "partial": 0, "open": 0 },
+          { "name": "AppImage, Flatpak & WebRTC", "verified": 1, "partial": 0, "open": 0 }
+        ]
+      }
     },
     {
       "id": "macos",
       "name": "macOS",
       "architectures": "Apple Silicon ARM64",
       "maturity": "Experimental port",
-      "summary": "Standalone ART, guest ELF/Bionic loader, 15/15 NDK libraries, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, CoreAudio AAudio/AudioQueue, VideoToolbox H.264/HEVC/VP9/AV1 & AudioToolbox Opus, Retina & Cmd-key input parity, CI-verified Darwin clocks/spawn/fds/SQLite, Security.framework TLS trust (wolfJSSE + OkHttp), CoreLocation, UNUserNotificationCenter, Seatbelt sandbox, and signed Shiraz.app bundles.",
-      "evidence": "docs/macos_final_goal.md"
+      "summary": "Standalone ART, opt-in guest ELF/Bionic loader (booting OsmAnd+ and Telegram native libs), 15/15 NDK libraries, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, CoreAudio AAudio/AudioQueue, VideoToolbox H.264/HEVC/VP9/AV1 & AudioToolbox Opus, Retina & Cmd-key input parity, Security.framework TLS trust (wolfJSSE + OkHttp), CoreLocation, UNUserNotificationCenter, Seatbelt sandbox, and signed Shiraz.app bundles.",
+      "evidence": "docs/macos_final_goal.md",
+      "progress": {
+        "label": "macOS goal checklist (91 items)",
+        "verified": 46,
+        "partial": 19,
+        "open": 26,
+        "note": "Counts audited directly from docs/macos_final_goal.md. Guest ELF loader runs OsmAnd+ & Telegram opt-in; its 18 strict checklist rows stay open until M5 hardened-runtime signing passes.",
+        "areas": [
+          { "name": "Graphics & Metal/ANGLE", "verified": 10, "partial": 7, "open": 0 },
+          { "name": "Platform services", "verified": 9, "partial": 1, "open": 0 },
+          { "name": "OS primitives", "verified": 8, "partial": 0, "open": 1 },
+          { "name": "Input & windowing", "verified": 7, "partial": 0, "open": 1 },
+          { "name": "Build, signing & CI", "verified": 5, "partial": 3, "open": 1 },
+          { "name": "Media & codecs", "verified": 4, "partial": 6, "open": 0 },
+          { "name": "Runtime hosting (ART)", "verified": 3, "partial": 2, "open": 5 },
+          { "name": "Guest ELF / Bionic (M5 gate)", "verified": 0, "partial": 0, "open": 18 }
+        ]
+      }
     },
     {
       "id": "windows",
@@ -25,51 +57,73 @@
       "architectures": "x64 · ARM64",
       "maturity": "Experimental foundation",
       "summary": "CI-verified native Win32 shared memory, WaitForMultipleObjects looper, Named Pipe IPC, DXGI GPU/display refresh & shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer, libvulkan.dll (ANativeWindow swapchain & AHB bridge), SDL2 Win32 presentation/IME/clipboard/keyboard suite, WASAPI audio + libaaudio.dll & libOpenSLES.dll, Media Foundation decoder & camera enumeration, DirectWrite fonts, Shell_NotifyIconW, Windows Location COM, DPAPI/SAPI/GetAdaptersAddresses services, Job Object + Restricted Token sandbox, and portable/MSIX bundler. Full ART + guest ELF execution on Windows is still in progress.",
-      "evidence": "docs/windows_final_goal.md"
+      "evidence": "docs/windows_final_goal.md",
+      "progress": {
+        "label": "Windows goal checklist (37 items)",
+        "verified": 32,
+        "partial": 2,
+        "open": 3,
+        "note": "Counts audited directly from docs/windows_final_goal.md and exercised in 3-OS GitHub Actions CI. Remaining open items: Win32 ART build, guest ELF loader, and ANGLE-D3D11 window wiring.",
+        "areas": [
+          { "name": "Platform services", "verified": 7, "partial": 1, "open": 0 },
+          { "name": "Graphics & DXGI/Vulkan", "verified": 6, "partial": 0, "open": 1 },
+          { "name": "OS primitives & sandbox", "verified": 6, "partial": 0, "open": 0 },
+          { "name": "Media & WASAPI/MF", "verified": 4, "partial": 1, "open": 0 },
+          { "name": "Input & Win32 windowing", "verified": 3, "partial": 0, "open": 0 },
+          { "name": "Build, MSIX & CI", "verified": 3, "partial": 0, "open": 0 },
+          { "name": "Runtime & ABI host", "verified": 3, "partial": 0, "open": 2 }
+        ]
+      }
     }
   ],
   "layers": [
     {
       "id": "runtime-abi",
       "layer": "Runtime & native ABI",
-      "linux": "Standalone ART, host ELF + Bionic bridge, optional Digitalis ARM64 on x86_64, 15/15 API 35 NDK libraries (887/887 symbols).",
-      "macos": "Standalone ART, guest ARM64 ELF/Bionic loader, 15/15 API 35 NDK libraries, unified 16 KB page-size & ABI policy.",
+      "status": { "linux": "ready", "macos": "partial", "windows": "progress" },
+      "linux": "Standalone ART with warm standby pool & daemon, host ELF + Bionic bridge, optional Digitalis ARM64 on x86_64, 15/15 API 35 NDK libraries (887/887 symbols).",
+      "macos": "Standalone ART (-Xint), opt-in guest ARM64 ELF/Bionic loader (OsmAnd+ & Telegram libs), 15/15 API 35 NDK libraries, unified 16 KB page-size policy; ART JIT & M5 signing gate open.",
       "windows": "Unified HostOs / ABI / page-size policy, CreateProcessW process spawning, and MinGW-w64 / Clang-UCRT64 build rules (mk/windows.mk); Win32 ART & guest ELF runtime integration in progress."
     },
     {
       "id": "graphics-window",
       "layer": "Graphics, windowing & input",
-      "linux": "SDL2 windows (Wayland & X11, GTK-free), EGL/GLES, libvulkan.so with VK_KHR_android_surface swapchain & AHardwareBuffer memory bridge, Shiraz Web WebRTC streaming.",
+      "status": { "linux": "ready", "macos": "ready", "windows": "partial" },
+      "linux": "SDL2 windows (Wayland & X11, GTK-free), upfront GLES2 window, EGL/GLES, zero-copy GBM/DMA-BUF swapchain, SurfaceTexture, AHB EGLImage & EGL_ANDROID_native_fence_sync, vsync AChoreographer pacing, libvulkan.so (VK_KHR_android_surface swapchain & AHB), Shiraz Web WebRTC streaming.",
       "macos": "SDL2 / Cocoa windows, ANGLE Metal GLES, zero-copy IOSurface swapchain, SurfaceTexture, AHardwareBuffer EGLImage & EGL_ANDROID_native_fence_sync (MTLSharedEvent), 120 Hz CVDisplayLink vsync pacing, live resize watch, Retina 2×/fractional pointer mapping, Cmd→Ctrl shortcuts, trackpad pinch & touch filter.",
-      "windows": "CI-verified SDL2 / Win32 presentation (WM_SIZE live resize, IMM32/TSF IME, keyboard & clipboard), libvulkan.dll (VK_KHR_android_surface ANativeWindow swapchain & AHB bridge), DXGI adapter probe, EnumDisplaySettingsW refresh rate, shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing & Precision Touchpad hooks."
+      "windows": "CI-verified SDL2 / Win32 presentation (WM_SIZE live resize, IMM32/TSF IME, keyboard & clipboard), libvulkan.dll (VK_KHR_android_surface ANativeWindow swapchain & AHB bridge), DXGI adapter probe, EnumDisplaySettingsW refresh rate, shared AHardwareBuffer pool, Win32 sync fences, DwmFlush choreographer pacing & Precision Touchpad hooks; ANGLE-D3D11 window wiring open."
     },
     {
       "id": "audio-video",
       "layer": "Audio & video codecs",
-      "linux": "ALSA / PulseAudio / PipeWire audio, OpenSL ES & AAudio, MediaCodec / libmediandk software and host codecs.",
+      "status": { "linux": "ready", "macos": "partial", "windows": "partial" },
+      "linux": "ALSA / PulseAudio / PipeWire audio, OpenSL ES & runtime libasound AAudio, MediaCodec / libmediandk software and host codecs.",
       "macos": "AudioToolbox / CoreAudio AudioQueue hardware AAudio, OpenSL ES, PCM, WAV, AAC & Opus; VideoToolbox H.264, HEVC, VP9 & AV1 decode; video recording unsupported.",
       "windows": "WASAPI PCM16 playback & capture bridge backing libaaudio.dll & libOpenSLES.dll; Media Foundation H.264, HEVC, VP9 & AV1 decoder probe and MFEnumDeviceSources camera device enumeration."
     },
     {
       "id": "os-primitives",
       "layer": "OS primitives, IPC & isolation",
-      "linux": "POSIX memfd/ashmem, epoll ALooper, Unix sockets, Linux Landlock LSM filesystem isolation + PR_SET_NO_NEW_PRIVS + optional --no-internet seccomp policy.",
+      "status": { "linux": "ready", "macos": "ready", "windows": "ready" },
+      "linux": "POSIX memfd/ashmem, epoll ALooper, Unix sockets, Linux Landlock LSM filesystem isolation + PR_SET_NO_NEW_PRIVS + CLI --sandbox / --no-network seccomp policy + Flatpak bubblewrap sandbox.",
       "macos": "POSIX/Mach shared memory, kqueue ALooper, CLOCK_UPTIME_RAW/CLOCK_MONOTONIC clocks, POSIX_SPAWN_CLOEXEC_DEFAULT process isolation, FD_CLOEXEC helpers, SDK SQLite, Unix sockets, App Nap guard, macOS Seatbelt (sandbox-exec) SBPL profile & App Sandbox bundle entitlements.",
       "windows": "CreateFileMappingW shared memory, WaitForMultipleObjects looper, Named Pipe IPC with peer PID lookup, SetThreadExecutionState, Job Object + Restricted Token sandbox."
     },
     {
       "id": "services-fonts",
       "layer": "Desktop services, trust & fonts",
-      "linux": "XDG directories, Fontconfig, desktop notification, file picker, connectivity & URL/file launcher hooks.",
-      "macos": "~/Library paths, CoreText fonts, Security.framework trust anchors, AVFoundation speech voices, UNUserNotificationCenter, CoreLocation, /usr/bin/open & osascript picker.",
+      "status": { "linux": "ready", "macos": "ready", "windows": "ready" },
+      "linux": "XDG directories, Fontconfig, desktop notifications, file picker, connectivity, Freedesktop .desktop install & URL/file launcher hooks.",
+      "macos": "~/Library paths, CoreText fonts, Security.framework trust anchors (wolfJSSE + OkHttp 32/32), AVFoundation speech voices, UNUserNotificationCenter, CoreLocation, /usr/bin/open & osascript picker.",
       "windows": "LOCALAPPDATA / APPDATA paths, DirectWrite fonts, native UTF-16/UTF-8 Win32 clipboard, DPAPI keystore, SAPI5 speech probe, GetAdaptersAddresses connectivity, Shell_NotifyIconW, Windows Location COM, WinForms picker & rundll32 URL launcher."
     },
     {
       "id": "packaging-ci",
       "layer": "Packaging & CI",
-      "linux": "Browser & CLI per-app AppImage and Flatpak (.flatpak) builders, .deb packages, Linux x86_64 & ARM64 CI releases.",
-      "macos": "Signed Shiraz.app bundle builder (hardened runtime, allow-jit, optional --sandbox entitlements, @rpath closure, .icns), per-APK install-desktop, macOS ARM64 CI.",
-      "windows": "Portable Shiraz\\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Windows x64 MinGW-w64 CI (make windows-check & windows-presentation-check)."
+      "status": { "linux": "ready", "macos": "ready", "windows": "ready" },
+      "linux": "Browser & CLI per-app AppImage and sandboxed Flatpak (.flatpak) builders, .deb packages, shiraz install-desktop, Linux x86_64 & ARM64 CI releases.",
+      "macos": "Signed Shiraz.app bundle builder (hardened runtime, allow-jit, optional --sandbox entitlements, @rpath closure, .icns), per-APK install-desktop (~/Applications), macOS ARM64 CI.",
+      "windows": "Portable Shiraz\\ & MSIX AppxManifest.xml bundler (PE32/PE32+ import resolver, .ico generator), Start Menu install-desktop, Windows x64 MinGW-w64 CI (make windows-check & windows-presentation-check)."
     }
   ]
 }

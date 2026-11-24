@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updated": "2026-11-21",
+  "updated": "2026-11-24",
   "apiLevel": 35,
   "androidVersion": "15",
   "definition": "Exported extern \"C\" symbols audited with nm across compiled Shiraz NDK shared libraries versus the API 35 NDK catalog (scripts/audit_ndk_apis.py). Exporting symbols and passing native unit tests does not establish complete hardware-driver or CTS parity.",
