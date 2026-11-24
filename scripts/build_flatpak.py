@@ -269,7 +269,7 @@ def build(args):
         if args.no_aot
         else compile_package(files_dir, work / 'aot-logs', HOST, JARS, ROOT / '.local')
     )
-    facts = application_metadata(report['manifest'], Path('/unused.apk'), Path('/unused-data'))
+    facts = application_metadata(report['manifest'], share / 'original.apk', Path('/unused-data'))
     for key in ('sourceDir', 'dataDir'):
         facts.pop(key)
     (share / 'application.properties').write_text(properties_text(facts))

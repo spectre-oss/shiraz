@@ -125,7 +125,7 @@ def install(template, apk, expected, installer, result):
                 shutil.copy2(staged_apk, share / 'original.apk')
                 native = extract_native(staged_apk, appdir / 'usr/android-lib', platform.machine())
                 version = (share / 'VERSION').read_text().strip()
-                facts = application_metadata(manifest, Path('/unused.apk'), Path('/unused-data'))
+                facts = application_metadata(manifest, share / 'original.apk', Path('/unused-data'))
                 facts.pop('sourceDir', None)
                 facts.pop('dataDir', None)
                 (share / 'application.properties').write_text(properties_text(facts))

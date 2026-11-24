@@ -96,10 +96,11 @@ Linux phone; device graphics, input and app behavior still require testing.
 Shiraz's Android compatibility remains incremental. The browser cannot execute
 the resulting Linux AppImage; run it on Linux to test actual app behavior.
 The current browser code buffers the base, APK, and output in memory. Large APKs
-may exceed a browser's memory limit. The browser manifest parser covers common
-APK fields, but has not yet been proved equivalent to Shiraz's Python inspector
-for every APK; unsupported inputs should fail explicitly or be tested with the
-Linux packager.
+may exceed a browser's memory limit. The browser manifest parser mirrors Shiraz's
+Python manifest inspector, Android attribute-ID map, and `resources.arsc`
+component-flag normalization (including `foregroundServiceType`, network policy,
+permissions, aliases, and resolved labels/icons); unsupported inputs should fail
+explicitly or be tested with the Linux packager.
 
 Generated templates, WASM binaries, `wasm_exec.js`, and AppImages are local
 build artifacts and should not be committed.

@@ -424,7 +424,7 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 		}
 		if strings.HasPrefix(file.Name, "lib/"+abi+"/") && !file.FileInfo().IsDir() {
 			name := strings.TrimPrefix(file.Name, "lib/"+abi+"/")
-			if !nativeName.MatchString(name) || reserved[name] || seen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 128<<20 {
+			if !nativeName.MatchString(name) || reserved[name] || seen[name] || file.Flags&1 != 0 || file.UncompressedSize64 > 256<<20 {
 				return nil, errors.New("unsupported native library")
 			}
 			seen[name] = true
@@ -450,7 +450,10 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 		property(meta.Version),
 	)
 	appID := flatpakAppID(meta.Package)
-	title := flatpakTitle(meta.Package)
+	title := meta.Label
+	if title == "" {
+		title = flatpakTitle(meta.Package)
+	}
 	metadataINI := flatpakMetadataINI(appID, architecture, base.index.RuntimeBranch, opts.AllowNetwork)
 	desktop := flatpakDesktopEntry(appID, title)
 	metainfo := flatpakMetainfoXML(appID, title, meta.Package, version)
@@ -496,12 +499,12 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 			if err != nil {
 				return nil, err
 			}
-			data, err := io.ReadAll(io.LimitReader(stream, 128<<20+1))
+			data, err := io.ReadAll(io.LimitReader(stream, 256<<20+1))
 			stream.Close()
 			if err != nil {
 				return nil, err
 			}
-			if len(data) > 128<<20 {
+			if len(data) > 256<<20 {
 				return nil, errors.New("native library exceeds size limit")
 			}
 			if len(data) < 20 || string(data[:6]) != "\x7fELF\x02\x01" || data[16] != 3 || data[17] != 0 || data[18] != machine || data[19] != 0 {
@@ -531,7 +534,18 @@ func buildFlatpakFromApk(baseBytes, apkBytes []byte, version string, opts flatpa
 
 	var iconSizeDir, iconFileName string
 	var iconBytes []byte
-	if pngBytes, ok := extractAPKIconPNG(apkZip); ok {
+	var resIconPNG []byte
+	var resIconOK bool
+	if meta.IconRes != 0 {
+		if table, err := readResourceTableFromZip(apkZip); err == nil {
+			resIconPNG, resIconOK = resolveResourceIconPNG(apkZip, table, meta.IconRes)
+		}
+	}
+	if resIconOK {
+		iconSizeDir = "256x256"
+		iconFileName = appID + ".png"
+		iconBytes = resIconPNG
+	} else if pngBytes, ok := extractAPKIconPNG(apkZip); ok {
 		iconSizeDir = "256x256"
 		iconFileName = appID + ".png"
 		iconBytes = pngBytes
