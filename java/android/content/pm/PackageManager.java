@@ -13,16 +13,53 @@ public abstract class PackageManager {
     public int getPackageUid(String packageName,int flags)throws NameNotFoundException{return getApplicationInfo(packageName,flags).uid;}
     public static final String FEATURE_CAMERA="android.hardware.camera",FEATURE_CAMERA_ANY="android.hardware.camera.any",FEATURE_MICROPHONE="android.hardware.microphone";
     public static final String FEATURE_TOUCHSCREEN="android.hardware.touchscreen";
+    public static final String FEATURE_VULKAN_HARDWARE_LEVEL="android.hardware.vulkan.level";
+    public static final String FEATURE_VULKAN_HARDWARE_VERSION="android.hardware.vulkan.version";
+    public static final String FEATURE_VULKAN_HARDWARE_COMPUTE="android.hardware.vulkan.compute";
+    public static final String FEATURE_VULKAN_DEQP_LEVEL="android.software.vulkan.deqp.level";
+    private static volatile int[] vulkanCapabilities;
+    private static native int[] nativeVulkanCapabilities();
+    private static int[] getVulkanCapabilities(){
+        int[] cached=vulkanCapabilities;
+        if(cached!=null)return cached;
+        int[] probed=new int[]{0,-1};
+        try{
+            System.loadLibrary("shiraz-host");
+            int[] raw=nativeVulkanCapabilities();
+            if(raw!=null&&raw.length>=2&&raw[0]>0&&raw[1]>=0)probed=new int[]{raw[0],raw[1]};
+        }catch(UnsatisfiedLinkError|SecurityException unavailable){}
+        vulkanCapabilities=probed;
+        return probed;
+    }
     public android.content.Intent getLaunchIntentForPackage(String pkg){return null;}
     public java.util.List<ApplicationInfo> getInstalledApplications(int flags){java.util.ArrayList<ApplicationInfo> result=new java.util.ArrayList<>();for(PackageInfo info:getInstalledPackages(flags))result.add(info.applicationInfo);return result;}
     public java.util.List<PackageInfo> getInstalledPackages(int flags){throw new UnsupportedOperationException("Installed package registry");}
     public PackageInstaller getPackageInstaller(){throw new UnsupportedOperationException("No host installer");}
     public boolean canRequestPackageInstalls(){return false;}
-    public boolean hasSystemFeature(String name){return (FEATURE_CAMERA.equals(name)||FEATURE_CAMERA_ANY.equals(name))?android.hardware.Camera.getNumberOfCameras()>0:FEATURE_MICROPHONE.equals(name)?new java.io.File("/dev/snd").isDirectory():FEATURE_TOUCHSCREEN.equals(name)&&shiraz.runtime.HostInput.hasTouchscreen();}
-    public FeatureInfo[] getSystemAvailableFeatures(){java.util.ArrayList<FeatureInfo> features=new java.util.ArrayList<FeatureInfo>();for(String name:new String[]{FEATURE_CAMERA,FEATURE_CAMERA_ANY,FEATURE_MICROPHONE,FEATURE_TOUCHSCREEN})if(hasSystemFeature(name)){FeatureInfo info=new FeatureInfo();info.name=name;features.add(info);}return features.toArray(new FeatureInfo[features.size()]);}
+    public boolean hasSystemFeature(String name){return hasSystemFeature(name,0);}
+    public FeatureInfo[] getSystemAvailableFeatures(){
+        java.util.ArrayList<FeatureInfo> features=new java.util.ArrayList<FeatureInfo>();
+        for(String name:new String[]{FEATURE_CAMERA,FEATURE_CAMERA_ANY,FEATURE_MICROPHONE,FEATURE_TOUCHSCREEN}){
+            if(hasSystemFeature(name)){FeatureInfo info=new FeatureInfo();info.name=name;features.add(info);}
+        }
+        int[] vk=getVulkanCapabilities();
+        if(vk[0]>0&&vk[1]>=0){
+            FeatureInfo level=new FeatureInfo();level.name=FEATURE_VULKAN_HARDWARE_LEVEL;level.version=vk[1];features.add(level);
+            FeatureInfo ver=new FeatureInfo();ver.name=FEATURE_VULKAN_HARDWARE_VERSION;ver.version=vk[0];features.add(ver);
+            FeatureInfo comp=new FeatureInfo();comp.name=FEATURE_VULKAN_HARDWARE_COMPUTE;comp.version=0;features.add(comp);
+        }
+        return features.toArray(new FeatureInfo[features.size()]);
+    }
     /** Shiraz installs complete APK packages; Android instant apps are not hosted. */
     public boolean isInstantApp(){return false;}
-    public boolean hasSystemFeature(String name,int version){return version<=0&&hasSystemFeature(name);}
+    public boolean hasSystemFeature(String name,int version){
+        if(name==null)return false;
+        if(FEATURE_VULKAN_HARDWARE_LEVEL.equals(name)){int[] vk=getVulkanCapabilities();return vk[0]>0&&vk[1]>=0&&vk[1]>=version;}
+        if(FEATURE_VULKAN_HARDWARE_VERSION.equals(name)){int[] vk=getVulkanCapabilities();return vk[0]>0&&vk[1]>=0&&vk[0]>=version;}
+        if(FEATURE_VULKAN_HARDWARE_COMPUTE.equals(name)){int[] vk=getVulkanCapabilities();return vk[0]>=0x400000&&vk[1]>=0&&version<=0;}
+        if(version>0)return false;
+        return (FEATURE_CAMERA.equals(name)||FEATURE_CAMERA_ANY.equals(name))?android.hardware.Camera.getNumberOfCameras()>0:FEATURE_MICROPHONE.equals(name)?new java.io.File("/dev/snd").isDirectory():FEATURE_TOUCHSCREEN.equals(name)&&shiraz.runtime.HostInput.hasTouchscreen();
+    }
 
     public ResolveInfo resolveService(android.content.Intent intent,int flags){java.util.List<ResolveInfo> matches=queryIntentServices(intent,flags);return matches.isEmpty()?null:matches.get(0);}
     public ResolveInfo resolveActivity(android.content.Intent intent,int flags){java.util.List<ResolveInfo> matches=queryIntentActivities(intent,flags);return matches.isEmpty()?null:matches.get(0);}

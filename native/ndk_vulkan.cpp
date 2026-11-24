@@ -97,6 +97,10 @@ struct HostVulkanLoader {
     PFN_vkGetDeviceProcAddr getDeviceProcAddr = nullptr;
 
     HostVulkanLoader() {
+        if (const char* disabled = std::getenv("SHIRAZ_VULKAN_DISABLE");
+            disabled && std::strcmp(disabled, "1") == 0) {
+            return;
+        }
         std::vector<std::string> candidates;
         if (const char* envIcd = std::getenv("SHIRAZ_VULKAN_ICD"); envIcd && *envIcd) {
             candidates.emplace_back(envIcd);
@@ -1557,6 +1561,74 @@ vkGetMemoryAndroidHardwareBufferANDROID(VkDevice device,
     AHardwareBuffer_acquire(it->second.buffer);
     *pBuffer = it->second.buffer;
     return VK_SUCCESS;
+}
+
+int32_t shiraz_vulkan_host_probe(uint32_t* pApiVersion, int32_t* pHardwareLevel) {
+    if (pApiVersion) {
+        *pApiVersion = 0;
+    }
+    if (pHardwareLevel) {
+        *pHardwareLevel = -1;
+    }
+    if (!host_loader().available()) {
+        return 0;
+    }
+    VkApplicationInfo appInfo{};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "shiraz-vulkan-probe";
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo = &appInfo;
+
+    VkInstance instance = nullptr;
+    if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS || !instance) {
+        return 0;
+    }
+
+    uint32_t deviceCount = 0;
+    uint32_t bestApiVersion = 0;
+    int32_t bestLevel = -1;
+    if (vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr) == VK_SUCCESS &&
+        deviceCount > 0) {
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        if (vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()) == VK_SUCCESS) {
+            devices.resize(deviceCount);
+            for (VkPhysicalDevice dev : devices) {
+                VkPhysicalDeviceProperties props{};
+                vkGetPhysicalDeviceProperties(dev, &props);
+                VkPhysicalDeviceFeatures feats{};
+                vkGetPhysicalDeviceFeatures(dev, &feats);
+                if (props.apiVersion > bestApiVersion) {
+                    bestApiVersion = props.apiVersion;
+                }
+                int32_t level = 0;
+                const bool hasCompressed =
+                    feats.textureCompressionETC2 != 0 || feats.textureCompressionASTC_LDR != 0;
+                if (hasCompressed && feats.fullDrawIndexUint32 && feats.imageCubeArray &&
+                    feats.independentBlend && feats.sampleRateShading && feats.samplerAnisotropy &&
+                    feats.fragmentStoresAndAtomics) {
+                    level = 1;
+                }
+                if (level > bestLevel) {
+                    bestLevel = level;
+                }
+            }
+        }
+    }
+    vkDestroyInstance(instance, nullptr);
+
+    if (bestApiVersion == 0 || bestLevel < 0) {
+        return 0;
+    }
+    if (pApiVersion) {
+        *pApiVersion = bestApiVersion;
+    }
+    if (pHardwareLevel) {
+        *pHardwareLevel = bestLevel;
+    }
+    return 1;
 }
 
 } // extern "C"

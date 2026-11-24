@@ -19,7 +19,7 @@ commit:
 	python3 scripts/commit.py
 
 all: build
-build: build/libshiraz-host.so build/libshiraz-warm-pool.so build/shiraz-preview build/libandroid.so build/libandroid.so.0 build/libnativewindow.so build/libEGL.so.1 build/libshiraz-jni.so build/shiraz-framework.jar
+build: build/libshiraz-host.so build/libshiraz-warm-pool.so build/shiraz-preview build/libandroid.so build/libandroid.so.0 build/libnativewindow.so build/libEGL.so.1 build/libvulkan.so build/libshiraz-jni.so build/shiraz-framework.jar
 build/libandroid.so.0: build/libandroid.so
 	ln -sfn libandroid.so $@
 build/libnativewindow.so: build/libandroid.so

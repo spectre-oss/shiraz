@@ -7,6 +7,7 @@
 #include "shiraz/darwin/guest/signals.hpp"
 #include "shiraz/darwin/guest/cleanup.hpp"
 #include "shiraz/darwin/guest/guestegl.hpp"
+#include "shiraz/darwin/guest/vulkan.hpp"
 #include "shiraz/darwin/guest/jni.hpp"
 #include "shiraz/darwin/guest/path.hpp"
 #include "shiraz/darwin/guest/opensles.hpp"
@@ -233,6 +234,16 @@ void* load(const char* path, int flags) {
                                 return shiraz::guest::host_env(static_cast<JNIEnv*>(env));
                             },
                             shiraz::guest::is_guest_code, lifecycle, &close_looper));
+                        const char* vulkan_env = std::getenv("SHIRAZ_GUEST_VULKAN_LIB");
+                        std::filesystem::path vulkan_path = vulkan_env && *vulkan_env
+                                                                ? std::filesystem::path(vulkan_env)
+                                                                : (directory / "libvulkan.so");
+                        std::error_code vk_ec;
+                        if (std::filesystem::is_regular_file(vulkan_path, vk_ec))
+                            providers.add(shiraz::guest::guest_vulkan_provider(vulkan_path));
+                    } else if (const char* vulkan_env = std::getenv("SHIRAZ_GUEST_VULKAN_LIB");
+                               vulkan_env && *vulkan_env) {
+                        providers.add(shiraz::guest::guest_vulkan_provider(vulkan_env));
                     }
                     providers.add(shiraz::guest::bitmap_provider([](void* env) -> void* {
                         return shiraz::guest::host_env(static_cast<JNIEnv*>(env));

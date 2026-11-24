@@ -491,6 +491,8 @@ def build(args):
     libraries.scan(binaries / 'shiraz-app')
     for name in RUNTIME_LIBS:
         libraries.add(ROOT / 'build' / ('lib' + name + '.so'))
+    if (ROOT / 'build/libvulkan.so').is_file():
+        libraries.add(ROOT / 'build/libvulkan.so')
     libraries.add(ROOT / "build/libOpenSLES.so.1")
     # The ARM64 Android proxy resolves the unversioned host library name.
     libraries.add(ROOT / "build/libOpenSLES.so.1", "libOpenSLES.so")

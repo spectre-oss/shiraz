@@ -272,6 +272,19 @@ int main() {
         vkDestroyInstance(instance, nullptr);
     }
 
+    // 5c. Host Vulkan capability probe agrees with host ICD availability.
+    uint32_t probedApi = 0;
+    int32_t probedLevel = -1;
+    const int32_t hasHostVk = shiraz_vulkan_host_probe(&probedApi, &probedLevel);
+    assert(hasHostVk == 0 || hasHostVk == 1);
+    if (hasHostVk == 1) {
+        assert(probedApi >= VK_API_VERSION_1_0);
+        assert(probedLevel == 0 || probedLevel == 1);
+    } else {
+        assert(probedApi == 0);
+        assert(probedLevel == -1);
+    }
+
     // 6. VK_ANDROID_external_memory_android_hardware_buffer backed by a real AHardwareBuffer.
     AHardwareBuffer_Desc ahbDesc{};
     ahbDesc.width = 64;

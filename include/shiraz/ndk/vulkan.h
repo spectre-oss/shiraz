@@ -669,6 +669,11 @@ vkGetMemoryAndroidHardwareBufferANDROID(VkDevice device,
 VkResult shiraz_vulkan_swapchain_image_buffer(VkSwapchainKHR swapchain, uint32_t imageIndex,
                                               struct AHardwareBuffer** pBuffer);
 
+// Host helper: probes whether a real host Vulkan ICD with at least one physical device is usable.
+// Returns 1 when a physical device is available (writing its apiVersion and Android hardware level
+// 0 or 1), or 0 when unavailable (writing apiVersion = 0 and hardwareLevel = -1).
+int32_t shiraz_vulkan_host_probe(uint32_t* pApiVersion, int32_t* pHardwareLevel);
+
 #ifdef __cplusplus
 }
 #endif

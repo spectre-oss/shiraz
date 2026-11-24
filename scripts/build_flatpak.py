@@ -184,6 +184,8 @@ def build(args):
         libraries.add(ROOT / 'build' / ('lib' + name + '.so'))
     if (ROOT / 'build/libaaudio.so').is_file():
         libraries.add(ROOT / 'build/libaaudio.so')
+    if (ROOT / 'build/libvulkan.so').is_file():
+        libraries.add(ROOT / 'build/libvulkan.so')
     libraries.add(ROOT / 'build/libOpenSLES.so.1')
     libraries.add(ROOT / 'build/libOpenSLES.so.1', 'libOpenSLES.so')
     if (ROOT / 'build/libshiraz-video.so').is_file():
