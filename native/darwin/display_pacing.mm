@@ -6,13 +6,25 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+#if defined(__APPLE__)
+#import <CoreVideo/CoreVideo.h>
+#endif
 #import <Foundation/Foundation.h>
 #import <IOSurface/IOSurface.h>
 #import <Metal/Metal.h>
 #import <Security/Security.h>
 
+#if defined(__APPLE__)
+#include <atomic>
+#endif
 #include <cerrno>
+#if defined(__APPLE__)
+#include <chrono>
+#endif
 #include <cstring>
+#if defined(__APPLE__)
+#include <thread>
+#endif
 #include <vector>
 
 namespace shiraz {
@@ -49,6 +61,63 @@ std::int64_t darwin_display_period_ns() {
     const double hz = darwin_display_refresh_hz();
     return static_cast<std::int64_t>(1000000000.0 / (hz >= 24.0 ? hz : 60.0));
 }
+#if defined(__APPLE__)
+
+int darwin_vsync_probe(int timeoutMs, std::int64_t* outPeriodNs, std::uint64_t* outTicks) {
+    if (outPeriodNs)
+        *outPeriodNs = darwin_display_period_ns();
+    if (outTicks)
+        *outTicks = 0;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    struct State {
+        std::atomic<std::uint64_t> ticks{0};
+        std::atomic<std::int64_t> periodNs{0};
+    } state;
+    CVDisplayLinkRef link = nullptr;
+    if (CVDisplayLinkCreateWithActiveCGDisplays(&link) != kCVReturnSuccess || !link)
+        return -ENODEV;
+    CVTime nominal = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link);
+    if (!(nominal.flags & kCVTimeIsIndefinite) && nominal.timeScale > 0 && nominal.timeValue > 0) {
+        const std::int64_t p = (nominal.timeValue * 1000000000LL) / nominal.timeScale;
+        if (p >= 2000000LL && p <= 50000000LL)
+            state.periodNs.store(p, std::memory_order_relaxed);
+    }
+    auto cb = [](CVDisplayLinkRef, const CVTimeStamp*, const CVTimeStamp* outTime, CVOptionFlags,
+                 CVOptionFlags*, void* ctx) -> CVReturn {
+        auto* s = static_cast<State*>(ctx);
+        if (outTime && outTime->videoTimeScale > 0 && outTime->videoRefreshPeriod > 0) {
+            const std::int64_t p =
+                (outTime->videoRefreshPeriod * 1000000000LL) / outTime->videoTimeScale;
+            if (p >= 2000000LL && p <= 50000000LL)
+                s->periodNs.store(p, std::memory_order_relaxed);
+        }
+        s->ticks.fetch_add(1, std::memory_order_release);
+        return kCVReturnSuccess;
+    };
+    if (CVDisplayLinkSetOutputCallback(link, cb, &state) != kCVReturnSuccess ||
+        CVDisplayLinkStart(link) != kCVReturnSuccess) {
+        CVDisplayLinkRelease(link);
+        return -ENODEV;
+    }
+    const int waitLimit = timeoutMs > 0 ? timeoutMs : 120;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(waitLimit);
+    while (state.ticks.load(std::memory_order_acquire) < 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CVDisplayLinkStop(link);
+    CVDisplayLinkRelease(link);
+#pragma clang diagnostic pop
+    const std::uint64_t ticks = state.ticks.load(std::memory_order_acquire);
+    const std::int64_t period = state.periodNs.load(std::memory_order_relaxed);
+    if (outPeriodNs && period > 0)
+        *outPeriodNs = period;
+    if (outTicks)
+        *outTicks = ticks;
+    return ticks > 0 ? 0 : -ENODEV;
+}
+#endif
 
 int darwin_iosurface_metal_verify(ANativeWindow* window, std::uint32_t* outWidth,
                                   std::uint32_t* outHeight, std::uint32_t* outFirstPixelArgb) {

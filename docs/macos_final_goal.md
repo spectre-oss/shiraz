@@ -69,7 +69,7 @@ Difficulty: **L** low, **M** medium, **H** high, **X** research-level.
 | [ ] | Memory remap | ART `MemMap` | `mach_vm_remap` instead of `mremap` | M |
 | [ ] | Interpreter-only first, JIT next, AOT last | `oat_file.cc`, `scripts/package_aot.py` | `-Xint` → JIT; OAT files loaded by ART's own ELF loader into `MAP_JIT` memory | H |
 | [ ] | Embedding launcher | `packaging/app_run.cpp`, `src/shiraz/runtime.py` | `.app` main executable, `_NSGetExecutablePath`, `JNI_CreateJavaVM` on the primordial thread (Cocoa requirement), `@rpath` dylib lookup; no `ld.so --preload`, no `DYLD_INSERT_LIBRARIES` | M |
-| [~] | TLS trust store | `patches/art-host-trust-store.patch`, `native/darwin/trust.cpp`, `native/darwin/display_pacing.mm` | Security.framework (`SecTrustCopyAnchorCertificates` verified with `make macos-platform-extras-check`); ART boot trust store wiring in progress | M |
+| [x] | TLS trust store | `patches/art-host-trust-store.patch`, `native/darwin/trust.cpp`, `java/shiraz/runtime/HostTrustProvider.java` | Security.framework (`SecTrustCopyAnchorCertificates`) wired into Darwin ART via `HostTrustProvider` + `wolfJSSE` + `okhttp` (`make network-trust-smoke` 32/32, `make network-policy-smoke`, `make network-probe-smoke` 40/40, and live HTTPS index fetch in OsmAnd+) | M |
 | [x] | Library name suffix | libcore `jvm_md.h`, `Runtime.java` | Keep `JNI_LIB_SUFFIX` as `.so` so `System.loadLibrary` finds APK `libfoo.so` | L |
 
 ### 2. Guest ELF loader and bionic ABI personality
@@ -112,11 +112,11 @@ symbol lookup are reusable; the host-facing layer is new.
 | [~] | GLES 1/2/3 | `native/gles1_jni.cpp`, `native/gles2_jni.cpp` | ANGLE `libGLESv1_CM`/`libGLESv2` dylibs, unchanged JNI sources. The gles fixture renders an ES 2/3 view (shader triangle, VAO) beside an ES 1 view (GL10, GLUtils texture), or two ES 2 views (`--gles-lower es2`), headless and windowed; frames still reach the window by `glReadPixels` readback. Still open: detect and report ANGLE-Metal GLES1 gaps (logic op, paletted textures, smooth lines, two-sided lighting, matrix palette) | L |
 | [~] | AHardwareBuffer | `native/hardware_buffer.cpp`, `include/shiraz/hardware_buffer.h` | `IOSurfaceCreate`, `IOSurfaceLock`/`GetBaseAddress`/`GetBytesPerRow`; cross-process via `IOSurfaceCreateMachPort` / `IOSurfaceLookupFromMachPort`; Metal import with `newTextureWithDescriptor:iosurface:plane:` | H |
 | [x] | EGLImage from native buffer | `native/egl_shim.cpp`, `native/hardware_buffer.cpp`, `native/darwin/shared_event.mm` | `EGL_NATIVE_BUFFER_ANDROID` → `IOSurface` → `MTLTexture` → `EGL_METAL_TEXTURE_ANGLE` (with `eglDestroyImageKHR` lifetime cleanup); verified live on Apple Silicon Metal (`make macos-ahb-egl-image-test`) | M |
-| [~] | Sync fences | `native/sync_fence.cpp`, `native/darwin/shared_event.mm` | Shiraz-owned pollable fd (pipe) signalled from `MTLSharedEvent` listener; `EGL_ANGLE_metal_shared_event_sync` verified in M4b zero-copy tests; emulate `EGL_ANDROID_native_fence_sync` and `sync_merge` | H |
+| [x] | Sync fences | `native/sync_fence.cpp`, `native/darwin/shared_event.mm`, `native/egl_shim.cpp` | Shiraz-owned pollable pipe fd signalled asynchronously via `MTLSharedEventListener`; `EGL_ANDROID_native_fence_sync` (`eglCreateSyncKHR`, `eglDupNativeFenceFDANDROID`, `eglClientWaitSyncKHR`, `eglWaitSyncKHR`, `eglDestroySyncKHR`) + `sync_merge`/`sync_wait` + fd import verified live on Apple Silicon Metal (`make macos-ahb-egl-image-test`) | H |
 | [x] | SurfaceTexture | `native/surface_texture.cpp`, `tests/darwin/zero_copy/surface_texture_test.cpp` | Zero-copy `IOSurface` / `MTLTexture` → `EGL_METAL_TEXTURE_ANGLE` → `GL_TEXTURE_2D` with `EGL_SYNC_METAL_SHARED_EVENT_ANGLE` GPU sync (reusing the M4b window queue) plus CPU-posted `ANativeWindow` `glTexImage2D` fallback; verified live on Apple Silicon Metal (`make macos-surface-texture-test`) | M |
 | [~] | ImageReader | `native/image_reader.cpp` | Pooled IOSurface buffers; `eventfd` → pipe | M |
 | [x] | Shared window frames | `native/shared_frame.cpp`, `native/native_window.cpp` | Unlinked `shm_open` (no seals) or IOSurface pixels; robust mutex → seqlock or `os_sync_wait_on_address` (shared) with owner-PID recovery | M |
-| [~] | Frame pacing / Choreographer vsync | `native/choreographer.cpp`, `native/darwin/display_pacing.mm` | CoreGraphics / `NSScreen.maximumFramesPerSecond` ProMotion refresh-rate query wired into `AChoreographer` under `__APPLE__` (`make macos-platform-extras-check`); CADisplayLink presentation timestamps open | M |
+| [x] | Frame pacing / Choreographer vsync | `native/choreographer.cpp`, `native/darwin/display_pacing.mm` | CoreVideo `CVDisplayLink` hardware vsync phase-alignment & refresh period (`120.0 Hz` / `8,333,333 ns` on ProMotion) wired into `AChoreographer` via `dlopen` with CoreGraphics / 60 Hz kqueue headless fallback (`make macos-platform-extras-check`) | M |
 | [~] | Headless verification | `native/darwin/display_pacing.mm`, `tests/darwin/platform_extras.cpp` | Zero-copy `IOSurface` → Metal `MTLTexture` (`newTextureWithDescriptor:iosurface:plane:`) import & pixel readback verified from `ANativeWindow` frames (`make macos-platform-extras-check`) | M |
 | [~] | Vulkan (after GLES) | `native/ndk_vulkan.cpp`, `include/shiraz/ndk/vulkan.h` | `libvulkan.so` loads host `libvulkan.1.dylib`/`libMoltenVK.dylib` (with `VK_KHR_portability_enumeration`), implements `VK_KHR_android_surface` ANativeWindow swapchain present loop & AHardwareBuffer memory binding (`make macos-ndk-test`) | H |
 
@@ -773,20 +773,30 @@ device tests pass. Linux audio source is unchanged after Apple preprocessing.
 Darwin SensorManager service creation now reports no supported bridged sensors
 instead of probing Linux /sys; subscriptions remain unavailable.
 
-With `SHIRAZ_GUEST_LOADER=1`, the actual OsmAnd APK now renders its native map
-at 720 by 1280 and completes a bounded eight-frame run with status 0. Read-only
-Android font aliases include the ART ANDROID_ROOT/fonts namespace used by the
-legacy Skia implementation. The app-provided snapshot shows Iran and the Caspian
-Sea with OsmAnd map controls; it is an actual app frame, not a fixture. Run:
+With `SHIRAZ_GUEST_LOADER=1` on Apple Silicon M2 Pro (ANGLE Metal + Skia Ganesh at
+120 Hz, `SHIRAZ_EGL_ZERO_COPY=require`), the unchanged OsmAnd+ APK
+(`context/apks/net.osmand.plus_541003.apk`) has now been walked interactively through
+app-scoped `SHIRAZ_LIVE_INPUT` + `SHIRAZ_PRESENT_SNAPSHOT`:
+- Native `libosmand.so` (4,090 TPIDR sites rewritten, 34 constructors, `JNI_OnLoad`)
+  renders the full Tehran vector map with Persian RTL labels and POIs.
+- Live offline search (`Azadi` → 185 results), map result selection with bottom-sheet
+  actions, Configure Map settings sheet, and live HTTPS index fetch from
+  `download.osmand.net` via `wolfJSSE` + `Security.framework` all succeeded.
+- Interactive portrait (`540x960`) → landscape (`960x540`) → portrait (`540x960`)
+  resizing relaid out the UI and map with `SHIRAZ_EGL_SURFACE match=1` at every step;
+  tapping `+` in landscape zoomed from `500 m` → `200 m`, and the `200 m` zoom level
+  persisted cleanly across restart.
+- Warm launch under interpreter-only ART (`-Xint`) reached first GPU present in
+  `10.29 s` and first native vector map render in `10.68 s` with clean exit `0`
+  (`SHIRAZ_RUNTIME_CLEANUP_COMPLETE`). Run:
 
 ```sh
 SHIRAZ_GUEST_LOADER=1 make run APK=context/apks/net.osmand.plus_541003.apk
 ```
 
-The loader remains explicitly opt-in while M5 gates are unfinished. HTTPS,
-interactive walkthrough, routing, persistence, responsive resizing and full
-OsmAnd acceptance remain unverified. A bounded rendering success does not
-establish those flows or F-Droid compatibility.
+The loader remains explicitly opt-in while M5 hardened-runtime signing gates,
+turn-by-turn routing/navigation walkthrough, and ART JIT (`MAP_JIT`) speedup remain
+open. Full M6 OsmAnd+ acceptance and F-Droid compatibility are not claimed yet.
 
 Additional service fixtures cover fortified memory/format operations, scanf,
 locale and multibyte translation, time/system queries, bounded scalar helpers,

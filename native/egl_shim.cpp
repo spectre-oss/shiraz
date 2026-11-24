@@ -17,9 +17,14 @@
 #include <unordered_map>
 #include <vector>
 #if defined(__APPLE__)
+#include <fcntl.h>
+#include <poll.h>
 extern "C" {
 void* shiraz_mtl_texture_from_iosurface(void* device, void* iosurface, uint32_t androidFormat);
 void shiraz_mtl_release(void* object);
+int shiraz_mtl_event_to_fence_fd(void* event, uint64_t value);
+int32_t shiraz_event_cpu_wait(void* event, uint64_t value, int32_t timeoutMs);
+int32_t shiraz_event_signaled(void* event, uint64_t value);
 EGLBoolean eglDestroyImageKHR(EGLDisplay display, EGLImageKHR image);
 }
 #endif
@@ -82,6 +87,250 @@ void* symbol(const char* name) {
     void* library = mesa();
     return library ? dlsym(library, name) : nullptr;
 }
+#if defined(__APPLE__)
+struct DarwinNativeFence {
+    EGLDisplay display = EGL_NO_DISPLAY;
+    EGLSync angleSync = EGL_NO_SYNC;
+    void* sharedEvent = nullptr; // +1 retained id<MTLSharedEvent>
+    uint64_t signalValue = 0;
+    int ownedFd = -1; // >= 0 when imported via EGL_SYNC_NATIVE_FENCE_FD_ANDROID
+};
+std::mutex darwinNativeFencesMutex;
+std::unordered_map<EGLSyncKHR, DarwinNativeFence*> darwinNativeFences;
+
+DarwinNativeFence* darwinFindNativeFence(EGLSyncKHR sync) {
+    std::lock_guard<std::mutex> guard(darwinNativeFencesMutex);
+    auto it = darwinNativeFences.find(sync);
+    return it == darwinNativeFences.end() ? nullptr : it->second;
+}
+
+EGLSyncKHR darwinCreateSyncKHR(EGLDisplay display, EGLenum type, const EGLint* attribs) {
+    constexpr EGLenum kEglSyncNativeFenceAndroid = 0x3144;
+    constexpr EGLint kEglSyncNativeFenceFdAndroid = 0x3145;
+    constexpr EGLenum kEglSyncMetalSharedEventAngle = 0x34D8;
+    constexpr EGLint kEglSyncMetalSharedEventSignalValueLoAngle = 0x34DA;
+    constexpr EGLint kEglSyncMetalSharedEventSignalValueHiAngle = 0x34DB;
+    using CreateSyncKHRFn = EGLSyncKHR (*)(EGLDisplay, EGLenum, const EGLint*);
+    auto getProc = reinterpret_cast<void* (*)(const char*)>(symbol("eglGetProcAddress"));
+    if (type != kEglSyncNativeFenceAndroid) {
+        auto real =
+            getProc ? reinterpret_cast<CreateSyncKHRFn>(getProc("eglCreateSyncKHR")) : nullptr;
+        if (!real) {
+            shimError = EGL_BAD_ACCESS;
+            return EGL_NO_SYNC_KHR;
+        }
+        return real(display, type, attribs);
+    }
+    int importedFd = -1;
+    if (attribs) {
+        for (unsigned i = 0; attribs[i] != EGL_NONE; i += 2) {
+            if (i >= 32 || attribs[i] != kEglSyncNativeFenceFdAndroid) {
+                shimError = EGL_BAD_ATTRIBUTE;
+                return EGL_NO_SYNC_KHR;
+            }
+            importedFd = attribs[i + 1];
+        }
+    }
+    auto* entry = new (std::nothrow) DarwinNativeFence;
+    if (!entry) {
+        shimError = EGL_BAD_ALLOC;
+        return EGL_NO_SYNC_KHR;
+    }
+    entry->display = display;
+    if (importedFd >= 0) {
+        // Per EGL_ANDROID_native_fence_sync, ownership of importedFd transfers on success.
+        if (fcntl(importedFd, F_GETFD) < 0) {
+            delete entry;
+            shimError = EGL_BAD_ATTRIBUTE;
+            return EGL_NO_SYNC_KHR;
+        }
+        entry->ownedFd = importedFd;
+    } else {
+        using CreateSyncFn = EGLSync (*)(EGLDisplay, EGLenum, const EGLAttrib*);
+        using CopyEventFn = void* (*)(EGLDisplay, EGLSync);
+        using DestroySyncFn = EGLBoolean (*)(EGLDisplay, EGLSync);
+        auto createSync =
+            getProc ? reinterpret_cast<CreateSyncFn>(getProc("eglCreateSync")) : nullptr;
+        auto copyEvent =
+            getProc ? reinterpret_cast<CopyEventFn>(getProc("eglCopyMetalSharedEventANGLE"))
+                    : nullptr;
+        auto destroySync =
+            getProc ? reinterpret_cast<DestroySyncFn>(getProc("eglDestroySync")) : nullptr;
+        if (!createSync || !copyEvent || !destroySync) {
+            delete entry;
+            shimError = EGL_BAD_ACCESS;
+            return EGL_NO_SYNC_KHR;
+        }
+        const EGLAttrib syncAttribs[] = {
+            kEglSyncMetalSharedEventSignalValueLoAngle,
+            1,
+            kEglSyncMetalSharedEventSignalValueHiAngle,
+            0,
+            EGL_NONE,
+        };
+        EGLSync angleSync = createSync(display, kEglSyncMetalSharedEventAngle, syncAttribs);
+        if (angleSync == EGL_NO_SYNC) {
+            delete entry;
+            return EGL_NO_SYNC_KHR;
+        }
+        void* sharedEvent = copyEvent(display, angleSync);
+        if (!sharedEvent) {
+            destroySync(display, angleSync);
+            delete entry;
+            shimError = EGL_BAD_ALLOC;
+            return EGL_NO_SYNC_KHR;
+        }
+        entry->angleSync = angleSync;
+        entry->sharedEvent = sharedEvent;
+        entry->signalValue = 1;
+    }
+    EGLSyncKHR handle = reinterpret_cast<EGLSyncKHR>(entry);
+    {
+        std::lock_guard<std::mutex> guard(darwinNativeFencesMutex);
+        darwinNativeFences.emplace(handle, entry);
+    }
+    return handle;
+}
+
+EGLint darwinDupNativeFenceFDANDROID(EGLDisplay display, EGLSyncKHR sync) {
+    (void)display;
+    DarwinNativeFence* entry = darwinFindNativeFence(sync);
+    if (!entry) {
+        shimError = EGL_BAD_PARAMETER;
+        return -1;
+    }
+    if (entry->ownedFd >= 0) {
+        int dupFd = fcntl(entry->ownedFd, F_DUPFD_CLOEXEC, 0);
+        if (dupFd < 0) {
+            shimError = EGL_BAD_ALLOC;
+            return -1;
+        }
+        return dupFd;
+    }
+    if (entry->sharedEvent) {
+        int fd = shiraz_mtl_event_to_fence_fd(entry->sharedEvent, entry->signalValue);
+        if (fd < 0) {
+            shimError = EGL_BAD_ALLOC;
+            return -1;
+        }
+        return fd;
+    }
+    shimError = EGL_BAD_PARAMETER;
+    return -1;
+}
+
+EGLint darwinClientWaitSyncKHR(EGLDisplay display, EGLSyncKHR sync, EGLint flags,
+                               EGLTimeKHR timeout) {
+    DarwinNativeFence* entry = darwinFindNativeFence(sync);
+    if (!entry) {
+        using Fn = EGLint (*)(EGLDisplay, EGLSyncKHR, EGLint, EGLTimeKHR);
+        auto getProc = reinterpret_cast<void* (*)(const char*)>(symbol("eglGetProcAddress"));
+        auto real = getProc ? reinterpret_cast<Fn>(getProc("eglClientWaitSyncKHR")) : nullptr;
+        if (!real) {
+            shimError = EGL_BAD_ACCESS;
+            return EGL_FALSE;
+        }
+        return real(display, sync, flags, timeout);
+    }
+    if (flags & EGL_SYNC_FLUSH_COMMANDS_BIT_KHR)
+        glFlush();
+    if (entry->ownedFd >= 0) {
+        int timeoutMs = -1;
+        if (timeout != EGL_FOREVER_KHR) {
+            uint64_t ms = (timeout + 999999ULL) / 1000000ULL;
+            timeoutMs = ms > 0x7fffffffULL ? 0x7fffffff : static_cast<int>(ms);
+        }
+        pollfd p{entry->ownedFd, POLLIN, 0};
+        int r;
+        do {
+            r = poll(&p, 1, timeoutMs);
+        } while (r < 0 && errno == EINTR);
+        if (r > 0 && !(p.revents & (POLLERR | POLLNVAL)))
+            return EGL_CONDITION_SATISFIED_KHR;
+        if (r == 0)
+            return EGL_TIMEOUT_EXPIRED_KHR;
+        shimError = EGL_BAD_PARAMETER;
+        return EGL_FALSE;
+    }
+    if (entry->sharedEvent) {
+        if (shiraz_event_signaled(entry->sharedEvent, entry->signalValue))
+            return EGL_CONDITION_SATISFIED_KHR;
+        int32_t waitMs = 60000;
+        if (timeout != EGL_FOREVER_KHR) {
+            uint64_t ms = (timeout + 999999ULL) / 1000000ULL;
+            waitMs = ms > 0x7fffffffULL ? 0x7fffffff : static_cast<int32_t>(ms);
+        }
+        int32_t rc = shiraz_event_cpu_wait(entry->sharedEvent, entry->signalValue, waitMs);
+        if (rc == 0)
+            return EGL_CONDITION_SATISFIED_KHR;
+        if (rc == -ETIMEDOUT)
+            return EGL_TIMEOUT_EXPIRED_KHR;
+        shimError = EGL_BAD_PARAMETER;
+        return EGL_FALSE;
+    }
+    return EGL_FALSE;
+}
+
+EGLint darwinWaitSyncKHR(EGLDisplay display, EGLSyncKHR sync, EGLint flags) {
+    DarwinNativeFence* entry = darwinFindNativeFence(sync);
+    if (!entry) {
+        using Fn = EGLint (*)(EGLDisplay, EGLSyncKHR, EGLint);
+        auto getProc = reinterpret_cast<void* (*)(const char*)>(symbol("eglGetProcAddress"));
+        auto real = getProc ? reinterpret_cast<Fn>(getProc("eglWaitSyncKHR")) : nullptr;
+        if (!real) {
+            shimError = EGL_BAD_ACCESS;
+            return EGL_FALSE;
+        }
+        return real(display, sync, flags);
+    }
+    if (entry->angleSync != EGL_NO_SYNC) {
+        using WaitSyncFn = EGLBoolean (*)(EGLDisplay, EGLSync, EGLint);
+        auto getProc = reinterpret_cast<void* (*)(const char*)>(symbol("eglGetProcAddress"));
+        auto waitSync = getProc ? reinterpret_cast<WaitSyncFn>(getProc("eglWaitSync")) : nullptr;
+        if (waitSync)
+            return waitSync(display, entry->angleSync, flags) ? EGL_TRUE : EGL_FALSE;
+    }
+    return darwinClientWaitSyncKHR(display, sync, 0, EGL_FOREVER_KHR) == EGL_CONDITION_SATISFIED_KHR
+               ? EGL_TRUE
+               : EGL_FALSE;
+}
+
+EGLBoolean darwinDestroySyncKHR(EGLDisplay display, EGLSyncKHR sync) {
+    DarwinNativeFence* entry = nullptr;
+    {
+        std::lock_guard<std::mutex> guard(darwinNativeFencesMutex);
+        auto it = darwinNativeFences.find(sync);
+        if (it != darwinNativeFences.end()) {
+            entry = it->second;
+            darwinNativeFences.erase(it);
+        }
+    }
+    if (!entry) {
+        using Fn = EGLBoolean (*)(EGLDisplay, EGLSyncKHR);
+        auto getProc = reinterpret_cast<void* (*)(const char*)>(symbol("eglGetProcAddress"));
+        auto real = getProc ? reinterpret_cast<Fn>(getProc("eglDestroySyncKHR")) : nullptr;
+        if (!real) {
+            shimError = EGL_BAD_ACCESS;
+            return EGL_FALSE;
+        }
+        return real(display, sync);
+    }
+    if (entry->angleSync != EGL_NO_SYNC) {
+        using DestroySyncFn = EGLBoolean (*)(EGLDisplay, EGLSync);
+        auto getProc = reinterpret_cast<void* (*)(const char*)>(symbol("eglGetProcAddress"));
+        auto destroySync =
+            getProc ? reinterpret_cast<DestroySyncFn>(getProc("eglDestroySync")) : nullptr;
+        if (destroySync)
+            destroySync(entry->display, entry->angleSync);
+    }
+    if (entry->sharedEvent)
+        shiraz_mtl_release(entry->sharedEvent);
+    if (entry->ownedFd >= 0)
+        close(entry->ownedFd);
+    delete entry;
+    return EGL_TRUE;
+}
+#endif
 EGLImageKHR createImage(EGLDisplay display, EGLContext context, EGLenum target,
                         EGLClientBuffer client, const EGLint* attributes) {
     using Fn = EGLImageKHR (*)(EGLDisplay, EGLContext, EGLenum, EGLClientBuffer, const EGLint*);
@@ -650,6 +899,22 @@ extern "C" __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char
     if (std::strcmp(name, "eglDestroyImageKHR") == 0) {
         return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(eglDestroyImageKHR);
     }
+    if (std::strcmp(name, "eglCreateSyncKHR") == 0) {
+        return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(darwinCreateSyncKHR);
+    }
+    if (std::strcmp(name, "eglDestroySyncKHR") == 0) {
+        return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(darwinDestroySyncKHR);
+    }
+    if (std::strcmp(name, "eglClientWaitSyncKHR") == 0) {
+        return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(darwinClientWaitSyncKHR);
+    }
+    if (std::strcmp(name, "eglWaitSyncKHR") == 0) {
+        return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(darwinWaitSyncKHR);
+    }
+    if (std::strcmp(name, "eglDupNativeFenceFDANDROID") == 0) {
+        return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(
+            darwinDupNativeFenceFDANDROID);
+    }
 #endif
     if (std::strcmp(name, "eglGetNativeClientBufferANDROID") == 0)
         return reinterpret_cast<__eglMustCastToProperFunctionPointerType>(nativeClientBuffer);
@@ -817,17 +1082,24 @@ extern "C" const char* eglQueryString(EGLDisplay d, EGLint name) {
     }
 #if defined(__APPLE__)
     if (result && name == EGL_EXTENSIONS && d != EGL_NO_DISPLAY &&
-        std::strstr(result, "EGL_ANGLE_metal_texture_client_buffer") &&
-        !std::strstr(result, "EGL_ANDROID_image_native_buffer")) {
+        (std::strstr(result, "EGL_ANGLE_metal_texture_client_buffer") ||
+         std::strstr(result, "EGL_ANGLE_metal_shared_event_sync"))) {
         static std::mutex extensionMutex;
         static std::unordered_map<EGLDisplay, std::string> extensions;
         std::lock_guard<std::mutex> guard(extensionMutex);
         auto found = extensions.find(d);
         if (found == extensions.end()) {
-            found = extensions
-                        .emplace(d, std::string(result) + " EGL_ANDROID_image_native_buffer"
-                                                          " EGL_ANDROID_get_native_client_buffer")
-                        .first;
+            std::string merged(result);
+            if (std::strstr(result, "EGL_ANGLE_metal_texture_client_buffer") &&
+                !std::strstr(result, "EGL_ANDROID_image_native_buffer")) {
+                merged += " EGL_ANDROID_image_native_buffer"
+                          " EGL_ANDROID_get_native_client_buffer";
+            }
+            if (std::strstr(result, "EGL_ANGLE_metal_shared_event_sync") &&
+                !std::strstr(result, "EGL_ANDROID_native_fence_sync")) {
+                merged += " EGL_ANDROID_native_fence_sync";
+            }
+            found = extensions.emplace(d, std::move(merged)).first;
         }
         return found->second.c_str();
     }

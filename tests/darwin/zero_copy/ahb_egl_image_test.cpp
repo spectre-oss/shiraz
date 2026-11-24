@@ -16,6 +16,12 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <string>
+#if defined(__APPLE__)
+#include <unistd.h>
+
+extern "C" int sync_merge(const char* name, int first, int second);
+extern "C" int sync_wait(int fd, int timeout);
+#endif
 
 namespace {
 
@@ -56,8 +62,15 @@ int main(int argc, char** argv) {
         reinterpret_cast<PFNEGLDESTROYSURFACEPROC>(dlsym(shim, "eglDestroySurface"));
     auto terminate = reinterpret_cast<PFNEGLTERMINATEPROC>(dlsym(shim, "eglTerminate"));
     auto getError = reinterpret_cast<PFNEGLGETERRORPROC>(dlsym(shim, "eglGetError"));
+#if defined(__APPLE__)
+    auto queryString = reinterpret_cast<PFNEGLQUERYSTRINGPROC>(dlsym(shim, "eglQueryString"));
+    assert(getDisplay && initialize && bindAPI && chooseConfig && createContext && createPbuffer &&
+           makeCurrent && getProc && destroyContext && destroySurface && terminate && getError &&
+           queryString);
+#else
     assert(getDisplay && initialize && bindAPI && chooseConfig && createContext && createPbuffer &&
            makeCurrent && getProc && destroyContext && destroySurface && terminate && getError);
+#endif
 
     auto getNativeClientBuffer = reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(
         getProc("eglGetNativeClientBufferANDROID"));
@@ -65,7 +78,18 @@ int main(int argc, char** argv) {
     auto destroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(getProc("eglDestroyImageKHR"));
     auto imageTargetTex2D = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
         getProc("glEGLImageTargetTexture2DOES"));
+#if defined(__APPLE__)
+    auto createSync = reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(getProc("eglCreateSyncKHR"));
+    auto destroySync = reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(getProc("eglDestroySyncKHR"));
+    auto clientWaitSync =
+        reinterpret_cast<PFNEGLCLIENTWAITSYNCKHRPROC>(getProc("eglClientWaitSyncKHR"));
+    auto dupNativeFenceFd =
+        reinterpret_cast<PFNEGLDUPNATIVEFENCEFDANDROIDPROC>(getProc("eglDupNativeFenceFDANDROID"));
+    assert(getNativeClientBuffer && createImage && destroyImage && imageTargetTex2D && createSync &&
+           destroySync && clientWaitSync && dupNativeFenceFd);
+#else
     assert(getNativeClientBuffer && createImage && destroyImage && imageTargetTex2D);
+#endif
 
     auto genTextures = reinterpret_cast<PFNGLGENTEXTURESPROC>(dlsym(gles, "glGenTextures"));
     auto bindTexture = reinterpret_cast<PFNGLBINDTEXTUREPROC>(dlsym(gles, "glBindTexture"));
@@ -98,18 +122,34 @@ int main(int argc, char** argv) {
     auto getUniformLocation =
         reinterpret_cast<PFNGLGETUNIFORMLOCATIONPROC>(dlsym(gles, "glGetUniformLocation"));
     auto uniform1i = reinterpret_cast<PFNGLUNIFORM1IPROC>(dlsym(gles, "glUniform1i"));
+#if defined(__APPLE__)
+    auto flushFn = reinterpret_cast<PFNGLFLUSHPROC>(dlsym(gles, "glFlush"));
+    assert(genTextures && bindTexture && texParameteri && deleteTextures && genFramebuffers &&
+           bindFramebuffer && framebufferTexture2D && deleteFramebuffers && texImage2D &&
+           viewport && createShader && shaderSource && compileShaderFn && getShaderiv &&
+           createProgram && attachShader && linkProgram && getProgramiv && useProgram &&
+           drawArrays && readPixels && getGlError && activeTexture && getUniformLocation &&
+           uniform1i && flushFn);
+#else
     assert(genTextures && bindTexture && texParameteri && deleteTextures && genFramebuffers &&
            bindFramebuffer && framebufferTexture2D && deleteFramebuffers && texImage2D &&
            viewport && createShader && shaderSource && compileShaderFn && getShaderiv &&
            createProgram && attachShader && linkProgram && getProgramiv && useProgram &&
            drawArrays && readPixels && getGlError && activeTexture && getUniformLocation &&
            uniform1i);
+#endif
 
     EGLDisplay dpy = getDisplay(EGL_DEFAULT_DISPLAY);
     assert(dpy != EGL_NO_DISPLAY);
     EGLint major = 0, minor = 0;
     assert(initialize(dpy, &major, &minor) == EGL_TRUE);
     assert(bindAPI(EGL_OPENGL_ES_API) == EGL_TRUE);
+#if defined(__APPLE__)
+    const char* exts = queryString(dpy, EGL_EXTENSIONS);
+    assert(exts && std::strstr(exts, "EGL_ANDROID_image_native_buffer") &&
+           std::strstr(exts, "EGL_ANDROID_get_native_client_buffer") &&
+           std::strstr(exts, "EGL_ANDROID_native_fence_sync"));
+#endif
 
     const EGLint cfgAttribs[] = {
         EGL_SURFACE_TYPE,
@@ -219,6 +259,31 @@ int main(int argc, char** argv) {
     assert(pixel[0] == 224 && pixel[1] == 64 && pixel[2] == 160 && pixel[3] == 255);
     std::printf("PASS ahb egl_image zero-copy rgba=(%u,%u,%u,%u)\n", pixel[0], pixel[1], pixel[2],
                 pixel[3]);
+#if defined(__APPLE__)
+
+    // 4. Verify EGL_ANDROID_native_fence_sync backed by MTLSharedEvent + sync_merge + sync_wait.
+    drawArrays(GL_TRIANGLES, 0, 3);
+    EGLSyncKHR gpuSync = createSync(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+    assert(gpuSync != EGL_NO_SYNC_KHR);
+    flushFn();
+    int fenceFd = dupNativeFenceFd(dpy, gpuSync);
+    assert(fenceFd >= 0);
+    int mergedFd = sync_merge("shiraz-macos-fence", fenceFd, fenceFd);
+    assert(mergedFd >= 0 && sync_wait(mergedFd, 2000) == 0);
+    assert(clientWaitSync(dpy, gpuSync, 0, 2000000000ULL) == EGL_CONDITION_SATISFIED_KHR);
+    // Import a Shiraz fence fd back into EGL_SYNC_NATIVE_FENCE_ANDROID.
+    const EGLint importAttribs[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, mergedFd, EGL_NONE};
+    EGLSyncKHR importedSync = createSync(dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, importAttribs);
+    assert(importedSync != EGL_NO_SYNC_KHR);
+    assert(clientWaitSync(dpy, importedSync, 0, 1000000000ULL) == EGL_CONDITION_SATISFIED_KHR);
+    int reDup = dupNativeFenceFd(dpy, importedSync);
+    assert(reDup >= 0 && sync_wait(reDup, 1000) == 0);
+    close(reDup);
+    close(fenceFd);
+    assert(destroySync(dpy, importedSync) == EGL_TRUE);
+    assert(destroySync(dpy, gpuSync) == EGL_TRUE);
+    std::printf("PASS egl_native_fence_sync mtl_shared_event merge_wait=ok\n");
+#endif
 
     // 4. Clean teardown: destroy EGLImageKHR, GL objects, AHardwareBuffer, EGL context.
     assert(destroyImage(dpy, img) == EGL_TRUE);

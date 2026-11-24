@@ -85,7 +85,8 @@ public final class ApplicationTrustSmoke {
         HostNetworkPolicy.install(facts("debug",true));request(cached,"localhost",false);
         HostNetworkPolicy.install(facts("debug_no_override",true));request(cached,"localhost",true);passed++;
         HostNetworkPolicy.install(facts("debug_user",false));request(cached,"localhost",false);
-        try{HostNetworkPolicy.install(facts("debug_user",true));throw new AssertionError("active unsupported user-CA store accepted");}catch(UnsupportedOperationException expected){}passed++;
+        HostNetworkPolicy.install(facts("debug_user",true));request(cached,"localhost",false);
+        HostNetworkPolicy.install(facts("user_only",true));request(cached,"localhost",true);passed++;
         // Android chain cleaner returns only the validated chain, never arbitrary
         // unrelated certificates supplied by the peer or a caller.
         policy("mismatch");TrustManagerFactory factory=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());factory.init((KeyStore)null);

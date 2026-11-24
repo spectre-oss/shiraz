@@ -2,6 +2,7 @@
 // Software frame pacing for the host display. Callbacks run on the owning
 // ALooper; this is not a compositor presentation-timestamp implementation.
 #if defined(__APPLE__)
+#include <atomic>
 #include <dlfcn.h>
 #include <sys/types.h>
 #include <sys/event.h>
@@ -54,6 +55,97 @@ int64_t darwin_frame_period_ns() {
     return 16666667;
 }
 const int64_t period = darwin_frame_period_ns();
+
+// Hardware vsync phase tracker via CoreVideo CVDisplayLink (loaded lazily via
+// dlopen so headless/CI binaries require no CoreVideo link dependency).
+struct DarwinVsyncTracker {
+    std::atomic<int64_t> lastTickNs{0};
+    std::atomic<int64_t> activePeriodNs{period};
+    std::atomic<uint64_t> tickCount{0};
+
+    struct CVTimeLite {
+        int64_t timeValue;
+        int32_t timeScale;
+        int32_t flags;
+    };
+    struct CVTimeStampLite {
+        uint32_t version;
+        int32_t videoTimeScale;
+        int64_t videoTime;
+        uint64_t hostTime;
+        double rateScalar;
+        int64_t videoRefreshPeriod;
+        uint8_t smpteTime[24];
+        uint64_t flags;
+        uint64_t reserved;
+    };
+    using CallbackFn = int32_t (*)(void*, const CVTimeStampLite*, const CVTimeStampLite*, uint64_t,
+                                   uint64_t*, void*);
+    static int32_t onVsync(void*, const CVTimeStampLite*, const CVTimeStampLite* outputTime,
+                           uint64_t, uint64_t*, void* userdata) {
+        auto* self = static_cast<DarwinVsyncTracker*>(userdata);
+        timespec ts{};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        const int64_t tickNs = int64_t(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+        if (outputTime && outputTime->videoTimeScale > 0 && outputTime->videoRefreshPeriod > 0) {
+            const int64_t p = (outputTime->videoRefreshPeriod * 1000000000LL) /
+                              int64_t(outputTime->videoTimeScale);
+            if (p >= 2000000LL && p <= 50000000LL)
+                self->activePeriodNs.store(p, std::memory_order_relaxed);
+        }
+        self->lastTickNs.store(tickNs, std::memory_order_release);
+        self->tickCount.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
+
+    DarwinVsyncTracker() {
+        void* cv = dlopen("/System/Library/Frameworks/CoreVideo.framework/CoreVideo",
+                          RTLD_LAZY | RTLD_LOCAL);
+        if (!cv)
+            return;
+        using CreateFn = int32_t (*)(void**);
+        using SetCbFn = int32_t (*)(void*, CallbackFn, void*);
+        using StartFn = int32_t (*)(void*);
+        using GetNominalFn = CVTimeLite (*)(void*);
+        auto* createLink =
+            reinterpret_cast<CreateFn>(dlsym(cv, "CVDisplayLinkCreateWithActiveCGDisplays"));
+        auto* setCb = reinterpret_cast<SetCbFn>(dlsym(cv, "CVDisplayLinkSetOutputCallback"));
+        auto* startLink = reinterpret_cast<StartFn>(dlsym(cv, "CVDisplayLinkStart"));
+        auto* getNominal = reinterpret_cast<GetNominalFn>(
+            dlsym(cv, "CVDisplayLinkGetNominalOutputVideoRefreshPeriod"));
+        if (!createLink || !setCb || !startLink)
+            return;
+        void* link = nullptr;
+        if (createLink(&link) != 0 || !link)
+            return;
+        if (getNominal) {
+            CVTimeLite nom = getNominal(link);
+            if (!(nom.flags & 1) && nom.timeScale > 0 && nom.timeValue > 0) {
+                const int64_t p = (nom.timeValue * 1000000000LL) / int64_t(nom.timeScale);
+                if (p >= 2000000LL && p <= 50000000LL)
+                    activePeriodNs.store(p, std::memory_order_relaxed);
+            }
+        }
+        if (setCb(link, &DarwinVsyncTracker::onVsync, this) == 0)
+            startLink(link);
+    }
+
+    int64_t nextDue(int64_t requested, int64_t current) const {
+        const int64_t p = activePeriodNs.load(std::memory_order_relaxed);
+        const int64_t anchor = lastTickNs.load(std::memory_order_acquire);
+        if (anchor > 0 && current >= anchor && (current - anchor) < 250000000LL) {
+            const int64_t delta = requested - anchor;
+            const int64_t steps = delta >= 0 ? (delta / p + 1) : 1;
+            return anchor + steps * p;
+        }
+        return (requested / p + 1) * p;
+    }
+};
+
+DarwinVsyncTracker& darwin_vsync() {
+    static DarwinVsyncTracker* tracker = new DarwinVsyncTracker;
+    return *tracker;
+}
 #else
 constexpr int64_t period = 16666667;
 #endif
@@ -180,7 +272,11 @@ struct AChoreographer {
         const uint64_t maximum =
             (uint64_t(std::numeric_limits<int64_t>::max()) - current - period) / 1000000;
         const int64_t requested = current + int64_t(std::min(delay, maximum)) * 1000000;
+#if defined(__APPLE__)
+        const int64_t due = darwin_vsync().nextDue(requested, current);
+#else
         const int64_t due = (requested / period + 1) * period;
+#endif
         std::lock_guard<std::mutex> lock(mutex);
         pending.push_back({due, wide, legacy, data});
         arm();

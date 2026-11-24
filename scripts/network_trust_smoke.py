@@ -190,6 +190,7 @@ def fixtures(work):
         'system_custom': '<base-config><trust-anchors><certificates src="system"/><certificates src="@raw/root_a"/></trust-anchors></base-config>',
         'debug': domain(b, pin('b')) + f'<debug-overrides>{a}</debug-overrides>',
         'debug_user': domain(a, pin()) + f'<debug-overrides>{anchors("user")}</debug-overrides>',
+        'user_only': f'<base-config>{anchors("user")}</base-config>',
         'debug_no_override': domain(b, pin('b'))
         + '<debug-overrides>'
         + anchors('@raw/root_a', 'overridePins="false"')
@@ -325,7 +326,7 @@ def main():
     passed = (
         result.returncode == 0
         and 'APPLICATION_TRUST_VERIFIED 32' in result.stdout
-        and Handler.requests == ['/body'] * 20
+        and Handler.requests == ['/body'] * 21
     )
     (work / 'result.json').write_text(
         json.dumps(

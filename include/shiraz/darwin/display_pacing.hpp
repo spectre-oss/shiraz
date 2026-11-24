@@ -13,6 +13,13 @@ namespace shiraz {
 // 60.0 Hz default in headless sessions).
 double darwin_display_refresh_hz();
 std::int64_t darwin_display_period_ns();
+#if defined(__APPLE__)
+
+// Probes CoreVideo CVDisplayLink hardware vsync cadence (up to timeoutMs).
+// Returns 0 when CVDisplayLink ticks on an active display, or -ENODEV on
+// headless hosts without an attached display (falling back to CoreGraphics).
+int darwin_vsync_probe(int timeoutMs, std::int64_t* outPeriodNs, std::uint64_t* outTicks);
+#endif
 
 // Zero-copy IOSurface -> Metal MTLTexture bridge for ANativeWindow frames.
 // Creates an IOSurface populated from the posted ANativeWindow frame, imports

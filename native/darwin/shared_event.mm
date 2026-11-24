@@ -12,6 +12,11 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#if defined(__APPLE__)
+#include <dispatch/dispatch.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
 // Returns the texture (+1) and stores the surface (+1). Null on failure (logged).
@@ -125,4 +130,49 @@ int32_t shiraz_event_cpu_wait(void* event, uint64_t value, int32_t timeoutMs) {
                                                 timeoutMS:uint64_t(timeoutMs > 0 ? timeoutMs : 0)];
     return reached || shiraz_event_signaled(event, value) ? 0 : -ETIMEDOUT;
 }
+#if defined(__APPLE__)
+int shiraz_mtl_event_to_fence_fd(void* event, uint64_t value) {
+    if (!event) {
+        errno = EINVAL;
+        return -1;
+    }
+    int ends[2]{-1, -1};
+    if (pipe(ends) != 0)
+        return -1;
+    for (int i = 0; i < 2; ++i) {
+        const int fd = ends[i];
+        if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 || fcntl(fd, F_SETFL, O_NONBLOCK) < 0 ||
+            (i == 1 && fcntl(fd, F_SETNOSIGPIPE, 1) < 0)) {
+            const int err = errno;
+            close(ends[0]);
+            close(ends[1]);
+            errno = err;
+            return -1;
+        }
+    }
+    if (shiraz_event_signaled(event, value)) {
+        char b = 1;
+        [[maybe_unused]] const ssize_t n = write(ends[1], &b, 1);
+        close(ends[1]);
+        return ends[0];
+    }
+    static dispatch_once_t once;
+    static MTLSharedEventListener* sharedListener = nil;
+    dispatch_once(&once, ^{
+      dispatch_queue_t q =
+          dispatch_queue_create("org.shiraz.mtl-fence-listener", DISPATCH_QUEUE_SERIAL);
+      sharedListener = [[MTLSharedEventListener alloc] initWithDispatchQueue:q];
+    });
+    const int writeEnd = ends[1];
+    [(id<MTLSharedEvent>)event
+        notifyListener:sharedListener
+               atValue:value
+                 block:^(__unused id<MTLSharedEvent> ev, __unused uint64_t val) {
+                   char b = 1;
+                   [[maybe_unused]] const ssize_t n = write(writeEnd, &b, 1);
+                   close(writeEnd);
+                 }];
+    return ends[0];
+}
+#endif
 }
