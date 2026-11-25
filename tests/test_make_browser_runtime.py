@@ -141,15 +141,18 @@ class MakeBrowserRuntimeTest(unittest.TestCase):
             (appdir / 'usr/art/framework').mkdir(parents=True)
             (appdir / 'usr/share/shiraz').mkdir(parents=True)
             captured_env: dict[str, str] = {}
+            captured_cmd: list[str] = []
 
             def fake_run(command, env=None, stdout=None, stderr=None, timeout=None):
                 captured_env.update(env or {})
+                captured_cmd.extend(command)
                 stdout.write('dex2oat: error while loading shared libraries: libunwind.so.8\n')
                 stdout.flush()
                 return mock.Mock(returncode=127)
 
             with (
                 mock.patch.dict('os.environ', {'LD_LIBRARY_PATH': '/nix/store/fake-libunwind/lib'}),
+                mock.patch.object(package_aot.platform, 'machine', return_value='aarch64'),
                 mock.patch.object(package_aot.subprocess, 'run', side_effect=fake_run),
             ):
                 with self.assertRaises(RuntimeError) as ctx:
@@ -160,6 +163,8 @@ class MakeBrowserRuntimeTest(unittest.TestCase):
             self.assertEqual(ld_parts[0], str(host / 'lib64'))
             self.assertEqual(ld_parts[1], str(prefix / 'lib'))
             self.assertIn('/nix/store/fake-libunwind/lib', ld_parts)
+            self.assertIn('--instruction-set=arm64', captured_cmd)
+            self.assertIn('--instruction-set-features=-a53,-crc,-lse,-fp16,-dotprod', captured_cmd)
             self.assertIn('exit 127', str(ctx.exception))
             self.assertIn('libunwind.so.8', str(ctx.exception))
 

@@ -71,10 +71,14 @@ def compile_aot(work, jar, env, timeout, boot_locations=None):
     oat = jar.parent / 'oat' / isa / 'smoke.odex'
     oat.parent.mkdir(parents=True, exist_ok=True)
     memory = ['--runtime-arg', '-Xms64m', '--runtime-arg', '-Xmx256m']
+    features = (
+        ['--instruction-set-features=-a53,-crc,-lse,-fp16,-dotprod'] if isa == 'arm64' else []
+    )
     boot_args = [
         compiler,
         *memory,
         '--instruction-set=' + isa,
+        *features,
         '--compiler-filter=verify',
         '--base=0x70000000',
         '--image=' + str(images / 'boot.art'),
@@ -88,6 +92,7 @@ def compile_aot(work, jar, env, timeout, boot_locations=None):
         '--dex-file=' + str(jar),
         '--oat-file=' + str(oat),
         '--instruction-set=' + isa,
+        *features,
         '--compiler-filter=speed',
         '--host',
     ]

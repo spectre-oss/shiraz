@@ -59,8 +59,8 @@ public final class NetworkSecurityConfig {
                 if(debugSeen)throw bad("Duplicate debug-overrides");debugSeen=true;
                 if(debuggable){
                     List<BinaryXml.Node> children=result.children(node);
-                    if(children.size()!=1)throw bad("debug-overrides requires trust-anchors");
-                    result.debugAnchors=result.trust(children.get(0),true);
+                    if(children.size()>1)throw bad("Duplicate trust-anchors");
+                    if(children.size()==1)result.debugAnchors=result.trust(children.get(0),true);
                 }
             }else throw unsupported(node.name);
         }
@@ -153,7 +153,9 @@ public final class NetworkSecurityConfig {
             if(!children(child).isEmpty())throw bad("certificates contains elements");
             if(anchors.size()>=256)throw bad("Certificate source count limit");anchors.add(new Anchor(certs,overridePins));
         }
-        if(anchors.isEmpty())throw bad("Empty trust-anchors");return Collections.unmodifiableList(anchors);
+        // Android's XmlConfigSource accepts an empty <trust-anchors/> element as
+        // an explicit empty root set (fail closed without inheriting parent/system roots).
+        return Collections.unmodifiableList(anchors);
     }
     private Pins pins(BinaryXml.Node node){
         tag(node,"pin-set");attributes(node,"expiration");Pins pins=new Pins();BinaryXml.Value expiration=value(node,"expiration");

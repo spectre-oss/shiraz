@@ -28,6 +28,8 @@ public final class NetworkConfigSmoke {
         // Android user CA store: Shiraz has none, so it adds no roots but is accepted.
         HostNetworkPolicy.install(facts(apk,"@xml/custom_ca"));host("example.com",false);host("other.org",false);
         HostNetworkPolicy.install(facts(apk,"@xml/user_only"));host("other.org",false);
+        // Empty <trust-anchors/> is valid on Android and yields an explicit empty root set.
+        HostNetworkPolicy.install(facts(apk,"@xml/empty_trust"));host("other.org",true);
         // API 36 certificateTransparency is ignored by the API 27 profile, as AOSP skips it there.
         HostNetworkPolicy.install(facts(apk,"@xml/transparency"));host("other.org",true);host("www.example.com",false);
         Properties defaults=facts(apk,"@xml/defaults");defaults.setProperty("usesCleartextTraffic","true");HostNetworkPolicy.install(defaults);

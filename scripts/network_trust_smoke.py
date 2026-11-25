@@ -191,6 +191,10 @@ def fixtures(work):
         'debug': domain(b, pin('b')) + f'<debug-overrides>{a}</debug-overrides>',
         'debug_user': domain(a, pin()) + f'<debug-overrides>{anchors("user")}</debug-overrides>',
         'user_only': f'<base-config>{anchors("user")}</base-config>',
+        'empty_trust': '<base-config><trust-anchors/></base-config>',
+        'empty_domain_trust': f'<base-config>{a}</base-config>' + domain('<trust-anchors/>'),
+        'empty_debug': domain(a, pin()) + '<debug-overrides><trust-anchors/></debug-overrides>',
+        'empty_debug_tag': domain(a, pin()) + '<debug-overrides/>',
         'debug_no_override': domain(b, pin('b'))
         + '<debug-overrides>'
         + anchors('@raw/root_a', 'overridePins="false"')
@@ -325,8 +329,8 @@ def main():
         key.unlink(missing_ok=True)
     passed = (
         result.returncode == 0
-        and 'APPLICATION_TRUST_VERIFIED 32' in result.stdout
-        and Handler.requests == ['/body'] * 21
+        and 'APPLICATION_TRUST_VERIFIED 36' in result.stdout
+        and Handler.requests == ['/body'] * 24
     )
     (work / 'result.json').write_text(
         json.dumps(

@@ -87,6 +87,11 @@ public final class ApplicationTrustSmoke {
         HostNetworkPolicy.install(facts("debug_user",false));request(cached,"localhost",false);
         HostNetworkPolicy.install(facts("debug_user",true));request(cached,"localhost",false);
         HostNetworkPolicy.install(facts("user_only",true));request(cached,"localhost",true);passed++;
+        test("empty_trust","localhost",true);
+        test("empty_domain_trust","localhost",true);
+        test("empty_domain_trust","127.0.0.1",false);
+        HostNetworkPolicy.install(facts("empty_debug",true));request(cached,"localhost",false);
+        HostNetworkPolicy.install(facts("empty_debug_tag",true));request(cached,"localhost",false);passed++;
         // Android chain cleaner returns only the validated chain, never arbitrary
         // unrelated certificates supplied by the peer or a caller.
         policy("mismatch");TrustManagerFactory factory=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());factory.init((KeyStore)null);

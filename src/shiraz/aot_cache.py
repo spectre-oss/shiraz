@@ -236,7 +236,7 @@ def _atomic_write_json(path: Path, data: object) -> None:
 
 
 def _common_dex2oat_flags(host: Path, isa: str) -> List[str]:
-    return [
+    flags = [
         str(host / 'bin/dex2oat'),
         '--runtime-arg',
         '-Xms64m',
@@ -247,6 +247,9 @@ def _common_dex2oat_flags(host: Path, isa: str) -> List[str]:
         '--no-generate-debug-info',
         '--generate-mini-debug-info',
     ]
+    if isa == 'arm64':
+        flags.append('--instruction-set-features=-a53,-crc,-lse,-fp16,-dotprod')
+    return flags
 
 
 def _wrap_dex2oat(cmd: List[str], env: Dict[str, str]) -> Tuple[List[str], Dict[str, str]]:

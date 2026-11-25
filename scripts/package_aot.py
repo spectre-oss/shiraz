@@ -49,6 +49,12 @@ def _compile(appdir, work, host, jars, prefix, include_apk=True):
         '--no-generate-debug-info',
         '--generate-mini-debug-info',
     ]
+    if isa == 'arm64':
+        # Match ART's portable ARMv8.0-A CPP defines (-a53,-crc,-lse,-fp16,-dotprod):
+        # avoids ART 9's Cortex-A53 erratum 835769 code-buffer underflow SIGSEGV in
+        # InstructionCodeGeneratorARM64::VisitMultiplyAccumulate and ensures boot.oat
+        # loads on any ARM64 host or unkernel guest regardless of optional HWCAPs.
+        common.append('--instruction-set-features=-a53,-crc,-lse,-fp16,-dotprod')
     # Core collection/string/reflection work is on the activity launch path too.
     # A verify-only boot image leaves that work to interpretation/JIT warmup.
     commands = [
