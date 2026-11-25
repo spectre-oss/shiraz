@@ -1288,6 +1288,12 @@ bionic-dirent-smoke:
 	$(CC) -Wall -Wextra -Werror tests/bionic_dirent.c -o build/test-bionic-dirent -L.local/lib -lc_bio -Wl,-rpath-link,.local/lib -Wl,-rpath,'$$ORIGIN/../.local/lib'
 	LD_LIBRARY_PATH="$(CURDIR)/.local/lib" build/test-bionic-dirent
 
+.PHONY: bionic-system-properties-smoke
+BIONIC_PROPS_RUNNER ?=
+bionic-system-properties-smoke:
+	$(CC) -Wall -Wextra -Werror -pthread tests/bionic_system_properties.c -o build/test-bionic-system-properties -L.local/lib -lc_bio -ldl -Wl,-rpath-link,.local/lib -Wl,-rpath,'$$ORIGIN/../.local/lib'
+	LD_LIBRARY_PATH="$(CURDIR)/.local/lib" SHIRAZ_ANDROID_MODEL="Shiraz Pixel" SHIRAZ_ANDROID_RELEASE="8.1.0" SHIRAZ_ANDROID_DISPLAY_ID="Shiraz Test" SHIRAZ_ANDROID_SECURITY_PATCH="2026-01-01" $(BIONIC_PROPS_RUNNER) build/test-bionic-system-properties "$(CURDIR)/.local/lib/libc_bio.so.0"
+
 .PHONY: bionic-sigchain-smoke
 .PHONY: bionic-static-sync-smoke
 BIONIC_SYNC_RUNNER ?=

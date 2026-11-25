@@ -94,6 +94,13 @@ PATCHES = {
             },
         ),
         (
+            'bionic-system-properties.patch',
+            {
+                'libc/libc.c': 'f29a3d5ce6edc0c4ec6939e0efe49da0771e36c80648109c80e0b2aecc88cd0a',
+                'libc/libc-misc.c': '1ba649f0f528b9ceaa1aa74444535189399f45907175cb6c7698061105681b5a',
+            },
+        ),
+        (
             'bionic-host-debug-init.patch',
             {
                 'linker/linker.c': '120cbd7b332b69ca1a937dd269438dacbe520f204374fc2838081e6006a4f9f7',

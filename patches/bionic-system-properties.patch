@@ -1,0 +1,336 @@
+--- a/libc/libc.c
++++ b/libc/libc.c
+@@ -60,20 +60,6 @@
+ 
+ // Stuff that doesn't exist in glibc
+ 
+-#define PROP_NAME_MAX  32
+-#define PROP_VALUE_MAX 92
+-
+-int __system_property_get(const char *name, char *value)
+-{
+-	verbose("%s", name);
+-
+-	if (!strcmp(name, "ro.build.version.sdk"))
+-		return snprintf(value, PROP_VALUE_MAX, "%d", 21);
+-
+-	*value = 0;
+-	return 0;
+-}
+-
+ pid_t gettid(void)
+ {
+ 	return syscall(SYS_gettid);
+--- a/libc/libc-misc.c
++++ b/libc/libc-misc.c
+@@ -1,45 +1,294 @@
+ #include <errno.h>
+ #include <locale.h>
++#include <pthread.h>
+ #include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-// this seems to not be a stable ABI, so hopefully nobody treats it as such
+-// FIXME: move this out into it's own file whenever we get to implementing it more properly
++#define PROP_NAME_MAX  32
++#define PROP_VALUE_MAX 92
++#define BIONIC_PROP_NAME_STORAGE 128
++
++/* Preserve Bionic's short-value prop_info prefix (serial + value[92] + name[])
++ * for native callers inspecting either opaque handles or short-property fields. */
+ struct prop_info {
++	uint32_t serial;
++	char value[PROP_VALUE_MAX];
++	char name[BIONIC_PROP_NAME_STORAGE];
++};
++
++_Static_assert(offsetof(struct prop_info, serial) == 0, "prop_info serial offset");
++_Static_assert(offsetof(struct prop_info, value) == 4, "prop_info value offset");
++_Static_assert(offsetof(struct prop_info, name) == 96, "prop_info name offset");
++
++#if defined(__aarch64__)
++#define BIONIC_HOST_ABI "arm64-v8a"
++#elif defined(__x86_64__)
++#define BIONIC_HOST_ABI "x86_64"
++#elif defined(__arm__)
++#define BIONIC_HOST_ABI "armeabi-v7a"
++#elif defined(__i386__)
++#define BIONIC_HOST_ABI "x86"
++#else
++#define BIONIC_HOST_ABI "unknown"
++#endif
++
++#ifdef __LP64__
++#define BIONIC_HOST_ABILIST64 BIONIC_HOST_ABI
++#define BIONIC_HOST_ABILIST32 ""
++#else
++#define BIONIC_HOST_ABILIST64 ""
++#define BIONIC_HOST_ABILIST32 BIONIC_HOST_ABI
++#endif
++
++static const struct {
+ 	const char *name;
++	const char *environment;
++} bionic_profile_properties[] = {
++	{"ro.product.model", "SHIRAZ_ANDROID_MODEL"},
++	{"ro.product.manufacturer", "SHIRAZ_ANDROID_MANUFACTURER"},
++	{"ro.product.brand", "SHIRAZ_ANDROID_BRAND"},
++	{"ro.product.device", "SHIRAZ_ANDROID_DEVICE"},
++	{"ro.product.name", "SHIRAZ_ANDROID_PRODUCT"},
++	{"ro.product.board", "SHIRAZ_ANDROID_BOARD"},
++	{"ro.hardware", "SHIRAZ_ANDROID_HARDWARE"},
++	{"ro.bootloader", "SHIRAZ_ANDROID_BOOTLOADER"},
++	{"ro.serialno", "SHIRAZ_ANDROID_SERIAL"},
++	{"ro.build.host", "SHIRAZ_ANDROID_HOST"},
++	{"ro.build.user", "SHIRAZ_ANDROID_USER"},
++	{"ro.build.id", "SHIRAZ_ANDROID_ID"},
++	{"ro.build.type", "SHIRAZ_ANDROID_TYPE"},
++	{"ro.build.tags", "SHIRAZ_ANDROID_TAGS"},
++	{"ro.build.fingerprint", "SHIRAZ_ANDROID_FINGERPRINT"},
++	{"ro.build.version.incremental", "SHIRAZ_ANDROID_INCREMENTAL"},
++	{"ro.build.version.security_patch", "SHIRAZ_ANDROID_SECURITY_PATCH"},
+ };
+ 
+-#define PROP_NAME_MAX  32
+-#define PROP_VALUE_MAX 92
++#define BIONIC_BASE_PROP_COUNT 9
++#define BIONIC_MAX_PROPS \
++	(BIONIC_BASE_PROP_COUNT + (sizeof(bionic_profile_properties) / sizeof(bionic_profile_properties[0])))
++
++static struct prop_info bionic_props[BIONIC_MAX_PROPS];
++static size_t bionic_props_count = 0;
++static pthread_once_t bionic_props_once = PTHREAD_ONCE_INIT;
++
++static void bionic_prop_append(const char *name, const char *value)
++{
++	if (!name || !value || bionic_props_count >= BIONIC_MAX_PROPS)
++		return;
++	size_t name_len = strlen(name);
++	size_t value_len = strlen(value);
++	if (name_len == 0 || name_len >= BIONIC_PROP_NAME_STORAGE || value_len >= PROP_VALUE_MAX)
++		return;
++	struct prop_info *p = &bionic_props[bionic_props_count++];
++	memcpy(p->name, name, name_len + 1);
++	memcpy(p->value, value, value_len + 1);
++	p->serial = (uint32_t)value_len << 24;
++}
++
++static void bionic_props_init(void)
++{
++	const char *release = getenv("SHIRAZ_ANDROID_RELEASE");
++	const char *display = getenv("SHIRAZ_ANDROID_DISPLAY_ID");
++
++	bionic_prop_append("ro.build.version.sdk", "27");
++	bionic_prop_append("ro.build.version.preview_sdk", "0");
++	bionic_prop_append(
++		"ro.build.version.release",
++		(release && release[0] && strlen(release) < PROP_VALUE_MAX) ? release : "8.1");
++	bionic_prop_append("ro.build.version.codename", "REL");
++	bionic_prop_append(
++		"ro.build.display.id",
++		(display && display[0] && strlen(display) < PROP_VALUE_MAX) ? display : "Shiraz");
++	bionic_prop_append("ro.product.cpu.abi", BIONIC_HOST_ABI);
++	bionic_prop_append("ro.product.cpu.abilist", BIONIC_HOST_ABI);
++	bionic_prop_append("ro.product.cpu.abilist64", BIONIC_HOST_ABILIST64);
++	bionic_prop_append("ro.product.cpu.abilist32", BIONIC_HOST_ABILIST32);
++
++	for (size_t i = 0; i < sizeof(bionic_profile_properties) / sizeof(bionic_profile_properties[0]); ++i) {
++		const char *val = getenv(bionic_profile_properties[i].environment);
++		if (val)
++			bionic_prop_append(bionic_profile_properties[i].name, val);
++	}
++}
++
++static void bionic_props_ensure(void)
++{
++	pthread_once(&bionic_props_once, bionic_props_init);
++}
++
++static bool bionic_prop_valid(const struct prop_info *pi)
++{
++	if (!pi || bionic_props_count == 0)
++		return false;
++	uintptr_t base = (uintptr_t)&bionic_props[0];
++	uintptr_t end = (uintptr_t)&bionic_props[bionic_props_count];
++	uintptr_t addr = (uintptr_t)pi;
++	return addr >= base && addr < end && ((addr - base) % sizeof(bionic_props[0])) == 0;
++}
++
++int bionic___system_properties_init(void)
++{
++	int saved = errno;
++	bionic_props_ensure();
++	errno = saved;
++	return 0;
++}
+ 
+ const struct prop_info *bionic___system_property_find(const char *name)
+ {
+-	struct prop_info *ret = malloc(sizeof(struct prop_info));
+-	ret->name = name;
++	int saved = errno;
++	bionic_props_ensure();
++	if (getenv("SHIRAZ_TRACE_PROPERTIES") && name)
++		fprintf(stderr, "SHIRAZ_PROPERTY_LOOKUP %.128s\n", name);
++	if (name) {
++		for (size_t i = 0; i < bionic_props_count; ++i) {
++			if (strcmp(name, bionic_props[i].name) == 0) {
++				errno = saved;
++				return &bionic_props[i];
++			}
++		}
++	}
++	errno = saved;
++	return NULL;
++}
+ 
+-	return ret;
++const struct prop_info *bionic___system_property_find_nth(unsigned n)
++{
++	int saved = errno;
++	bionic_props_ensure();
++	const struct prop_info *result = (n < bionic_props_count) ? &bionic_props[n] : NULL;
++	errno = saved;
++	return result;
+ }
+ 
+ int bionic___system_property_read(const struct prop_info *prop_info, char *name, char *value)
+ {
+-	if (name)
+-		strncpy(name, prop_info->name, PROP_NAME_MAX);
++	int saved = errno;
++	bionic_props_ensure();
++	if (!prop_info) {
++		errno = saved;
++		return 0;
++	}
++	if (!bionic_prop_valid(prop_info)) {
++		errno = EINVAL;
++		return -1;
++	}
++	if (name) {
++		size_t name_len = strlen(prop_info->name);
++		if (name_len >= PROP_NAME_MAX)
++			name_len = PROP_NAME_MAX - 1;
++		memcpy(name, prop_info->name, name_len);
++		name[name_len] = '\0';
++	}
++	size_t value_len = strlen(prop_info->value);
++	if (value)
++		memcpy(value, prop_info->value, value_len + 1);
++	errno = saved;
++	return (int)value_len;
++}
++
++void bionic___system_property_read_callback(
++	const struct prop_info *prop_info,
++	void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
++	void *cookie)
++{
++	int saved = errno;
++	bionic_props_ensure();
++	if (!callback || !bionic_prop_valid(prop_info)) {
++		errno = saved;
++		return;
++	}
++	errno = saved;
++	callback(cookie, prop_info->name, prop_info->value, prop_info->serial);
++}
+ 
+-	if (!value)
++int bionic___system_property_get(const char *name, char *value)
++{
++	int saved = errno;
++	const struct prop_info *prop = bionic___system_property_find(name);
++	if (!value) {
++		errno = saved;
+ 		return 0;
++	}
++	if (!prop) {
++		value[0] = '\0';
++		errno = saved;
++		return 0;
++	}
++	size_t value_len = strlen(prop->value);
++	memcpy(value, prop->value, value_len + 1);
++	errno = saved;
++	return (int)value_len;
++}
+ 
+-	if (!strcmp(prop_info->name, "ro.build.fingerprint")) {
+-		strncpy(value, "", PROP_VALUE_MAX); // there is no good reason that apps should need this, so just return an empty string
+-	} else {
+-		printf("__system_property_find: >%s< not handled yet\n", prop_info->name);
+-		strncpy(value, "", PROP_VALUE_MAX);
++int bionic___system_property_foreach(
++	void (*propfn)(const struct prop_info *pi, void *cookie),
++	void *cookie)
++{
++	int saved = errno;
++	bionic_props_ensure();
++	if (!propfn) {
++		errno = EINVAL;
++		return -1;
+ 	}
++	errno = saved;
++	for (size_t i = 0; i < bionic_props_count; ++i)
++		propfn(&bionic_props[i], cookie);
++	return 0;
++}
++
++uint32_t bionic___system_property_serial(const struct prop_info *prop_info)
++{
++	int saved = errno;
++	bionic_props_ensure();
++	uint32_t serial = bionic_prop_valid(prop_info) ? prop_info->serial : 0;
++	errno = saved;
++	return serial;
++}
+ 
+-	return strlen(value);
++uint32_t bionic___system_property_area_serial(void)
++{
++	return 0;
+ }
+ 
++int bionic___system_property_set(const char *key, const char *value)
++{
++	(void)key;
++	(void)value;
++	errno = EACCES;
++	return -1;
++}
++
++int __system_properties_init(void)
++	__attribute__((alias("bionic___system_properties_init")));
++const struct prop_info *__system_property_find(const char *name)
++	__attribute__((alias("bionic___system_property_find")));
++const struct prop_info *__system_property_find_nth(unsigned n)
++	__attribute__((alias("bionic___system_property_find_nth")));
++int __system_property_read(const struct prop_info *prop_info, char *name, char *value)
++	__attribute__((alias("bionic___system_property_read")));
++void __system_property_read_callback(
++	const struct prop_info *prop_info,
++	void (*callback)(void *cookie, const char *name, const char *value, uint32_t serial),
++	void *cookie)
++	__attribute__((alias("bionic___system_property_read_callback")));
++int __system_property_get(const char *name, char *value)
++	__attribute__((alias("bionic___system_property_get")));
++int __system_property_foreach(
++	void (*propfn)(const struct prop_info *pi, void *cookie),
++	void *cookie)
++	__attribute__((alias("bionic___system_property_foreach")));
++uint32_t __system_property_serial(const struct prop_info *prop_info)
++	__attribute__((alias("bionic___system_property_serial")));
++uint32_t __system_property_area_serial(void)
++	__attribute__((alias("bionic___system_property_area_serial")));
++int __system_property_set(const char *key, const char *value)
++	__attribute__((alias("bionic___system_property_set")));
++
+ // actually misc stuff
+ 
+ void android_set_abort_message(const char *msg)
