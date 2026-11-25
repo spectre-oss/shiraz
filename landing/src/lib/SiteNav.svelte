@@ -6,14 +6,16 @@
   import { resolve } from '$app/paths';
   import GitHubLink from '#lib/GitHubLink.svelte';
   const home = resolve('/');
+  const runPath = resolve('/run/');
+  const onRunRoute = $derived(page.route.id === '/run' || /(?:^|\/)run\/?$/.test(page.url.pathname));
   const links = [
-    { href: resolve('/run/'), label: 'Run', path: resolve('/run/'), narrow: 'nav-run' },
-    { href: home + '#builder', label: 'Builder', path: null, narrow: 'nav-builder' },
-    { href: resolve('/compatibility/'), label: 'Compatibility', path: resolve('/compatibility/') },
-    { href: resolve('/compare/'), label: 'Compare', path: resolve('/compare/'), narrow: 'nav-compare' }
+    { href: runPath, label: 'Run', routeId: '/run', narrow: 'nav-run', reload: true },
+    { href: home + '#builder', label: 'Builder', routeId: null, narrow: 'nav-builder', reload: false },
+    { href: resolve('/compatibility/'), label: 'Compatibility', routeId: '/compatibility', reload: false },
+    { href: resolve('/compare/'), label: 'Compare', routeId: '/compare', narrow: 'nav-compare', reload: false }
   ];
 </script>
 <nav aria-label="Main navigation">
-  {#each links as link}<a href={link.href} class={link.narrow} aria-current={link.path && page.url.pathname === link.path ? 'page' : undefined}>{link.label}</a>{/each}
+  {#each links as link}<a href={link.href} class={link.narrow} data-sveltekit-reload={link.reload || onRunRoute ? '' : undefined} aria-current={link.routeId && page.route.id === link.routeId ? 'page' : undefined}>{link.label}</a>{/each}
   <GitHubLink />
 </nav>

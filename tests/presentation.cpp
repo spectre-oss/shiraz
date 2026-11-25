@@ -496,6 +496,30 @@ int main() {
     std::cerr.rdbuf(previous);
     unsetenv("SHIRAZ_TRACE_PRESENT");
     assert(trace.str().find("SHIRAZ_TEXTURE_UPLOAD uploads=4 unchanged=0") != std::string::npos);
+#if defined(__linux__)
+    // Invalid SHIRAZ_PRESENT_FB must log fallback cleanly and still write SHIRAZ_PRESENT_SNAPSHOT.
+    {
+        std::string snapName = std::string(std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp") +
+                               "/shiraz-fb-fallback-XXXXXX.ppm";
+        int snapFd = mkstemps(snapName.data(), 4);
+        assert(snapFd >= 0);
+        close(snapFd);
+        setenv("SHIRAZ_PRESENT_FB", "/dev/nonexistent-shiraz-fb0", 1);
+        setenv("SHIRAZ_PRESENT_SNAPSHOT", snapName.c_str(), 1);
+        std::ostringstream fbLog;
+        auto* prevBuf = std::cerr.rdbuf(fbLog.rdbuf());
+        shiraz::present(shiraz::Surface(4, 4, 0xff112233), "fb fallback", 1);
+        std::cerr.rdbuf(prevBuf);
+        unsetenv("SHIRAZ_PRESENT_FB");
+        unsetenv("SHIRAZ_PRESENT_SNAPSHOT");
+        assert(fbLog.str().find("SHIRAZ_FB_FALLBACK") != std::string::npos);
+        std::ifstream snapIn(snapName, std::ios::binary);
+        std::string header;
+        std::getline(snapIn, header);
+        assert(header == "P6");
+        unlink(snapName.c_str());
+    }
+#endif
     assert(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER) == 0);
     auto timer = SDL_AddTimer(50, close_window, nullptr);
     assert(timer != 0);

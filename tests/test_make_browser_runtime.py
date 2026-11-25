@@ -51,6 +51,14 @@ class MakeBrowserRuntimeTest(unittest.TestCase):
         self.assertFalse(mbr.should_drop('usr/lib/libart.so'))
         self.assertFalse(mbr.should_drop('usr/lib/ld-linux-aarch64.so.1'))
         self.assertFalse(mbr.should_drop('usr/share/shiraz/shiraz-framework.jar'))
+        self.assertFalse(mbr.should_drop('usr/art/framework/arm64/boot.art'))
+        self.assertFalse(mbr.should_drop('usr/share/shiraz/oat/arm64/shiraz-framework.odex'))
+        # --keep-gpu preserves Mesa gallium/DRI/LLVM while still dropping desktop bloat.
+        self.assertFalse(mbr.should_drop('usr/lib/libLLVM.so.20.1', keep_gpu=True))
+        self.assertFalse(mbr.should_drop('usr/lib/libgallium-25.2.8.so', keep_gpu=True))
+        self.assertFalse(mbr.should_drop('usr/lib/swrast_dri.so', keep_gpu=True))
+        self.assertTrue(mbr.should_drop('usr/lib/libpython3.13.so.1.0', keep_gpu=True))
+        self.assertTrue(mbr.should_drop('usr/share/shiraz/original.apk', keep_gpu=True))
 
     def test_stage_tree_strips_bloat_and_preserves_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -7,7 +7,7 @@
     <div class="footer-main">
       <div class="footer-identity"><a class="brand" href={home} aria-label="Shiraz home"><img src={home + 'spectre.svg'} width="42" height="42" alt=""><span>shiraz</span></a><p>Android™ apps.<br>A little more at home on Linux, macOS and Windows.</p></div>
       <nav class="footer-links" aria-label="Footer navigation">
-        <div><h2>Explore</h2><a href={resolve('/run/')}>Run APK in browser</a><a href={resolve('/compatibility/')}>App compatibility</a><a href={home + '#approach'}>How it works</a><a href={home + '#web'}>Shiraz Web</a><a href={home + '#mac'}>Shiraz Launcher for Mac</a><a href={home + '#compare'}>Compare approaches</a><a href={resolve('/compare/')}>Shiraz and its peers</a></div>
+        <div><h2>Explore</h2><a href={resolve('/run/')} data-sveltekit-reload>Run APK in browser</a><a href={resolve('/compatibility/')}>App compatibility</a><a href={home + '#approach'}>How it works</a><a href={home + '#web'}>Shiraz Web</a><a href={home + '#mac'}>Shiraz Launcher for Mac</a><a href={home + '#compare'}>Compare approaches</a><a href={resolve('/compare/')}>Shiraz and its peers</a></div>
         <div><h2>Build with us</h2><a href="https://github.com/spectre-oss/shiraz">Source code</a><a href="https://github.com/spectre-oss/shiraz/releases">Releases</a><a href="https://github.com/spectre-oss/shiraz/issues">Report an issue</a></div>
       </nav>
     </div>

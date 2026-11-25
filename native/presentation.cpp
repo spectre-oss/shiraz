@@ -33,7 +33,13 @@
 #include <dlfcn.h>
 #endif
 #if defined(__linux__)
+#include <cerrno>
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <linux/fb.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include "linux/osk_dbus.inc"
 #endif
 
@@ -65,6 +71,147 @@ void notify_linux_choreographer_vsync(float hz) {
                                  : 0;
     fn(nowNs, periodNs);
 }
+// Zero-copy Linux framebuffer sink (SHIRAZ_PRESENT_FB=/dev/fb0) for headless
+// VM/browser hosts such as unkernel's kwfb XRGB8888 framebuffer.
+struct LinuxFbSink {
+    std::string path;
+    int fd = -1;
+    void* mapped = nullptr;
+    size_t mapLen = 0;
+    uint32_t stride = 0;
+    int fbWidth = 0;
+    int fbHeight = 0;
+    int requestedWidth = 0;
+    int requestedHeight = 0;
+    bool enabled = false;
+    bool failed = false;
+
+    LinuxFbSink() {
+        const char* configured = std::getenv("SHIRAZ_PRESENT_FB");
+        if (configured && *configured) {
+            path = configured;
+            enabled = true;
+        }
+    }
+    LinuxFbSink(const LinuxFbSink&) = delete;
+    LinuxFbSink& operator=(const LinuxFbSink&) = delete;
+
+    void unmap() {
+        if (mapped) {
+            munmap(mapped, mapLen);
+            mapped = nullptr;
+            mapLen = 0;
+        }
+        stride = 0;
+        fbWidth = 0;
+        fbHeight = 0;
+        requestedWidth = 0;
+        requestedHeight = 0;
+    }
+
+    ~LinuxFbSink() {
+        unmap();
+        if (fd >= 0) {
+            close(fd);
+            fd = -1;
+        }
+    }
+
+    void disable(const char* reason) {
+        std::cerr << "SHIRAZ_FB_FALLBACK path=" << path << " reason=" << reason
+                  << " errno=" << errno << "\n";
+        unmap();
+        if (fd >= 0) {
+            close(fd);
+            fd = -1;
+        }
+        failed = true;
+    }
+
+    bool configure(int cw, int ch) {
+        if (mapped && requestedWidth == cw && requestedHeight == ch)
+            return true;
+        // kwfb requires zero active mmaps before FBIOPUT_VSCREENINFO can resize.
+        unmap();
+        if (fd < 0) {
+            fd = open(path.c_str(), O_RDWR | O_CLOEXEC);
+            if (fd < 0) {
+                disable("open");
+                return false;
+            }
+        }
+        fb_var_screeninfo vinfo{};
+        if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) != 0) {
+            disable("vscreeninfo");
+            return false;
+        }
+        if (int(vinfo.xres) != cw || int(vinfo.yres) != ch || vinfo.bits_per_pixel != 32) {
+            fb_var_screeninfo desired = vinfo;
+            desired.xres = static_cast<uint32_t>(cw);
+            desired.yres = static_cast<uint32_t>(ch);
+            desired.xres_virtual = static_cast<uint32_t>(cw);
+            desired.yres_virtual = static_cast<uint32_t>(ch);
+            desired.xoffset = 0;
+            desired.yoffset = 0;
+            desired.bits_per_pixel = 32;
+            (void)ioctl(fd, FBIOPUT_VSCREENINFO, &desired);
+            if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) != 0) {
+                disable("vscreeninfo-after-put");
+                return false;
+            }
+        }
+        fb_fix_screeninfo finfo{};
+        if (ioctl(fd, FBIOGET_FSCREENINFO, &finfo) != 0) {
+            disable("fscreeninfo");
+            return false;
+        }
+        if (vinfo.bits_per_pixel != 32 || vinfo.xres == 0 || vinfo.yres == 0 ||
+            finfo.line_length < vinfo.xres * 4 ||
+            finfo.smem_len < uint64_t(finfo.line_length) * vinfo.yres) {
+            errno = EINVAL;
+            disable("geometry");
+            return false;
+        }
+        void* ptr = mmap(nullptr, finfo.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (ptr == MAP_FAILED) {
+            disable("mmap");
+            return false;
+        }
+        mapped = ptr;
+        mapLen = finfo.smem_len;
+        stride = finfo.line_length;
+        fbWidth = static_cast<int>(vinfo.xres);
+        fbHeight = static_cast<int>(vinfo.yres);
+        requestedWidth = cw;
+        requestedHeight = ch;
+        std::cerr << "SHIRAZ_FB path=" << path << " mode=" << fbWidth << "x" << fbHeight
+                  << " stride=" << stride << "\n";
+        return true;
+    }
+
+    bool present(SDL_Renderer* renderer) {
+        if (!enabled || failed)
+            return false;
+        int cw = 0, ch = 0;
+        if (SDL_GetRendererOutputSize(renderer, &cw, &ch) != 0 || cw <= 0 || ch <= 0 || cw > 8192 ||
+            ch > 8192 || int64_t(cw) * ch > 16 * 1024 * 1024)
+            return false;
+        if (!configure(cw, ch))
+            return false;
+        // Little-endian SDL_PIXELFORMAT_ARGB8888 has identical B,G,R,A byte order to
+        // Linux DRM FOURCC_XRGB8888, so SDL reads directly into the mapped framebuffer.
+        if (cw == fbWidth && ch == fbHeight) {
+            return SDL_RenderReadPixels(renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, mapped,
+                                        static_cast<int>(stride)) == 0;
+        }
+        const int copyW = std::min(cw, fbWidth);
+        const int copyH = std::min(ch, fbHeight);
+        std::memset(mapped, 0, static_cast<size_t>(fbHeight) * stride);
+        SDL_Rect rect{0, 0, copyW, copyH};
+        return SDL_RenderReadPixels(renderer, &rect, SDL_PIXELFORMAT_ARGB8888, mapped,
+                                    static_cast<int>(stride)) == 0;
+    }
+};
 #endif
 bool mouse_as_touch() {
     const char* value = std::getenv("SHIRAZ_MOUSE_AS_TOUCH");
@@ -1037,6 +1184,9 @@ void present(const Surface& initial, const std::string& title, int frames,
     int scriptedWidth = -1, scriptedHeight = -1; // replay/live resizes request exact sizes
     bool running = true;
     FrameStats frameStats;
+#if defined(__linux__)
+    LinuxFbSink fbSink;
+#endif
     for (int frame = 0; running && (frames < 0 || frame < frames);) {
         textInput.sync();
         const Uint64 frameStarted = SDL_GetPerformanceCounter();
@@ -1518,10 +1668,16 @@ void present(const Surface& initial, const std::string& title, int frames,
                 }
             }
 #endif
+            // Direct Linux framebuffer sink (SHIRAZ_PRESENT_FB=/dev/fb0) avoids PPM
+            // serialization when running inside headless VM/browser hosts.
+            bool presentedToFb = false;
+#if defined(__linux__)
+            presentedToFb = fbSink.present(renderer.get());
+#endif
             // Opt-in app-surface observation reads the actual renderer output,
             // including GPU sampling, rather than only the CPU Canvas buffer.
             const char* capture = std::getenv("SHIRAZ_PRESENT_SNAPSHOT");
-            if (capture && *capture) {
+            if (!presentedToFb && capture && *capture) {
                 int cw = 0, ch = 0;
                 checked(SDL_GetRendererOutputSize(renderer.get(), &cw, &ch));
                 if (cw <= 0 || ch <= 0 || cw > 8192 || ch > 8192 ||

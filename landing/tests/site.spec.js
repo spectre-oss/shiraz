@@ -468,7 +468,32 @@ test('home page links to the client-side browser APK runner with unkernel credit
 
   const swRes = await request.get('/sw.js');
   expect(swRes.ok()).toBe(true);
-  expect(await swRes.text()).toContain('self.location.origin');
+  const swText = await swRes.text();
+  expect(swText).toContain('self.location.origin');
+  expect(swText).toContain('Cross-Origin-Opener-Policy');
+  expect(swText).toContain('shiraz-runtime-blocks-v1');
+
+  // Verify bundled local unkernel + virgl WebGL2 assets are served same-origin.
+  expect((await request.get('/unkernel/unkernel.wasm')).ok()).toBe(true);
+  expect((await request.get('/unkernel/virgl.mjs')).ok()).toBe(true);
+  expect((await request.get('/unkernel/virgl.wasm')).ok()).toBe(true);
+
+  // Acceleration controls (boot.art AOT, SMP vCPUs, VM fast boot, experimental OAT/WebGL2) exist.
+  await expect(page.locator('#runner-art-mode')).toHaveValue('auto');
+  await expect(page.locator('#runner-cpus')).toHaveValue('auto');
+  await expect(page.locator('#runner-fast-boot')).toHaveValue('snapshot');
+  await expect(page.locator('#runner-precompile-apk')).toHaveCount(1);
+  await expect(page.locator('#runner-gpu')).toHaveCount(1);
+
+  // Verify service worker isolates /run/ for multi-core SMP while leaving / non-isolated.
+  await page.evaluate(async () => {
+    if ('serviceWorker' in navigator) {
+      await navigator.serviceWorker.ready;
+    }
+  });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.crossOriginIsolated)).toBe(true);
+  await expect(page.locator('.runner-accel-strip')).toContainText(/SMP/);
 
   // Credit for pithings/unkernel must be clearly visible and linked, with zero-telemetry guarantee.
   const credit = page.locator('.unkernel-credit');

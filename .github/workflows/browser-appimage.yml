@@ -145,7 +145,7 @@ jobs:
               build/flatpak/io.github.spectre_oss.shiraz.org_shiraz_fixture.stage \
               "dist/Shiraz-Flatpak-Base-${version}-${SHIRAZ_ARCH}.flatpak-base"
             if [ "$SHIRAZ_ARCH" = aarch64 ]; then
-              python3 scripts/make_browser_runtime.py \
+              python3 scripts/make_browser_runtime.py --with-aot \
                 build/appimage/org.shiraz.fixture.AppDir \
                 "dist/Shiraz-Browser-Runtime-${version}-aarch64.erofs"
             fi

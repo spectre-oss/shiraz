@@ -297,8 +297,9 @@ void help() {
            "Runs this packaged APK using standalone ART and Shiraz.\n"
            "Linux Landlock filesystem sandboxing is enabled by default outside Flatpak;\n"
            "pass --no-sandbox to opt out. --no-internet blocks direct network sockets.\n"
-           "Default display: 720x1280. SHIRAZ_ART_MODE=jit (default) or interpreter.\n"
+           "Default display: 720x1280. SHIRAZ_ART_MODE=jit (default), aot, or interpreter.\n"
            "SHIRAZ_ART_HEAP_MB: Java heap cap in MiB, 128..512 (default 512).\n"
+           "SHIRAZ_ART_INIT_HEAP_MB: optional initial Java heap in MiB, 16..heap cap.\n"
            "Data persists under XDG_DATA_HOME/shiraz-apps/<package>; logs are under\n"
            "XDG_CACHE_HOME/shiraz-apps/<package>/runs. Use an external timeout command\n"
            "for a wall-clock limit. This experimental runtime does not promise full APK "
@@ -406,8 +407,8 @@ int main(int argc, char** argv) {
         std::string mode = "jit";
         if (const char* configured = std::getenv("SHIRAZ_ART_MODE"))
             mode = configured;
-        if (mode != "jit" && mode != "interpreter")
-            fail("SHIRAZ_ART_MODE must be jit or interpreter");
+        if (mode != "jit" && mode != "aot" && mode != "interpreter")
+            fail("SHIRAZ_ART_MODE must be jit, aot, or interpreter");
         if (mode == "jit")
             requireFile(lib / "libart-compiler.so");
         const std::string aotProperty = facts.count("aot") ? facts.at("aot") : "false";
@@ -424,6 +425,27 @@ int main(int argc, char** argv) {
             for (const char* stem : {"shiraz-framework", "original"})
                 for (const char* extension : {".odex", ".vdex"})
                     requireFile(share / "oat" / artIsa / (std::string(stem) + extension));
+        }
+        bool runtimeBaseAot = false;
+        if (!packagedAot) {
+            runtimeBaseAot = true;
+            for (size_t i = 0; i < jars.size() && runtimeBaseAot; ++i) {
+                const std::string stem =
+                    i == 0 ? "boot" : "boot-" + fs::path(jars[i]).stem().string();
+                for (const char* extension : {".art", ".oat", ".vdex"}) {
+                    if (!fs::is_regular_file(art / "framework" / artIsa / (stem + extension))) {
+                        runtimeBaseAot = false;
+                        break;
+                    }
+                }
+            }
+            for (const char* extension : {".odex", ".vdex"}) {
+                if (!fs::is_regular_file(share / "oat" / artIsa /
+                                         (std::string("shiraz-framework") + extension))) {
+                    runtimeBaseAot = false;
+                    break;
+                }
+            }
         }
         const std::string nativeProperty = facts.count("native") ? facts.at("native") : "false";
         if (nativeProperty != "true" && nativeProperty != "false")
@@ -460,6 +482,9 @@ int main(int argc, char** argv) {
         int heapMiB = 512;
         if (const char* configured = std::getenv("SHIRAZ_ART_HEAP_MB"))
             heapMiB = number(configured, 128, 512, "SHIRAZ_ART_HEAP_MB");
+        int initHeapMiB = 0;
+        if (const char* configured = std::getenv("SHIRAZ_ART_INIT_HEAP_MB"))
+            initHeapMiB = number(configured, 16, heapMiB, "SHIRAZ_ART_INIT_HEAP_MB");
         fs::path data = dataOption.empty() ? xdg("XDG_DATA_HOME", ".local/share") / "shiraz-apps" /
                                                  facts["package"]
                                            : absolute(dataOption, "data directory");
@@ -483,6 +508,7 @@ int main(int argc, char** argv) {
                       << "Package: " << facts["package"] << "\nRuntime: " << facts["version"]
                       << "\nART mode: " << mode
                       << "\nPackaged AOT: " << (packagedAot ? "yes" : "no")
+                      << (runtimeBaseAot ? "\nRuntime base AOT: yes" : "")
                       << "\nARM64 bridge: " << (packagedDigitalis ? "digitalis (bundled)" : "none")
                       << "\nSandbox policy: "
                       << (inFlatpak   ? "flatpak"
@@ -490,8 +516,11 @@ int main(int argc, char** argv) {
                                       : "landlock (enforced at launch)")
                       << "\nNetwork policy: "
                       << (noInternet ? "offline (enforced at launch)" : "unrestricted")
-                      << "\nJava heap cap MiB: " << heapMiB << "\nData: " << data
-                      << "\nCache: " << cache
+                      << "\nJava heap cap MiB: " << heapMiB
+                      << (initHeapMiB > 0
+                              ? ("\nJava initial heap MiB: " + std::to_string(initHeapMiB))
+                              : "")
+                      << "\nData: " << data << "\nCache: " << cache
                       << "\nPayload layout checks passed; this does not test display, audio, TLS "
                          "or APK compatibility.\n";
             return 0;
@@ -616,6 +645,8 @@ int main(int argc, char** argv) {
                                               "-Xbootclasspath:" + boot,
                                               "-Xnoimage-dex2oat",
                                               mode == "jit" ? "-Xusejit:true" : "-Xusejit:false"};
+        if (initHeapMiB > 0)
+            arguments.insert(arguments.begin() + 4, "-Xms" + std::to_string(initHeapMiB) + "m");
         if (mode == "interpreter")
             arguments.push_back("-Xint");
         if (packagedDigitalis) {
@@ -625,7 +656,7 @@ int main(int argc, char** argv) {
                 arguments.begin() + 1,
                 {"--preload", "libshiraz-android-fonts.so:libshiraz-android-process.so"});
         }
-        if (packagedAot && mode != "interpreter") {
+        if ((packagedAot || runtimeBaseAot) && mode != "interpreter") {
             std::string logical;
             for (const auto& jar : jars) {
                 if (!logical.empty())
@@ -634,7 +665,8 @@ int main(int argc, char** argv) {
             }
             arguments.push_back("-Xbootclasspath-locations:" + logical);
             arguments.push_back("-Ximage:" + (art / "framework/boot.art").string());
-            arguments.push_back("-Xno-dex-file-fallback");
+            if (packagedAot)
+                arguments.push_back("-Xno-dex-file-fallback");
         }
         if (const char* trace = std::getenv("SHIRAZ_TRACE_AOT"))
             if (std::string(trace) == "1")

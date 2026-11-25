@@ -34,31 +34,37 @@ DROP_EXACT = {
 DROP_PREFIXES = (
     'usr/android-lib/',
     'usr/share/shiraz/installer/',
-    'usr/lib/libLLVM',
-    'usr/lib/libgallium',
     'usr/lib/libpython',
-    'usr/lib/dri/',
     'usr/lib/pipewire-0.3/',
     'usr/lib/spa-0.2/',
     'usr/share/pipewire/',
 )
 
+DROP_GPU_PREFIXES = (
+    'usr/lib/libLLVM',
+    'usr/lib/libgallium',
+    'usr/lib/dri/',
+)
+
 DROP_LIB_SUFFIXES = ('_dri.so',)
 
 
-def should_drop(relative: str) -> bool:
+def should_drop(relative: str, *, keep_gpu: bool = False) -> bool:
     if relative in DROP_EXACT:
         return True
     if any(relative.startswith(prefix) for prefix in DROP_PREFIXES):
         return True
-    if relative.startswith('usr/lib/') and any(
-        relative.endswith(suffix) for suffix in DROP_LIB_SUFFIXES
-    ):
-        return True
+    if not keep_gpu:
+        if any(relative.startswith(prefix) for prefix in DROP_GPU_PREFIXES):
+            return True
+        if relative.startswith('usr/lib/') and any(
+            relative.endswith(suffix) for suffix in DROP_LIB_SUFFIXES
+        ):
+            return True
     return False
 
 
-def stage_tree(source: Path, dest: Path) -> int:
+def stage_tree(source: Path, dest: Path, *, keep_gpu: bool = False) -> int:
     """Copy a Shiraz AppDir or runtime-template tarball into dest, stripping unused files."""
     if source.is_file():
         with tarfile.open(source, 'r:*') as archive:
@@ -66,7 +72,7 @@ def stage_tree(source: Path, dest: Path) -> int:
     elif source.is_dir():
         for entry in sorted(source.rglob('*')):
             relative = entry.relative_to(source).as_posix()
-            if should_drop(relative):
+            if should_drop(relative, keep_gpu=keep_gpu):
                 continue
             target = dest / relative
             if entry.is_symlink():
@@ -84,7 +90,7 @@ def stage_tree(source: Path, dest: Path) -> int:
     if source.is_file():
         for entry in sorted(dest.rglob('*'), reverse=True):
             relative = entry.relative_to(dest).as_posix()
-            if should_drop(relative):
+            if should_drop(relative, keep_gpu=keep_gpu):
                 if entry.is_dir() and not entry.is_symlink():
                     shutil.rmtree(entry, ignore_errors=True)
                 else:
@@ -106,6 +112,20 @@ def stage_tree(source: Path, dest: Path) -> int:
         if entry.is_file() and not entry.is_symlink():
             total_bytes += entry.stat().st_size
     return total_bytes
+
+
+def compile_base_aot(
+    staged: Path, work: Path, host: Path | None = None, prefix: Path | None = None
+) -> dict:
+    """Compile relocatable boot.art and shiraz-framework.odex inside the staged runtime."""
+    sys.path.insert(0, str(ROOT / 'scripts'))
+    sys.path.insert(0, str(ROOT / 'src'))
+    from package_aot import compile_runtime_base
+    from shiraz.runtime import HOST, JARS
+
+    resolved_host = host or HOST
+    resolved_prefix = prefix or (ROOT / '.local')
+    return compile_runtime_base(staged, work, resolved_host, JARS, resolved_prefix)
 
 
 def verify_aarch64_elfs(root: Path) -> None:
@@ -186,6 +206,16 @@ def main(argv: list[str] | None = None) -> int:
         help='Filesystem format (auto chooses from output suffix)',
     )
     parser.add_argument(
+        '--with-aot',
+        action='store_true',
+        help='Compile relocatable boot.art + shiraz-framework.odex into the runtime image',
+    )
+    parser.add_argument(
+        '--keep-gpu',
+        action='store_true',
+        help='Keep Mesa gallium/DRI/LLVM libraries for experimental virgl WebGL2 GPU mode',
+    )
+    parser.add_argument(
         '--skip-arch-check',
         action='store_true',
         help='Skip ELF aarch64 verification (for unit test fixtures only)',
@@ -200,7 +230,10 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix='shiraz-browser-rt-') as tmp:
         staged = Path(tmp) / 'runtime'
         staged.mkdir()
-        total_bytes = stage_tree(args.source.resolve(), staged)
+        total_bytes = stage_tree(args.source.resolve(), staged, keep_gpu=args.keep_gpu)
+        if args.with_aot:
+            aot_info = compile_base_aot(staged, Path(tmp) / 'aot-logs')
+            total_bytes += aot_info['bytes']
         if not args.skip_arch_check:
             verify_aarch64_elfs(staged)
         if fmt == 'erofs':

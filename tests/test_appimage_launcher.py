@@ -287,6 +287,46 @@ int main(void) {
         self.assertIn('-Xint', output)
         self.assertNotIn('-Ximage:', output)
 
+    def test_runtime_base_aot_and_initial_heap_arguments(self):
+        for stem in (
+            'boot',
+            'boot-core-libart-hostdex',
+            'boot-okhttp-hostdex',
+            'boot-bouncycastle-hostdex',
+            'boot-wolfssljni-hostdex',
+        ):
+            for suffix in ('.art', '.oat', '.vdex'):
+                file = self.app / 'usr/art/framework/x86_64' / (stem + suffix)
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.touch()
+        for suffix in ('.odex', '.vdex'):
+            file = self.share / 'oat/x86_64' / ('shiraz-framework' + suffix)
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.touch()
+        self.env['SHIRAZ_ART_MODE'] = 'aot'
+        self.env['SHIRAZ_ART_HEAP_MB'] = '384'
+        self.env['SHIRAZ_ART_INIT_HEAP_MB'] = '96'
+        diag = self.run_launcher('--diagnose')
+        self.assertEqual(diag.returncode, 0, diag.stderr)
+        self.assertIn('ART mode: aot', diag.stdout)
+        self.assertIn('Packaged AOT: no', diag.stdout)
+        self.assertIn('Runtime base AOT: yes', diag.stdout)
+        self.assertIn('Java initial heap MiB: 96', diag.stdout)
+        shutil.copy2('/usr/bin/echo', self.app / 'usr/art/bin/dalvikvm')
+        result = self.run_launcher('--frames', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tokens = next(self.cache.rglob('stdout.log')).read_text().split()
+        self.assertIn('-Xms96m', tokens)
+        self.assertIn('-Xmx384m', tokens)
+        self.assertIn('-Xusejit:false', tokens)
+        self.assertNotIn('-Xint', tokens)
+        self.assertTrue(any(tok.startswith('-Ximage:') for tok in tokens))
+        self.assertTrue(any(tok.startswith('-Xbootclasspath-locations:') for tok in tokens))
+        self.assertNotIn('-Xno-dex-file-fallback', tokens)
+        # Initial heap above heap cap must fail cleanly before data creation.
+        self.env['SHIRAZ_ART_INIT_HEAP_MB'] = '400'
+        self.assertNotEqual(self.run_launcher('--diagnose').returncode, 0)
+
     def test_native_payload_validation_before_data_creation(self):
         with self.launch.open('a') as out:
             out.write('native=true\n')

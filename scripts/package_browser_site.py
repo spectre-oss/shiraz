@@ -100,6 +100,7 @@ def main():
                 size=rt_path.stat().st_size,
                 format=fmt,
                 architecture='aarch64',
+                features=['fb0', 'aot'],
             )
             break
 

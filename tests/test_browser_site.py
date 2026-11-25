@@ -100,6 +100,7 @@ class BrowserSiteTests(unittest.TestCase):
                 'base/Shiraz-Browser-Runtime-1.2.3-aarch64.erofs',
             )
             self.assertEqual(manifest['browser_runtime']['format'], 'erofs')
+            self.assertEqual(manifest['browser_runtime']['features'], ['fb0', 'aot'])
             self.assertTrue((output / manifest['browser_runtime']['file']).is_file())
 
             # Corrupt browser runtime checksum must be rejected.

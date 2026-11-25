@@ -84,12 +84,15 @@ def install_runtime(site, source, version):
             rt_digest = _verify_sha256_file(rt_path, ext)
             (site / 'base').mkdir(exist_ok=True)
             shutil.copy2(rt_path, site / 'base' / rt_name)
+            parts = tuple(int(part) for part in version.split('.'))
+            features = ['fb0', 'aot'] if parts >= (0, 367, 0) else []
             browser_runtime = dict(
                 file='base/' + rt_name,
                 sha256=rt_digest,
                 size=rt_path.stat().st_size,
                 format=fmt,
                 architecture='aarch64',
+                features=features,
             )
             break
 

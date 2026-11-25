@@ -2,7 +2,7 @@
 
 > Shiraz is an open-source (GPL-3.0-only), GTK-free Android compatibility layer that runs supported Android APKs directly on Linux, Apple Silicon macOS (experimental), and Windows (experimental foundation) using standalone ART, SDL2, and native graphics/audio/OS bridges — without booting an Android system image, virtual machine, container, or kernel binder module.
 
-Snapshot version: v0.365.0 (data updated 2026-11-24).
+Snapshot version: v0.366.1 (data updated 2026-11-24).
 
 ## Core Facts
 

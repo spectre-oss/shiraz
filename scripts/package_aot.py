@@ -7,14 +7,14 @@ from pathlib import Path
 import subprocess
 
 
-def compile_package(appdir, work, host, jars, prefix):
+def _compile(appdir, work, host, jars, prefix, include_apk=True):
     framework = appdir / 'usr/art/framework'
     share = appdir / 'usr/share/shiraz'
     isa = {'x86_64': 'x86_64', 'aarch64': 'arm64'}[platform.machine()]
     images = framework / isa
     oat = share / 'oat' / isa
-    images.mkdir(parents=True)
-    oat.mkdir(parents=True)
+    images.mkdir(parents=True, exist_ok=True)
+    oat.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
     for name in ('android-data/dalvik-cache', 'cache', 'tmp', 'home'):
         (work / name).mkdir(parents=True, exist_ok=True)
@@ -58,10 +58,10 @@ def compile_package(appdir, work, host, jars, prefix):
             ],
         )
     ]
-    for name, context in [
-        ('shiraz-framework.jar', 'PCL[]'),
-        ('original.apk', 'PCL[shiraz-framework.jar]'),
-    ]:
+    targets = [('shiraz-framework.jar', 'PCL[]')]
+    if include_apk:
+        targets.append(('original.apk', 'PCL[shiraz-framework.jar]'))
+    for name, context in targets:
         commands.append(
             (
                 Path(name).stem,
@@ -99,7 +99,8 @@ def compile_package(appdir, work, host, jars, prefix):
             str((images / (stem + suffix)).relative_to(appdir))
             for suffix in ('.art', '.oat', '.vdex')
         )
-    for stem in ('shiraz-framework', 'original'):
+    stems = ('shiraz-framework', 'original') if include_apk else ('shiraz-framework',)
+    for stem in stems:
         expected.update(
             str((oat / (stem + suffix)).relative_to(appdir)) for suffix in ('.odex', '.vdex')
         )
@@ -120,8 +121,17 @@ def compile_package(appdir, work, host, jars, prefix):
     return {
         'native_debug_info': 'mini',
         'boot_filter': 'speed',
-        'application_filter': 'speed',
+        'application_filter': 'speed' if include_apk else 'none',
         'boot_locations': locations,
         'files': files,
         'bytes': sum((appdir / name).stat().st_size for name in files),
     }
+
+
+def compile_package(appdir, work, host, jars, prefix):
+    return _compile(appdir, work, host, jars, prefix, include_apk=True)
+
+
+def compile_runtime_base(appdir, work, host, jars, prefix):
+    """Compile relocatable boot.art + shiraz-framework.odex without an APK."""
+    return _compile(appdir, work, host, jars, prefix, include_apk=False)

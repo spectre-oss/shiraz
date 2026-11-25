@@ -12,6 +12,8 @@
   import {
     checkBrowserSupport,
     clearPersistentStorage,
+    disposeWarmVm,
+    getIsolationCapabilities,
     inspectApkForBrowser,
     keyboardEventToLiveCommands,
     startShirazBrowserSession
@@ -45,11 +47,25 @@
   let localRuntimeFile = $state(null);
   let dragging = $state(false);
 
-  let artMode = $state('interpreter');
+  let artMode = $state('auto');
+  let cpuCount = $state('auto');
+  let fastBootMode = $state('snapshot'); // snapshot | warm | cold
   let memoryMiB = $state(768);
   let orientation = $state('portrait');
   let persistData = $state(true);
+  let precompileApk = $state(false);
+  let enableGpu = $state(false);
   let muted = $state(false);
+
+  let isolation = $state({
+    isolated: false,
+    sharedArrayBuffer: false,
+    hardwareConcurrency: 1,
+    smpReady: false,
+    recommendedCpus: 1
+  });
+  let swReadyForReload = $state(false);
+  let runtimeTelemetry = $state(null);
 
   let phase = $state('idle'); // idle | inspecting | booting | running | stopped | error
   let statusMessage = $state('Drop an Android™ APK or pick a file to run it locally in your browser.');
@@ -177,6 +193,30 @@
     if (!rafId) rafId = requestAnimationFrame(paintFrame);
   }
 
+  function drawGpuScanout(gpu) {
+    if (!canvasEl || !gpu?.scanout) return false;
+    const { width, height } = gpu.scanout;
+    if (width > 0 && height > 0 && (canvasEl.width !== width || canvasEl.height !== height)) {
+      canvasEl.width = width;
+      canvasEl.height = height;
+      screenWidth = width;
+      screenHeight = height;
+    }
+    const ctx = canvasEl.getContext('2d', { alpha: false });
+    if (!ctx) return false;
+    const drew = gpu.drawFrame(ctx);
+    if (drew) {
+      frameCount += 1;
+      if (phase === 'booting' || phase === 'inspecting') {
+        phase = 'running';
+        loadPercent = 100;
+        stopBootTimer();
+        statusMessage = `${apkInfo?.label || apkInfo?.package || 'App'} is running locally in your browser.`;
+      }
+    }
+    return Boolean(drew);
+  }
+
   async function loadPublishedRuntime() {
     try {
       const response = await fetch(`${base}/release.json`, { cache: 'no-store' });
@@ -191,10 +231,11 @@
           format: data.browser_runtime.format || 'erofs',
           size: data.browser_runtime.size,
           sha256: data.browser_runtime.sha256,
-          version: data.version
+          version: data.version,
+          features: Array.isArray(data.browser_runtime.features) ? data.browser_runtime.features : []
         };
         runtimeBadge = `v${data.version} · aarch64 ${releaseManifest.format.toUpperCase()}`;
-        runtimeDetail = `${formatSize(releaseManifest.size)} lazy-streamed over HTTP Range requests (only used blocks download).`;
+        runtimeDetail = `${formatSize(releaseManifest.size)} lazy-streamed over HTTP Range requests and cached locally by block.`;
         return;
       }
       const arm = data.architectures?.aarch64;
@@ -274,21 +315,23 @@
     }
   }
 
-  async function stopSession(quiet = false) {
+  async function stopSession(quiet = false, keepWarm = fastBootMode !== 'cold') {
     activeRunId += 1;
     stopBootTimer();
     const current = session;
     session = null;
     activePointerId = null;
     if (current) {
-      await current.stop();
+      await current.stop({ keepWarm });
     }
     if (!quiet) {
       phase = 'stopped';
       loadStep = 'idle';
       loadPercent = 0;
       loadDetail = '';
-      statusMessage = 'Session stopped. Drop another APK or click Run APK to start again.';
+      statusMessage = keepWarm
+        ? 'Session stopped (Linux VM kept warm for instant relaunch). Drop another APK or click Run APK.'
+        : 'Session stopped. Drop another APK or click Run APK to start again.';
     }
   }
 
@@ -337,6 +380,7 @@
       );
 
       phase = 'booting';
+      runtimeTelemetry = null;
       const started = await startShirazBrowserSession({
         base,
         runtimeSource,
@@ -345,8 +389,12 @@
         width: targetW,
         height: targetH,
         artMode,
+        cpuCount,
         memoryMiB: Number(memoryMiB),
         persistData,
+        enableSnapshot: fastBootMode === 'snapshot',
+        precompileApk,
+        enableGpu,
         enableAudio: !muted,
         onStage: msg => {
           if (runId === activeRunId && phase === 'booting') statusMessage = msg;
@@ -357,6 +405,10 @@
         },
         onFrame: frame => {
           if (runId === activeRunId) queueFrame(frame);
+        },
+        onGpuDraw: gpu => (runId === activeRunId ? drawGpuScanout(gpu) : false),
+        onRuntimeInfo: info => {
+          if (runId === activeRunId) runtimeTelemetry = info;
         },
         onLog: chunk => {
           if (runId === activeRunId) appendLog(chunk);
@@ -601,9 +653,10 @@
   async function resetStorage() {
     clearingData = true;
     try {
-      await stopSession(true);
+      await stopSession(true, false);
       await clearPersistentStorage();
-      statusMessage = 'Cleared saved IndexedDB app storage for this browser.';
+      runtimeTelemetry = null;
+      statusMessage = 'Cleared IndexedDB app storage, OPFS warm snapshots, and cached runtime blocks.';
       phase = 'idle';
     } catch (error) {
       errorMessage = error?.message || String(error);
@@ -616,6 +669,7 @@
   onMount(() => {
     const stopIcons = initIcons();
     loadPublishedRuntime();
+    isolation = getIsolationCapabilities();
 
     // Detect standalone pop-out (?standalone=1) or installed PWA display mode.
     const standaloneParam = new URLSearchParams(window.location.search).get('standalone') === '1';
@@ -643,9 +697,24 @@
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onAppInstalled);
 
-    // Register minimal zero-telemetry same-origin service worker for PWA installability.
+    // Register minimal zero-telemetry same-origin service worker for PWA installability,
+    // Cross-Origin Isolation (/run/ only -> SMP multi-core), and runtime Range block caching.
+    const onSwController = () => {
+      isolation = getIsolationCapabilities();
+      if (!isolation.smpReady) swReadyForReload = true;
+    };
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register(`${base}/sw.js`, { scope: `${base}/` }).catch(() => {});
+      navigator.serviceWorker.addEventListener('controllerchange', onSwController);
+      navigator.serviceWorker
+        .register(`${base}/sw.js`, { scope: `${base}/` })
+        .then(() => navigator.serviceWorker.ready)
+        .then(() => {
+          isolation = getIsolationCapabilities();
+          if (!isolation.smpReady && navigator.serviceWorker.controller) {
+            swReadyForReload = true;
+          }
+        })
+        .catch(() => {});
     }
 
     // Support opening .apk files directly via installed PWA OS file_handlers.
@@ -680,8 +749,9 @@
       wcoMq.removeEventListener?.('change', syncDisplayMode);
       window.removeEventListener('beforeinstallprompt', onBeforeInstall);
       window.removeEventListener('appinstalled', onAppInstalled);
+      navigator.serviceWorker?.removeEventListener?.('controllerchange', onSwController);
       stopIcons();
-      stopSession(true);
+      stopSession(true, false).then(() => disposeWarmVm());
     };
   });
 </script>
@@ -1007,6 +1077,41 @@
         <div class="builder-base">
           <strong>{localRuntimeFile ? `Local: ${localRuntimeFile.name}` : runtimeBadge}</strong>
           <p>{localRuntimeFile ? `${formatSize(localRuntimeFile.size)} · read locally in browser` : runtimeDetail}</p>
+          <div class="runner-accel-strip" aria-label="Local acceleration status">
+            {#if isolation.smpReady}
+              <span class="runner-chip" data-active="true">
+                SMP · up to {Math.min(4, isolation.hardwareConcurrency)} CPUs
+              </span>
+            {:else}
+              <span class="runner-chip" data-active="false">1 CPU</span>
+              {#if swReadyForReload}
+                <button
+                  type="button"
+                  class="runner-chip-btn"
+                  onclick={() => window.location.reload()}
+                >
+                  Reload for multi-core SMP
+                </button>
+              {/if}
+            {/if}
+            {#if runtimeTelemetry}
+              <span class="runner-chip" data-active="true">
+                {runtimeTelemetry.transport === 'virgl+fb0'
+                  ? 'WebGL2 virgl'
+                  : runtimeTelemetry.transport === 'fb0'
+                    ? 'Zero-copy /dev/fb0'
+                    : 'PPM fallback'}
+              </span>
+              <span class="runner-chip" data-active={runtimeTelemetry.hasBootArt ? 'true' : 'false'}>
+                {runtimeTelemetry.artMode.toUpperCase()}{runtimeTelemetry.hasBootArt ? ' + boot.art' : ''}
+              </span>
+              {#if runtimeTelemetry.bootKind !== 'cold'}
+                <span class="runner-chip" data-active="true">
+                  {runtimeTelemetry.bootKind === 'warm-reuse' ? 'Warm VM' : 'OPFS snapshot'}
+                </span>
+              {/if}
+            {/if}
+          </div>
         </div>
 
         <label for="runner-apk">Android™ APK</label>
@@ -1045,7 +1150,9 @@
           <div>
             <label for="runner-art-mode">ART execution</label>
             <select id="runner-art-mode" bind:value={artMode}>
-              <option value="interpreter">Interpreter (fast)</option>
+              <option value="auto">Auto (boot.art AOT)</option>
+              <option value="aot">Boot AOT (hybrid)</option>
+              <option value="interpreter">Interpreter</option>
               <option value="jit">ART JIT (exp.)</option>
             </select>
           </div>
@@ -1058,12 +1165,55 @@
               <option value={1536}>1536 MiB</option>
             </select>
           </div>
+          <div>
+            <label for="runner-cpus">Virtual CPUs</label>
+            <select id="runner-cpus" bind:value={cpuCount}>
+              <option value="auto">
+                {isolation.smpReady ? `Auto (${isolation.recommendedCpus} CPUs · SMP)` : 'Auto (1 CPU)'}
+              </option>
+              <option value="1">1 CPU</option>
+              <option value="2" disabled={!isolation.smpReady}>2 CPUs (SMP)</option>
+              <option value="4" disabled={!isolation.smpReady}>4 CPUs (SMP)</option>
+            </select>
+          </div>
+          <div>
+            <label for="runner-fast-boot">VM fast boot</label>
+            <select id="runner-fast-boot" bind:value={fastBootMode}>
+              <option value="snapshot">Warm VM + OPFS snapshot</option>
+              <option value="warm">Warm VM reuse only</option>
+              <option value="cold">Cold boot each run</option>
+            </select>
+          </div>
         </div>
 
         <label class="builder-checkbox" for="runner-persist">
           <input id="runner-persist" type="checkbox" bind:checked={persistData} />
           <span>Persist app data locally in IndexedDB</span>
         </label>
+
+        <details class="runner-override">
+          <summary>
+            <span>Experimental acceleration (APK OAT cache &amp; WebGL2 GPU)</span>
+            <span class="disclosure-icon" aria-hidden="true">
+              <svg class="icon" data-icon="plus" viewBox="0 0 24 24" focusable="false">
+                <path d="M5 12h14" /><path d="M12 5v14" />
+              </svg>
+            </span>
+          </summary>
+          <label class="builder-checkbox" for="runner-precompile-apk">
+            <input
+              id="runner-precompile-apk"
+              type="checkbox"
+              bind:checked={precompileApk}
+              disabled={!persistData}
+            />
+            <span>Pre-compile APK on /data (quicken OAT cache for faster repeat launches)</span>
+          </label>
+          <label class="builder-checkbox" for="runner-gpu">
+            <input id="runner-gpu" type="checkbox" bind:checked={enableGpu} />
+            <span>Experimental WebGL2 GPU (virglrenderer; requires runtime built with --keep-gpu)</span>
+          </label>
+        </details>
 
         <details class="runner-override">
           <summary>

@@ -880,6 +880,12 @@ input, textarea { caret-color: var(--saffron); }
 .runner-option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .runner-option-grid > div { min-width: 0; }
 .runner-option-grid select { border-style: solid; border-color: var(--line-strong); text-overflow: ellipsis; }
+.runner-accel-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.runner-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--wine); font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+.runner-chip[data-active=true] { border-color: color-mix(in srgb, var(--glass-teal) 55%, var(--line)); color: #c7f7ef; }
+.runner-chip-btn { min-height: 30px; padding: 3px 11px; border-radius: 999px; border: 1px solid var(--saffron); background: rgb(232 180 79 / .12); color: var(--saffron); font-size: 12px; font-weight: 600; cursor: pointer; }
+.runner-chip-btn:hover { background: rgb(232 180 79 / .22); }
+.runner-override .builder-checkbox { margin: 12px 0 0; }
 .runner-override summary { justify-content: space-between; gap: 12px; list-style: none; }
 .runner-override summary::-webkit-details-marker { display: none; }
 .runner-override[open] .disclosure-icon { transform: rotate(45deg); }
