@@ -8,8 +8,10 @@
 
 const SHELL_CACHE = 'shiraz-pwa-shell-v2';
 const BLOCK_CACHE = 'shiraz-runtime-blocks-v1';
-const KEEP_CACHES = new Set([SHELL_CACHE, BLOCK_CACHE]);
+const PWA_APPS_CACHE = 'shiraz-pwa-apps-v1';
+const KEEP_CACHES = new Set([SHELL_CACHE, BLOCK_CACHE, PWA_APPS_CACHE]);
 const RUNTIME_IMAGE_RE = /\/Shiraz-Browser-Runtime-[^/]+\.(?:erofs|img)$/i;
+const PWA_APP_ASSET_RE = /^(.*\/)?run\/pwa\/[^/]+\/(manifest\.webmanifest|icon-(?:192|512)\.png)$/i;
 const RUN_ROUTE_RE = /(?:^|\/)run(?:\/(?:index\.html)?)?$/;
 const SKIP_SHELL_EXTENSIONS = /\.(?:wasm|erofs|img|ext4|appimage|flatpak-base|mp4|apk)$/i;
 
@@ -39,6 +41,35 @@ self.addEventListener('message', event => {
     }
   }
 });
+
+function sanitizeAppSlug(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120);
+}
+
+async function rewriteRunManifestForApp(response, url) {
+  const slug = sanitizeAppSlug(url.searchParams.get('app'));
+  if (!slug || !response || !response.ok) return response;
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/html')) return response;
+  const html = await response.text();
+  const basePrefix = url.pathname.replace(/run(?:\/(?:index\.html)?)?$/, '');
+  const manifestUrl = `${basePrefix}run/pwa/${encodeURIComponent(slug)}/manifest.webmanifest`;
+  const rewritten = html.replace(
+    /<link\s+rel=["']manifest["']\s+href=["'][^"']*["']\s*\/?>/i,
+    `<link rel="manifest" href="${manifestUrl}">`
+  );
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  return new Response(rewritten, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
 
 function withRunIsolationHeaders(response) {
   if (!response || response.status === 0 || (response.status >= 300 && response.status < 400)) {
@@ -127,6 +158,28 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
+  // Serve locally cached per-APK PWA manifests and original app PNG icons same-origin.
+  const pwaMatch = PWA_APP_ASSET_RE.exec(url.pathname);
+  if (pwaMatch) {
+    const basePrefix = pwaMatch[1] || '/';
+    const assetName = pwaMatch[2].toLowerCase();
+    event.respondWith(
+      caches
+        .open(PWA_APPS_CACHE)
+        .then(cache => cache.match(new Request(`${url.origin}${url.pathname}`)))
+        .then(hit => {
+          if (hit) return withSameOriginCorp(hit);
+          const fallbackPath =
+            assetName === 'manifest.webmanifest'
+              ? `${basePrefix}run-manifest.webmanifest`
+              : `${basePrefix}${assetName}`;
+          return fetch(new Request(`${url.origin}${fallbackPath}`)).then(withSameOriginCorp);
+        })
+        .catch(() => Response.error())
+    );
+    return;
+  }
+
   // Cache immutable HTTP Range blocks for versioned Shiraz browser runtime images.
   if (request.headers.has('range')) {
     if (RUNTIME_IMAGE_RE.test(url.pathname)) {
@@ -141,17 +194,23 @@ self.addEventListener('fetch', event => {
   const isolate = request.mode === 'navigate' && RUN_ROUTE_RE.test(url.pathname);
   event.respondWith(
     fetch(request)
-      .then(response => {
+      .then(async response => {
         if (response.ok) {
           const copy = response.clone();
           caches.open(SHELL_CACHE).then(cache => cache.put(request, copy)).catch(() => {});
         }
-        return isolate ? withRunIsolationHeaders(response) : response;
+        if (!isolate) return response;
+        const rewritten = await rewriteRunManifestForApp(response, url);
+        return withRunIsolationHeaders(rewritten);
       })
       .catch(async () => {
-        const cached = await caches.match(request);
+        const cached =
+          (await caches.match(request)) ||
+          (isolate ? await caches.match(new Request(`${url.origin}${url.pathname}`)) : null);
         if (!cached) return Response.error();
-        return isolate ? withRunIsolationHeaders(cached) : cached;
+        if (!isolate) return cached;
+        const rewritten = await rewriteRunManifestForApp(cached, url);
+        return withRunIsolationHeaders(rewritten);
       })
   );
 });

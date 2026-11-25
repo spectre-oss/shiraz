@@ -100,4 +100,35 @@ func TestPrepareBrowserApk(t *testing.T) {
 			t.Fatal("accepted x86_64 ELF inside arm64-v8a")
 		}
 	})
+
+	t.Run("extracts app icon and webp fallback", func(t *testing.T) {
+		launch, err := prepareBrowserApk(apkBytes, "0.363.2")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if launch.IconMime != "image/png" || launch.IconBase64 == "" {
+			t.Fatalf("expected fixture PNG icon, got mime=%q len=%d", launch.IconMime, len(launch.IconBase64))
+		}
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		w, err := zw.Create("res/mipmap-xxxhdpi/ic_launcher.webp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		webpStub := append([]byte("RIFF\x18\x00\x00\x00WEBPVP8 "), make([]byte, 16)...)
+		if _, err := w.Write(webpStub); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, mime, ok := resolveResourceIconImage(zr, nil, 0)
+		if !ok || mime != "image/webp" || len(data) != len(webpStub) {
+			t.Fatalf("expected extracted WebP fallback icon, got ok=%v mime=%q len=%d", ok, mime, len(data))
+		}
+	})
 }

@@ -534,7 +534,8 @@ test('home page links to the client-side browser APK runner with unkernel credit
     expect(violations).toEqual([]);
   }
 
-  // Standalone / popped-out PWA view makes strictly zero external requests and stays accessible.
+  // Standalone / popped-out minimal black PWA view: rounded viewport, thin always-on-top
+  // footer (Back, Forward, small label, Install), zero bulky controls, zero external requests.
   const standaloneExternal = [];
   page.on('request', req => {
     const url = new URL(req.url());
@@ -544,9 +545,77 @@ test('home page links to the client-side browser APK runner with unkernel credit
   });
   await page.setViewportSize({width: 440, height: 780});
   await page.goto('/run/?standalone=1');
-  await expect(page.locator('.standalone-header')).toBeVisible();
   await expect(page.locator('.runner-hero')).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Pop out', exact: true})).toBeVisible();
+  await expect(page.locator('.phone-controls')).toHaveCount(0);
+  await expect(page.locator('.phone-topbar')).toHaveCount(0);
+  await expect(page.locator('.runner-panel')).toHaveCount(0);
+  await expect(page.locator('.phone-frame.is-minimal')).toBeVisible();
+  const minimalStyles = await page.evaluate(() => {
+    const bodyBg = getComputedStyle(document.body).backgroundColor;
+    const viewport = document.querySelector('.phone-viewport');
+    const footer = document.querySelector('.minimal-footer');
+    const vRect = viewport ? viewport.getBoundingClientRect() : null;
+    const fRect = footer ? footer.getBoundingClientRect() : null;
+    return {
+      bodyBg,
+      viewportRadius: viewport ? parseFloat(getComputedStyle(viewport).borderTopLeftRadius) : 0,
+      footerPos: footer ? getComputedStyle(footer).position : '',
+      footerHeight: fRect ? fRect.height : 999,
+      leftGap: vRect ? vRect.left : -1,
+      rightGap: vRect ? window.innerWidth - vRect.right : -1,
+      bottomAboveFooter: vRect && fRect ? fRect.top - vRect.bottom : -1
+    };
+  });
+  expect(minimalStyles.bodyBg).toBe('rgb(0, 0, 0)');
+  expect(minimalStyles.viewportRadius).toBeGreaterThanOrEqual(20);
+  expect(minimalStyles.footerPos).toBe('fixed');
+  expect(minimalStyles.footerHeight).toBeLessThanOrEqual(34);
+  expect(minimalStyles.leftGap).toBeGreaterThanOrEqual(8);
+  expect(minimalStyles.rightGap).toBeGreaterThanOrEqual(8);
+  expect(Math.abs(minimalStyles.leftGap - minimalStyles.rightGap)).toBeLessThanOrEqual(2);
+  expect(minimalStyles.bottomAboveFooter).toBeGreaterThanOrEqual(4);
+  const footer = page.locator('.minimal-footer');
+  await expect(footer.getByRole('button', {name: 'Back'})).toBeVisible();
+  await expect(footer.getByRole('button', {name: 'Forward'})).toBeVisible();
+  await expect(footer.getByRole('button', {name: /Install/i})).toBeVisible();
+  await expect(footer.locator('.minimal-footer-text')).toContainText('Shiraz');
+
+  // Verify SW serves dynamically cached per-app PWA manifest ("<App> - Shiraz") & icon.
+  const cachedManifest = await page.evaluate(async () => {
+    const cache = await caches.open('shiraz-pwa-apps-v1');
+    const origin = window.location.origin;
+    const manifestBody = JSON.stringify({
+      id: '/run/?app=com.example.demo',
+      name: 'Demo - Shiraz',
+      short_name: 'Demo - Shiraz',
+      start_url: '/run/?standalone=1&app=com.example.demo',
+      display: 'standalone',
+      background_color: '#000000',
+      theme_color: '#000000',
+      icons: [{src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any'}]
+    });
+    await cache.put(
+      new Request(`${origin}/run/pwa/com.example.demo/manifest.webmanifest`),
+      new Response(manifestBody, {status: 200, headers: {'Content-Type': 'application/manifest+json'}})
+    );
+    const res = await fetch('/run/pwa/com.example.demo/manifest.webmanifest');
+    return res.ok ? await res.json() : null;
+  });
+  expect(cachedManifest?.name).toBe('Demo - Shiraz');
+  expect(cachedManifest?.short_name).toBe('Demo - Shiraz');
+  expect(cachedManifest?.background_color).toBe('#000000');
+
+  // Verify navigating to ?standalone=1&app=<slug> receives the per-app manifest from byte 0 via SW.
+  await page.goto('/run/?standalone=1&app=com.example.demo');
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', /\/run\/pwa\/com\.example\.demo\/manifest\.webmanifest$/);
+
+  // Selecting an invalid .apk immediately triggers launch in the same window (auto-run on select).
+  await page.locator('.phone-frame input[type="file"]').setInputFiles({
+    name: 'bad.apk',
+    mimeType: 'application/vnd.android.package-archive',
+    buffer: Buffer.from('NOTAPK')
+  });
+  await expect(page.locator('.placeholder-error')).toBeVisible();
   expect(standaloneExternal).toEqual([]);
   await page.addScriptTag({path: require.resolve('axe-core/axe.min.js')});
   const standaloneViolations = await page.evaluate(async () => (await window.axe.run(document, {runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa']}})).violations);

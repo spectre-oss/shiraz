@@ -1,6 +1,7 @@
 <script>
   // SPDX-License-Identifier: GPL-3.0-only
   import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
   import { onNavigate } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
@@ -9,7 +10,22 @@
   let { children } = $props();
   const base = resolve('/').replace(/\/$/, '');
   const isRunRoute = $derived(page.route.id === '/run' || /(?:^|\/)run\/?$/.test(page.url.pathname));
-  const manifestHref = $derived(`${base}/${isRunRoute ? 'run-manifest.webmanifest' : 'manifest.webmanifest'}`);
+  const appSlug = $derived(
+    browser && isRunRoute
+      ? (new URLSearchParams(window.location.search).get('app') || '')
+          .trim()
+          .replace(/[^A-Za-z0-9._-]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 120)
+      : ''
+  );
+  const manifestHref = $derived(
+    isRunRoute
+      ? appSlug
+        ? `${base}/run/pwa/${encodeURIComponent(appSlug)}/manifest.webmanifest`
+        : `${base}/run-manifest.webmanifest`
+      : `${base}/manifest.webmanifest`
+  );
   // Register minimal zero-telemetry same-origin SW so /run/ opens with Cross-Origin
   // Isolation (SMP multi-core) and runtime block caching on first navigation.
   onMount(() => {

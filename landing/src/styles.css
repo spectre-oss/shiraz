@@ -806,6 +806,7 @@ input, textarea { caret-color: var(--saffron); }
 .phone-canvas { display: block; width: 100%; height: 100%; object-fit: contain; touch-action: none; cursor: pointer; opacity: 0; transition: opacity .25s ease; }
 .phone-canvas.is-visible { opacity: 1; }
 .phone-placeholder { position: absolute; inset: 0; padding: 28px 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; background: radial-gradient(90% 80% at 50% 20%, #3d1729 0%, #14060d 78%); }
+.placeholder-error { max-width: 34ch; margin: 0 0 4px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgb(244 114 140 / .4); background: rgb(74 20 32 / .7); font-size: 12.5px; line-height: 1.4; color: #ffd4dc; }
 .placeholder-title { font-family: var(--display); font-stretch: 78%; font-size: 24px; font-weight: 700; color: var(--ink); }
 .placeholder-title code { font-family: var(--mono); font-size: .85em; color: var(--saffron); }
 .placeholder-sub { max-width: 30ch; font-size: 14px; color: var(--ink-soft); }
@@ -815,6 +816,7 @@ input, textarea { caret-color: var(--saffron); }
 /* Rich startup loading screen inside the phone viewport until frame #1 paints. */
 .phone-loading { position: absolute; inset: 0; padding: 22px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; background: radial-gradient(100% 75% at 50% 12%, #4a1c31 0%, #190810 62%, #10050a 100%); }
 .loader-emblem { position: relative; width: 64px; height: 64px; display: grid; place-items: center; }
+.loader-emblem img.has-app-icon { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; }
 .loader-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgb(232 180 79 / .22); border-top-color: var(--saffron); border-right-color: var(--glass-teal); animation: runner-spin 1.15s cubic-bezier(.55, .15, .45, .85) infinite; }
 .loader-heading { display: grid; gap: 2px; max-width: 100%; }
 .loader-app { font-family: var(--display); font-stretch: 82%; font-size: 20px; font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 26ch; }
@@ -851,18 +853,178 @@ input, textarea { caret-color: var(--saffron); }
 .control-install:hover:not(:disabled) { border-color: var(--glass-teal); background: rgb(94 203 189 / .16); }
 .control-stop:hover:not(:disabled) { border-color: var(--glass-rose); color: #ffc9d2; }
 
-/* Standalone PWA / popped-out window chrome. */
-.standalone-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-block: 14px; border-bottom: 1px solid var(--line); }
-.standalone-brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
-.standalone-title { font-family: var(--display); font-stretch: 82%; font-size: 20px; font-weight: 700; color: var(--ink); margin: 0; }
-.standalone-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.standalone-link { display: inline-flex; align-items: center; text-decoration: none; }
-.runner-page.is-standalone { padding-top: 20px; padding-bottom: 24px; }
-.standalone-credit { margin-top: 24px; text-align: center; font-size: 13px; color: var(--ink-soft); }
-.standalone-credit a { color: var(--saffron); text-decoration: underline; text-underline-offset: 3px; }
-.is-pip-window, .pip-body { margin: 0; padding: 0; min-height: 100%; background: var(--wine); color: var(--ink); }
-.pip-body { display: grid; place-items: center; padding: 12px; }
-.pip-body .phone-frame { width: min(100%, 720px); margin: 0; box-shadow: none; }
+/* Minimal pure-black standalone PWA / popped-out app window chrome. */
+html.is-standalone-app, body.is-standalone-app, html.is-pip-window, body.pip-body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100dvh;
+  background: #000;
+  color: #f2f2f5;
+  overflow: hidden;
+}
+body.pip-body { display: block; }
+.runner-page.is-standalone { width: 100%; max-width: none; margin: 0; padding: 0; min-height: 100dvh; background: #000; }
+#main > section.is-standalone-workspace,
+.runner-workspace.is-standalone-workspace { display: block; width: 100%; max-width: none; height: 100dvh; margin: 0; padding: 0; }
+.runner-stage-col.is-standalone-stage { display: block; width: 100%; height: 100dvh; gap: 0; }
+.runner-stage-col.is-standalone-stage .phone-host { width: 100%; height: 100dvh; display: block; }
+
+.phone-frame.is-minimal {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  margin: 0;
+  padding: 10px 10px 40px;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  box-sizing: border-box;
+  transition: none;
+}
+.phone-frame.is-minimal.is-dragging {
+  box-shadow: inset 0 0 0 2px var(--saffron);
+}
+.phone-frame.is-minimal .phone-viewport {
+  width: min(100%, calc((100dvh - 50px) * var(--screen-ratio, 0.5625)));
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 50px);
+  flex: 0 0 auto;
+  border-radius: 24px;
+  border: 1px solid rgb(255 255 255 / .12);
+  background: #000;
+  overflow: hidden;
+}
+.phone-frame.is-minimal .phone-placeholder {
+  background: radial-gradient(95% 80% at 50% 18%, #15151a 0%, #050507 78%);
+}
+.phone-frame.is-minimal .phone-loading {
+  background: radial-gradient(100% 75% at 50% 14%, #181820 0%, #08080b 65%, #000 100%);
+}
+.phone-frame.is-minimal .loader-steps {
+  border-color: rgb(255 255 255 / .12);
+  background: rgb(255 255 255 / .04);
+}
+.phone-frame.is-minimal .placeholder-pick {
+  border-color: rgb(255 255 255 / .22);
+  background: rgb(255 255 255 / .1);
+  color: #f4f4f8;
+}
+.phone-frame.is-minimal .placeholder-pick:hover {
+  border-color: rgb(255 255 255 / .4);
+  background: rgb(255 255 255 / .18);
+}
+
+/* Very thin always-on-top footer with Back/Forward, small app label, and Install. */
+.minimal-footer {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 9999;
+  height: 30px;
+  padding: 0 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  background: rgb(0 0 0 / .92);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgb(255 255 255 / .1);
+  color: #c8c8d0;
+  font-size: 11px;
+  line-height: 1;
+}
+.minimal-footer-nav,
+.minimal-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.minimal-nav-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #dcdce4;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.minimal-nav-btn svg {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.minimal-nav-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / .12);
+  color: #fff;
+}
+.minimal-nav-btn:focus-visible,
+.minimal-install-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+.minimal-nav-btn:disabled {
+  opacity: .35;
+  cursor: default;
+}
+.minimal-footer-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.minimal-footer-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+.minimal-footer-text {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  color: #c8c8d0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.minimal-install-btn {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / .24);
+  background: rgb(255 255 255 / .1);
+  color: #f4f4f8;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+.minimal-install-btn:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / .45);
+  background: rgb(255 255 255 / .2);
+}
+.minimal-install-btn:disabled {
+  opacity: .5;
+  cursor: wait;
+}
 
 .runner-logs { width: 100%; border: 1px solid var(--line); border-radius: 18px; background: var(--wine-deep); padding: 0 18px; }
 .runner-logs summary { display: flex; align-items: center; justify-content: space-between; min-height: 52px; cursor: pointer; list-style: none; font-weight: 600; color: var(--ink); }

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -372,6 +373,8 @@ type browserLaunch struct {
 	NativeLibs            []string `json:"native_libs"`
 	LaunchProperties      string   `json:"launch_properties"`
 	ApplicationProperties string   `json:"application_properties"`
+	IconBase64            string   `json:"icon_base64,omitempty"`
+	IconMime              string   `json:"icon_mime,omitempty"`
 }
 
 func prepareBrowserApk(apk []byte, version string) (*browserLaunch, error) {
@@ -433,6 +436,12 @@ func prepareBrowserApk(apk []byte, version string) (*browserLaunch, error) {
 	sum := sha256.Sum256(apk)
 	digest := hex.EncodeToString(sum[:])
 	launch := fmt.Sprintf("activity=%s\naot=false\napplication=%s\ndigitalis=false\nnative=%t\npackage=%s\nsha256=%s\nversion=%s\n", property(meta.Activity), property(meta.Application), len(nativeLibs) > 0, property(meta.Package), digest, property(version))
+	var iconBase64, iconMime string
+	table, _ := readResourceTableFromZip(apkZip)
+	if iconBytes, mime, ok := resolveResourceIconImage(apkZip, table, meta.IconRes); ok {
+		iconBase64 = base64.StdEncoding.EncodeToString(iconBytes)
+		iconMime = mime
+	}
 	return &browserLaunch{
 		Architecture:          "aarch64",
 		Package:               meta.Package,
@@ -445,6 +454,8 @@ func prepareBrowserApk(apk []byte, version string) (*browserLaunch, error) {
 		NativeLibs:            nativeLibs,
 		LaunchProperties:      launch,
 		ApplicationProperties: meta.ApplicationProperties,
+		IconBase64:            iconBase64,
+		IconMime:              iconMime,
 	}, nil
 }
 

@@ -644,3 +644,188 @@ func resolveResourceIconPNG(archive *zip.Reader, table *resourceTable, iconResID
 	}
 	return nil, false
 }
+
+func detectRasterIconMime(data []byte) (string, bool) {
+	if len(data) >= 24 && string(data[:8]) == "\x89PNG\r\n\x1a\n" {
+		return "image/png", true
+	}
+	if len(data) >= 16 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return "image/webp", true
+	}
+	return "", false
+}
+
+func densityRankFromPath(name string) int {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "xxxhdpi"):
+		return 640
+	case strings.Contains(lower, "xxhdpi"):
+		return 480
+	case strings.Contains(lower, "xhdpi"):
+		return 320
+	case strings.Contains(lower, "hdpi"):
+		return 240
+	case strings.Contains(lower, "mdpi"):
+		return 160
+	case strings.Contains(lower, "ldpi"):
+		return 120
+	default:
+		return 180
+	}
+}
+
+// resolveResourceIconImage extracts the highest-density PNG or WebP app icon
+// for browser PWA manifests and loading indicators.
+func resolveResourceIconImage(archive *zip.Reader, table *resourceTable, iconResID uint32) ([]byte, string, bool) {
+	if archive == nil {
+		return nil, "", false
+	}
+	readZipEntry := func(name string, limit uint64) ([]byte, bool) {
+		clean := path.Clean(name)
+		if !strings.HasPrefix(clean, "res/") {
+			return nil, false
+		}
+		for _, f := range archive.File {
+			if f.Name == clean && !f.FileInfo().IsDir() && f.Flags&1 == 0 && f.UncompressedSize64 > 0 && f.UncompressedSize64 <= limit {
+				stream, err := f.Open()
+				if err != nil {
+					return nil, false
+				}
+				data, err := io.ReadAll(io.LimitReader(stream, int64(limit)+1))
+				stream.Close()
+				if err != nil || uint64(len(data)) > limit {
+					return nil, false
+				}
+				return data, true
+			}
+		}
+		return nil, false
+	}
+
+	type imageCandidate struct {
+		rank int
+		name string
+	}
+	pickBestImage := func(candidates []imageCandidate) ([]byte, string, bool) {
+		if len(candidates) == 0 {
+			return nil, "", false
+		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			if candidates[i].rank != candidates[j].rank {
+				return candidates[i].rank > candidates[j].rank
+			}
+			return candidates[i].name > candidates[j].name
+		})
+		for _, c := range candidates {
+			data, ok := readZipEntry(c.name, maxIconImage)
+			if !ok {
+				continue
+			}
+			if mime, valid := detectRasterIconMime(data); valid {
+				return data, mime, true
+			}
+		}
+		return nil, "", false
+	}
+
+	if table != nil && iconResID != 0 {
+		visits := 0
+		var collect func(resID uint32, depth int) ([]imageCandidate, []string)
+		collect = func(resID uint32, depth int) ([]imageCandidate, []string) {
+			if depth > maxRefDepth {
+				return nil, nil
+			}
+			vals, err := table.values(resID)
+			if err != nil {
+				return nil, nil
+			}
+			var imgs []imageCandidate
+			var xmls []string
+			for _, v := range vals {
+				visits++
+				if visits > maxIconVisits {
+					return imgs, xmls
+				}
+				if v.dataType == resTypeReference && v.data != 0 {
+					p, x := collect(v.data, depth+1)
+					imgs = append(imgs, p...)
+					xmls = append(xmls, x...)
+				} else if v.dataType == resTypeString {
+					name, err := table.stringAt(v.data)
+					if err != nil || !strings.HasPrefix(name, "res/") || strings.Contains(name, "..") || strings.Contains(name, "\\") {
+						continue
+					}
+					lower := strings.ToLower(name)
+					if (strings.HasSuffix(lower, ".png") && !strings.HasSuffix(lower, ".9.png")) || strings.HasSuffix(lower, ".webp") {
+						if v.density == resDensityAny {
+							continue
+						}
+						r := int(v.density)
+						if v.density == 0 || v.density == resDensityNone {
+							r = densityRankFromPath(name)
+						}
+						imgs = append(imgs, imageCandidate{rank: r, name: name})
+					} else if strings.HasSuffix(lower, ".xml") {
+						xmls = append(xmls, name)
+					}
+				}
+			}
+			return imgs, xmls
+		}
+
+		imgs, xmls := collect(iconResID, 0)
+		if data, mime, ok := pickBestImage(imgs); ok {
+			return data, mime, true
+		}
+		for _, xmlName := range xmls {
+			raw, ok := readZipEntry(xmlName, maxIconXML)
+			if !ok {
+				continue
+			}
+			root, err := parseBinaryXML(raw)
+			if err != nil || root.tag != "adaptive-icon" {
+				continue
+			}
+			if fg := root.first("foreground"); fg != nil {
+				if ref := fg.androidRefUint32("drawable"); ref != 0 {
+					fgImgs, _ := collect(ref, 1)
+					if data, mime, ok := pickBestImage(fgImgs); ok {
+						return data, mime, true
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback for vector-only adaptive icons: scan standard mipmap/drawable launcher bitmaps.
+	var fallback []imageCandidate
+	for _, f := range archive.File {
+		if f.FileInfo().IsDir() || f.Flags&1 != 0 || f.UncompressedSize64 == 0 || f.UncompressedSize64 > maxIconImage {
+			continue
+		}
+		lower := strings.ToLower(f.Name)
+		if !strings.HasPrefix(lower, "res/") {
+			continue
+		}
+		if (!strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".9.png")) && !strings.HasSuffix(lower, ".webp") {
+			continue
+		}
+		baseName := path.Base(lower)
+		if !strings.Contains(baseName, "ic_launcher") && !strings.Contains(baseName, "app_icon") {
+			continue
+		}
+		rank := densityRankFromPath(lower)
+		if strings.Contains(lower, "mipmap") {
+			rank += 1000
+		}
+		if strings.HasPrefix(baseName, "ic_launcher.") || strings.HasPrefix(baseName, "ic_launcher_round.") {
+			rank += 500
+		}
+		if strings.Contains(baseName, "background") || strings.Contains(baseName, "monochrome") {
+			rank -= 400
+		}
+		fallback = append(fallback, imageCandidate{rank: rank, name: f.Name})
+	}
+	return pickBestImage(fallback)
+}

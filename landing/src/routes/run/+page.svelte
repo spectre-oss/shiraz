@@ -10,6 +10,14 @@
   import { initIcons } from '#lib/icons.js';
   import { ROBOTS_INDEX, runFaqs, runJsonLd, serializeJsonLd } from '#lib/seo.js';
   import {
+    applyDocumentAppIdentity,
+    clearSavedAppPwas,
+    formatAppPwaName,
+    loadAppApkRecord,
+    publishPerAppPwa,
+    saveAppApkRecord
+  } from '#lib/pwa-app.js';
+  import {
     checkBrowserSupport,
     clearPersistentStorage,
     disposeWarmVm,
@@ -34,6 +42,7 @@
   let phoneHostEl = $state(null);
   let phoneFrameEl = $state(null);
   let apkInput = $state(null);
+  let viewportApkInput = $state(null);
   let localRuntimeInput = $state(null);
 
   let supportState = $state({ checked: false, ok: true, problems: [] });
@@ -44,6 +53,8 @@
 
   let apkFile = $state(null);
   let apkInfo = $state(null);
+  let appIconUrl = $state('');
+  let appPwaMeta = $state(null);
   let localRuntimeFile = $state(null);
   let dragging = $state(false);
 
@@ -100,10 +111,18 @@
   let isStandalone = $state(detectStandaloneMode());
   let isInstalledPwa = $state(detectInstalledMode());
   let deferredInstallPrompt = $state(null);
+  let installPromptSlug = $state('');
   let installBusy = $state(false);
+  let installHint = $state('');
+
+  const isMinimalWindow = $derived(poppedOut || isStandalone);
+  const minimalAppTitle = $derived(
+    apkInfo ? formatAppPwaName(apkInfo.label, apkInfo.package) : appPwaMeta?.pwaName || 'Shiraz'
+  );
 
   let session = null;
   let pipWindow = null;
+  let publishedRuntimeReady = Promise.resolve();
   let activePointerId = null;
   let lastSentMove = null;
   let pendingMove = null;
@@ -289,12 +308,19 @@
     apkFile = file;
     apkInfo = null;
     errorMessage = '';
-    statusMessage = `Selected ${file.name} (${formatSize(file.size)}). Click Run APK to launch locally.`;
+    installHint = '';
+    statusMessage = `Loading ${file.name} (${formatSize(file.size)})…`;
+    void launchApk();
   }
 
   function onApkInputChange(event) {
     const file = event.currentTarget.files?.[0] || null;
+    event.currentTarget.value = '';
     handleApkSelected(file);
+  }
+
+  function pickApkFile() {
+    (viewportApkInput || apkInput)?.click();
   }
 
   function onRuntimeInputChange(event) {
@@ -366,7 +392,8 @@
     screenHeight = targetH;
 
     try {
-      const runtimeSource = resolveRuntimeSource();
+      await publishedRuntimeReady;
+      if (runId !== activeRunId) return;
       phase = 'inspecting';
       startBootTimer();
       updateLoadProgress('inspect', 'Inspecting Android manifest and arm64-v8a libraries…', 10);
@@ -375,14 +402,38 @@
       const prepared = await inspectApkForBrowser(base, apkBytes, runtimeVersion);
       if (runId !== activeRunId) return;
       apkInfo = prepared;
-      if (pipWindow && !pipWindow.closed) {
-        pipWindow.document.title = `${prepared.label || prepared.package} — Shiraz`;
+      const pwaMeta = await publishPerAppPwa({
+        base,
+        pkg: prepared.package,
+        label: prepared.label || prepared.package,
+        iconBase64: prepared.icon_base64 || '',
+        iconMime: prepared.icon_mime || ''
+      });
+      if (runId !== activeRunId) return;
+      if (deferredInstallPrompt && installPromptSlug !== pwaMeta.slug) {
+        deferredInstallPrompt = null;
+        installPromptSlug = '';
       }
+      appPwaMeta = pwaMeta;
+      appIconUrl = pwaMeta.iconDataUrl;
+      syncPipIdentity(pwaMeta.pwaName, pwaMeta.iconDataUrl);
+      if (isStandalone && new URLSearchParams(window.location.search).get('app') !== pwaMeta.slug) {
+        window.history.replaceState(null, '', pwaMeta.standaloneUrl);
+      }
+      // Persist APK locally in IndexedDB so an installed per-app PWA launches directly.
+      void saveAppApkRecord({
+        pkg: prepared.package,
+        label: prepared.label || prepared.package,
+        fileName: apkFile?.name || `${pwaMeta.slug}.apk`,
+        iconDataUrl: pwaMeta.iconDataUrl,
+        bytes: apkBytes
+      });
       updateLoadProgress('inspect', `Verified ${prepared.label || prepared.package}`, 18);
       appendLog(
         `[shiraz] package=${prepared.package} activity=${prepared.activity} native=${prepared.native} (${prepared.native_libs.length} arm64-v8a libs)\n`
       );
 
+      const runtimeSource = resolveRuntimeSource();
       phase = 'booting';
       runtimeTelemetry = null;
       const startWithSource = source =>
@@ -541,8 +592,31 @@
 
   function sendBack() {
     if (!session) return;
-    session.sendCommand('keydown "Escape"');
-    session.sendCommand('keyup "Escape"');
+    session.sendCommand('keydown "AC Back"');
+    session.sendCommand('keyup "AC Back"');
+  }
+
+  function sendForward() {
+    if (!session) return;
+    session.sendCommand('keydown "Left Alt"');
+    session.sendCommand('keydown "Right"');
+    session.sendCommand('keyup "Right"');
+    session.sendCommand('keyup "Left Alt"');
+  }
+
+  function syncPipIdentity(title, iconHref) {
+    if (!pipWindow || pipWindow.closed) return;
+    if (title) pipWindow.document.title = title;
+    if (iconHref) {
+      let icon = pipWindow.document.querySelector('link[rel="icon"]');
+      if (!icon) {
+        icon = pipWindow.document.createElement('link');
+        icon.rel = 'icon';
+        icon.type = 'image/png';
+        pipWindow.document.head.append(icon);
+      }
+      icon.href = iconHref;
+    }
   }
 
   function toggleRotate() {
@@ -605,19 +679,21 @@
     }
   }
 
-  function openStandalonePopup() {
-    const w = Math.max(440, screenWidth + 80);
-    const h = Math.max(760, screenHeight + 170);
+  function openStandalonePopup(appSlug = '') {
+    const w = Math.max(384, screenWidth + 24);
+    const h = Math.max(690, screenHeight + 54);
+    const query = appSlug ? `?standalone=1&app=${encodeURIComponent(appSlug)}` : '?standalone=1';
     const popup = window.open(
-      `${base}/run/?standalone=1`,
-      'shiraz-browser-runner',
+      `${base}/run/${query}`,
+      appSlug ? `shiraz-app-${appSlug}` : 'shiraz-browser-runner',
       `popup=yes,width=${w},height=${h},resizable=yes`
     );
     if (!popup) {
       statusMessage = 'Pop-out window was blocked by the browser. Allow pop-ups or open the standalone app view.';
-      return;
+      return null;
     }
     popup.focus?.();
+    return popup;
   }
 
   async function togglePopout() {
@@ -626,7 +702,7 @@
       return;
     }
     // Prefer Document Picture-in-Picture when available: moves the live app canvas
-    // into a floating always-on-top window without restarting unkernel or losing state.
+    // into a clean black floating always-on-top window without restarting unkernel.
     const canPip =
       typeof window !== 'undefined' &&
       'documentPictureInPicture' in window &&
@@ -634,37 +710,58 @@
       phoneFrameEl;
     if (canPip) {
       try {
-        const width = Math.min(Math.max(screenWidth + 56, 420), 760);
-        const height = Math.min(Math.max(screenHeight + 190, 620), 880);
+        const width = Math.min(Math.max(screenWidth + 24, 384), 760);
+        const height = Math.min(Math.max(screenHeight + 54, 520), 860);
         const pip = await window.documentPictureInPicture.requestWindow({ width, height });
-        pip.document.title = apkInfo?.label ? `${apkInfo.label} — Shiraz` : 'Shiraz — Android™ App';
+        pip.document.title = minimalAppTitle;
         pip.document.documentElement.classList.add('is-pip-window');
+        pip.document.documentElement.style.background = '#000';
+        pip.document.body.style.background = '#000';
         copyDocumentStyles(pip.document);
         pip.document.body.classList.add('pip-body');
         pip.document.body.append(phoneFrameEl);
         pipWindow = pip;
         poppedOut = true;
+        syncPipIdentity(minimalAppTitle, appIconUrl);
         pip.addEventListener('pagehide', dockBack, { once: true });
         return;
       } catch {
         // Fall through to standard standalone popup window.
       }
     }
-    openStandalonePopup();
+    openStandalonePopup(appPwaMeta?.slug || '');
   }
 
   async function installWebApp() {
-    if (!deferredInstallPrompt || installBusy) return;
+    if (installBusy) return;
+    // In Document PiP, Chromium does not show an omnibox install icon and may not
+    // have re-fired beforeinstallprompt for the newly loaded per-APK manifest yet.
+    if (poppedOut && appPwaMeta?.slug && !deferredInstallPrompt) {
+      openStandalonePopup(appPwaMeta.slug);
+      installHint = 'Use Install in the opened app window';
+      return;
+    }
+    if (!deferredInstallPrompt) {
+      if (appPwaMeta?.slug && !isStandalone) {
+        openStandalonePopup(appPwaMeta.slug);
+      } else {
+        installHint = 'Use your browser menu → Install app';
+      }
+      return;
+    }
     installBusy = true;
+    installHint = '';
     try {
       await deferredInstallPrompt.prompt();
       const choice = await deferredInstallPrompt.userChoice;
       if (choice?.outcome === 'accepted') {
         deferredInstallPrompt = null;
-        statusMessage = 'Shiraz Browser Runner installed as a web app.';
+        statusMessage = `${minimalAppTitle} installed as a web app.`;
       }
     } catch {
-      // User dismissed or browser declined prompt.
+      if (appPwaMeta?.slug) {
+        openStandalonePopup(appPwaMeta.slug);
+      }
     } finally {
       installBusy = false;
     }
@@ -675,8 +772,11 @@
     try {
       await stopSession(true, false);
       await clearPersistentStorage();
+      await clearSavedAppPwas();
       runtimeTelemetry = null;
-      statusMessage = 'Cleared IndexedDB app storage, OPFS warm snapshots, and cached runtime blocks.';
+      appPwaMeta = null;
+      appIconUrl = '';
+      statusMessage = 'Cleared IndexedDB app storage, saved PWAs, OPFS warm snapshots, and cached runtime blocks.';
       phase = 'idle';
     } catch (error) {
       errorMessage = error?.message || String(error);
@@ -688,29 +788,61 @@
 
   onMount(() => {
     const stopIcons = initIcons();
-    loadPublishedRuntime();
+    publishedRuntimeReady = loadPublishedRuntime();
     isolation = getIsolationCapabilities();
 
     // Detect standalone pop-out (?standalone=1) or installed PWA display mode.
-    const standaloneParam = new URLSearchParams(window.location.search).get('standalone') === '1';
+    const searchParams = new URLSearchParams(window.location.search);
+    const standaloneParam = searchParams.get('standalone') === '1';
+    const requestedApp = searchParams.get('app') || '';
     const displayMq = window.matchMedia('(display-mode: standalone)');
     const wcoMq = window.matchMedia('(display-mode: window-controls-overlay)');
     const syncDisplayMode = () => {
       const installed = Boolean(displayMq.matches || wcoMq.matches || navigator.standalone === true);
       isInstalledPwa = installed;
       isStandalone = standaloneParam || installed;
+      document.documentElement.classList.toggle('is-standalone-app', isStandalone);
+      document.body.classList.toggle('is-standalone-app', isStandalone);
     };
     syncDisplayMode();
     displayMq.addEventListener?.('change', syncDisplayMode);
     wcoMq.addEventListener?.('change', syncDisplayMode);
 
+    if (requestedApp) {
+      loadAppApkRecord(requestedApp)
+        .then(record => {
+          if (!record?.bytes) return;
+          const pwaName = formatAppPwaName(record.label, record.pkg);
+          appPwaMeta = {
+            slug: record.slug,
+            pwaName,
+            iconDataUrl: record.iconDataUrl || '',
+            manifestUrl: `${base}/run/pwa/${encodeURIComponent(record.slug)}/manifest.webmanifest`,
+            standaloneUrl: `${base}/run/?standalone=1&app=${encodeURIComponent(record.slug)}`
+          };
+          if (record.iconDataUrl) appIconUrl = record.iconDataUrl;
+          applyDocumentAppIdentity({
+            title: pwaName,
+            iconDataUrl: record.iconDataUrl || '',
+            themeColor: '#000000'
+          });
+          const restoredFile = new File([record.bytes], record.fileName || `${record.slug}.apk`, {
+            type: 'application/vnd.android.package-archive'
+          });
+          handleApkSelected(restoredFile);
+        })
+        .catch(() => {});
+    }
+
     // Capture browser PWA installability prompt (no telemetry, strictly local browser API).
     const onBeforeInstall = event => {
       event.preventDefault();
       deferredInstallPrompt = event;
+      installPromptSlug = appPwaMeta?.slug || requestedApp || '';
     };
     const onAppInstalled = () => {
       deferredInstallPrompt = null;
+      installPromptSlug = '';
       isInstalledPwa = true;
       isStandalone = true;
     };
@@ -765,6 +897,8 @@
       if (rafId) cancelAnimationFrame(rafId);
       stopBootTimer();
       dockBack();
+      document.documentElement.classList.remove('is-standalone-app');
+      document.body.classList.remove('is-standalone-app');
       displayMq.removeEventListener?.('change', syncDisplayMode);
       wcoMq.removeEventListener?.('change', syncDisplayMode);
       window.removeEventListener('beforeinstallprompt', onBeforeInstall);
@@ -804,29 +938,9 @@
   {@html serializeJsonLd(runJsonLd(__SHIRAZ_VERSION__))}
 </svelte:head>
 
-<a class="skip-link" href="#main">Skip to content</a>
+{#if !isStandalone}
+  <a class="skip-link" href="#main">Skip to content</a>
 
-{#if isStandalone}
-  <header id="top" class="standalone-header wrap">
-    <div class="standalone-brand">
-      <img src="{home}spectre.svg" width="32" height="32" alt="Spectre" />
-      <h1 class="standalone-title">{apkInfo?.label || 'Shiraz Browser Runner'}</h1>
-    </div>
-    <div class="standalone-actions">
-      {#if deferredInstallPrompt && !isInstalledPwa}
-        <button
-          type="button"
-          class="control-btn control-install"
-          onclick={installWebApp}
-          disabled={installBusy}
-        >
-          Install web app
-        </button>
-      {/if}
-      <a class="control-btn standalone-link" href="{base}/run/">Full page</a>
-    </div>
-  </header>
-{:else}
   <header id="top" class="compat-header wrap">
     <a class="brand" href={home} aria-label="Shiraz home">
       <img src="{home}spectre.svg" width="42" height="42" alt="Spectre" />
@@ -836,8 +950,10 @@
   </header>
 {/if}
 
-<main id="main" class="wrap runner-page" class:is-standalone={isStandalone}>
-  {#if !isStandalone}
+<main id="main" class={isStandalone ? 'runner-page is-standalone' : 'wrap runner-page'}>
+  {#if isStandalone}
+    <h1 class="visually-hidden">{minimalAppTitle}</h1>
+  {:else}
     <nav class="breadcrumbs" aria-label="Breadcrumb">
       <ol>
         <li><a href={home}>Home</a></li>
@@ -856,7 +972,7 @@
     </section>
   {/if}
 
-  {#if supportState.checked && !supportState.ok}
+  {#if !isStandalone && supportState.checked && !supportState.ok}
     <div class="runner-alert" role="alert">
       <strong>This browser is missing required WebAssembly support.</strong>
       <p>{supportState.problems.join(' ')}</p>
@@ -866,15 +982,17 @@
     </div>
   {/if}
 
-  <section class="runner-workspace" aria-label="In-browser Android runner">
-    <div class="runner-stage-col">
+  <section class="runner-workspace" class:is-standalone-workspace={isStandalone} aria-label="In-browser Android runner">
+    <div class="runner-stage-col" class:is-standalone-stage={isStandalone}>
       <!-- Dedicated host wrapper with no conditional siblings so live DOM transfer to/from Document PiP stays clean. -->
       <div class="phone-host" bind:this={phoneHostEl} hidden={poppedOut}>
         <div
           bind:this={phoneFrameEl}
           class="phone-frame"
+          class:is-minimal={isMinimalWindow}
           class:is-landscape={orientation === 'landscape'}
           class:is-dragging={dragging}
+          style="--screen-w: {screenWidth}; --screen-h: {screenHeight}; --screen-ratio: {screenWidth / screenHeight};"
           role="region"
           aria-label="Android app screen"
           ondragover={event => {
@@ -886,44 +1004,56 @@
           }}
           ondrop={onDrop}
         >
-          <div class="phone-topbar">
-            <span class="phone-pill" data-phase={phase}>
-              <i aria-hidden="true"></i>
-              {#if phase === 'running'}
-                Live · {frameCount} {frameCount === 1 ? 'frame' : 'frames'}
-              {:else if phase === 'booting'}
-                Starting · {loadPercent}%
-              {:else if phase === 'inspecting'}
-                Inspecting…
-              {:else if phase === 'error'}
-                Error
-              {:else if phase === 'stopped'}
-                Stopped
-              {:else}
-                Ready
-              {/if}
-            </span>
-            <div class="phone-topbar-right">
-              <span class="phone-dims">{screenWidth}×{screenHeight}</span>
-              <button
-                type="button"
-                class="phone-popout-icon"
-                onclick={togglePopout}
-                aria-label={poppedOut ? 'Dock app back into page' : 'Pop out app into floating window'}
-                title={poppedOut ? 'Dock back' : 'Pop out window'}
-              >
-                {#if poppedOut}
-                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M9 14 4 9l5-5" /><path d="M20 20v-7a4 4 0 0 0-4-4H4" />
-                  </svg>
+          <input
+            bind:this={viewportApkInput}
+            type="file"
+            accept=".apk"
+            class="visually-hidden"
+            tabindex="-1"
+            aria-hidden="true"
+            onchange={onApkInputChange}
+          />
+
+          {#if !isMinimalWindow}
+            <div class="phone-topbar">
+              <span class="phone-pill" data-phase={phase}>
+                <i aria-hidden="true"></i>
+                {#if phase === 'running'}
+                  Live · {frameCount} {frameCount === 1 ? 'frame' : 'frames'}
+                {:else if phase === 'booting'}
+                  Starting · {loadPercent}%
+                {:else if phase === 'inspecting'}
+                  Inspecting…
+                {:else if phase === 'error'}
+                  Error
+                {:else if phase === 'stopped'}
+                  Stopped
                 {:else}
-                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                  </svg>
+                  Ready
                 {/if}
-              </button>
+              </span>
+              <div class="phone-topbar-right">
+                <span class="phone-dims">{screenWidth}×{screenHeight}</span>
+                <button
+                  type="button"
+                  class="phone-popout-icon"
+                  onclick={togglePopout}
+                  aria-label={poppedOut ? 'Dock app back into page' : 'Pop out app into floating window'}
+                  title={poppedOut ? 'Dock back' : 'Pop out window'}
+                >
+                  {#if poppedOut}
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M9 14 4 9l5-5" /><path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                    </svg>
+                  {:else}
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    </svg>
+                  {/if}
+                </button>
+              </div>
             </div>
-          </div>
+          {/if}
 
           <div class="phone-viewport" style="aspect-ratio: {screenWidth} / {screenHeight};">
             <canvas
@@ -948,7 +1078,13 @@
                 <div class="phone-loading" role="status" aria-live="polite">
                   <div class="loader-emblem" aria-hidden="true">
                     <span class="loader-ring"></span>
-                    <img src="{home}spectre.svg" width="34" height="34" alt="" />
+                    <img
+                      src={appIconUrl || `${home}spectre.svg`}
+                      class:has-app-icon={Boolean(appIconUrl)}
+                      width="34"
+                      height="34"
+                      alt=""
+                    />
                   </div>
 
                   <div class="loader-heading">
@@ -997,6 +1133,9 @@
                 </div>
               {:else}
                 <div class="phone-placeholder">
+                  {#if isMinimalWindow && errorMessage}
+                    <p class="placeholder-error" role="alert">{errorMessage}</p>
+                  {/if}
                   <p class="placeholder-title">Drop an <code>.apk</code> here</p>
                   <p class="placeholder-sub">
                     Pure Java/Kotlin and <code>arm64-v8a</code> native APKs run locally inside WebAssembly Linux.
@@ -1004,7 +1143,7 @@
                   <button
                     type="button"
                     class="button secondary placeholder-pick"
-                    onclick={() => apkInput?.click()}
+                    onclick={pickApkFile}
                   >
                     Choose an APK file
                   </button>
@@ -1013,50 +1152,126 @@
             {/if}
           </div>
 
-          <div class="phone-controls" role="toolbar" aria-label="App screen controls">
-            <button type="button" class="control-btn" onclick={sendBack} disabled={phase !== 'running'}>
-              Back
-            </button>
-            <button type="button" class="control-btn" onclick={toggleRotate}>
-              Rotate
-            </button>
-            <button type="button" class="control-btn" onclick={toggleMute} aria-pressed={muted}>
-              {muted ? 'Unmute' : 'Mute'}
-            </button>
-            <button type="button" class="control-btn" onclick={saveScreenshot} disabled={frameCount === 0}>
-              Screenshot
-            </button>
-            <button
-              type="button"
-              class="control-btn control-popout"
-              onclick={togglePopout}
-              aria-pressed={poppedOut}
-            >
-              {poppedOut ? 'Dock back' : 'Pop out'}
-            </button>
-            {#if deferredInstallPrompt && !isInstalledPwa}
+          {#if isMinimalWindow}
+            <div class="minimal-footer" role="toolbar" aria-label="App navigation">
+              <div class="minimal-footer-nav">
+                <button
+                  type="button"
+                  class="minimal-nav-btn"
+                  onclick={sendBack}
+                  disabled={phase !== 'running'}
+                  aria-label="Back"
+                  title="Back"
+                >
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                    <path d="M10.2 3.2 5.4 8l4.8 4.8" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="minimal-nav-btn"
+                  onclick={sendForward}
+                  disabled={phase !== 'running'}
+                  aria-label="Forward"
+                  title="Forward"
+                >
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                    <path d="M5.8 3.2 10.6 8l-4.8 4.8" />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="minimal-footer-title" title={installHint || minimalAppTitle}>
+                {#if appIconUrl}
+                  <img class="minimal-footer-icon" src={appIconUrl} width="14" height="14" alt="" />
+                {/if}
+                <span class="minimal-footer-text">
+                  {#if installHint}
+                    {installHint}
+                  {:else if phase === 'booting' || phase === 'inspecting'}
+                    {`${minimalAppTitle} · ${loadPercent}%`}
+                  {:else if phase === 'error'}
+                    {`${minimalAppTitle} · Error`}
+                  {:else}
+                    {minimalAppTitle}
+                  {/if}
+                </span>
+              </div>
+
+              <div class="minimal-footer-actions">
+                {#if !isInstalledPwa}
+                  <button
+                    type="button"
+                    class="minimal-install-btn"
+                    onclick={installWebApp}
+                    disabled={installBusy}
+                    aria-label={`Install ${minimalAppTitle}`}
+                    title={`Install ${minimalAppTitle}`}
+                  >
+                    {installBusy ? '…' : 'Install'}
+                  </button>
+                {/if}
+                {#if poppedOut}
+                  <button
+                    type="button"
+                    class="minimal-nav-btn"
+                    onclick={dockBack}
+                    aria-label="Dock back into page"
+                    title="Dock back"
+                  >
+                    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                      <path d="M6.5 10.5 3 7l3.5-3.5" /><path d="M13 13v-3a3 3 0 0 0-3-3H3" />
+                    </svg>
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {:else}
+            <div class="phone-controls" role="toolbar" aria-label="App screen controls">
+              <button type="button" class="control-btn" onclick={sendBack} disabled={phase !== 'running'}>
+                Back
+              </button>
+              <button type="button" class="control-btn" onclick={toggleRotate}>
+                Rotate
+              </button>
+              <button type="button" class="control-btn" onclick={toggleMute} aria-pressed={muted}>
+                {muted ? 'Unmute' : 'Mute'}
+              </button>
+              <button type="button" class="control-btn" onclick={saveScreenshot} disabled={frameCount === 0}>
+                Screenshot
+              </button>
               <button
                 type="button"
-                class="control-btn control-install"
-                onclick={installWebApp}
-                disabled={installBusy}
+                class="control-btn control-popout"
+                onclick={togglePopout}
+                aria-pressed={poppedOut}
               >
-                {installBusy ? 'Installing…' : 'Install app'}
+                {poppedOut ? 'Dock back' : 'Pop out'}
               </button>
-            {/if}
-            <button
-              type="button"
-              class="control-btn control-stop"
-              onclick={() => stopSession(false)}
-              disabled={phase !== 'running' && phase !== 'booting' && phase !== 'inspecting'}
-            >
-              Stop
-            </button>
-          </div>
+              {#if deferredInstallPrompt && !isInstalledPwa}
+                <button
+                  type="button"
+                  class="control-btn control-install"
+                  onclick={installWebApp}
+                  disabled={installBusy}
+                >
+                  {installBusy ? 'Installing…' : 'Install app'}
+                </button>
+              {/if}
+              <button
+                type="button"
+                class="control-btn control-stop"
+                onclick={() => stopSession(false)}
+                disabled={phase !== 'running' && phase !== 'booting' && phase !== 'inspecting'}
+              >
+                Stop
+              </button>
+            </div>
+          {/if}
         </div>
       </div>
 
-      {#if poppedOut}
+      {#if poppedOut && !isStandalone}
         <div class="phone-popped-card" role="status">
           <p class="placeholder-title">{apkInfo?.label || 'App'} is popped out</p>
           <p class="placeholder-sub">
@@ -1068,23 +1283,26 @@
         </div>
       {/if}
 
-      <details class="runner-logs" bind:open={logsOpen}>
-        <summary>
-          <span>Runtime console</span>
-          <span class="disclosure-icon" aria-hidden="true">
-            <svg class="icon" data-icon="plus" viewBox="0 0 24 24" focusable="false">
-              <path d="M5 12h14" /><path d="M12 5v14" />
-            </svg>
-          </span>
-        </summary>
-        <div class="runner-log-body">
-          <pre><code>{logText || 'No runtime output yet. Start an APK to stream standalone ART and Shiraz logs here.'}</code></pre>
-        </div>
-      </details>
+      {#if !isStandalone}
+        <details class="runner-logs" bind:open={logsOpen}>
+          <summary>
+            <span>Runtime console</span>
+            <span class="disclosure-icon" aria-hidden="true">
+              <svg class="icon" data-icon="plus" viewBox="0 0 24 24" focusable="false">
+                <path d="M5 12h14" /><path d="M12 5v14" />
+              </svg>
+            </span>
+          </summary>
+          <div class="runner-log-body">
+            <pre><code>{logText || 'No runtime output yet. Start an APK to stream standalone ART and Shiraz logs here.'}</code></pre>
+          </div>
+        </details>
+      {/if}
     </div>
 
-    <form
-      class="builder-panel runner-panel"
+    {#if !isStandalone}
+      <form
+        class="builder-panel runner-panel"
       onsubmit={event => {
         event.preventDefault();
         launchApk();
@@ -1305,16 +1523,11 @@
         (offline by default, zero telemetry; no Google Play Services; 32-bit-only APKs are rejected). Only run APKs you
         trust.
       </p>
-    </form>
+      </form>
+    {/if}
   </section>
 
-  {#if isStandalone}
-    <p class="standalone-credit">
-      Powered by Shiraz &amp;
-      <a href="https://github.com/pithings/unkernel">pithings/unkernel</a> (Pooya Parsa) ·
-      <a href="{home}licenses/unkernel.txt">Licenses</a> · Zero telemetry
-    </p>
-  {:else}
+  {#if !isStandalone}
     <section class="unkernel-credit" aria-labelledby="unkernel-credit-title">
       <div class="unkernel-credit-head">
         <p class="eyebrow">Powered by open source</p>
