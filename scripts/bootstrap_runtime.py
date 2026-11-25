@@ -72,7 +72,7 @@ PATCHES = {
         (
             'bionic-static-sync-init.patch',
             {
-                'pthread_wrapper/libpthread.c': '1a7551b88a17680256f290b3d55ae3686cfb26a1aefe216b75b6b8b5a593433c',
+                'pthread_wrapper/libpthread.c': '0ab505da898927d6cabc98bb87d0abf0f3976767aa10044102d28625e76269d8',
             },
         ),
         (

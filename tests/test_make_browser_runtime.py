@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 
 import make_browser_runtime as mbr  # noqa: E402
+import package_aot  # noqa: E402
 
 
 class MakeBrowserRuntimeTest(unittest.TestCase):
@@ -127,6 +128,40 @@ class MakeBrowserRuntimeTest(unittest.TestCase):
             # Explicit lz4/lz4hc compression flag rejected before invoking mkfs.erofs.
             with self.assertRaises(RuntimeError):
                 mbr.build_erofs(root, root / 'out.erofs', compress='lz4hc')
+
+    def test_package_aot_preserves_ld_library_path_and_reports_log_tail(self) -> None:
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            appdir = root / 'appdir'
+            work = root / 'work'
+            host = root / 'host'
+            prefix = root / 'prefix'
+            (appdir / 'usr/art/framework').mkdir(parents=True)
+            (appdir / 'usr/share/shiraz').mkdir(parents=True)
+            captured_env: dict[str, str] = {}
+
+            def fake_run(command, env=None, stdout=None, stderr=None, timeout=None):
+                captured_env.update(env or {})
+                stdout.write('dex2oat: error while loading shared libraries: libunwind.so.8\n')
+                stdout.flush()
+                return mock.Mock(returncode=127)
+
+            with (
+                mock.patch.dict('os.environ', {'LD_LIBRARY_PATH': '/nix/store/fake-libunwind/lib'}),
+                mock.patch.object(package_aot.subprocess, 'run', side_effect=fake_run),
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    package_aot.compile_runtime_base(
+                        appdir, work, host, ['core-oj-hostdex.jar'], prefix
+                    )
+            ld_parts = captured_env['LD_LIBRARY_PATH'].split(':')
+            self.assertEqual(ld_parts[0], str(host / 'lib64'))
+            self.assertEqual(ld_parts[1], str(prefix / 'lib'))
+            self.assertIn('/nix/store/fake-libunwind/lib', ld_parts)
+            self.assertIn('exit 127', str(ctx.exception))
+            self.assertIn('libunwind.so.8', str(ctx.exception))
 
 
 if __name__ == '__main__':

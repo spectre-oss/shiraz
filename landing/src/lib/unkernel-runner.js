@@ -764,7 +764,7 @@ mount -t overlay overlay -o lowerdir=/opt/shiraz,upperdir=/tmp/ov/upper,workdir=
 `
           : `
 set -e
-mount -t tmpfs -o size=700M tmpfs /tmp 2>/dev/null || true
+mount -t tmpfs -o size=${Math.max(700, Math.min(900, Math.round(effectiveMemoryMiB * 0.8)))}M tmpfs /tmp 2>/dev/null || true
 mkdir -p /tmp/work /tmp/home
 cd /tmp/work
 /mnt/appimage/base.AppImage --appimage-extract >/dev/null
@@ -1093,7 +1093,9 @@ echo "$APP_PID" > /tmp/shiraz-app.pid
       TAIL_PID=$!
       echo "$TAIL_PID" > /tmp/shiraz-tail.pid
       while kill -0 "$APP_PID" 2>/dev/null; do sleep 1; done
+      sleep 0.3
       kill "$TAIL_PID" 2>/dev/null || true
+      wait "$TAIL_PID" 2>/dev/null || true
       rm -f /tmp/shiraz-tail.pid
       break
     fi
@@ -1101,8 +1103,17 @@ echo "$APP_PID" > /tmp/shiraz-app.pid
     sleep 0.5
   done
 ) &
+TAIL_WATCHER=$!
 wait "$APP_PID"
 STATUS=$?
+wait "$TAIL_WATCHER" 2>/dev/null || true
+if [ "$STATUS" -ne 0 ]; then
+  LOG_DIR=$(ls -dt /tmp/home/.cache/shiraz-apps/*/runs/run-* 2>/dev/null | head -n 1)
+  if [ -n "$LOG_DIR" ] && [ -f "$LOG_DIR/stderr.log" ]; then
+    echo "=== crash log tail ($LOG_DIR/stderr.log) ===" >&2
+    tail -n 60 "$LOG_DIR/stderr.log" >&2
+  fi
+fi
 rm -f /tmp/shiraz-app.pid
 exit "$STATUS"
 `;

@@ -20,13 +20,20 @@ def _compile(appdir, work, host, jars, prefix, include_apk=True):
         (work / name).mkdir(parents=True, exist_ok=True)
     physical = ':'.join(str(framework / name) for name in jars)
     locations = ['/shiraz/boot/' + name for name in jars]
+    lib_dirs = [str(host / 'lib64'), str(prefix / 'lib')]
+    build_dir = Path(__file__).resolve().parents[1] / 'build'
+    if build_dir.is_dir():
+        lib_dirs.append(str(build_dir))
+    existing_ld = os.environ.get('LD_LIBRARY_PATH', '').strip()
+    if existing_ld:
+        lib_dirs.append(existing_ld)
     env = dict(
         os.environ,
         ANDROID_ROOT=str(host),
         ANDROID_DATA=str(work / 'android-data'),
         XDG_CACHE_HOME=str(work / 'cache'),
         BOOTCLASSPATH=physical,
-        LD_LIBRARY_PATH=str(host / 'lib64') + ':' + str(prefix / 'lib'),
+        LD_LIBRARY_PATH=':'.join(lib_dirs),
     )
     compiler = str(host / 'bin/dex2oat')
     # Full DWARF dwarfs the executable code for large APKs. Keep compact native
@@ -91,7 +98,19 @@ def _compile(appdir, work, host, jars, prefix, include_apk=True):
             except subprocess.TimeoutExpired as exc:
                 raise RuntimeError('AOT compilation timed out: ' + name) from exc
         if result.returncode:
-            raise RuntimeError('AOT compilation failed: ' + name + '; inspect ' + str(work))
+            tail = ''
+            log_path = work / (name + '.log')
+            if log_path.is_file():
+                lines = log_path.read_text(errors='replace').splitlines()
+                if lines:
+                    tail = '\n' + '\n'.join(lines[-40:])
+            raise RuntimeError(
+                'AOT compilation failed: '
+                + name
+                + f' (exit {result.returncode}); inspect '
+                + str(work)
+                + tail
+            )
     expected = set()
     for index, name in enumerate(jars):
         stem = 'boot' if index == 0 else 'boot-' + Path(name).stem
