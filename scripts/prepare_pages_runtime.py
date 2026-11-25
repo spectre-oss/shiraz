@@ -77,11 +77,21 @@ def install_runtime(site, source, version):
         raise RuntimeError('Published x86_64 runtime missing')
 
     browser_runtime = None
+    from make_browser_runtime import verify_unkernel_erofs
+
     for ext, fmt in (('.erofs', 'erofs'), ('.img', 'ext4')):
         rt_name = f'Shiraz-Browser-Runtime-{version}-aarch64{ext}'
         rt_path = source / rt_name
         if rt_path.exists():
             rt_digest = _verify_sha256_file(rt_path, ext)
+            if fmt == 'erofs':
+                try:
+                    verify_unkernel_erofs(rt_path)
+                except RuntimeError as exc:
+                    print(
+                        f'Skipping incompatible browser EROFS ({exc}); falling back to AppImage base.'
+                    )
+                    continue
             (site / 'base').mkdir(exist_ok=True)
             shutil.copy2(rt_path, site / 'base' / rt_name)
             parts = tuple(int(part) for part in version.split('.'))

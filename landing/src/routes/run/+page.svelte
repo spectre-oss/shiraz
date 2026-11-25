@@ -224,6 +224,16 @@
       const data = await response.json();
       if (!/^\d+\.\d+\.\d+$/.test(data.version || '')) throw new Error('Invalid release manifest.');
       runtimeVersion = data.version;
+      const arm = data.architectures?.aarch64;
+      const appImageFallback = arm?.base_file
+        ? {
+            kind: 'http-appimage',
+            url: `${base}/${arm.base_file}`,
+            size: arm.base_size,
+            sha256: arm.base_sha256,
+            version: data.version
+          }
+        : null;
       if (data.browser_runtime?.file) {
         releaseManifest = {
           kind: 'http-image',
@@ -232,21 +242,15 @@
           size: data.browser_runtime.size,
           sha256: data.browser_runtime.sha256,
           version: data.version,
-          features: Array.isArray(data.browser_runtime.features) ? data.browser_runtime.features : []
+          features: Array.isArray(data.browser_runtime.features) ? data.browser_runtime.features : [],
+          fallback: appImageFallback
         };
         runtimeBadge = `v${data.version} · aarch64 ${releaseManifest.format.toUpperCase()}`;
         runtimeDetail = `${formatSize(releaseManifest.size)} lazy-streamed over HTTP Range requests and cached locally by block.`;
         return;
       }
-      const arm = data.architectures?.aarch64;
-      if (arm?.base_file) {
-        releaseManifest = {
-          kind: 'http-appimage',
-          url: `${base}/${arm.base_file}`,
-          size: arm.base_size,
-          sha256: arm.base_sha256,
-          version: data.version
-        };
+      if (appImageFallback) {
+        releaseManifest = appImageFallback;
         runtimeBadge = `v${data.version} · aarch64 AppImage base`;
         runtimeDetail = `${formatSize(arm.base_size)} fallback base · verified by SHA-256 before launch.`;
         return;
@@ -381,52 +385,68 @@
 
       phase = 'booting';
       runtimeTelemetry = null;
-      const started = await startShirazBrowserSession({
-        base,
-        runtimeSource,
-        apkBytes,
-        prepared,
-        width: targetW,
-        height: targetH,
-        artMode,
-        cpuCount,
-        memoryMiB: Number(memoryMiB),
-        persistData,
-        enableSnapshot: fastBootMode === 'snapshot',
-        precompileApk,
-        enableGpu,
-        enableAudio: !muted,
-        onStage: msg => {
-          if (runId === activeRunId && phase === 'booting') statusMessage = msg;
-        },
-        onProgress: progress => {
-          if (runId !== activeRunId) return;
-          updateLoadProgress(progress.step, progress.detail, progress.percent);
-        },
-        onFrame: frame => {
-          if (runId === activeRunId) queueFrame(frame);
-        },
-        onGpuDraw: gpu => (runId === activeRunId ? drawGpuScanout(gpu) : false),
-        onRuntimeInfo: info => {
-          if (runId === activeRunId) runtimeTelemetry = info;
-        },
-        onLog: chunk => {
-          if (runId === activeRunId) appendLog(chunk);
-        },
-        onExit: info => {
-          if (runId !== activeRunId) return;
-          stopBootTimer();
-          session = null;
-          if (info.code && info.code !== 0) {
-            phase = 'error';
-            errorMessage = `The app exited with code ${info.code}. Open Runtime console to see the ART output.`;
-            logsOpen = true;
-          } else {
-            phase = 'stopped';
-            statusMessage = 'App exited cleanly.';
+      const startWithSource = source =>
+        startShirazBrowserSession({
+          base,
+          runtimeSource: source,
+          apkBytes,
+          prepared,
+          width: targetW,
+          height: targetH,
+          artMode,
+          cpuCount,
+          memoryMiB: Number(memoryMiB),
+          persistData,
+          enableSnapshot: fastBootMode === 'snapshot',
+          precompileApk,
+          enableGpu,
+          enableAudio: !muted,
+          onStage: msg => {
+            if (runId === activeRunId && phase === 'booting') statusMessage = msg;
+          },
+          onProgress: progress => {
+            if (runId !== activeRunId) return;
+            updateLoadProgress(progress.step, progress.detail, progress.percent);
+          },
+          onFrame: frame => {
+            if (runId === activeRunId) queueFrame(frame);
+          },
+          onGpuDraw: gpu => (runId === activeRunId ? drawGpuScanout(gpu) : false),
+          onRuntimeInfo: info => {
+            if (runId === activeRunId) runtimeTelemetry = info;
+          },
+          onLog: chunk => {
+            if (runId === activeRunId) appendLog(chunk);
+          },
+          onExit: info => {
+            if (runId !== activeRunId) return;
+            stopBootTimer();
+            session = null;
+            if (info.code && info.code !== 0) {
+              phase = 'error';
+              errorMessage = `The app exited with code ${info.code}. Open Runtime console to see the ART output.`;
+              logsOpen = true;
+            } else {
+              phase = 'stopped';
+              statusMessage = 'App exited cleanly.';
+            }
           }
+        });
+
+      let started;
+      try {
+        started = await startWithSource(runtimeSource);
+      } catch (err) {
+        if (err?.code === 'EROFS_LZ4_UNSUPPORTED' && runtimeSource.fallback && runId === activeRunId) {
+          appendLog(
+            '[shiraz] Published EROFS uses LZ4 compression (unsupported in unkernel); falling back to verified aarch64 AppImage base…\n'
+          );
+          updateLoadProgress('kernel', 'Switching to verified aarch64 AppImage fallback…', 20);
+          started = await startWithSource(runtimeSource.fallback);
+        } else {
+          throw err;
         }
-      });
+      }
 
       if (runId !== activeRunId) {
         await started.stop();

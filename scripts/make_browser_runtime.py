@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tarfile
@@ -137,16 +138,58 @@ def verify_aarch64_elfs(root: Path) -> None:
             require_architecture(entry, 'aarch64')
 
 
-def build_erofs(staged: Path, output: Path) -> None:
+EROFS_SUPER_OFFSET = 1024
+EROFS_MAGIC = 0xE0F5E1E2
+EROFS_FEATURE_INCOMPAT_COMPR_CFGS = 0x00000002
+EROFS_COMPR_LZ4 = 1 << 0
+EROFS_COMPR_ZSTD = 1 << 3
+
+
+def verify_unkernel_erofs(path: Path) -> None:
+    """Verify an EROFS image does not use LZ4/LZ4HC (which fails with -ENOMEM on unkernel)."""
+    with path.open('rb') as stream:
+        header = stream.read(EROFS_SUPER_OFFSET + 128)
+    if len(header) < EROFS_SUPER_OFFSET + 0x56:
+        raise RuntimeError(f'Truncated EROFS image: {path.name}')
+    (magic,) = struct.unpack_from('<I', header, EROFS_SUPER_OFFSET)
+    if magic != EROFS_MAGIC:
+        raise RuntimeError(f'Invalid EROFS magic in {path.name}: 0x{magic:08x}')
+    (incompat,) = struct.unpack_from('<I', header, EROFS_SUPER_OFFSET + 0x50)
+    (compr_field,) = struct.unpack_from('<H', header, EROFS_SUPER_OFFSET + 0x54)
+    if incompat & EROFS_FEATURE_INCOMPAT_COMPR_CFGS:
+        if compr_field & EROFS_COMPR_LZ4:
+            raise RuntimeError(
+                f'EROFS image {path.name} uses LZ4 compression, which fails with -ENOMEM in unkernel'
+            )
+        if compr_field & ~EROFS_COMPR_ZSTD:
+            raise RuntimeError(
+                f'EROFS image {path.name} uses unsupported compression mask 0x{compr_field:04x}; only zstd or uncompressed EROFS works in unkernel'
+            )
+    elif compr_field != 0:
+        raise RuntimeError(
+            f'EROFS image {path.name} uses legacy LZ4/LZ4HC compression (lz4_max_distance=0x{compr_field:04x}), which fails with -ENOMEM in unkernel'
+        )
+
+
+def build_erofs(staged: Path, output: Path, compress: str = 'zstd,level=9') -> None:
     mkfs = shutil.which('mkfs.erofs')
     if not mkfs:
-        raise RuntimeError('mkfs.erofs not found; install erofs-utils or use --format ext4')
+        raise RuntimeError('mkfs.erofs not found; install erofs-utils >= 1.8 or use --format ext4')
+    if compress.startswith('lz4'):
+        raise RuntimeError(
+            'LZ4/LZ4HC EROFS fails with -ENOMEM under unkernel flat vmalloc; use zstd or none'
+        )
     temp = output.with_suffix(output.suffix + '.tmp')
     temp.unlink(missing_ok=True)
-    subprocess.run(
-        [mkfs, '-zlz4hc', '-L', 'shirazrt', '-T', '0', str(temp), str(staged)],
-        check=True,
-    )
+    cmd = [mkfs]
+    if compress != 'none':
+        cmd.extend([f'-z{compress}', '-C65536'])
+    cmd.extend(['-L', 'shirazrt', '-T', '0', str(temp), str(staged)])
+    subprocess.run(cmd, check=True)
+    verify_unkernel_erofs(temp)
+    fsck = shutil.which('fsck.erofs')
+    if fsck:
+        subprocess.run([fsck, str(temp)], check=True)
     temp.replace(output)
 
 
@@ -206,6 +249,11 @@ def main(argv: list[str] | None = None) -> int:
         help='Filesystem format (auto chooses from output suffix)',
     )
     parser.add_argument(
+        '--erofs-compress',
+        default='zstd,level=9',
+        help='EROFS compression algorithm (zstd,level=9 or none; lz4/lz4hc rejected for unkernel)',
+    )
+    parser.add_argument(
         '--with-aot',
         action='store_true',
         help='Compile relocatable boot.art + shiraz-framework.odex into the runtime image',
@@ -237,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.skip_arch_check:
             verify_aarch64_elfs(staged)
         if fmt == 'erofs':
-            build_erofs(staged, args.output)
+            build_erofs(staged, args.output, compress=args.erofs_compress)
         else:
             build_ext4(staged, args.output, total_bytes)
 

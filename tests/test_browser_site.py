@@ -86,7 +86,11 @@ class BrowserSiteTests(unittest.TestCase):
             root = Path(tmp)
             self.prepare(root)
             erofs = root / 'dist' / 'Shiraz-Browser-Runtime-1.2.3-aarch64.erofs'
-            erofs_bytes = b'erofs-fixture-data'
+            erofs_buf = bytearray(4096)
+            struct.pack_into('<I', erofs_buf, 1024, 0xE0F5E1E2)
+            struct.pack_into('<I', erofs_buf, 1024 + 0x50, 0x00000023)
+            struct.pack_into('<H', erofs_buf, 1024 + 0x54, 1 << 3)
+            erofs_bytes = bytes(erofs_buf)
             erofs.write_bytes(erofs_bytes)
             Path(str(erofs) + '.sha256').write_text(
                 hashlib.sha256(erofs_bytes).hexdigest() + '  ' + erofs.name + '\n'
@@ -103,7 +107,24 @@ class BrowserSiteTests(unittest.TestCase):
             self.assertEqual(manifest['browser_runtime']['features'], ['fb0', 'aot'])
             self.assertTrue((output / manifest['browser_runtime']['file']).is_file())
 
+            # Incompatible legacy LZ4 EROFS must be skipped so Pages falls back to AppImage base.
+            lz4_buf = bytearray(4096)
+            struct.pack_into('<I', lz4_buf, 1024, 0xE0F5E1E2)
+            struct.pack_into('<I', lz4_buf, 1024 + 0x50, 0x00000001)
+            struct.pack_into('<H', lz4_buf, 1024 + 0x54, 0xFFFF)
+            erofs.write_bytes(bytes(lz4_buf))
+            Path(str(erofs) + '.sha256').write_text(
+                hashlib.sha256(bytes(lz4_buf)).hexdigest() + '  ' + erofs.name + '\n'
+            )
+            runtime.install_runtime(output, root / 'dist', '1.2.3')
+            fallback_manifest = json.loads((output / 'release.json').read_text())
+            self.assertNotIn('browser_runtime', fallback_manifest)
+
             # Corrupt browser runtime checksum must be rejected.
+            erofs.write_bytes(erofs_bytes)
+            Path(str(erofs) + '.sha256').write_text(
+                hashlib.sha256(erofs_bytes).hexdigest() + '  ' + erofs.name + '\n'
+            )
             erofs.write_bytes(erofs_bytes + b'corrupt')
             with self.assertRaises(RuntimeError):
                 runtime.install_runtime(output, root / 'dist', '1.2.3')

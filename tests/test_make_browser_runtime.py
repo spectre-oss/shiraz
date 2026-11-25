@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import shutil
+import struct
 import sys
 import tempfile
 import unittest
@@ -90,6 +91,42 @@ class MakeBrowserRuntimeTest(unittest.TestCase):
             digest, name = sha_file.read_text(encoding='utf-8').strip().split(None, 1)
             self.assertEqual(name, out.name)
             self.assertEqual(digest, hashlib.sha256(out.read_bytes()).hexdigest())
+
+    def test_verify_unkernel_erofs_accepts_zstd_and_rejects_lz4(self) -> None:
+        def make_erofs_stub(path: Path, incompat: int, compr_field: int) -> None:
+            buf = bytearray(4096)
+            struct.pack_into('<I', buf, mbr.EROFS_SUPER_OFFSET, mbr.EROFS_MAGIC)
+            struct.pack_into('<I', buf, mbr.EROFS_SUPER_OFFSET + 0x50, incompat)
+            struct.pack_into('<H', buf, mbr.EROFS_SUPER_OFFSET + 0x54, compr_field)
+            path.write_bytes(buf)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # zstd-only EROFS (incompat has COMPR_CFGS, compr_algs = ZSTD) -> accepted.
+            zstd_img = root / 'zstd.erofs'
+            make_erofs_stub(zstd_img, 0x00000023, mbr.EROFS_COMPR_ZSTD)
+            mbr.verify_unkernel_erofs(zstd_img)
+
+            # Uncompressed EROFS (no COMPR_CFGS, lz4_max_distance = 0) -> accepted.
+            raw_img = root / 'raw.erofs'
+            make_erofs_stub(raw_img, 0x00000001, 0)
+            mbr.verify_unkernel_erofs(raw_img)
+
+            # Legacy LZ4/LZ4HC EROFS (no COMPR_CFGS, lz4_max_distance = 0xffff) -> rejected.
+            lz4_legacy = root / 'lz4-legacy.erofs'
+            make_erofs_stub(lz4_legacy, 0x00000001, 0xFFFF)
+            with self.assertRaises(RuntimeError):
+                mbr.verify_unkernel_erofs(lz4_legacy)
+
+            # COMPR_CFGS EROFS with LZ4 bit set -> rejected.
+            lz4_cfgs = root / 'lz4-cfgs.erofs'
+            make_erofs_stub(lz4_cfgs, 0x00000003, mbr.EROFS_COMPR_LZ4 | mbr.EROFS_COMPR_ZSTD)
+            with self.assertRaises(RuntimeError):
+                mbr.verify_unkernel_erofs(lz4_cfgs)
+
+            # Explicit lz4/lz4hc compression flag rejected before invoking mkfs.erofs.
+            with self.assertRaises(RuntimeError):
+                mbr.build_erofs(root, root / 'out.erofs', compress='lz4hc')
 
 
 if __name__ == '__main__':

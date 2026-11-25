@@ -752,6 +752,14 @@ export async function startShirazBrowserSession({
 set -e
 mkdir -p /opt/shiraz /tmp/ov/upper /tmp/ov/work /tmp/shiraz /tmp/home
 mount -t ${fsType} -o ro /dev/wda /opt/shiraz 2>/dev/null || mount -t ext4 -o ro /dev/wda /opt/shiraz || mount -t erofs -o ro /dev/wda /opt/shiraz
+if ! cat /opt/shiraz/usr/bin/shiraz-app /opt/shiraz/usr/lib/ld-linux-aarch64.so.1 >/dev/null 2>&1; then
+  if dmesg 2>/dev/null | grep -qi 'failed to decompress (lz4)'; then
+    echo "SHIRAZ_EROFS_LZ4_UNSUPPORTED" >&2
+    exit 42
+  fi
+  echo "Runtime binary read failed after mount" >&2
+  exit 43
+fi
 mount -t overlay overlay -o lowerdir=/opt/shiraz,upperdir=/tmp/ov/upper,workdir=/tmp/ov/work /tmp/shiraz
 `
           : `
@@ -780,6 +788,13 @@ ln -sfn /tmp/work/squashfs-root /tmp/shiraz
         const detail = (mounted.stderr || mounted.stdout || '').trim();
         vm.stop();
         audio?.close?.();
+        if (mounted.exitCode === 42 || detail.includes('SHIRAZ_EROFS_LZ4_UNSUPPORTED')) {
+          const err = new Error(
+            'This EROFS runtime image uses LZ4/LZ4HC compression, which fails with -ENOMEM in unkernel. Rebuild with zstd compression (--erofs-compress zstd,level=9) or ext4.'
+          );
+          err.code = 'EROFS_LZ4_UNSUPPORTED';
+          throw err;
+        }
         throw new Error(`Runtime mount failed (exit ${mounted.exitCode})${detail ? `: ${detail}` : ''}`);
       }
 

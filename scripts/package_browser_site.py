@@ -84,6 +84,8 @@ def main():
         bases[architecture] = {**appimage_entry, 'formats': formats}
 
     browser_runtime = None
+    from make_browser_runtime import verify_unkernel_erofs
+
     for ext, fmt in (('.erofs', 'erofs'), ('.img', 'ext4')):
         rt_name = f'Shiraz-Browser-Runtime-{version}-aarch64{ext}'
         rt_path = ROOT / 'dist' / rt_name
@@ -92,6 +94,8 @@ def main():
             rt_digest, rt_named = rt_sha_file.read_text().strip().split(None, 1)
             if rt_named != rt_name or hashlib.sha256(rt_path.read_bytes()).hexdigest() != rt_digest:
                 raise RuntimeError('browser runtime checksum mismatch: ' + rt_name)
+            if fmt == 'erofs':
+                verify_unkernel_erofs(rt_path)
             rt_location = 'base/' + rt_name
             shutil.copy2(rt_path, site / rt_location)
             browser_runtime = dict(

@@ -75,7 +75,7 @@ jobs:
             pkg-config python3 python3-venv ripgrep weston xz-utils zlib1g-dev
           mkdir -p "$TMPDIR"
           if [ "$SHIRAZ_ARCH" = aarch64 ]; then
-            sudo apt-get install -y --no-install-recommends aapt erofs-utils
+            sudo apt-get install -y --no-install-recommends aapt
           fi
       - uses: actions/cache@v4
         with:
@@ -260,6 +260,26 @@ jobs:
           npm ci --prefix landing
           npm --prefix landing run check
           npm --prefix landing run build
+      - name: Smoke test browser EROFS runtime inside unkernel
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import { createKernel } from "./landing/node_modules/unkernel/dist/node.mjs";
+            const version = fs.readFileSync("VERSION", "utf8").trim();
+            const erofs = `dist/Shiraz-Browser-Runtime-${version}-aarch64.erofs`;
+            const vm = await createKernel({
+              memoryMiB: 256,
+              cpus: 2,
+              disks: [{ kind: "file", path: erofs, readOnly: true }]
+            });
+            const r = await vm.exec("sh", ["-c", "mkdir -p /opt/shiraz && mount -t erofs -o ro /dev/wda /opt/shiraz && /opt/shiraz/usr/lib/ld-linux-aarch64.so.1 --library-path /opt/shiraz/usr/lib /opt/shiraz/usr/bin/shiraz-app --help"]);
+            vm.stop();
+            if (r.exitCode !== 0 || !r.stdout.includes("SHIRAZ_ART_MODE")) {
+              console.error("EROFS_UNKERNEL_SMOKE_FAILED", r);
+              process.exit(1);
+            }
+            console.log("EROFS_UNKERNEL_SMOKE_OK");
+          '
       - name: Package both architectures for Pages and releases
         run: python3 scripts/package_browser_site.py
       - name: Publish prerelease

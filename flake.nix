@@ -13,7 +13,7 @@
         in {
           default = pkgs.mkShellNoCC {
             packages = with pkgs; [
-              autoconf automake bison cmake curl file flex gettext git
+              autoconf automake bison cmake curl erofs-utils file flex gettext git
               go gnumake gzip jdk17_headless libtool libunwind meson ninja nodejs_22
               patchelf python3 ripgrep unzip uv xz zip zstd
             ];
