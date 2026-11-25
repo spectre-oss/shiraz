@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://spectre-oss.github.io/shiraz/">
+<a href="https://shiraz.foo/">
   <img src=".github/readme-banner.svg" alt="Shiraz — Your Android™ apps. A little more at home." width="100%" />
 </a>
 
@@ -16,7 +16,7 @@
 
 <br /><br />
 
-[Try Builder](https://spectre-oss.github.io/shiraz/#builder) · [Compatibility](https://spectre-oss.github.io/shiraz/compatibility/) · [Compare Peers](https://spectre-oss.github.io/shiraz/compare/) · [Shiraz Web](docs/WEB.md) · [macOS Launcher](macos/Launcher/README.md) · [Documentation](docs/README.md)
+[Try Builder](https://shiraz.foo/#builder) · [Compatibility](https://shiraz.foo/compatibility/) · [Compare Peers](https://shiraz.foo/compare/) · [Shiraz Web](docs/WEB.md) · [macOS Launcher](macos/Launcher/README.md) · [Documentation](docs/README.md)
 
 </div>
 
@@ -32,10 +32,10 @@
 | Interface | What it does | Best for |
 | --- | --- | --- |
 | **Shiraz Runtime** | The core CLI, standalone ART host (with warm standby daemon on Linux), framework layer, 15 NDK libraries, and native OS adapters ([development guide](docs/DEVELOPMENT.md)). | Running APKs directly on Linux/macOS desktops, installing desktop entries (`shiraz install-desktop`), and developing Android compatibility. |
-| **[Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder)** | Packages an APK and the runtime into a standalone Linux **AppImage** or sandboxed **Flatpak** (`.flatpak`) directly in your browser using Go WebAssembly — your APK stays local ([guide](docs/BUILDER.md)). | Turning a supported APK into a single-file or sandboxed Linux desktop application with no upload. |
-| **[Shiraz Browser Runner](https://spectre-oss.github.io/shiraz/run/)** *(exp.)* | Runs supported pure-DEX and `arm64-v8a` APKs 100% client-side in your browser tab by executing Shiraz’s `aarch64` Linux runtime inside [pithings/unkernel](https://github.com/pithings/unkernel) (Linux 7.3 + `kwemu` on WebAssembly) with zero backend compute. | Dropping an APK into a modern browser (Chrome/Edge 137+, Firefox 153+, Safari 27+) with no server or install. |
+| **[Shiraz Builder](https://shiraz.foo/#builder)** | Packages an APK and the runtime into a standalone Linux **AppImage** or sandboxed **Flatpak** (`.flatpak`) directly in your browser using Go WebAssembly — your APK stays local ([guide](docs/BUILDER.md)). | Turning a supported APK into a single-file or sandboxed Linux desktop application with no upload. |
+| **[Shiraz Browser Runner](https://shiraz.foo/run/)** *(exp.)* | Runs supported pure-DEX and `arm64-v8a` APKs 100% client-side in your browser tab by executing Shiraz’s `aarch64` Linux runtime inside [pithings/unkernel](https://github.com/pithings/unkernel) (Linux 7.3 + `kwemu` on WebAssembly) with zero backend compute. | Dropping an APK into a modern browser (Chrome/Edge 137+, Firefox 153+, Safari 27+) with no server or install. |
 | **[Shiraz Web](docs/WEB.md)** | Runs an APK on a Linux host and streams its screen, touch, and keyboard to any browser over WebRTC. | Trying apps through a browser locally or on Linux phones from a host. |
-| **[Shiraz Launcher](macos/Launcher/README.md)** *(macOS, exp.)* | Native SwiftUI shelf for Apple Silicon Macs with per-app screen presets, F-Droid catalog browsing, Dock icons, and live console ([watch demo](https://spectre-oss.github.io/shiraz/#mac)). | Managing, configuring, and launching local APKs on Apple Silicon. |
+| **[Shiraz Launcher](macos/Launcher/README.md)** *(macOS, exp.)* | Native SwiftUI shelf for Apple Silicon Macs with per-app screen presets, F-Droid catalog browsing, Dock icons, and live console ([watch demo](https://shiraz.foo/#mac)). | Managing, configuring, and launching local APKs on Apple Silicon. |
 
 Builder creates standalone Linux applications, Web streams from a Linux host, and Launcher drives local runs on Apple Silicon. All of them share the Shiraz runtime and its recorded compatibility limits.
 
@@ -59,18 +59,18 @@ Shiraz executes Android DEX bytecode with a standalone host build of **ART** (An
 
 | Platform | State | Current scope & limits |
 | --- | --- | --- |
-| **Linux** (`x86_64`, `aarch64`) | Experimental · Primary | Prebuilt `x86_64` and `aarch64` browser base AppImages and Flatpak bases, the browser builder, and an `amd64` `shiraz-web` Debian package are published on [GitHub Releases](https://github.com/spectre-oss/shiraz/releases). 18 recorded apps across 8 engines ([tested applications](docs/tested.md), [compatibility tracker](https://spectre-oss.github.io/shiraz/compatibility/)) with behavioral limits documented. |
+| **Linux** (`x86_64`, `aarch64`) | Experimental · Primary | Prebuilt `x86_64` and `aarch64` browser base AppImages and Flatpak bases, the browser builder, and an `amd64` `shiraz-web` Debian package are published on [GitHub Releases](https://github.com/spectre-oss/shiraz/releases). 18 recorded apps across 8 engines ([tested applications](docs/tested.md), [compatibility tracker](https://shiraz.foo/compatibility/)) with behavioral limits documented. |
 | **macOS** (Apple Silicon) | Experimental · Active port | **48 verified / 21 partial / 22 open** items in [docs/macos_final_goal.md](docs/macos_final_goal.md). Live Apple Silicon walkthroughs on Metal/ANGLE verified OsmAnd+ (vector maps, Persian RTL, offline search, turn-by-turn routing/navigation, 468 MB live HTTPS downloads, resize, zoom persistence), F-Droid v2.0.2 (Material 3 Compose UI + two-pane landscape), Math (ARM64 native), Editor, Crossword, SolitaireCG (with restart persistence), 2048 (`402 ms` `WarmArtPool` standby reuse, `2.67×` faster), and Telegram 13.2.1 auth, plus live MoltenVK v1.4.2 Metal Vulkan 1.4.357 (`Apple M2 Pro`, Java `PackageManager` `level=1`). Building `libart-compiler.so` JIT, M5 hardened signing gate, and Linux/Waydroid parity remain open. |
 | **Windows** (`x64`, `arm64`) | Experimental · Foundation | **32 verified / 5 partial / 0 open** items in [docs/windows_final_goal.md](docs/windows_final_goal.md) (CI-verified SDL2 Win32 presentation, DXGI, `libvulkan.dll`, WASAPI, Media Foundation decode + `IMFSourceReader` camera capture, DirectWrite, portable/MSIX bundler, plus cross-platform tested Per-Monitor V2 DPI/ANGLE-D3D11 layer, Win32 ART `NativeBridge` v3 + guest ELF `SysV ↔ Win64` thunks, and pinned `patches/art-win32-build.patch` + `bootstrap_windows.py` orchestrator). Live Win32 `libart.dll` execution remains open. |
 | **Linux phones** | Future goal | Long-term target. `aarch64` base AppImages/Flatpaks build in CI and Shiraz Web targets mobile touch and keyboard controls, but phone-level compatibility is not yet established. |
 
 - **Framework & NDK coverage:** All **4,445 / 4,445** Android API 35 `android.*` framework class surfaces (`49 / 49` areas) and all **15 / 15** tracked API 35 NDK C/C++ libraries (`887 / 887` symbols) are built and audited — see [Framework APIs goal](docs/framework_final_goal.md), [NDK libraries goal](docs/ndk_final_goal.md), and [missing Android libraries](docs/MISSING_ANDROID_LIBRARIES.md). Class/symbol presence is not CTS certification or a whole-Android compatibility percentage.
-- **How Shiraz compares:** See [Shiraz and its peers](https://spectre-oss.github.io/shiraz/compare/) for a side-by-side comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper, Waydroid, and Android Emulator.
+- **How Shiraz compares:** See [Shiraz and its peers](https://shiraz.foo/compare/) for a side-by-side comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper, Waydroid, and Android Emulator.
 - **Local verification:** With pinned development dependencies prepared, run `make check` on Linux or `make macos-guest-check` on Apple Silicon macOS.
 
 ## Get started
 
-- **Package an AppImage or Flatpak in your browser:** Open [Shiraz Builder](https://spectre-oss.github.io/shiraz/#builder) — no upload, everything runs locally in WebAssembly ([Builder guide](docs/BUILDER.md)).
+- **Package an AppImage or Flatpak in your browser:** Open [Shiraz Builder](https://shiraz.foo/#builder) — no upload, everything runs locally in WebAssembly ([Builder guide](docs/BUILDER.md)).
 - **Run apps through a browser:** Install the `shiraz-web` `.deb` package from [Releases](https://github.com/spectre-oss/shiraz/releases) or run `go-server` from source ([Web setup guide](docs/WEB.md)).
 - **Build and run from source:** With runtime dependencies prepared (see [development guide](docs/DEVELOPMENT.md) and [Makefile](Makefile)):
 
@@ -140,13 +140,13 @@ On Apple Silicon macOS, build the native app shelf with `make launcher-app` — 
 Waydroid boots a full LineageOS Android system in an LXC container and requires Linux kernel binder support; emulators boot Android inside a virtual machine. Shiraz runs only the app on standalone ART over native host libraries — no OS image, no VM, no binder kernel module, and no root.
 
 **How does Shiraz differ from Android Translation Layer (ATL)?**
-Both are GPL-3.0 standalone-ART translation layers (Shiraz ships ATL's `bionic_translation` linker under its original notice). Shiraz is GTK-free (SDL2 across Linux, macOS, and Windows), adds in-browser AppImage and Flatpak packaging, WebRTC streaming, warm ART pre-warming, and native macOS/Windows host backends. See [the full 7-project comparison](https://spectre-oss.github.io/shiraz/compare/).
+Both are GPL-3.0 standalone-ART translation layers (Shiraz ships ATL's `bionic_translation` linker under its original notice). Shiraz is GTK-free (SDL2 across Linux, macOS, and Windows), adds in-browser AppImage and Flatpak packaging, WebRTC streaming, warm ART pre-warming, and native macOS/Windows host backends. See [the full 7-project comparison](https://shiraz.foo/compare/).
 
 **Does Shiraz include Google Play Services or run every Android app?**
-No. Shiraz does not ship the Google Play Store or Google Play Services, and compatibility grows app by app. Check [the live compatibility catalog](https://spectre-oss.github.io/shiraz/compatibility/) and [docs/tested.md](docs/tested.md) for verified flows and open limits.
+No. Shiraz does not ship the Google Play Store or Google Play Services, and compatibility grows app by app. Check [the live compatibility catalog](https://shiraz.foo/compatibility/) and [docs/tested.md](docs/tested.md) for verified flows and open limits.
 
 **Can AI tools or search engines read a structured summary of Shiraz?**
-Yes — up-to-date machine-readable summaries are published at [`llms.txt`](https://spectre-oss.github.io/shiraz/llms.txt) and [`llms-full.txt`](https://spectre-oss.github.io/shiraz/llms-full.txt).
+Yes — up-to-date machine-readable summaries are published at [`llms.txt`](https://shiraz.foo/llms.txt) and [`llms-full.txt`](https://shiraz.foo/llms-full.txt).
 
 ## Documentation
 
@@ -156,8 +156,8 @@ Yes — up-to-date machine-readable summaries are published at [`llms.txt`](http
 | Cross-platform host architecture (Linux, macOS, Windows) | [docs/cross_platform.md](docs/cross_platform.md) |
 | Setup, architecture, builds, and tests | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | Observed app results and limits | [docs/tested.md](docs/tested.md) |
-| Live compatibility & API 35/NDK tracker | [spectre-oss.github.io/shiraz/compatibility/](https://spectre-oss.github.io/shiraz/compatibility/) |
-| Comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper | [spectre-oss.github.io/shiraz/compare/](https://spectre-oss.github.io/shiraz/compare/) |
+| Live compatibility & API 35/NDK tracker | [shiraz.foo/compatibility/](https://shiraz.foo/compatibility/) |
+| Comparison with ATL, ACL, a4l, Mac.apk, apklayer, Innkeeper | [shiraz.foo/compare/](https://shiraz.foo/compare/) |
 | Browser AppImage & Flatpak builder (Go/WASM) | [docs/BUILDER.md](docs/BUILDER.md) |
 | WebRTC browser runner | [docs/WEB.md](docs/WEB.md) |
 | macOS Launcher (SwiftUI) | [macos/Launcher/README.md](macos/Launcher/README.md) |

@@ -7,7 +7,7 @@ authors:
     alias: mamad
   - name: Shiraz Contributors
 repository-code: https://github.com/spectre-oss/shiraz
-url: https://spectre-oss.github.io/shiraz/
+url: https://shiraz.foo/
 license: GPL-3.0-only
 abstract: >-
   An open-source, GTK-free Android compatibility layer and local APK packaging

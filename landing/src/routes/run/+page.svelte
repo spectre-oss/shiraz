@@ -917,7 +917,7 @@
     content="Drop a supported Android™ APK and run it 100% client-side in your browser tab using Shiraz aarch64 and pithings/unkernel Linux on WebAssembly. Zero backend compute, zero telemetry."
   />
   <meta name="robots" content={ROBOTS_INDEX} />
-  <link rel="canonical" href="https://spectre-oss.github.io/shiraz/run/" />
+  <link rel="canonical" href="https://shiraz.foo/run/" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Shiraz" />
@@ -926,15 +926,15 @@
     property="og:description"
     content="Run supported Android™ APKs directly inside your browser tab with zero backend servers and zero telemetry — Shiraz standalone ARM64 ART running inside pithings/unkernel."
   />
-  <meta property="og:url" content="https://spectre-oss.github.io/shiraz/run/" />
-  <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta property="og:url" content="https://shiraz.foo/run/" />
+  <meta property="og:image" content="https://shiraz.foo/social-card.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Run Android™ APKs in your browser — Shiraz + unkernel" />
   <meta
     name="twitter:description"
     content="100% client-side Android™ APK runner in WebAssembly powered by Shiraz + pithings/unkernel. Zero telemetry."
   />
-  <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta name="twitter:image" content="https://shiraz.foo/social-card.png" />
   {@html serializeJsonLd(runJsonLd(__SHIRAZ_VERSION__))}
 </svelte:head>
 

@@ -36,7 +36,7 @@ portals, and optional `--no-internet` / sandbox network toggle).
 
 ## Build an AppImage or Flatpak in the browser
 
-The [Shiraz site](https://spectre-oss.github.io/shiraz/#builder) includes the
+The [Shiraz site](https://shiraz.foo/#builder) includes the
 SvelteKit builder directly on the page. Select the **Linux package format**
 (**AppImage** or **Flatpak**), choose the **Linux device architecture**
 (`x86_64` or `ARM64`), and select an APK, then build. The published runtime is

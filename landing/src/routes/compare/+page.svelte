@@ -399,14 +399,14 @@
     content="Compare Shiraz beside ATL, ACL, a4l, Mac.apk, apklayer and Innkeeper: Linux/macOS/Windows support, runtime architecture, graphics, sandboxing, AppImage/Flatpak packaging, and reported apps."
   />
   <meta name="robots" content={ROBOTS_INDEX} />
-  <link rel="canonical" href="https://spectre-oss.github.io/shiraz/compare/" />
+  <link rel="canonical" href="https://shiraz.foo/compare/" />
   <meta property="og:title" content="Shiraz vs ATL, ACL, a4l, Mac.apk, apklayer &amp; Innkeeper" />
   <meta property="og:description" content="Seven open-source ways to run Android™ apps off Android, compared across nine capabilities and fourteen technical dimensions." />
-  <meta property="og:url" content="https://spectre-oss.github.io/shiraz/compare/" />
+  <meta property="og:url" content="https://shiraz.foo/compare/" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Shiraz" />
-  <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta property="og:image" content="https://shiraz.foo/social-card.png" />
   <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -414,7 +414,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Shiraz vs ATL, ACL, a4l, Mac.apk, apklayer &amp; Innkeeper" />
   <meta name="twitter:description" content="Seven open-source Android-on-desktop layers compared side by side: architecture, graphics, sandboxing, packaging, and tested apps." />
-  <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta name="twitter:image" content="https://shiraz.foo/social-card.png" />
   <meta name="twitter:image:alt" content="Seven open-source Android-on-desktop projects compared side by side with Shiraz." />
   {@html serializeJsonLd(compareJsonLd({ version: __SHIRAZ_VERSION__, updated: '2026-11-24', projects }))}
 </svelte:head>

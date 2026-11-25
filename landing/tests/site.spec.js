@@ -625,12 +625,12 @@ test('home page links to the client-side browser APK runner with unkernel credit
 test('SEO, GEO and AEO discovery files, JSON-LD graphs and matching FAQs are published on every route', async ({page, request}) => {
   const robots = await request.get('/robots.txt');
   expect(robots.ok()).toBe(true);
-  expect(await robots.text()).toContain('Sitemap: https://spectre-oss.github.io/shiraz/sitemap.xml');
+  expect(await robots.text()).toContain('Sitemap: https://shiraz.foo/sitemap.xml');
 
   const sitemap = await request.get('/sitemap.xml');
   expect(sitemap.ok()).toBe(true);
   const sitemapXml = await sitemap.text();
-  for (const url of ['https://spectre-oss.github.io/shiraz/', 'https://spectre-oss.github.io/shiraz/run/', 'https://spectre-oss.github.io/shiraz/compatibility/', 'https://spectre-oss.github.io/shiraz/compare/']) {
+  for (const url of ['https://shiraz.foo/', 'https://shiraz.foo/run/', 'https://shiraz.foo/compatibility/', 'https://shiraz.foo/compare/']) {
     expect(sitemapXml).toContain(`<loc>${url}</loc>`);
   }
 

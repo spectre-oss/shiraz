@@ -1,4 +1,4 @@
-# Shiraz — https://spectre-oss.github.io/shiraz/
+# Shiraz — https://shiraz.foo/
 # Search engines and AI answer engines are welcome to index public documentation and compatibility data.
 
 User-agent: *
@@ -25,7 +25,7 @@ Allow: /
 User-agent: Applebot
 Allow: /
 
-Sitemap: https://spectre-oss.github.io/shiraz/sitemap.xml
+Sitemap: https://shiraz.foo/sitemap.xml
 # AI-readable project summaries:
-# https://spectre-oss.github.io/shiraz/llms.txt
-# https://spectre-oss.github.io/shiraz/llms-full.txt
+# https://shiraz.foo/llms.txt
+# https://shiraz.foo/llms-full.txt

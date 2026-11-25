@@ -13,7 +13,7 @@ make landing-check
 make landing-build
 ```
 
-`landing/build/` is the prerendered static site. `BASE_PATH=/shiraz make landing-build`
+`landing/build/` is the prerendered static site. `make landing-build`
 builds for GitHub project Pages. Go assets are generated from `go-wasm/` and ignored,
 as are node_modules and all build output. CI can use verified upstream-job assets
 with `SHIRAZ_PREBUILT_WASM=1`. No APKs or runtime bases belong in source control.

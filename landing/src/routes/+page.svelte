@@ -54,14 +54,14 @@
   <title>Shiraz — Run Android™ apps natively on Linux, macOS and Windows</title>
   <meta name="description" content="Run supported Android™ APKs natively on Linux, Apple Silicon macOS, and Windows without a virtual machine or Waydroid. Package an AppImage or sandboxed Flatpak locally in your browser." />
   <meta name="robots" content={ROBOTS_INDEX} />
-  <link rel="canonical" href="https://spectre-oss.github.io/shiraz/" />
+  <link rel="canonical" href="https://shiraz.foo/" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Shiraz" />
   <meta property="og:title" content="Shiraz — Run Android™ apps natively on Linux, macOS and Windows" />
   <meta property="og:description" content="Open-source, GTK-free Android™ compatibility layer for Linux, macOS and Windows. Build a Linux AppImage or Flatpak locally in your browser. No virtual machine." />
-  <meta property="og:url" content="https://spectre-oss.github.io/shiraz/" />
-  <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta property="og:url" content="https://shiraz.foo/" />
+  <meta property="og:image" content="https://shiraz.foo/social-card.png" />
   <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -69,7 +69,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Shiraz — Run Android™ apps natively on Linux, macOS and Windows" />
   <meta name="twitter:description" content="Open-source Android™ compatibility layer for Linux, macOS and Windows. Package an AppImage or Flatpak locally in your browser with no VM." />
-  <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta name="twitter:image" content="https://shiraz.foo/social-card.png" />
   <meta name="twitter:image:alt" content="Shiraz — Your Android™ apps. A little more at home." />
   {@html serializeJsonLd(homeJsonLd(__SHIRAZ_VERSION__))}
 </svelte:head>

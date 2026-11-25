@@ -71,14 +71,14 @@
   <title>App compatibility &amp; Android™ API 35 coverage — Shiraz</title>
   <meta name="description" content="Explore recorded Shiraz app compatibility across 14 apps, Linux/macOS/Windows host OS matrices, 4,445 API 35 framework classes, 15 NDK libraries (887 C symbols), and public test reports." />
   <meta name="robots" content={ROBOTS_INDEX} />
-  <link rel="canonical" href="https://spectre-oss.github.io/shiraz/compatibility/" />
+  <link rel="canonical" href="https://shiraz.foo/compatibility/" />
   <meta property="og:title" content="App compatibility &amp; Android™ API 35 coverage — Shiraz" />
   <meta property="og:description" content="Recorded app walkthroughs, Linux/macOS/Windows host backend progress, 4,445 API 35 classes, and 15/15 NDK libraries (887 C symbols)." />
-  <meta property="og:url" content="https://spectre-oss.github.io/shiraz/compatibility/" />
+  <meta property="og:url" content="https://shiraz.foo/compatibility/" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="en_US" />
   <meta property="og:site_name" content="Shiraz" />
-  <meta property="og:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta property="og:image" content="https://shiraz.foo/social-card.png" />
   <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -86,7 +86,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="App compatibility &amp; Android™ API 35 coverage — Shiraz" />
   <meta name="twitter:description" content="Recorded app runs, 3-OS host progress, 4,445 API 35 classes, and 15/15 NDK libraries with explicit limits." />
-  <meta name="twitter:image" content="https://spectre-oss.github.io/shiraz/social-card.png" />
+  <meta name="twitter:image" content="https://shiraz.foo/social-card.png" />
   <meta name="twitter:image:alt" content="Shiraz app compatibility and Android API 35 coverage across Linux, macOS, and Windows." />
   {@html serializeJsonLd(
     compatibilityJsonLd({

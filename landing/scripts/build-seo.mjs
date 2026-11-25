@@ -15,7 +15,7 @@ const inventory = readJson('landing/src/lib/android-inventory.json');
 const ndk = readJson('landing/src/lib/ndk-inventory.json');
 const support = readJson('landing/src/lib/android-support.json');
 
-const SITE = 'https://spectre-oss.github.io/shiraz';
+const SITE = 'https://shiraz.foo';
 const REPO = 'https://github.com/spectre-oss/shiraz';
 
 const partialApps = compat.applications.filter(a => a.status === 'Partial').length;

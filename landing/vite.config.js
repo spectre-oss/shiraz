@@ -41,7 +41,7 @@ export default defineConfig(async ({ command }) => {
     },
     plugins: [sveltekit({
       adapter: adapter({ fallback: '404.html' }),
-      paths: { base: process.env.BASE_PATH || '' }
+      paths: { base: process.env.BASE_PATH === '/shiraz' ? '' : process.env.BASE_PATH || '' }
     })]
   };
 });

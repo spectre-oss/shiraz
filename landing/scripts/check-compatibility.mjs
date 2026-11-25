@@ -184,9 +184,9 @@ console.log(
 
 // Verify SEO, GEO and AEO static discovery assets.
 const robots = readFileSync(`${root}landing/static/robots.txt`, 'utf8');
-if (!robots.includes('Sitemap: https://spectre-oss.github.io/shiraz/sitemap.xml')) throw Error('robots.txt missing canonical Sitemap directive');
+if (!robots.includes('Sitemap: https://shiraz.foo/sitemap.xml')) throw Error('robots.txt missing canonical Sitemap directive');
 const sitemap = readFileSync(`${root}landing/static/sitemap.xml`, 'utf8');
-for (const loc of ['https://spectre-oss.github.io/shiraz/', 'https://spectre-oss.github.io/shiraz/compatibility/', 'https://spectre-oss.github.io/shiraz/compare/']) {
+for (const loc of ['https://shiraz.foo/', 'https://shiraz.foo/compatibility/', 'https://shiraz.foo/compare/']) {
   if (!sitemap.includes(`<loc>${loc}</loc>`)) throw Error(`sitemap.xml missing ${loc}`);
 }
 if (!/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/.test(sitemap)) throw Error('sitemap.xml missing ISO lastmod dates');

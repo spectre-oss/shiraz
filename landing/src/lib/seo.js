@@ -3,7 +3,7 @@
 // metadata, FAQ content, and Schema.org JSON-LD graph builders.
 // Visible FAQ blocks render from these exact arrays so on-page text and JSON-LD stay identical.
 
-export const SITE_URL = 'https://spectre-oss.github.io/shiraz';
+export const SITE_URL = 'https://shiraz.foo';
 export const REPO_URL = 'https://github.com/spectre-oss/shiraz';
 export const SOCIAL_IMAGE = `${SITE_URL}/social-card.png`;
 export const ROBOTS_INDEX = 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
