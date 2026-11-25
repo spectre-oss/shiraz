@@ -37,6 +37,18 @@ public final class UiThreadSmoke {
    android.os.Message nativeMessage=android.os.Message.obtain(handler,68);handler.sendMessage(nativeMessage);
    java.lang.reflect.Method next=android.os.MessageQueue.class.getDeclaredMethod("next");next.setAccessible(true);
    check(next.invoke(Looper.myQueue())==nativeMessage&&!handler.hasMessages(68),"Native queue next ABI consumes the due message");
+   final List<String> gestureOrder=new ArrayList<String>();
+   final int[] idleDuringGesture={0};
+   android.os.MessageQueue.IdleHandler gestureIdle=new android.os.MessageQueue.IdleHandler(){public boolean queueIdle(){idleDuringGesture[0]++;return true;}};
+   Looper.myQueue().addIdleHandler(gestureIdle);
+   handler.post(new Runnable(){public void run(){try{Thread.sleep(25);}catch(InterruptedException ignored){}gestureOrder.add("slow");}});
+   handler.post(new Runnable(){public void run(){gestureOrder.add("followup");}});
+   handler.postDelayed(new Runnable(){public void run(){gestureOrder.add("future");}},5000);
+   Looper.myLooper().shirazDispatchDueNow(64);
+   check(gestureOrder.equals(Arrays.asList("slow","followup")),"Gesture drain finishes all already-due callbacks despite >16ms work and skips future delayed messages");
+   check(idleDuringGesture[0]==0,"Gesture drain does not fire IdleHandlers");
+   handler.removeCallbacksAndMessages(null);
+   Looper.myQueue().removeIdleHandler(gestureIdle);
    System.out.println("UI_THREAD_DISPATCH_OK");
   }finally{Looper.shirazShutdownMain();}
  }

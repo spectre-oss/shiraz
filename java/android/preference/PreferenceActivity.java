@@ -10,7 +10,7 @@ import android.os.Parcelable;
 import android.view.View;
 import android.widget.ListView;
 
-/** Legacy programmatic preference screens. XML and fragment headers remain unsupported. */
+/** Legacy preference screen activity supporting programmatic and XML preference hierarchies. */
 public abstract class PreferenceActivity extends ListActivity {
     public static final long HEADER_ID_UNDEFINED = -1L;
 
@@ -142,7 +142,7 @@ public abstract class PreferenceActivity extends ListActivity {
     }
 
     public void addPreferencesFromResource(int resource) {
-        throw new UnsupportedOperationException("Preference XML inflation is not implemented");
+        setPreferenceScreen(getPreferenceManager().inflateFromResource(this, resource, getPreferenceScreen()));
     }
 
     public void addPreferencesFromIntent(Intent intent) {

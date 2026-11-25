@@ -20,6 +20,13 @@ public abstract class TwoStatePreference extends Preference {
 
     public TwoStatePreference(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
         super(context, attrs, defStyleAttr, defStyleRes);
+        if (attrs != null || defStyleAttr != 0 || defStyleRes != 0) {
+            shiraz.runtime.XmlAttributes x =
+                    new shiraz.runtime.XmlAttributes(context, attrs, defStyleAttr, defStyleRes);
+            summaryOn = x.text("summaryOn");
+            summaryOff = x.text("summaryOff");
+            disableDependentsState = x.bool("disableDependentsState", false);
+        }
     }
 
     public TwoStatePreference(Context context, AttributeSet attrs, int defStyleAttr) {

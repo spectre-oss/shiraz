@@ -10,26 +10,34 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT/'scripts'))
-spec = importlib.util.spec_from_file_location('package_browser_site', ROOT/'scripts/package_browser_site.py')
+sys.path.insert(0, str(ROOT / 'scripts'))
+spec = importlib.util.spec_from_file_location(
+    'package_browser_site', ROOT / 'scripts/package_browser_site.py'
+)
 site = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(site)
 
 
-import prepare_pages_runtime as runtime
+import prepare_pages_runtime as runtime  # noqa: E402
 
 
 class BrowserSiteTests(unittest.TestCase):
     def prepare(self, root):
-        (root/'VERSION').write_text('1.2.3\n')
-        for name in ('demo.html', 'shiraz-assemble.wasm', 'wasm_exec.js',
-                     'fonts/Manrope-wght.ttf', 'fonts/OFL.txt', 'fonts/README.md'):
-            file = root/'go-wasm'/name
+        (root / 'VERSION').write_text('1.2.3\n')
+        for name in (
+            'demo.html',
+            'shiraz-assemble.wasm',
+            'wasm_exec.js',
+            'fonts/Manrope-wght.ttf',
+            'fonts/OFL.txt',
+            'fonts/README.md',
+        ):
+            file = root / 'go-wasm' / name
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(b'fixture')
-        (root/'landing/build').mkdir(parents=True)
-        (root/'landing/build/index.html').write_text('SvelteKit fixture')
-        (root/'dist').mkdir()
+        (root / 'landing/build').mkdir(parents=True)
+        (root / 'landing/build/index.html').write_text('SvelteKit fixture')
+        (root / 'dist').mkdir()
         for arch, machine in (('x86_64', 62), ('aarch64', 183)):
             self.base(root, arch, machine)
 
@@ -37,9 +45,11 @@ class BrowserSiteTests(unittest.TestCase):
         data = bytearray(64)
         data[:6] = b'\x7fELF\x02\x01'
         struct.pack_into('<H', data, 18, machine)
-        base = root/'dist'/f'Shiraz-Browser-Base-1.2.3-{arch}.AppImage'
+        base = root / 'dist' / f'Shiraz-Browser-Base-1.2.3-{arch}.AppImage'
         base.write_bytes(data)
-        base.with_suffix('.AppImage.sha256').write_text(hashlib.sha256(data).hexdigest()+'  '+base.name+'\n')
+        base.with_suffix('.AppImage.sha256').write_text(
+            hashlib.sha256(data).hexdigest() + '  ' + base.name + '\n'
+        )
         return base
 
     def test_manifest_contains_verified_bases(self):
@@ -48,31 +58,59 @@ class BrowserSiteTests(unittest.TestCase):
             self.prepare(root)
             with patch.object(site, 'ROOT', root):
                 site.main()
-            self.assertEqual((root/'build/pages-site/index.html').read_text(), 'SvelteKit fixture')
-            manifest = json.loads((root/'build/pages-site/release.json').read_text())
+            self.assertEqual(
+                (root / 'build/pages-site/index.html').read_text(), 'SvelteKit fixture'
+            )
+            manifest = json.loads((root / 'build/pages-site/release.json').read_text())
             self.assertEqual(set(manifest['architectures']), {'x86_64', 'aarch64'})
             for arch, entry in manifest['architectures'].items():
                 self.assertIn(arch, entry['base_file'])
                 self.assertEqual(entry['base_size'], 64)
-                self.assertTrue((root/'build/pages-site'/entry['base_file']).is_file())
+                self.assertTrue((root / 'build/pages-site' / entry['base_file']).is_file())
 
     def test_independent_pages_uses_latest_complete_published_release(self):
         def release(version, complete=True):
             name = f'Shiraz-Browser-Base-{version}-x86_64.AppImage'
-            return dict(tag_name='v'+version, assets=[dict(name=name), dict(name=name+'.sha256')] if complete else [])
-        selected = runtime.select_release([release('1.9.0'), release('1.10.0'), release('2.0.0', False)])
+            return dict(
+                tag_name='v' + version,
+                assets=[dict(name=name), dict(name=name + '.sha256')] if complete else [],
+            )
+
+        selected = runtime.select_release(
+            [release('1.9.0'), release('1.10.0'), release('2.0.0', False)]
+        )
         self.assertEqual(selected['tag_name'], 'v1.10.0')
 
     def test_independent_pages_installs_and_verifies_available_architectures(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.prepare(root)
-            output = root/'landing/build'
-            runtime.install_runtime(output, root/'dist', '1.2.3')
-            self.assertEqual(set(json.loads((output/'release.json').read_text())['architectures']), {'x86_64','aarch64'})
+            erofs = root / 'dist' / 'Shiraz-Browser-Runtime-1.2.3-aarch64.erofs'
+            erofs_bytes = b'erofs-fixture-data'
+            erofs.write_bytes(erofs_bytes)
+            Path(str(erofs) + '.sha256').write_text(
+                hashlib.sha256(erofs_bytes).hexdigest() + '  ' + erofs.name + '\n'
+            )
+            output = root / 'landing/build'
+            runtime.install_runtime(output, root / 'dist', '1.2.3')
+            manifest = json.loads((output / 'release.json').read_text())
+            self.assertEqual(set(manifest['architectures']), {'x86_64', 'aarch64'})
+            self.assertEqual(
+                manifest['browser_runtime']['file'],
+                'base/Shiraz-Browser-Runtime-1.2.3-aarch64.erofs',
+            )
+            self.assertEqual(manifest['browser_runtime']['format'], 'erofs')
+            self.assertTrue((output / manifest['browser_runtime']['file']).is_file())
+
+            # Corrupt browser runtime checksum must be rejected.
+            erofs.write_bytes(erofs_bytes + b'corrupt')
+            with self.assertRaises(RuntimeError):
+                runtime.install_runtime(output, root / 'dist', '1.2.3')
+            erofs.write_bytes(erofs_bytes)
+
             self.base(root, 'aarch64', 62)
             with self.assertRaises(RuntimeError):
-                runtime.install_runtime(output, root/'dist', '1.2.3')
+                runtime.install_runtime(output, root / 'dist', '1.2.3')
 
     def test_rejects_relabelled_or_corrupt_base(self):
         for wrong_machine in (True, False):
@@ -81,6 +119,6 @@ class BrowserSiteTests(unittest.TestCase):
                 self.prepare(root)
                 base = self.base(root, 'aarch64', 62 if wrong_machine else 183)
                 if not wrong_machine:
-                    base.write_bytes(base.read_bytes()+b'corruption')
+                    base.write_bytes(base.read_bytes() + b'corruption')
                 with patch.object(site, 'ROOT', root), self.assertRaises(RuntimeError):
                     site.main()

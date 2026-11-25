@@ -21,6 +21,20 @@ public class ListPreference extends DialogPreference {
 
     public ListPreference(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
         super(context, attrs, defStyleAttr, defStyleRes);
+        if (attrs != null || defStyleAttr != 0 || defStyleRes != 0) {
+            TypedArray a = context.obtainStyledAttributes(
+                    attrs, new int[] {0x010100b2, 0x010101f8}, defStyleAttr, defStyleRes);
+            try {
+                if (a.hasValue(0)) {
+                    entries = a.getTextArray(0);
+                }
+                if (a.hasValue(1)) {
+                    entryValues = a.getTextArray(1);
+                }
+            } finally {
+                a.recycle();
+            }
+        }
         CharSequence rawSummary = super.getSummary();
         if (rawSummary != null) {
             summaryFormat = rawSummary.toString();

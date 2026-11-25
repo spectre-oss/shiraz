@@ -81,6 +81,16 @@ public final class MessageQueue {
             }
         }
     }
+    Message nextDueBefore(long cutoff) {
+        synchronized (this) {
+            if (head != null && head.when <= cutoff) {
+                Message result = head; head = head.next; result.next = null; --size;
+                idleDispatched = false;
+                return result;
+            }
+            return null;
+        }
+    }
     public synchronized boolean isIdle() { return head == null || head.when > SystemClock.uptimeMillis(); }
     synchronized boolean has(Handler handler, Runnable callback, int what, Object token) {
         for (Message message = head; message != null; message = message.next)

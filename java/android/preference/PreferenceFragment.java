@@ -158,7 +158,11 @@ public abstract class PreferenceFragment extends Fragment {
     }
 
     public void addPreferencesFromResource(int preferencesResId) {
-        throw new UnsupportedOperationException("Preference XML inflation is not implemented");
+        PreferenceManager pm = getPreferenceManager();
+        if (pm == null) {
+            throw new IllegalStateException("This should be called after super.onCreate.");
+        }
+        setPreferenceScreen(pm.inflateFromResource(getActivity(), preferencesResId, getPreferenceScreen()));
     }
 
     public boolean onPreferenceTreeClick(PreferenceScreen preferenceScreen, Preference preference) {

@@ -21,6 +21,10 @@ public abstract class PreferenceGroup extends Preference {
 
     public PreferenceGroup(Context c, AttributeSet a, int style, int resource) {
         super(c, a, style, resource);
+        if (a != null || style != 0 || resource != 0) {
+            shiraz.runtime.XmlAttributes x = new shiraz.runtime.XmlAttributes(c, a, style, resource);
+            ordering = x.bool("orderingFromXml", true);
+        }
     }
 
     public void setOrderingAsAdded(boolean value) {
@@ -86,6 +90,15 @@ public abstract class PreferenceGroup extends Preference {
         }
         children.clear();
         notifyHierarchyChanged();
+    }
+
+    List<Preference> takeChildren() {
+        List<Preference> detached = new ArrayList<Preference>(children);
+        for (Preference child : detached) {
+            child.parent = null;
+        }
+        children.clear();
+        return detached;
     }
 
     public int getPreferenceCount() {

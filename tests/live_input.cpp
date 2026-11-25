@@ -228,6 +228,24 @@ int main() {
         });
     assert(frames == 2 && pointers == 2 && keys == 2 && texts == 1 && resizes == 1 &&
            locations == 1 && wheels == 1);
+    // In interactive mode (frames < 0), back-to-back queued clicks yield to tick()
+    // between gestures so Looper/FragmentManager transactions run before the next tap.
+    assert(ftruncate(file, 0) == 0 && lseek(file, 0, SEEK_SET) == 0);
+    int interactiveTicks = 0;
+    std::vector<int> pointersPerTick;
+    int tickPointers = 0;
+    shiraz::present(
+        surface, "Interactive gesture yield test", -1,
+        [&](shiraz::Surface&) {
+            if (interactiveTicks == 0)
+                append("down 2 3\nup 2 3\ndown 4 5\nup 4 5\nclose\n");
+            else
+                pointersPerTick.push_back(tickPointers);
+            tickPointers = 0;
+            return ++interactiveTicks < 10;
+        },
+        [&](const shiraz::PointerEvent&) { ++tickPointers; });
+    assert(pointersPerTick.size() == 2 && pointersPerTick[0] == 2 && pointersPerTick[1] == 2);
 #if defined(__APPLE__)
     // A hidden SDL window is expected when embedded. Only stage visibility
     // changes should pause/resume the Activity; focus loss alone must not.

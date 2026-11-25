@@ -86,6 +86,14 @@ public class Preference implements Comparable<Preference> {
             selectable = x.bool("selectable", true);
             persistent = x.bool("persistent", true);
             order = x.integer("order", DEFAULT_ORDER);
+            TypedArray defaults = context.obtainStyledAttributes(attrs, new int[] {0x010101ed}, style, resource);
+            try {
+                if (defaults.hasValue(0)) {
+                    defaultValue = onGetDefaultValue(defaults, 0);
+                }
+            } finally {
+                defaults.recycle();
+            }
         }
     }
 

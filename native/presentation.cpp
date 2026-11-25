@@ -1321,8 +1321,11 @@ void present(const Surface& initial, const std::string& title, int frames,
                               text && (text_input_request.load() & 1) &&
                                   editor_text_key(event.key.keysym.sym,
                                                   SDL_Keymod(event.key.keysym.mod)));
-                else
+                else {
                     keys.up(event.key.keysym.scancode, meta, eventTime(event.key.timestamp));
+                    if (frames < 0)
+                        break;
+                }
             }
             if (event.type == SDL_TEXTEDITING && preedit && ownWindow(event.edit.windowID)) {
                 const auto length = strnlen(event.edit.text, sizeof(event.edit.text));
@@ -1363,9 +1366,12 @@ void present(const Surface& initial, const std::string& title, int frames,
                     sample(PointerAction::Down, {double(event.button.x), double(event.button.y)},
                            mouse_source, event.common.timestamp);
                 } else if (event.type == SDL_MOUSEBUTTONUP && pointer.accepts(mouse_source) &&
-                           event.button.which == mouse)
+                           event.button.which == mouse) {
                     sample(PointerAction::Up, {double(event.button.x), double(event.button.y)},
                            mouse_source, event.common.timestamp);
+                    if (frames < 0)
+                        break;
+                }
             }
             if (event.type == SDL_MOUSEWHEEL && ownWindow(event.wheel.windowID) && input &&
                 !pointer.active() && !touches.active()) {
@@ -1448,6 +1454,8 @@ void present(const Surface& initial, const std::string& title, int frames,
                         event.tfinger.pressure,
                         input_viewport(image.width, image.height, w, h, bool(displayChanged)),
                         image.width, image.height, eventTime(event.common.timestamp));
+                    if (event.type == SDL_FINGERUP && frames < 0)
+                        break;
                 }
             }
         }

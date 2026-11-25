@@ -89,11 +89,15 @@
   let session = null;
   let pipWindow = null;
   let activePointerId = null;
+  let lastSentMove = null;
+  let pendingMove = null;
+  let lastMoveSentAt = 0;
   let pendingFrame = null;
   let rafId = 0;
   let activeRunId = 0;
   let bootTimerId = 0;
   let bootStartedAt = 0;
+  const MOVE_COALESCE_MS = 33;
 
   function appendLog(chunk) {
     logText = (logText + chunk).slice(-32000);
@@ -400,20 +404,32 @@
   }
 
   function onCanvasPointerDown(event) {
-    if (!session || event.button !== 0) return;
+    if (!session || frameCount === 0 || event.button !== 0) return;
     session.resumeAudio();
     canvasEl?.focus({ preventScroll: true });
     const pt = mapCanvasCoords(event);
     if (!pt) return;
     activePointerId = event.pointerId;
+    lastSentMove = pt;
+    pendingMove = null;
+    lastMoveSentAt = performance.now();
     canvasEl?.setPointerCapture?.(event.pointerId);
     session.sendCommand(`down ${pt.x} ${pt.y}`);
   }
 
   function onCanvasPointerMove(event) {
-    if (!session || activePointerId !== event.pointerId) return;
+    if (!session || frameCount === 0 || activePointerId !== event.pointerId) return;
     const pt = mapCanvasCoords(event);
     if (!pt) return;
+    if (lastSentMove && pt.x === lastSentMove.x && pt.y === lastSentMove.y) return;
+    const now = performance.now();
+    if (now - lastMoveSentAt < MOVE_COALESCE_MS) {
+      pendingMove = pt;
+      return;
+    }
+    pendingMove = null;
+    lastSentMove = pt;
+    lastMoveSentAt = now;
     session.sendCommand(`move ${pt.x} ${pt.y}`);
   }
 
@@ -421,11 +437,20 @@
     if (!session || activePointerId !== event.pointerId) return;
     activePointerId = null;
     const pt = mapCanvasCoords(event);
+    if (
+      pendingMove &&
+      (!lastSentMove || pendingMove.x !== lastSentMove.x || pendingMove.y !== lastSentMove.y) &&
+      (!pt || pendingMove.x !== pt.x || pendingMove.y !== pt.y)
+    ) {
+      session.sendCommand(`move ${pendingMove.x} ${pendingMove.y}`);
+    }
+    pendingMove = null;
+    lastSentMove = null;
     if (pt) session.sendCommand(`up ${pt.x} ${pt.y}`);
   }
 
   function onCanvasWheel(event) {
-    if (!session) return;
+    if (!session || frameCount === 0) return;
     const pt = mapCanvasCoords(event);
     if (!pt) return;
     event.preventDefault();
@@ -435,7 +460,7 @@
   }
 
   function onCanvasKey(event, isDown) {
-    if (!session) return;
+    if (!session || frameCount === 0) return;
     const cmds = keyboardEventToLiveCommands(event, isDown);
     if (!cmds.length) return;
     event.preventDefault();

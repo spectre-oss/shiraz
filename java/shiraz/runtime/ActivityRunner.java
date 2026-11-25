@@ -500,13 +500,16 @@ public final class ActivityRunner {
                             private long overlayRevision = -1, dialogRevision = -1;
                             private boolean applicationPointer, modalFocus, dumpAfterLayout;private View priorFocus;private android.view.MotionEvent lastApplicationEvent;
                             private void cancelApplicationPointer(long time){if(applicationPointer){applicationPointer=false;android.view.MotionEvent event=lastApplicationEvent==null?android.view.MotionEvent.shirazObtain(downTime,time,android.view.MotionEvent.ACTION_CANCEL,0,0,0x1002):android.view.MotionEvent.obtain(lastApplicationEvent);event.setAction(android.view.MotionEvent.ACTION_CANCEL);try{activity.getWindow().shirazDispatchTouchEvent(event);}finally{event.recycle();}}}
+                            private void drainGestureCallbacks(){android.os.Looper looper=android.os.Looper.myLooper();if(looper!=null)looper.shirazDispatchDueNow(64);}
                             private void modalInput(long time){if(DialogOverlay.hasVisible()||android.widget.PopupWindow.shirazCapturesApplicationPointer()){cancelApplicationPointer(time);if(!modalFocus){View root=activity.shirazContentView();if(root!=null){priorFocus=root.findFocus();root.clearFocus();}modalFocus=true;}}else if(modalFocus){modalFocus=false;if(priorFocus!=null&&priorFocus.isAttachedToWindow())priorFocus.requestFocus();priorFocus=null;}}
                             @Override public void onKey(int action, int key, int scan, int repeat, int meta, int flags, long down, long time) {
+                                if(action==android.view.KeyEvent.ACTION_DOWN)drainGestureCallbacks();
                                 if (activity.isFinishing()) return;
                                 android.view.KeyEvent event = new android.view.KeyEvent(down,time,action,key,repeat,meta,0,scan,flags,0x101);
                                 if(action==0&&(key>=19&&key<=23||key==61||key==66||key==92||key==93||key==122||key==123))touchMode(false);
                                 // KeyEvents may be retained for asynchronous dispatch by applications.
                                 if(event.getKeyCode()==android.view.KeyEvent.KEYCODE_P&&event.isCtrlPressed()&&event.isShiftPressed()){if(event.getAction()==0&&event.getRepeatCount()==0)context.capture.showPrivacy(activity);return;}modalInput(time); if(!android.widget.PopupWindow.shirazKey(event)&&!DialogOverlay.key(event))activity.getWindow().shirazDispatchKeyEvent(event);
+                                if(action==android.view.KeyEvent.ACTION_UP){drainGestureCallbacks();modalInput(time);}
                             }
                             @Override public void onText(String text, long time) {
                                 if (activity.isFinishing()) return;
@@ -540,6 +543,7 @@ public final class ActivityRunner {
                             }
                             private void routePointer(android.view.MotionEvent event) {
                                 int action=event.getActionMasked(),source=event.getSource();float x=event.getX(),y=event.getY();long eventTime=event.getEventTime();
+                                if(action==android.view.MotionEvent.ACTION_DOWN)drainGestureCallbacks();
                                 if (activity.isFinishing()) return;
                                 if(action==android.view.MotionEvent.ACTION_HOVER_MOVE){
                                     View root=activity.shirazContentView();
@@ -566,8 +570,12 @@ public final class ActivityRunner {
                                  if("1".equals(System.getenv("SHIRAZ_TRACE_INPUT"))&&action==android.view.MotionEvent.ACTION_DOWN)System.err.println("SHIRAZ_POINTER_ROUTE dialog2 x="+x+" y="+y);
                                  routed=true;
                                 }
+                                if(routed){
+                                    if(action==android.view.MotionEvent.ACTION_UP)drainGestureCallbacks();
+                                    modalInput(eventTime);
+                                    return;
+                                }
                                 modalInput(eventTime);
-                                if(routed)return;
                                 if("1".equals(System.getenv("SHIRAZ_TRACE_INPUT"))&&action==android.view.MotionEvent.ACTION_DOWN)System.err.println("SHIRAZ_POINTER_ROUTE activity x="+x+" y="+y);
                                 View view = activity.shirazContentView();
                                 attach(view);DialogOverlay.touchMode(view,touchMode);DialogOverlay.windowVisibility(view,hostVisible);DialogOverlay.windowFocus(view,hostFocused);if(view!=null){view.shirazUpdateSystemUiVisibility();view.shirazApplyWindowInsets(width,height);}
@@ -582,6 +590,7 @@ public final class ActivityRunner {
                                 if(lastApplicationEvent!=null)lastApplicationEvent.recycle();lastApplicationEvent=android.view.MotionEvent.obtain(event);
                                 if(keyboardPointer!=null){touchMode(false);keyboardPointer.dispatch(activity.getWindow(),view,event);}
                                 else activity.getWindow().shirazDispatchTouchEvent(event);
+                                if(action==android.view.MotionEvent.ACTION_UP)drainGestureCallbacks();
                                 modalInput(now);
                             }
                             private boolean keepFrame;

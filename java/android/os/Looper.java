@@ -71,6 +71,15 @@ public final class Looper {
             Message message = queue.next(false); if (message == null) return; dispatch(message);
         }
     }
+    /** Drain callbacks already due at entry so completed gestures take effect before the next tap. */
+    public void shirazDispatchDueNow(int limit) {
+        if (!isCurrentThread()) throw new IllegalStateException("Dispatch must run on the owning thread");
+        if (limit < 1 || limit > 10000) throw new IllegalArgumentException("Dispatch limit");
+        long cutoff = SystemClock.uptimeMillis();
+        for (int count = 0; count < limit; ++count) {
+            Message message = queue.nextDueBefore(cutoff); if (message == null) return; dispatch(message);
+        }
+    }
     /** Internal lifecycle observation for host-owned asynchronous registrations. */
     public boolean shirazIsQuitting() { return queue.shirazIsQuitting(); }
     public void quit() { queue.quit(false, false); }

@@ -75,6 +75,24 @@ def install_runtime(site, source, version):
 
     if 'x86_64' not in bases:
         raise RuntimeError('Published x86_64 runtime missing')
+
+    browser_runtime = None
+    for ext, fmt in (('.erofs', 'erofs'), ('.img', 'ext4')):
+        rt_name = f'Shiraz-Browser-Runtime-{version}-aarch64{ext}'
+        rt_path = source / rt_name
+        if rt_path.exists():
+            rt_digest = _verify_sha256_file(rt_path, ext)
+            (site / 'base').mkdir(exist_ok=True)
+            shutil.copy2(rt_path, site / 'base' / rt_name)
+            browser_runtime = dict(
+                file='base/' + rt_name,
+                sha256=rt_digest,
+                size=rt_path.stat().st_size,
+                format=fmt,
+                architecture='aarch64',
+            )
+            break
+
     manifest = dict(
         version=version,
         architectures=bases,
@@ -83,6 +101,8 @@ def install_runtime(site, source, version):
         base_size=bases['x86_64']['base_size'],
         release_url=f'https://github.com/spectre-oss/shiraz/releases/tag/v{version}',
     )
+    if browser_runtime is not None:
+        manifest['browser_runtime'] = browser_runtime
     (site / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
     (site / '.nojekyll').touch()
     total_site_bytes = sum(p.stat().st_size for p in site.rglob('*') if p.is_file())
@@ -130,6 +150,22 @@ def main():
                     'spectre-oss/shiraz',
                     '--pattern',
                     'Shiraz-Flatpak-Base-*.flatpak-base*',
+                    '--dir',
+                    tmp,
+                ],
+                check=True,
+            )
+        if any(name.startswith('Shiraz-Browser-Runtime-') for name in asset_names):
+            subprocess.run(
+                [
+                    'gh',
+                    'release',
+                    'download',
+                    release['tag_name'],
+                    '--repo',
+                    'spectre-oss/shiraz',
+                    '--pattern',
+                    'Shiraz-Browser-Runtime-*',
                     '--dir',
                     tmp,
                 ],
